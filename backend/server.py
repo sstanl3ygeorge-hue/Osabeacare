@@ -138,13 +138,15 @@ class OnboardingStatus:
 MANDATORY_ITEMS = {
     "base": [  # Common to all roles
         {"id": "application_form", "name": "Application Form", "category": "A_Application_Form", "type": "form", "template_name": "Application Form"},
+        {"id": "cv", "name": "CV / Resume", "category": "A_Application_Form", "type": "document", "document_types": ["cv", "resume"]},
         {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", "category": "B_Recruitment_Checklist", "type": "form", "template_name": "Recruitment Compliance Checklist"},
         {"id": "personal_info", "name": "Personal Information Form", "category": "C_Personal_Information", "type": "form", "template_name": "Personal Information Form"},
         {"id": "interview_record", "name": "Interview Record", "category": "D_Interview", "type": "form", "template_name": "Interview Record Form"},
         {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", "category": "E_Equal_Opportunities", "type": "form", "template_name": "Equal Opportunities Monitoring Form"},
         {"id": "health_screening", "name": "Health Screening Questionnaire", "category": "F_Health_Screening", "type": "form", "template_name": "Health Screening Questionnaire"},
         {"id": "identity_rtw", "name": "Identity / Right to Work", "category": "G_Identity_RTW", "type": "document", "document_types": ["passport", "visa", "right_to_work", "driving_licence"]},
-        {"id": "references", "name": "References (2 required)", "category": "H_References", "type": "document", "document_types": ["reference"], "min_count": 2},
+        {"id": "reference_1", "name": "Reference 1", "category": "H_References", "type": "document", "document_types": ["reference"]},
+        {"id": "reference_2", "name": "Reference 2", "category": "H_References", "type": "document", "document_types": ["reference"]},
         {"id": "dbs", "name": "DBS Certificate", "category": "I_DBS", "type": "document", "document_types": ["dbs"]},
         {"id": "induction", "name": "Induction & Competency Assessment", "category": "J_Induction_Shadowing_Observations", "type": "form", "template_name": "Induction & Competency Assessment"},
         {"id": "contract", "name": "Contract Acknowledgement", "category": "L_Contract", "type": "form", "template_name": "Contract Acknowledgement Form"},
@@ -2378,8 +2380,8 @@ async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, 
     
     # Get verifier name if verified
     if doc.get('verified_by'):
-        verifier = await db.users.find_one({"user_id": doc['verified_by']}, {"_id": 0, "full_name": 1})
-        doc['verified_by_name'] = verifier.get('full_name') if verifier else None
+        verifier = await db.users.find_one({"user_id": doc['verified_by']}, {"_id": 0, "name": 1})
+        doc['verified_by_name'] = verifier.get('name') if verifier else None
     
     return EmployeeDocumentResponse(**doc)
 
@@ -2395,9 +2397,15 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
         raise HTTPException(status_code=400, detail="Document must be approved before verification")
     
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Get verifier name
+    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
+    verifier_name = verifier.get('name') if verifier else None
+    
     update_data = {
         "verified": True,
         "verified_by": user['user_id'],
+        "verified_by_name": verifier_name,
         "verified_at": now,
         "status": "approved"  # Ensure status is approved
     }
@@ -2406,10 +2414,6 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
     await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {"verified": True})
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
-    
-    # Get verifier name
-    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "full_name": 1})
-    updated_doc['verified_by_name'] = verifier.get('full_name') if verifier else None
     
     return EmployeeDocumentResponse(**updated_doc)
 
@@ -3866,17 +3870,42 @@ async def import_application_form(
                     "employee_id": employee_id,
                     "document_type_id": cv_doc_type['id'],
                     "document_type_name": cv_doc_type['name'],
+                    "requirement_id": "cv",
+                    "requirement_name": "CV / Resume",
+                    "category": "A_Application_Form",
                     "file_url": cv_file_url,
                     "original_filename": cv_file.filename,
                     "status": "uploaded",
+                    "source_type": "imported",
                     "notes": "Imported with application form",
                     "uploaded_at": now,
                     "uploaded_by": user['user_id'],
                     "expiry_date": None,
+                    "version_number": 1,
+                    "verified": False,
                     "created_at": now,
                     "updated_at": now
                 }
-                await db.employee_documents.insert_one(cv_doc)
+                # Check if CV already exists for this employee, replace if so
+                existing_cv = await db.employee_documents.find_one({
+                    "employee_id": employee_id,
+                    "requirement_id": "cv"
+                })
+                if existing_cv:
+                    cv_doc["version_number"] = existing_cv.get("version_number", 1) + 1
+                    await db.employee_documents.update_one(
+                        {"id": existing_cv["id"]},
+                        {"$set": {
+                            "file_url": cv_file_url,
+                            "original_filename": cv_file.filename,
+                            "version_number": cv_doc["version_number"],
+                            "uploaded_at": now,
+                            "updated_at": now
+                        }}
+                    )
+                    cv_doc_id = existing_cv["id"]
+                else:
+                    await db.employee_documents.insert_one(cv_doc)
         except Exception as e:
             # Log but don't fail the whole import
             print(f"Warning: Failed to upload CV: {str(e)}")

@@ -1501,160 +1501,208 @@ export default function EmployeeProfilePage() {
           </Card>
         </TabsContent>
 
-        {/* Documents Tab */}
+        {/* Documents Tab - Requirement-based view (one row per requirement slot) */}
         <TabsContent value="documents">
           <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-[#E4E8EB]">
+              <div>
+                <CardTitle className="font-heading text-lg">Document Requirements</CardTitle>
+                <p className="text-sm text-text-muted mt-1">
+                  One document per requirement slot. Re-uploading replaces the existing file.
+                </p>
+              </div>
+              {complianceRequirements && (
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="text-text-muted">
+                    {complianceRequirements.requirements.filter(r => r.type === 'document' && r.document).length} / {complianceRequirements.requirements.filter(r => r.type === 'document').length} uploaded
+                  </span>
+                </div>
+              )}
+            </CardHeader>
             <CardContent className="p-0">
-              {documents.length === 0 ? (
-                <div className="text-center py-12 text-text-muted">
-                  <FileText className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No documents uploaded yet</p>
+              {!complianceRequirements ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Document</th>
+                        <th className="text-left p-4 font-medium text-text-muted text-sm">Requirement</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Category</th>
+                        <th className="text-left p-4 font-medium text-text-muted text-sm">Document</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Verification</th>
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Uploaded</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {documents.map((doc) => (
-                        <tr key={doc.id} className="border-b border-[#E4E8EB]">
-                          <td className="p-4">
-                            <p className="font-medium text-text-primary">{doc.document_type_name}</p>
-                            {doc.original_filename && (
-                              <p className="text-sm text-text-muted">{doc.original_filename}</p>
-                            )}
-                            {doc.source_type && (
-                              <span className="text-xs bg-[#F0F4F5] text-text-muted px-2 py-0.5 rounded-full">
-                                {doc.source_type === 'form_submission' ? 'From Form' : 
-                                 doc.source_type === 'imported' ? 'Imported' : 'Manual'}
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-4 text-text-muted">{doc.category}</td>
-                          <td className="p-4">
-                            <span className={`status-chip ${statusColors[doc.status]}`}>
-                              {doc.status?.replace('_', ' ')}
-                            </span>
-                          </td>
-                          <td className="p-4">
-                            {doc.verified ? (
-                              <div className="flex items-center gap-1">
-                                <span className="flex items-center gap-1 text-xs bg-success/10 text-success px-2 py-1 rounded-full">
-                                  <CheckCircle className="h-3 w-3" />
-                                  Verified
-                                </span>
-                                {doc.verified_by_name && (
-                                  <span className="text-xs text-text-muted">by {doc.verified_by_name}</span>
+                      {complianceRequirements.requirements
+                        .filter(req => req.type === 'document' || req.type === 'db_record')
+                        .map((req) => {
+                          const doc = req.document;
+                          return (
+                            <tr key={req.id} className={`border-b border-[#E4E8EB] ${
+                              !doc ? 'bg-error/5' : 
+                              req.verified ? 'bg-success/5' : ''
+                            }`}>
+                              <td className="p-4">
+                                <p className="font-medium text-text-primary">{req.name}</p>
+                              </td>
+                              <td className="p-4 text-text-muted text-sm">
+                                {req.category?.replace(/_/g, ' ').replace(/^[A-Z]_/, '')}
+                              </td>
+                              <td className="p-4">
+                                {doc ? (
+                                  <div>
+                                    <p className="text-sm text-text-primary">{doc.original_filename || 'File uploaded'}</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      {doc.version_number > 1 && (
+                                        <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                                          v{doc.version_number}
+                                        </span>
+                                      )}
+                                      {doc.source_type && (
+                                        <span className="text-xs bg-[#F0F4F5] text-text-muted px-1.5 py-0.5 rounded">
+                                          {doc.source_type === 'form_submission' ? 'From Form' : 
+                                           doc.source_type === 'imported' ? 'Imported' : 'Manual'}
+                                        </span>
+                                      )}
+                                      <span className="text-xs text-text-muted">
+                                        {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-sm text-error">Not uploaded</span>
                                 )}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-text-muted">Not verified</span>
-                            )}
-                          </td>
-                          <td className="p-4 text-text-muted text-sm">
-                            {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : '-'}
-                          </td>
-                          <td className="p-4">
-                            <div className="flex gap-2 flex-wrap">
-                              {doc.file_url && (
-                                <>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    className="rounded-lg"
-                                    onClick={() => handlePreviewDocument(
-                                      `${API}/employee-documents/${doc.id}/file`,
-                                      doc.document_type,
-                                      doc.original_filename
-                                    )}
-                                    data-testid={`view-doc-${doc.id}`}
-                                  >
-                                    <Eye className="h-4 w-4 mr-1" />
-                                    View
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    className="rounded-lg"
-                                    onClick={async () => {
-                                      try {
-                                        const response = await axios.get(`${API}/employee-documents/${doc.id}/download`, {
-                                          headers: { Authorization: `Bearer ${token}` },
-                                          responseType: 'blob'
-                                        });
-                                        const blob = new Blob([response.data]);
-                                        const url = URL.createObjectURL(blob);
-                                        const link = document.createElement('a');
-                                        link.href = url;
-                                        link.download = doc.original_filename || 'document';
-                                        link.click();
-                                        URL.revokeObjectURL(url);
-                                        toast.success('Document downloaded');
-                                      } catch (error) {
-                                        toast.error('Failed to download');
-                                      }
-                                    }}
-                                    data-testid={`download-doc-${doc.id}`}
-                                  >
-                                    <FileDown className="h-4 w-4 mr-1" />
-                                    Download
-                                  </Button>
-                                </>
-                              )}
-                              {!isAuditor() && doc.status === 'uploaded' && (
-                                <>
-                                  <Button 
-                                    size="sm" 
-                                    onClick={() => handleUpdateDocumentStatus(doc.id, 'approved')}
-                                    className="bg-success hover:bg-success/90 text-white rounded-lg"
-                                  >
-                                    Approve
-                                  </Button>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => handleUpdateDocumentStatus(doc.id, 'rejected')}
-                                    className="text-error border-error hover:bg-error/10 rounded-lg"
-                                  >
-                                    Reject
-                                  </Button>
-                                </>
-                              )}
-                              {!isAuditor() && doc.status === 'approved' && !doc.verified && (
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => handleVerifyDocument(doc.id)}
-                                  className="text-success border-success hover:bg-success/10 rounded-lg"
-                                  data-testid={`verify-doc-${doc.id}`}
-                                >
-                                  <Shield className="h-3 w-3 mr-1" />
-                                  Verify
-                                </Button>
-                              )}
-                              {!isAuditor() && doc.verified && (
-                                <Button 
-                                  size="sm" 
-                                  variant="ghost"
-                                  onClick={() => handleUnverifyDocument(doc.id)}
-                                  className="text-text-muted hover:text-error rounded-lg"
-                                  title="Remove verification"
-                                >
-                                  <XCircle className="h-3 w-3" />
-                                </Button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                              </td>
+                              <td className="p-4">
+                                {doc ? (
+                                  <div className="flex flex-col gap-1">
+                                    <span className={`status-chip ${statusColors[doc.status]}`}>
+                                      {doc.status?.replace('_', ' ')}
+                                    </span>
+                                    {req.verified ? (
+                                      <span className="flex items-center gap-1 text-xs text-success">
+                                        <Shield className="h-3 w-3" />
+                                        Verified
+                                        {req.verified_by && <span className="text-text-muted">by {req.verified_by}</span>}
+                                      </span>
+                                    ) : doc.status === 'approved' ? (
+                                      <span className="text-xs text-warning">Awaiting verification</span>
+                                    ) : null}
+                                  </div>
+                                ) : (
+                                  <span className="text-xs bg-error/10 text-error px-2 py-1 rounded-lg">Missing</span>
+                                )}
+                              </td>
+                              <td className="p-4">
+                                <div className="flex gap-2 flex-wrap">
+                                  {doc?.file_url && (
+                                    <>
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        className="rounded-lg"
+                                        onClick={() => handlePreviewDocument(
+                                          `${API}/employee-documents/${doc.id}/file`,
+                                          doc.document_type,
+                                          doc.original_filename
+                                        )}
+                                        data-testid={`view-doc-${req.id}`}
+                                      >
+                                        <Eye className="h-4 w-4 mr-1" />
+                                        View
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        className="rounded-lg"
+                                        onClick={async () => {
+                                          try {
+                                            const response = await axios.get(`${API}/employee-documents/${doc.id}/download`, {
+                                              headers: { Authorization: `Bearer ${token}` },
+                                              responseType: 'blob'
+                                            });
+                                            const blob = new Blob([response.data]);
+                                            const url = URL.createObjectURL(blob);
+                                            const link = document.createElement('a');
+                                            link.href = url;
+                                            link.download = doc.original_filename || 'document';
+                                            link.click();
+                                            URL.revokeObjectURL(url);
+                                            toast.success('Document downloaded');
+                                          } catch (error) {
+                                            toast.error('Failed to download');
+                                          }
+                                        }}
+                                        data-testid={`download-doc-${req.id}`}
+                                      >
+                                        <FileDown className="h-4 w-4 mr-1" />
+                                        Download
+                                      </Button>
+                                    </>
+                                  )}
+                                  {!isAuditor() && doc?.status === 'uploaded' && (
+                                    <>
+                                      <Button 
+                                        size="sm" 
+                                        onClick={() => handleUpdateDocumentStatus(doc.id, 'approved')}
+                                        className="bg-success hover:bg-success/90 text-white rounded-lg"
+                                      >
+                                        Approve
+                                      </Button>
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        onClick={() => handleUpdateDocumentStatus(doc.id, 'rejected')}
+                                        className="text-error border-error hover:bg-error/10 rounded-lg"
+                                      >
+                                        Reject
+                                      </Button>
+                                    </>
+                                  )}
+                                  {!isAuditor() && doc?.status === 'approved' && !req.verified && (
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => handleVerifyDocument(doc.id)}
+                                      className="text-success border-success hover:bg-success/10 rounded-lg"
+                                      data-testid={`verify-doc-${req.id}`}
+                                    >
+                                      <Shield className="h-3 w-3 mr-1" />
+                                      Verify
+                                    </Button>
+                                  )}
+                                  {!isAuditor() && req.verified && (
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost"
+                                      onClick={() => handleUnverifyDocument(doc.id)}
+                                      className="text-text-muted hover:text-error rounded-lg"
+                                      title="Remove verification"
+                                    >
+                                      <XCircle className="h-3 w-3" />
+                                    </Button>
+                                  )}
+                                  {!isAuditor() && (
+                                    <Button 
+                                      size="sm" 
+                                      variant={doc ? "ghost" : "default"}
+                                      className={doc ? "text-text-muted rounded-lg" : "bg-primary hover:bg-primary-hover text-white rounded-lg"}
+                                      onClick={() => { setSelectedRequirement(req.id); setUploadDialogOpen(true); }}
+                                      data-testid={`upload-btn-${req.id}`}
+                                    >
+                                      <Upload className="h-4 w-4 mr-1" />
+                                      {doc ? 'Replace' : 'Upload'}
+                                    </Button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                     </tbody>
                   </table>
                 </div>

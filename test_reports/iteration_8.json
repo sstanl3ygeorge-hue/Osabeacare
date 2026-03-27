@@ -1,0 +1,108 @@
+{
+  "summary": "Completed testing of 1:1 Document-to-Requirement Mapping system. All 13 backend tests pass. Frontend UI verified: Documents tab shows one row per requirement, Upload/Replace buttons work correctly, version numbers increment on re-upload, CV and Reference 1/2 appear as separate requirements. Fixed bug where verified_by was showing user_id instead of user name.",
+  
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  
+  "passed_tests": [
+    "Backend: compliance-requirements endpoint returns valid data",
+    "Backend: One row per requirement (no duplicates)",
+    "Backend: CV / Resume requirement exists",
+    "Backend: Reference 1 and Reference 2 appear as separate requirements",
+    "Backend: Document requirements have correct structure",
+    "Backend: Verification status shows correctly with verified_by name",
+    "Backend: upload-document endpoint works",
+    "Backend: Re-upload increments version number",
+    "Backend: Summary statistics are calculated correctly",
+    "Backend: Document status values are valid",
+    "Backend: All mandatory document types present",
+    "Backend: Compliance endpoint for checklist works",
+    "Backend: Checklist items have correct structure",
+    "Frontend: Documents tab shows one row per requirement",
+    "Frontend: Upload button appears for missing requirements",
+    "Frontend: Replace button appears for existing documents",
+    "Frontend: Version numbers displayed (v2, v3)",
+    "Frontend: Verification status shows 'Verified by System Admin'",
+    "Frontend: Checklist tab shows requirement status correctly"
+  ],
+  
+  "test_report_links": [
+    "/app/backend/tests/test_document_mapping.py",
+    "/app/test_reports/pytest/document_mapping_results.xml"
+  ],
+  
+  "action_items": [],
+  
+  "critical_code_review_comments": [],
+  
+  "updated_files": [
+    "/app/backend/server.py (fixed verified_by_name to use 'name' field instead of 'full_name', and store verified_by_name in database)",
+    "/app/backend/tests/test_document_mapping.py"
+  ],
+  
+  "success_rate": {
+    "backend": "100% (13/13 tests pass)",
+    "frontend": "100% (all UI elements verified)"
+  },
+  
+  "seed_data_creation": "Used existing employee Olakunle Alonge (id: d88335f6-1b18-435a-8086-28af4a583f77). Test documents uploaded for DBS and Reference 2 requirements.",
+  
+  "retest_needed": false,
+  
+  "should_main_agent_self_test": true,
+  
+  "context_for_next_testing_agent": "1:1 Document-to-Requirement Mapping fully functional. Documents tab shows one row per requirement with Upload/Replace buttons. Version numbers increment on re-upload. CV and Reference 1/2 appear as separate requirements. Fixed bug where verified_by was showing user_id - now shows user name correctly.",
+  
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123",
+    "role": "super_admin"
+  },
+  
+  "features_verified": {
+    "documents_tab": {
+      "one_row_per_requirement": true,
+      "upload_button_for_missing": true,
+      "replace_button_for_existing": true,
+      "version_number_display": true,
+      "verified_by_name_display": true
+    },
+    "checklist_tab": {
+      "requirement_status_display": true,
+      "verified_indicator": true,
+      "missing_indicator": true,
+      "in_progress_indicator": true
+    },
+    "backend_endpoints": {
+      "compliance_requirements": "/api/employees/{id}/compliance-requirements",
+      "upload_document": "/api/employees/{id}/upload-document",
+      "verify_document": "/api/employee-documents/{id}/verify"
+    },
+    "requirements_list": [
+      "CV / Resume",
+      "Reference 1",
+      "Reference 2",
+      "Identity / Right to Work",
+      "DBS Certificate"
+    ]
+  },
+  
+  "bug_fixed": {
+    "issue": "verified_by was showing user_id (e.g., 'user_d91e02377f78') instead of user name",
+    "root_cause": "verify_employee_document endpoint was looking for 'full_name' field but user documents have 'name' field. Also, verified_by_name was not being stored in the database.",
+    "fix_applied": [
+      "Changed 'full_name' to 'name' in user lookup query",
+      "Added verified_by_name to update_data so it's stored in database",
+      "Now shows 'System Admin' instead of user_id"
+    ],
+    "files_modified": ["/app/backend/server.py"]
+  }
+}

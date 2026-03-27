@@ -2520,9 +2520,20 @@ async def get_requirement_evidence(
             completed_at = record.get('completion_date')
     else:
         # Check documents
+        # Build query with legacy mapping support
+        legacy_mapping = {
+            "dbs_certificate": ["dbs", "dbs_certificate"],
+            "identity_documents": ["identity_rtw", "identity_documents"],
+            "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+        }
+        
+        req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
+        if isinstance(req_ids_to_search, str):
+            req_ids_to_search = [req_ids_to_search]
+        
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
-            "requirement_id": requirement_id
+            "requirement_id": {"$in": req_ids_to_search}
         }, {"_id": 0}).to_list(100)
         
         for doc in docs:
@@ -2868,8 +2879,16 @@ async def verify_requirement(
             }}
         )
     else:
+        # Build query with legacy mapping support
+        legacy_mapping = {
+            "dbs_certificate": ["dbs", "dbs_certificate"],
+            "identity_documents": ["identity_rtw", "identity_documents"],
+            "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+        }
+        req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
+        
         await db.employee_documents.update_many(
-            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"employee_id": employee_id, "requirement_id": {"$in": req_ids_to_search}},
             {"$set": {
                 "verified": True,
                 "verified_by": user['user_id'],
@@ -2907,14 +2926,22 @@ async def unverify_requirement(
     now = datetime.now(timezone.utc).isoformat()
     req_type = requirement.get('type', 'document')
     
+    # Build query with legacy mapping support
+    legacy_mapping = {
+        "dbs_certificate": ["dbs", "dbs_certificate"],
+        "identity_documents": ["identity_rtw", "identity_documents"],
+        "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+    }
+    req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
+    
     if req_type == 'training':
         await db.training_records.update_many(
-            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"employee_id": employee_id, "requirement_id": {"$in": req_ids_to_search}},
             {"$set": {"verified": False, "verified_by": None, "verified_at": None, "updated_at": now}}
         )
     else:
         await db.employee_documents.update_many(
-            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"employee_id": employee_id, "requirement_id": {"$in": req_ids_to_search}},
             {"$set": {"verified": False, "verified_by": None, "verified_by_name": None, "verified_at": None, "updated_at": now}}
         )
     

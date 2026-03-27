@@ -335,28 +335,29 @@ export default function EmployeeProfilePage() {
     
     try {
       const formData = new FormData();
-      formData.append('requirement_id', selectedRequirement);
       formData.append('file', uploadFile);
       if (documentLabel) {
-        formData.append('document_label', documentLabel);
+        formData.append('file_label', documentLabel);
       }
       
-      await axios.post(`${API}/employees/${employeeId}/upload-document`, formData, {
+      // Use the unified evidence upload endpoint
+      await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
         }
       });
       
-      toast.success('Document uploaded successfully');
+      toast.success('Evidence uploaded successfully');
       setUploadDialogOpen(false);
       setSelectedRequirement('');
       setSelectedDocType('');
       setDocumentLabel('');
       setUploadFile(null);
       fetchData();
+      fetchCompliance();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to upload document');
+      toast.error(error.response?.data?.detail || 'Failed to upload evidence');
     } finally {
       setIsUploading(false);
     }
@@ -1036,21 +1037,75 @@ export default function EmployeeProfilePage() {
                           <SelectValue placeholder="Select requirement to upload for" />
                         </SelectTrigger>
                         <SelectContent className="max-h-[300px]">
-                          {complianceRequirements?.requirements
-                            ?.filter(req => req.type === 'document' || req.type === 'db_record')
-                            .map((req) => (
-                              <SelectItem key={req.id} value={req.id}>
-                                <div className="flex items-center gap-2">
-                                  <span className={`w-2 h-2 rounded-full ${
-                                    req.status === 'completed' ? 'bg-success' :
-                                    req.status === 'in_progress' ? 'bg-warning' : 'bg-gray-300'
-                                  }`} />
-                                  {req.name}
-                                  {req.allow_multiple_files && <span className="text-xs bg-info/20 text-info px-1 rounded">Multi</span>}
-                                  {req.document_count > 0 && <span className="text-xs text-text-muted">({req.document_count} file{req.document_count !== 1 ? 's' : ''})</span>}
-                                </div>
-                              </SelectItem>
-                            ))}
+                          {/* Group requirements by type for clarity */}
+                          {complianceRequirements?.requirements && (
+                            <>
+                              {/* Documents (employee-submitted) */}
+                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50">Documents</div>
+                              {complianceRequirements.requirements
+                                .filter(req => req.type === 'document' && req.source === 'employee')
+                                .map((req) => (
+                                  <SelectItem key={req.id} value={req.id}>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`w-2 h-2 rounded-full ${
+                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
+                                      }`} />
+                                      {req.name}
+                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              
+                              {/* Internal Checks */}
+                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50 mt-1">Internal Checks</div>
+                              {complianceRequirements.requirements
+                                .filter(req => req.type === 'document' && req.source === 'internal')
+                                .map((req) => (
+                                  <SelectItem key={req.id} value={req.id}>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`w-2 h-2 rounded-full ${
+                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
+                                      }`} />
+                                      {req.name}
+                                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1 rounded">Internal</span>
+                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              
+                              {/* Forms */}
+                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50 mt-1">Forms</div>
+                              {complianceRequirements.requirements
+                                .filter(req => req.type === 'form-generated')
+                                .map((req) => (
+                                  <SelectItem key={req.id} value={req.id}>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`w-2 h-2 rounded-full ${
+                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
+                                      }`} />
+                                      {req.name}
+                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              
+                              {/* Training */}
+                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50 mt-1">Training Certificates</div>
+                              {complianceRequirements.requirements
+                                .filter(req => req.type === 'training')
+                                .map((req) => (
+                                  <SelectItem key={req.id} value={req.id}>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`w-2 h-2 rounded-full ${
+                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
+                                      }`} />
+                                      {req.name}
+                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                            </>
+                          )}
                         </SelectContent>
                       </Select>
                       {selectedRequirement && (() => {

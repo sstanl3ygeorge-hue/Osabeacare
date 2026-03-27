@@ -287,6 +287,16 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Frontend: Warning message for items completed without evidence
   - Result: Audit-ready single source of truth for all compliance evidence
   - Pilot: OCS-0001 successfully tested with DBS Certificate + DBS Check separate
+- [x] **Audit Validation & Enforcement Pass** (Completed 2026-03-27):
+  - VALIDATED: All 23 requirements support evidence upload
+  - VALIDATED: All evidence files viewable (HTTP 200)
+  - VALIDATED: All evidence files downloadable (HTTP 200)
+  - VALIDATED: Verification blocked without evidence
+  - FIXED: Legacy requirement ID mapping (dbs→dbs_certificate, identity_rtw→split)
+  - FIXED: Upload modal now shows ALL requirements grouped by type
+  - FIXED: Unified evidence endpoint handles all requirement types
+  - RESULT: OCS-0001 at 100% completion (23/23 with evidence), 5 verified
+  - AUDIT STATUS: Evidence-based, traceable, audit-ready
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests

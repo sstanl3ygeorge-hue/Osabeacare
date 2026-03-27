@@ -45,10 +45,10 @@ export default function DashboardPage() {
 
   const statCards = [
     { label: 'Total Employees', value: stats?.total_employees || 0, icon: Users, color: 'bg-primary' },
-    { label: 'Applicants', value: stats?.total_applicants || 0, icon: UserPlus, color: 'bg-secondary' },
+    { label: 'Fully Verified', value: stats?.fully_verified_employees || 0, icon: ShieldAlert, color: 'bg-success', highlight: true },
     { label: 'Onboarding', value: stats?.onboarding_in_progress || 0, icon: Clock, color: 'bg-info' },
-    { label: 'Missing Documents', value: stats?.missing_urgent_documents || 0, icon: FileX, color: 'bg-warning', alert: true },
-    { label: 'Unsigned Policies', value: stats?.unsigned_policies || 0, icon: FileCheck, color: 'bg-error', alert: true },
+    { label: 'Missing Documents', value: stats?.missing_urgent_documents || 0, icon: FileX, color: 'bg-error', alert: true },
+    { label: 'Unsigned Policies', value: stats?.unsigned_policies || 0, icon: FileCheck, color: 'bg-warning', alert: true },
     { label: 'DBS Pending', value: stats?.dbs_pending || 0, icon: ShieldAlert, color: 'bg-warning' },
     { label: 'RTW Missing', value: stats?.rtw_missing || 0, icon: AlertTriangle, color: 'bg-error' },
     { label: 'Expiring (30 days)', value: stats?.expiring_30_days || 0, icon: CalendarClock, color: 'bg-warning' },
@@ -79,6 +79,9 @@ export default function DashboardPage() {
                   <stat.icon className="h-5 w-5 text-white" />
                 </div>
               </div>
+              {stat.highlight && stat.value > 0 && (
+                <p className="text-xs text-success mt-2">Ready for audit</p>
+              )}
             </CardContent>
           </Card>
         ))}

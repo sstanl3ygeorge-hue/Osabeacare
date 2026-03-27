@@ -850,6 +850,7 @@ class ApplicationForm(BaseModel):
 class DashboardStats(BaseModel):
     total_employees: int = 0
     total_applicants: int = 0
+    fully_verified_employees: int = 0
     onboarding_in_progress: int = 0
     missing_urgent_documents: int = 0
     unsigned_policies: int = 0
@@ -4503,6 +4504,34 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     total_applicants = await db.employees.count_documents({**assignment_filter, "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, EmployeeStatus.COMPLIANCE_REVIEW]}})
     onboarding = await db.employees.count_documents({**assignment_filter, "status": EmployeeStatus.ONBOARDING})
     
+    # Count fully verified employees (all requirements have evidence AND are verified)
+    fully_verified_count = 0
+    active_employees = await db.employees.find(
+        {**assignment_filter, "status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING]}},
+        {"_id": 0, "id": 1}
+    ).to_list(500)
+    
+    for emp in active_employees:
+        emp_doc = await db.employee_documents.find_one(
+            {"employee_id": emp["id"], "requirement_type": "evidence_store"},
+            {"_id": 0}
+        )
+        if emp_doc:
+            evidence_store = emp_doc.get("evidence_store", {})
+            if evidence_store:
+                all_verified = True
+                has_any_evidence = False
+                for req_id, evidence in evidence_store.items():
+                    files = evidence.get("evidence_files", [])
+                    if files:
+                        has_any_evidence = True
+                        # Check if all files are verified
+                        if not all(f.get("verified", False) for f in files):
+                            all_verified = False
+                            break
+                if has_any_evidence and all_verified:
+                    fully_verified_count += 1
+    
     # Get DBS document type
     dbs_type = await db.document_types.find_one({"name": {"$regex": "DBS", "$options": "i"}}, {"_id": 0})
     rtw_type = await db.document_types.find_one({"name": {"$regex": "Right to Work", "$options": "i"}}, {"_id": 0})
@@ -4530,6 +4559,7 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     return DashboardStats(
         total_employees=total_employees,
         total_applicants=total_applicants,
+        fully_verified_employees=fully_verified_count,
         onboarding_in_progress=onboarding,
         missing_urgent_documents=missing_urgent,
         unsigned_policies=unsigned_policies,

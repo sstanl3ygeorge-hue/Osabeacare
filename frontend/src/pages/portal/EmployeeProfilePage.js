@@ -1677,7 +1677,7 @@ export default function EmployeeProfilePage() {
           </TabsTrigger>
           <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <ClipboardList className="h-4 w-4 mr-2" />
-            Forms
+            Internal Forms (Admin)
           </TabsTrigger>
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
@@ -1701,36 +1701,41 @@ export default function EmployeeProfilePage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Generated Forms Tab */}
+        {/* Generated Forms Tab - Admin Internal Workflow */}
         <TabsContent value="forms">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader>
               <CardTitle className="font-heading text-lg flex items-center justify-between">
-                <span>Compliance Forms</span>
+                <span>Internal Forms (Admin)</span>
                 <span className="text-sm font-normal text-text-muted">{generatedForms.length} forms</span>
               </CardTitle>
+              <p className="text-sm text-text-muted mt-1">
+                Forms are internal workflows. Completed forms generate PDF evidence stored in the checklist.
+              </p>
             </CardHeader>
             <CardContent>
               {generatedForms.length === 0 ? (
                 <div className="text-center py-8">
                   <ClipboardList className="h-12 w-12 mx-auto text-text-muted/50 mb-3" />
-                  <p className="text-text-muted">No forms generated yet</p>
-                  <p className="text-sm text-text-muted">Click "Generate Forms" to create compliance forms for this employee.</p>
+                  <p className="text-text-muted">No internal forms generated yet</p>
+                  <p className="text-sm text-text-muted mt-1">Click "Generate Forms" to create internal workflow forms.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {generatedForms.map((form) => {
                     const statusConfig = {
-                      draft: { color: 'bg-gray-100 text-text-muted', icon: Clock },
-                      sent: { color: 'bg-info/10 text-info', icon: Mail },
-                      in_progress: { color: 'bg-warning/10 text-warning', icon: Clock },
-                      completed: { color: 'bg-info/10 text-info', icon: CheckCircle },
-                      reviewed: { color: 'bg-warning/10 text-warning', icon: Eye },
-                      signed_off: { color: 'bg-success/10 text-success', icon: CheckCircle },
-                      archived: { color: 'bg-gray-100 text-text-muted', icon: FileText }
+                      draft: { color: 'bg-gray-100 text-text-muted', label: 'Draft', icon: Clock },
+                      sent: { color: 'bg-info/10 text-info', label: 'Sent', icon: Mail },
+                      in_progress: { color: 'bg-warning/10 text-warning', label: 'In Progress', icon: Clock },
+                      completed: { color: 'bg-info/10 text-info', label: 'Completed', icon: CheckCircle },
+                      completed_imported: { color: 'bg-info/10 text-info', label: 'Imported', icon: FileText },
+                      reviewed: { color: 'bg-warning/10 text-warning', label: 'Reviewed', icon: Eye },
+                      signed_off: { color: 'bg-success/10 text-success', label: 'Signed Off', icon: CheckCircle },
+                      archived: { color: 'bg-gray-100 text-text-muted', label: 'Archived', icon: FileText }
                     };
                     const config = statusConfig[form.status] || statusConfig.draft;
                     const StatusIcon = config.icon;
+                    const hasPdfEvidence = !!form.pdf_url;
                     
                     return (
                       <div 
@@ -1745,34 +1750,31 @@ export default function EmployeeProfilePage() {
                           </div>
                           <div>
                             <p className="font-medium text-text-primary">{form.template_name}</p>
-                            <p className="text-sm text-text-muted">
-                              {form.template_category} • Created {new Date(form.created_at).toLocaleDateString()}
-                            </p>
+                            <div className="flex items-center gap-2 text-sm text-text-muted">
+                              <span>{form.template_category}</span>
+                              <span>•</span>
+                              <span>{new Date(form.created_at).toLocaleDateString()}</span>
+                              {hasPdfEvidence && (
+                                <>
+                                  <span>•</span>
+                                  <span className="flex items-center gap-1 text-success">
+                                    <FileText className="h-3 w-3" />
+                                    PDF Generated
+                                  </span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${config.color}`}>
-                            {form.status.replace('_', ' ')}
+                            {config.label}
                           </span>
-                          {form.locked && (
-                            <span className="text-success text-xs">Locked</span>
-                          )}
-                          {(form.status === 'completed' || form.status === 'completed_imported' || form.status === 'signed_off') && !form.saved_as_document_id && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-primary border-primary hover:bg-primary/10 rounded-lg text-xs"
-                              onClick={(e) => handleSaveFormAsDocument(form.id, e)}
-                              data-testid={`save-form-doc-${form.id}`}
-                            >
-                              <FileDown className="h-3 w-3 mr-1" />
-                              Save as Doc
-                            </Button>
-                          )}
-                          {form.saved_as_document_id && (
-                            <span className="text-xs text-success flex items-center gap-1">
-                              <CheckCircle className="h-3 w-3" />
-                              Saved
+                          {/* Warning if no PDF but form is complete */}
+                          {['completed', 'completed_imported', 'signed_off'].includes(form.status) && !hasPdfEvidence && (
+                            <span className="flex items-center gap-1 text-warning text-xs">
+                              <AlertTriangle className="h-3 w-3" />
+                              No PDF
                             </span>
                           )}
                         </div>
@@ -1946,19 +1948,14 @@ export default function EmployeeProfilePage() {
                             // Determine row styling based on evidence
                             const getRowStyle = () => {
                               if (isVerified) return 'bg-success/5 border-success/20';
-                              if (req.status === 'completed' && hasEvidence) return 'bg-info/5 border-info/20';
-                              if (isNoEvidence) return 'bg-warning/5 border-warning/20';
-                              if (req.status === 'in_progress' || req.status === 'pending') return 'bg-warning/5 border-warning/20';
+                              if (hasEvidence) return 'bg-info/5 border-info/20';
                               return 'bg-error/5 border-error/20';
                             };
                             
-                            // Determine status badge
+                            // Determine status badge - STANDARDIZED: Missing, Evidence Uploaded, Verified
                             const getStatusBadge = () => {
                               if (isVerified) return { text: 'Verified', style: 'bg-success/10 text-success' };
-                              if (req.status === 'completed' && hasEvidence) return { text: 'Complete', style: 'bg-info/10 text-info' };
-                              if (isNoEvidence) return { text: 'No Evidence', style: 'bg-warning/10 text-warning' };
-                              if (req.status === 'pending') return { text: 'Pending', style: 'bg-warning/10 text-warning' };
-                              if (req.status === 'in_progress') return { text: 'In Progress', style: 'bg-warning/10 text-warning' };
+                              if (hasEvidence) return { text: 'Evidence Uploaded', style: 'bg-info/10 text-info' };
                               return { text: 'Missing', style: 'bg-error/10 text-error' };
                             };
                             
@@ -1971,28 +1968,21 @@ export default function EmployeeProfilePage() {
                               data-testid={`requirement-row-${req.id}`}
                             >
                               <div className="flex items-start gap-3 flex-1">
+                                {/* Status Icon - simplified to 3 states */}
                                 {isVerified ? (
                                   <Shield className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
-                                ) : req.status === 'completed' && hasEvidence ? (
+                                ) : hasEvidence ? (
                                   <CheckCircle className="h-5 w-5 text-info flex-shrink-0 mt-0.5" />
-                                ) : isNoEvidence ? (
-                                  <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
-                                ) : req.status === 'in_progress' || req.status === 'pending' ? (
-                                  <Clock className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
                                 ) : (
                                   <XCircle className="h-5 w-5 text-error flex-shrink-0 mt-0.5" />
                                 )}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <p className="font-medium text-text-primary">{req.name}</p>
-                                    {/* Source badge */}
-                                    {req.source && (
-                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                                        req.source === 'internal' ? 'bg-purple-100 text-purple-700' :
-                                        req.source === 'employee' ? 'bg-blue-100 text-blue-700' :
-                                        'bg-gray-100 text-gray-600'
-                                      }`}>
-                                        {req.source === 'internal' ? 'Internal' : req.source === 'employee' ? 'Employee' : 'Form'}
+                                    {/* Source badge - cleaner */}
+                                    {req.source === 'internal' && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                                        Internal
                                       </span>
                                     )}
                                     {/* Evidence count badge */}
@@ -2003,15 +1993,15 @@ export default function EmployeeProfilePage() {
                                     )}
                                   </div>
                                   
-                                  {/* Description */}
+                                  {/* Description - only show when no evidence */}
                                   {req.description && !hasEvidence && (
                                     <p className="text-xs text-text-muted mt-0.5">{req.description}</p>
                                   )}
                                   
-                                  {/* Evidence files list */}
+                                  {/* Evidence files list - compact */}
                                   {evidenceFiles.length > 0 && (
                                     <div className="text-xs text-text-muted space-y-0.5 mt-1">
-                                      {evidenceFiles.slice(0, 3).map((file, idx) => (
+                                      {evidenceFiles.slice(0, 2).map((file, idx) => (
                                         <div key={file.file_id || idx} className="flex items-center gap-1">
                                           <FileText className="h-3 w-3 flex-shrink-0" />
                                           <span className="truncate max-w-[200px]">
@@ -2020,57 +2010,33 @@ export default function EmployeeProfilePage() {
                                           {file.verified && <Shield className="h-3 w-3 text-success flex-shrink-0" />}
                                         </div>
                                       ))}
-                                      {evidenceFiles.length > 3 && (
-                                        <p className="text-primary">+{evidenceFiles.length - 3} more</p>
+                                      {evidenceFiles.length > 2 && (
+                                        <p className="text-primary">+{evidenceFiles.length - 2} more</p>
                                       )}
                                     </div>
                                   )}
                                   
-                                  {/* No evidence warning */}
-                                  {isNoEvidence && (
+                                  {/* Warning for form without PDF */}
+                                  {req.type === 'form-generated' && req.form && !hasEvidence && (
                                     <p className="text-xs text-warning flex items-center gap-1 mt-1">
                                       <AlertTriangle className="h-3 w-3" />
-                                      Completed without evidence - not audit-ready
-                                    </p>
-                                  )}
-                                  
-                                  {/* Form status - show clear message based on PDF status */}
-                                  {req.form && !hasEvidence && (
-                                    <div className="text-xs mt-1">
-                                      <p className="flex items-center gap-1 text-text-muted">
-                                        <ClipboardList className="h-3 w-3" />
-                                        Form: {req.form.status.replace('_', ' ')}
-                                      </p>
-                                      {!req.form.pdf_url && ['completed', 'completed_imported', 'signed_off'].includes(req.form.status) && (
-                                        <p className="flex items-center gap-1 text-warning mt-0.5">
-                                          <AlertTriangle className="h-3 w-3" />
-                                          No PDF document generated - click Generate PDF
-                                        </p>
-                                      )}
-                                    </div>
-                                  )}
-                                  
-                                  {/* Training status (when no evidence) */}
-                                  {req.training && !hasEvidence && (
-                                    <p className="text-xs text-warning flex items-center gap-1 mt-1">
-                                      <GraduationCap className="h-3 w-3" />
-                                      Training: {req.training.status} - No certificate uploaded
+                                      No PDF evidence - click Generate PDF
                                     </p>
                                   )}
                                 </div>
                               </div>
                               
-                              {/* Actions */}
+                              {/* Actions - Clean Linear: Upload/Add → View → Download → Verify */}
                               <div className="flex items-center gap-2 flex-wrap justify-end">
                                 {/* Status badge */}
                                 <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusBadge.style}`}>
                                   {statusBadge.text}
                                 </span>
                                 
-                                {/* Upload Evidence button - for any requirement without evidence */}
-                                {!hasEvidence && !isAuditor() && (
+                                {/* ACTION 1: Upload / Add File */}
+                                {!isAuditor() && (
                                   <>
-                                    {/* For form-generated items with completed form but no PDF, show Generate button */}
+                                    {/* Generate PDF for forms without evidence */}
                                     {req.type === 'form-generated' && req.form && req.form.status && 
                                      ['completed', 'completed_imported', 'signed_off'].includes(req.form.status) && 
                                      !req.form.pdf_url ? (
@@ -2085,7 +2051,7 @@ export default function EmployeeProfilePage() {
                                               { headers: { Authorization: `Bearer ${token}` } }
                                             );
                                             toast.success('PDF generated successfully');
-                                            fetchCompliance();
+                                            fetchData();
                                           } catch (e) {
                                             toast.error(e.response?.data?.detail || 'Failed to generate PDF');
                                           }
@@ -2096,7 +2062,25 @@ export default function EmployeeProfilePage() {
                                         <FileText className="h-3 w-3 mr-1" />
                                         Generate PDF
                                       </Button>
-                                    ) : (
+                                    ) : !hasEvidence ? (
+                                      <Button 
+                                        size="sm" 
+                                        variant="default"
+                                        onClick={() => {
+                                          if (req.type === 'training') {
+                                            openTrainingCertDialog(req);
+                                          } else {
+                                            setSelectedRequirement(req.id);
+                                            setUploadDialogOpen(true);
+                                          }
+                                        }}
+                                        className="text-xs h-7 bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                        data-testid={`upload-evidence-${req.id}`}
+                                      >
+                                        <Upload className="h-3 w-3 mr-1" />
+                                        Upload
+                                      </Button>
+                                    ) : req.allow_multiple_files ? (
                                       <Button 
                                         size="sm" 
                                         variant="outline"
@@ -2108,38 +2092,17 @@ export default function EmployeeProfilePage() {
                                             setUploadDialogOpen(true);
                                           }
                                         }}
-                                        className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
-                                        data-testid={`upload-evidence-${req.id}`}
+                                        className="text-xs h-7 rounded-lg"
+                                        data-testid={`add-file-${req.id}`}
                                       >
                                         <Upload className="h-3 w-3 mr-1" />
-                                        Upload
+                                        Add File
                                       </Button>
-                                    )}
+                                    ) : null}
                                   </>
                                 )}
                                 
-                                {/* Add File button - when has evidence and allows multiple */}
-                                {hasEvidence && req.allow_multiple_files && !isAuditor() && (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => {
-                                      if (req.type === 'training') {
-                                        openTrainingCertDialog(req);
-                                      } else {
-                                        setSelectedRequirement(req.id);
-                                        setUploadDialogOpen(true);
-                                      }
-                                    }}
-                                    className="text-xs h-7 rounded-lg"
-                                    data-testid={`add-file-${req.id}`}
-                                  >
-                                    <Upload className="h-3 w-3 mr-1" />
-                                    Add
-                                  </Button>
-                                )}
-                                
-                                {/* View button - when has evidence */}
+                                {/* ACTION 2: View */}
                                 {evidenceFiles.length > 0 && (
                                   <Button
                                     size="sm"
@@ -2162,7 +2125,7 @@ export default function EmployeeProfilePage() {
                                   </Button>
                                 )}
                                 
-                                {/* Download button - when has evidence */}
+                                {/* ACTION 3: Download */}
                                 {evidenceFiles.length > 0 && (
                                   <Button
                                     size="sm"
@@ -2194,8 +2157,8 @@ export default function EmployeeProfilePage() {
                                   </Button>
                                 )}
                                 
-                                {/* Verify button - only when has evidence and not verified */}
-                                {canVerify && !isAuditor() && (
+                                {/* ACTION 4: Verify (only when evidence exists and not yet verified) */}
+                                {hasEvidence && !isVerified && !isAuditor() && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
@@ -2207,24 +2170,25 @@ export default function EmployeeProfilePage() {
                                           { headers: { Authorization: `Bearer ${token}` } }
                                         );
                                         toast.success(`${req.name} verified`);
-                                        fetchCompliance();
+                                        fetchData();
                                       } catch (e) {
                                         toast.error(e.response?.data?.detail || 'Verification failed');
                                       }
                                     }}
                                     className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
                                     data-testid={`verify-${req.id}`}
+                                    title="Verification requires uploaded evidence"
                                   >
                                     <Shield className="h-3 w-3 mr-1" />
                                     Verify
                                   </Button>
                                 )}
                                 
-                                {/* Unverify button */}
+                                {/* Unverify option */}
                                 {isVerified && !isAuditor() && (
                                   <Button 
                                     size="sm" 
-                                    variant="outline"
+                                    variant="ghost"
                                     onClick={async () => {
                                       try {
                                         await axios.post(
@@ -2233,16 +2197,15 @@ export default function EmployeeProfilePage() {
                                           { headers: { Authorization: `Bearer ${token}` } }
                                         );
                                         toast.success('Verification removed');
-                                        fetchCompliance();
+                                        fetchData();
                                       } catch (e) {
                                         toast.error('Failed to remove verification');
                                       }
                                     }}
-                                    className="text-xs h-7 text-warning border-warning hover:bg-warning/10 rounded-lg"
+                                    className="text-xs h-7 text-text-muted hover:text-warning rounded-lg"
                                     data-testid={`unverify-${req.id}`}
                                   >
-                                    <Shield className="h-3 w-3 mr-1" />
-                                    Unverify
+                                    <XCircle className="h-3 w-3" />
                                   </Button>
                                 )}
                               </div>
@@ -2319,16 +2282,14 @@ export default function EmployeeProfilePage() {
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              {/* Status Badge */}
+                              {/* Status Badge - Standardized */}
                               <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
                                 allVerified ? 'bg-success/10 text-success' :
-                                isComplete ? 'bg-info/10 text-info' :
-                                hasFiles ? 'bg-warning/10 text-warning' :
+                                hasFiles ? 'bg-info/10 text-info' :
                                 'bg-error/10 text-error'
                               }`}>
                                 {allVerified ? 'Verified' :
-                                 isComplete ? 'Complete' :
-                                 hasFiles ? 'In Progress' :
+                                 hasFiles ? 'Evidence Uploaded' :
                                  'Missing'}
                               </span>
                               

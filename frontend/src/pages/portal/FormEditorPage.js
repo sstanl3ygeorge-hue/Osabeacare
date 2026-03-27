@@ -65,11 +65,17 @@ export default function FormEditorPage() {
         }
       }
 
-      // Get template for form fields
-      const templateRes = await axios.get(`${API}/templates/${formRes.data.template_id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setTemplate(templateRes.data);
+      // Get template for form fields (optional - imported forms may not have templates)
+      try {
+        const templateRes = await axios.get(`${API}/templates/${formRes.data.template_id}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setTemplate(templateRes.data);
+      } catch (templateError) {
+        // Template not found - this is expected for imported forms
+        console.log('Template not found - showing imported document view');
+        setTemplate(null);
+      }
     } catch (error) {
       console.error('Failed to fetch form:', error);
       toast.error('Failed to load form');
@@ -257,13 +263,14 @@ export default function FormEditorPage() {
   }
   
   // For imported forms without templates, show a simplified view
-  const isImportedWithoutTemplate = !template && form.status === 'completed_imported';
+  const isImportedWithoutTemplate = !template;
 
   const statusColors = {
     draft: 'bg-gray-100 text-text-muted',
     sent: 'bg-info/10 text-info',
     in_progress: 'bg-warning/10 text-warning',
     completed: 'bg-info/10 text-info',
+    completed_imported: 'bg-info/10 text-info',
     reviewed: 'bg-warning/10 text-warning',
     signed_off: 'bg-success/10 text-success',
     archived: 'bg-gray-100 text-text-muted'
@@ -280,6 +287,10 @@ export default function FormEditorPage() {
       Confidential
     </span>
   ) : null;
+  
+  // Safe form name - fallback for imported forms
+  const formName = template?.name || form.template_name || 'Imported Document';
+  const formDescription = template?.description || '';
 
   return (
     <div className="space-y-6 print:space-y-4" data-testid="form-editor">
@@ -303,10 +314,10 @@ export default function FormEditorPage() {
               <div>
                 <div className="flex items-center gap-3 mb-2 flex-wrap">
                   <h1 className="font-heading text-2xl font-bold text-text-primary">
-                    {template.name}
+                    {formName}
                   </h1>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[form.status]}`}>
-                    {form.status?.replace('_', ' ')}
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[form.status] || 'bg-gray-100 text-text-muted'}`}>
+                    {form.status === 'completed_imported' ? 'Imported' : form.status?.replace('_', ' ')}
                   </span>
                   {form.locked && (
                     <span className="flex items-center gap-1 text-success text-sm bg-success/10 px-2 py-1 rounded-full">
@@ -316,7 +327,7 @@ export default function FormEditorPage() {
                   )}
                   {visibilityBadge}
                 </div>
-                <p className="text-text-muted">{template.description}</p>
+                {formDescription && <p className="text-text-muted">{formDescription}</p>}
               </div>
 
               {/* Actions - hide on print */}
@@ -471,52 +482,97 @@ export default function FormEditorPage() {
         {/* Form Fields */}
         <Card className="border-[#E4E8EB] shadow-sm print:shadow-none print:border-0">
           <CardContent className="p-6 space-y-6">
-            {template.form_fields?.map((field, index) => (
-              <FormFieldRenderer
-                key={field.name || index}
-                field={field}
-                value={formData[field.name]}
-                onChange={handleFieldChange}
-                disabled={form.locked}
-                employeeRole={employeeRole}
-              />
-            ))}
-
-            {/* Signatures Section */}
-            {(template.requires_employee_signature || template.requires_admin_signature) && (
-              <div className="border-t border-[#E4E8EB] pt-6 mt-6">
-                <h3 className="font-heading font-semibold text-text-primary mb-6">Signatures</h3>
+            {/* For imported forms without template, show read-only view */}
+            {isImportedWithoutTemplate ? (
+              <div className="space-y-4">
+                <div className="bg-info/5 border border-info/20 rounded-xl p-4">
+                  <p className="text-sm text-info font-medium mb-2">Imported Document</p>
+                  <p className="text-xs text-text-muted">
+                    This document was imported from an existing file. The original document is stored as evidence.
+                  </p>
+                </div>
                 
-                <div className="grid sm:grid-cols-2 gap-6">
-                  {template.requires_employee_signature && (
-                    <div>
-                      {form.locked || form.employee_signature ? (
-                        <SignatureDisplay 
-                          signature={employeeSignature}
-                          label="Employee Signature"
-                        />
-                      ) : (
-                        <SignaturePad
-                          label="Employee Signature"
-                          value={employeeSignature}
-                          onChange={setEmployeeSignature}
-                          disabled={form.locked}
-                          required={template.requires_employee_signature}
-                        />
+                {/* Show form data if any */}
+                {Object.keys(formData).length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-text-primary">Form Data</h4>
+                    {Object.entries(formData).map(([key, value]) => (
+                      <div key={key} className="flex justify-between items-start p-3 bg-[#F8FAFA] rounded-lg">
+                        <span className="text-sm text-text-muted capitalize">{key.replace(/_/g, ' ')}</span>
+                        <span className="text-sm text-text-primary font-medium text-right max-w-[60%]">
+                          {typeof value === 'object' ? JSON.stringify(value) : String(value || '-')}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Show PDF link if available */}
+                {form.pdf_url && (
+                  <div className="border-t border-[#E4E8EB] pt-4 mt-4">
+                    <h4 className="font-medium text-text-primary mb-3">Evidence Document</h4>
+                    <a 
+                      href={form.pdf_url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-primary hover:underline"
+                    >
+                      <FileText className="h-4 w-4" />
+                      View Original Document
+                    </a>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                {template?.form_fields?.map((field, index) => (
+                  <FormFieldRenderer
+                    key={field.name || index}
+                    field={field}
+                    value={formData[field.name]}
+                    onChange={handleFieldChange}
+                    disabled={form.locked}
+                    employeeRole={employeeRole}
+                  />
+                ))}
+
+                {/* Signatures Section */}
+                {(template?.requires_employee_signature || template?.requires_admin_signature) && (
+                  <div className="border-t border-[#E4E8EB] pt-6 mt-6">
+                    <h3 className="font-heading font-semibold text-text-primary mb-6">Signatures</h3>
+                    
+                    <div className="grid sm:grid-cols-2 gap-6">
+                      {template?.requires_employee_signature && (
+                        <div>
+                          {form.locked || form.employee_signature ? (
+                            <SignatureDisplay 
+                              signature={employeeSignature}
+                              label="Employee Signature"
+                            />
+                          ) : (
+                            <SignaturePad
+                              label="Employee Signature"
+                              value={employeeSignature}
+                              onChange={setEmployeeSignature}
+                              disabled={form.locked}
+                              required={template?.requires_employee_signature}
+                            />
+                          )}
+                        </div>
+                      )}
+
+                      {template?.requires_admin_signature && (
+                        <div>
+                          <SignatureDisplay 
+                            signature={adminSignature}
+                            label="Admin Signature"
+                          />
+                        </div>
                       )}
                     </div>
-                  )}
-
-                  {template.requires_admin_signature && (
-                    <div>
-                      <SignatureDisplay 
-                        signature={adminSignature}
-                        label="Admin Signature"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
+                  </div>
+                )}
+              </>
             )}
           </CardContent>
         </Card>

@@ -186,6 +186,13 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Loading and error states
   - White background, rounded corners, responsive (large on desktop, fullscreen on mobile)
   - Integrated in Compliance Centre (policies, insurance) and Employee Profile (documents)
+- [x] **Import Application Form Workflow** (Completed 2026-03-27):
+  - "Generate Forms" dropdown with two options: "Generate Blank Forms" and "Create from Existing Application"
+  - Import dialog allows uploading completed application form and optional CV
+  - Imported forms marked as "Completed (Imported)" with locked fields
+  - Application document stored in A_Application folder with "approved" status
+  - CV stored in C_Personal Information folder
+  - Avoids duplicate data entry for real-world onboarding
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -328,4 +335,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Document Preview Modal with PDF viewer, zoom controls, fullscreen mode
+2026-03-27 - Import Application Form workflow for pre-filled onboarding

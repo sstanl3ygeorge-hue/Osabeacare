@@ -343,15 +343,15 @@ export default function ComplianceCentrePage() {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
-          <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+          <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-policies">
             <FileText className="h-4 w-4 mr-2" />
             Policies
           </TabsTrigger>
-          <TabsTrigger value="insurance" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+          <TabsTrigger value="insurance" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-insurance">
             <Shield className="h-4 w-4 mr-2" />
-            Insurance
+            Insurance & Certificates
           </TabsTrigger>
-          <TabsTrigger value="incidents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+          <TabsTrigger value="incidents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-incidents">
             <AlertCircle className="h-4 w-4 mr-2" />
             Incidents
           </TabsTrigger>
@@ -359,6 +359,7 @@ export default function ComplianceCentrePage() {
             value="reports" 
             className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white"
             onClick={() => fetchReports('dbs')}
+            data-testid="tab-reports"
           >
             <ClipboardList className="h-4 w-4 mr-2" />
             Reports
@@ -368,8 +369,19 @@ export default function ComplianceCentrePage() {
         {/* Policies Tab */}
         <TabsContent value="policies">
           <Card className="border-[#E4E8EB] shadow-sm">
-            <CardHeader>
-              <CardTitle className="font-heading text-lg">Organisation Policies</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="font-heading text-lg">Organisation Policies</CardTitle>
+                <p className="text-sm text-text-muted mt-1">
+                  {policies.filter(p => p.status === 'active').length} of {policies.length} policies uploaded
+                </p>
+              </div>
+              {isAdmin() && policies.length > 0 && policies.some(p => p.status === 'missing') && (
+                <div className="flex items-center gap-2 text-sm text-warning bg-warning/10 px-3 py-1.5 rounded-lg">
+                  <AlertTriangle className="h-4 w-4" />
+                  {policies.filter(p => p.status === 'missing').length} policies missing
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {policies.length === 0 ? (
@@ -383,68 +395,114 @@ export default function ComplianceCentrePage() {
                   )}
                 </div>
               ) : (
-                <div className="space-y-6">
-                  {Object.entries(groupedPolicies).map(([category, categoryPolicies]) => (
-                    <div key={category}>
-                      <h3 className="font-medium text-text-primary mb-3">{category}</h3>
-                      <div className="space-y-2">
-                        {categoryPolicies.map((policy) => (
-                          <div 
-                            key={policy.id}
-                            className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
-                            data-testid={`policy-${policy.id}`}
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className={`p-2 rounded-lg ${policy.status === 'active' ? 'bg-success/10' : 'bg-error/10'}`}>
-                                <FileText className={`h-5 w-5 ${policy.status === 'active' ? 'text-success' : 'text-error'}`} />
-                              </div>
-                              <div>
-                                <p className="font-medium text-text-primary">{policy.name}</p>
-                                <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
-                                  <span>Version: {policy.version}</span>
-                                  {policy.review_date && (
-                                    <span className="flex items-center gap-1">
-                                      <Calendar className="h-3 w-3" />
-                                      Review: {new Date(policy.review_date).toLocaleDateString()}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <div className="flex items-center gap-3">
-                              {getStatusBadge(policy.status)}
-                              
-                              {policy.file_url ? (
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  className="rounded-lg"
-                                  onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${policy.file_url}`, '_blank')}
-                                >
-                                  <Eye className="h-4 w-4 mr-1" />
-                                  View
-                                </Button>
-                              ) : isAdmin() && (
-                                <Button 
-                                  size="sm"
-                                  className="bg-primary hover:bg-primary-hover text-white rounded-lg"
-                                  onClick={() => {
-                                    setSelectedPolicy(policy);
-                                    setSelectedInsurance(null);
-                                    setUploadDialogOpen(true);
-                                  }}
-                                >
-                                  <Upload className="h-4 w-4 mr-1" />
-                                  Upload
-                                </Button>
-                              )}
+                <div className="space-y-8">
+                  {['Core Policies', 'Operational Policies', 'Governance & Compliance'].map((category) => {
+                    const categoryPolicies = groupedPolicies[category] || [];
+                    if (categoryPolicies.length === 0) return null;
+                    
+                    const activeCount = categoryPolicies.filter(p => p.status === 'active').length;
+                    const missingCount = categoryPolicies.filter(p => p.status === 'missing').length;
+                    
+                    return (
+                      <div key={category} data-testid={`policy-category-${category.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')}`}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-1 h-8 rounded-full ${
+                              category === 'Core Policies' ? 'bg-primary' :
+                              category === 'Operational Policies' ? 'bg-info' :
+                              'bg-warning'
+                            }`}></div>
+                            <div>
+                              <h3 className="font-semibold text-text-primary">{category}</h3>
+                              <p className="text-xs text-text-muted">
+                                {activeCount}/{categoryPolicies.length} uploaded
+                                {missingCount > 0 && <span className="text-error ml-2">• {missingCount} missing</span>}
+                              </p>
                             </div>
                           </div>
-                        ))}
+                        </div>
+                        <div className="space-y-2 ml-4">
+                          {categoryPolicies.map((policy) => (
+                            <div 
+                              key={policy.id}
+                              className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] hover:border-primary/30 transition-colors"
+                              data-testid={`policy-${policy.id}`}
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className={`p-2 rounded-lg ${policy.status === 'active' ? 'bg-success/10' : 'bg-error/10'}`}>
+                                  <FileText className={`h-5 w-5 ${policy.status === 'active' ? 'text-success' : 'text-error'}`} />
+                                </div>
+                                <div>
+                                  <p className="font-medium text-text-primary">{policy.name}</p>
+                                  <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
+                                    <span>Version: {policy.version}</span>
+                                    {policy.review_date && (
+                                      <span className="flex items-center gap-1">
+                                        <Calendar className="h-3 w-3" />
+                                        Review: {new Date(policy.review_date).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    {policy.last_reviewed_at && (
+                                      <span className="flex items-center gap-1">
+                                        <CheckCircle className="h-3 w-3 text-success" />
+                                        Last reviewed: {new Date(policy.last_reviewed_at).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-3">
+                                {getStatusBadge(policy.status)}
+                                
+                                {policy.file_url ? (
+                                  <div className="flex items-center gap-2">
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      className="rounded-lg"
+                                      onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${policy.file_url}`, '_blank')}
+                                    >
+                                      <Eye className="h-4 w-4 mr-1" />
+                                      View
+                                    </Button>
+                                    {isAdmin() && (
+                                      <Button 
+                                        size="sm"
+                                        variant="outline"
+                                        className="rounded-lg"
+                                        onClick={() => {
+                                          setSelectedPolicy(policy);
+                                          setSelectedInsurance(null);
+                                          setUploadDialogOpen(true);
+                                        }}
+                                      >
+                                        <RefreshCw className="h-4 w-4 mr-1" />
+                                        Replace
+                                      </Button>
+                                    )}
+                                  </div>
+                                ) : isAdmin() && (
+                                  <Button 
+                                    size="sm"
+                                    className="bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                    onClick={() => {
+                                      setSelectedPolicy(policy);
+                                      setSelectedInsurance(null);
+                                      setUploadDialogOpen(true);
+                                    }}
+                                  >
+                                    <Upload className="h-4 w-4 mr-1" />
+                                    Upload
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -454,8 +512,19 @@ export default function ComplianceCentrePage() {
         {/* Insurance Tab */}
         <TabsContent value="insurance">
           <Card className="border-[#E4E8EB] shadow-sm">
-            <CardHeader>
-              <CardTitle className="font-heading text-lg">Insurance Documents</CardTitle>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="font-heading text-lg">Insurance & Certificates</CardTitle>
+                <p className="text-sm text-text-muted mt-1">
+                  {insurance.filter(i => i.status === 'valid').length} of {insurance.length} documents valid
+                </p>
+              </div>
+              {insurance.some(i => i.status === 'missing' || i.status === 'expired') && (
+                <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
+                  <AlertTriangle className="h-4 w-4" />
+                  {insurance.filter(i => i.status === 'missing' || i.status === 'expired').length} require attention
+                </div>
+              )}
             </CardHeader>
             <CardContent>
               {insurance.length === 0 ? (
@@ -468,7 +537,7 @@ export default function ComplianceCentrePage() {
                   {insurance.map((ins) => (
                     <div 
                       key={ins.id}
-                      className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
+                      className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] hover:border-primary/30 transition-colors"
                       data-testid={`insurance-${ins.id}`}
                     >
                       <div className="flex items-center gap-4">
@@ -479,7 +548,7 @@ export default function ComplianceCentrePage() {
                           <p className="font-medium text-text-primary">{ins.name}</p>
                           <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
                             {ins.provider && <span>Provider: {ins.provider}</span>}
-                            {ins.policy_number && <span>Policy: {ins.policy_number}</span>}
+                            {ins.policy_number && <span>Policy #: {ins.policy_number}</span>}
                             {ins.expiry_date && (
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />
@@ -494,15 +563,32 @@ export default function ComplianceCentrePage() {
                         {getStatusBadge(ins.status)}
                         
                         {ins.file_url ? (
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            className="rounded-lg"
-                            onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${ins.file_url}`, '_blank')}
-                          >
-                            <Eye className="h-4 w-4 mr-1" />
-                            View
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              className="rounded-lg"
+                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${ins.file_url}`, '_blank')}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View
+                            </Button>
+                            {isAdmin() && (
+                              <Button 
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg"
+                                onClick={() => {
+                                  setSelectedInsurance(ins);
+                                  setSelectedPolicy(null);
+                                  setUploadDialogOpen(true);
+                                }}
+                              >
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                                Replace
+                              </Button>
+                            )}
+                          </div>
                         ) : isAdmin() && (
                           <Button 
                             size="sm"

@@ -2036,19 +2036,43 @@ async def send_templated_email(request: SendEmailRequest, user: dict = Depends(r
 # ==================== COMPLIANCE CENTRE - ORG POLICIES ====================
 
 # Core policies that should exist as placeholders
+# Comprehensive Organisation Policies organised by category
 CORE_POLICIES = [
-    {"name": "Safeguarding Adults Policy", "category": "Safeguarding"},
-    {"name": "Safeguarding Children Policy", "category": "Safeguarding"},
-    {"name": "Medication Policy", "category": "Clinical"},
-    {"name": "Infection Control Policy", "category": "Health & Safety"},
-    {"name": "Health & Safety Policy", "category": "Health & Safety"},
-    {"name": "Risk Assessment Policy", "category": "Health & Safety"},
-    {"name": "Incident Reporting Policy", "category": "Governance"},
-    {"name": "Complaints Policy", "category": "Governance"},
-    {"name": "Equality & Diversity Policy", "category": "HR"},
-    {"name": "Data Protection / GDPR Policy", "category": "Governance"},
-    {"name": "Recruitment Policy", "category": "HR"},
-    {"name": "Supervision & Appraisal Policy", "category": "HR"},
+    # Core Policies - Essential CQC Requirements
+    {"name": "Safeguarding Adults Policy", "category": "Core Policies"},
+    {"name": "Safeguarding Children Policy", "category": "Core Policies"},
+    {"name": "Mental Capacity Act & DoLS Policy", "category": "Core Policies"},
+    {"name": "Medication Policy", "category": "Core Policies"},
+    {"name": "Infection Prevention & Control Policy", "category": "Core Policies"},
+    {"name": "Health & Safety Policy", "category": "Core Policies"},
+    {"name": "Manual Handling Policy", "category": "Core Policies"},
+    {"name": "Fire Safety Policy", "category": "Core Policies"},
+    {"name": "First Aid Policy", "category": "Core Policies"},
+    {"name": "COSHH Policy", "category": "Core Policies"},
+    
+    # Operational Policies - Day-to-Day Operations
+    {"name": "Lone Working Policy", "category": "Operational Policies"},
+    {"name": "Risk Assessment Policy", "category": "Operational Policies"},
+    {"name": "Care Planning Policy", "category": "Operational Policies"},
+    {"name": "Record Keeping Policy", "category": "Operational Policies"},
+    {"name": "Confidentiality Policy", "category": "Operational Policies"},
+    {"name": "Whistleblowing Policy", "category": "Operational Policies"},
+    {"name": "Complaints Policy", "category": "Operational Policies"},
+    {"name": "Incident Reporting Policy", "category": "Operational Policies"},
+    {"name": "Business Continuity Policy", "category": "Operational Policies"},
+    {"name": "Service User Feedback Policy", "category": "Operational Policies"},
+    
+    # Governance & Compliance - HR & Regulatory
+    {"name": "Recruitment & Selection Policy", "category": "Governance & Compliance"},
+    {"name": "DBS & Vetting Policy", "category": "Governance & Compliance"},
+    {"name": "Induction & Probation Policy", "category": "Governance & Compliance"},
+    {"name": "Training & Development Policy", "category": "Governance & Compliance"},
+    {"name": "Supervision & Appraisal Policy", "category": "Governance & Compliance"},
+    {"name": "Disciplinary & Grievance Policy", "category": "Governance & Compliance"},
+    {"name": "Equality, Diversity & Inclusion Policy", "category": "Governance & Compliance"},
+    {"name": "Data Protection & GDPR Policy", "category": "Governance & Compliance"},
+    {"name": "Social Media Policy", "category": "Governance & Compliance"},
+    {"name": "Code of Conduct", "category": "Governance & Compliance"},
 ]
 
 @api_router.post("/compliance/seed-policies")
@@ -2182,9 +2206,14 @@ async def update_org_policy(
 
 # ==================== COMPLIANCE CENTRE - INSURANCE ====================
 
+# Insurance & Certificates required for care agency compliance
 INSURANCE_TYPES = [
     {"name": "Public Liability Insurance", "type": "public_liability"},
     {"name": "Employer's Liability Insurance", "type": "employers_liability"},
+    {"name": "Professional Indemnity Insurance", "type": "professional_indemnity"},
+    {"name": "CQC Registration Certificate", "type": "cqc_registration"},
+    {"name": "ICO Registration Certificate", "type": "ico_registration"},
+    {"name": "Company Registration Certificate", "type": "company_registration"},
 ]
 
 @api_router.post("/compliance/seed-insurance")
@@ -2399,8 +2428,6 @@ async def get_staff_training_report(
     user: dict = Depends(get_current_user)
 ):
     """Get staff training report for last N months"""
-    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=months * 30)).isoformat()
-    
     employees = await db.employees.find(
         {"status": {"$in": ["active", "onboarding"]}},
         {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "role": 1}
@@ -2426,7 +2453,7 @@ async def get_staff_training_report(
                     exp = datetime.fromisoformat(t["expiry_date"].replace('Z', '+00:00'))
                     if exp < thirty_days:
                         expiring.append(t["training_name"])
-                except:
+                except (ValueError, TypeError):
                     pass
         
         report.append({
@@ -2841,6 +2868,54 @@ async def startup():
         init_storage()
     except Exception as e:
         logger.error(f"Storage initialization failed: {e}")
+    
+    # Auto-seed organisation policies and insurance if empty
+    try:
+        policy_count = await db.org_policies.count_documents({})
+        if policy_count == 0:
+            now = datetime.now(timezone.utc).isoformat()
+            for policy in CORE_POLICIES:
+                policy_doc = {
+                    "id": str(uuid.uuid4()),
+                    "name": policy["name"],
+                    "category": policy["category"],
+                    "version": "v1.0",
+                    "status": "missing",
+                    "file_url": None,
+                    "original_filename": None,
+                    "review_date": None,
+                    "last_reviewed_at": None,
+                    "reviewed_by": None,
+                    "notes": None,
+                    "created_at": now,
+                    "updated_at": now,
+                    "created_by": "system"
+                }
+                await db.org_policies.insert_one(policy_doc)
+            logger.info(f"Auto-seeded {len(CORE_POLICIES)} organisation policies")
+        
+        insurance_count = await db.insurance_docs.count_documents({})
+        if insurance_count == 0:
+            now = datetime.now(timezone.utc).isoformat()
+            for ins in INSURANCE_TYPES:
+                doc = {
+                    "id": str(uuid.uuid4()),
+                    "name": ins["name"],
+                    "insurance_type": ins["type"],
+                    "status": "missing",
+                    "file_url": None,
+                    "original_filename": None,
+                    "expiry_date": None,
+                    "policy_number": None,
+                    "provider": None,
+                    "notes": None,
+                    "created_at": now,
+                    "updated_at": now
+                }
+                await db.insurance_docs.insert_one(doc)
+            logger.info(f"Auto-seeded {len(INSURANCE_TYPES)} insurance documents")
+    except Exception as e:
+        logger.error(f"Auto-seeding failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

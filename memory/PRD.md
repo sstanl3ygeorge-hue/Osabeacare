@@ -30,48 +30,30 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] Responsive design with Shadcn/UI components
 
 #### Phase 2: Template Library & Document Control (Completed 2026-03-27)
-- [x] **12 Compliance Templates** (role-aware for HCA vs Nurse):
-  - Application Form
-  - Interview Record Form
-  - Recruitment Compliance Checklist
-  - Health Screening Questionnaire (restricted)
-  - Induction & Competency Assessment
-  - Contract Acknowledgement Form
-  - Personal Information Form
-  - Equal Opportunities Monitoring Form (confidential)
-  - Supervision Record
-  - Annual Appraisal Form
-  - Reference Request & Verification Form
-  - DBS Review & Risk Assessment
+- [x] **12 Compliance Templates** (role-aware for HCA vs Nurse)
+- [x] **Form Generation System** with auto-fill, role-based fields, status workflow
+- [x] **Digital Signatures** (typed + canvas drawn)
+- [x] **Bulk Operations** (bulk upload, bulk form generation)
+- [x] **PDF Export** for forms
+- [x] **Visibility Controls** (normal/restricted/confidential)
 
-- [x] **Form Generation System**:
-  - Auto-fill employee details (name, ID, role, branch, email, phone)
-  - Role-based field filtering (nurse-only NMC sections)
-  - Status workflow: Draft → Sent → In Progress → Completed → Reviewed → Signed Off → Archived
-  - Form versioning and audit trail
-
-- [x] **Digital Signatures**:
-  - Typed name signature (fast for mobile)
-  - Canvas-based drawn signature (for formal records)
-  - Date signed capture
-  - Confirmation tick boxes (declarations)
-  - Admin signature and sign-off
-  - Form locking after sign-off
-
-- [x] **Bulk Operations**:
-  - Bulk document upload with type assignment
-  - Bulk form generation for employees
-  - Generate multiple templates at once without navigating away
-
-- [x] **PDF Export**:
-  - Export forms as clean A4 PDFs
-  - Print-friendly layout
-  - Signature display in exported documents
-
-- [x] **Visibility Controls**:
-  - Normal: Standard access
-  - Restricted: HR and authorized personnel only (health forms)
-  - Confidential: Strictly controlled (equal opportunities)
+#### Phase 2.5: Training & Compliance Overview (Completed 2026-03-27)
+- [x] **Compliance Overview Component** on employee profiles
+- [x] **9 Key Compliance Items Tracked**:
+  - Safeguarding Training
+  - Manual Handling
+  - Infection Control
+  - Basic Life Support (BLS)
+  - Medication Training (Nurse-only)
+  - DBS Check
+  - Right to Work
+  - Induction Completed
+  - Policies Acknowledgement
+- [x] **Status Indicators**: Complete (green), Expiring (amber), Pending (blue), Missing (red), N/A (gray)
+- [x] **Expiry Date Display** when applicable
+- [x] **Last Updated Date Display**
+- [x] **Role-Based Logic**: Medication Training shows N/A for Healthcare Assistants
+- [x] **Overall Compliance Progress Bar** with color-coded segments
 
 ### Upcoming Features (P0)
 - [ ] PDF generation backend (server-side PDF for archival)

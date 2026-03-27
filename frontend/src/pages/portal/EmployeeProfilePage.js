@@ -12,10 +12,11 @@ import { Label } from '../../components/ui/label';
 import { Input } from '../../components/ui/input';
 import { Checkbox } from '../../components/ui/checkbox';
 import { toast } from 'sonner';
+import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
-  GraduationCap, ClipboardList, History, User, FolderUp, Eye
+  GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -760,6 +761,15 @@ export default function EmployeeProfilePage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Training & Compliance Overview */}
+          <ComplianceOverview
+            employee={employee}
+            documents={documents}
+            training={training}
+            policies={policies}
+            generatedForms={generatedForms}
+          />
         </TabsContent>
 
         {/* Checklist Tab */}

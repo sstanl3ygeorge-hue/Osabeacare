@@ -135,39 +135,196 @@ class OnboardingStatus:
     ARCHIVED = "Archived"
 
 # Mandatory Compliance Items by Role
-# allow_multiple_files: True = can have many files (passport front/back, visa, etc.)
-# allow_multiple_files: False = single file only (CV, DBS cert)
-# min_files: minimum required for completion (default 1)
+# EVIDENCE-BASED COMPLIANCE MODEL (2026-03-27 Redesign)
+# 
+# Types:
+#   - "document": Employee-submitted or internal evidence file(s)
+#   - "form-generated": Internal form that becomes evidence document on completion
+#   - "training": Training certificate evidence
+#
+# Source:
+#   - "employee": Evidence submitted by employee (passport, DBS cert, references)
+#   - "internal": Internal verification evidence (RTW check, DBS check)
+#   - "form": Auto-generated from completed internal form
+#
+# Rules:
+#   - allow_multiple_files: True = supports multiple evidence files
+#   - min_files: Minimum files required for completion (default 1)
+#   - Only evidence-backed completions count toward compliance score
+#   - Verification requires at least one viewable file
+#
 MANDATORY_ITEMS = {
     "base": [  # Common to all roles
-        {"id": "application_form", "name": "Application Form", "category": "A_Application_Form", "type": "form", "template_name": "Application Form"},
-        {"id": "cv", "name": "CV / Resume", "category": "A_Application_Form", "type": "document", "document_types": ["cv", "resume"], "allow_multiple_files": False},
-        {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", "category": "B_Recruitment_Checklist", "type": "form", "template_name": "Recruitment Compliance Checklist"},
-        {"id": "personal_info", "name": "Personal Information Form", "category": "C_Personal_Information", "type": "form", "template_name": "Personal Information Form"},
-        {"id": "interview_record", "name": "Interview Record", "category": "D_Interview", "type": "form", "template_name": "Interview Record Form"},
-        {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", "category": "E_Equal_Opportunities", "type": "form", "template_name": "Equal Opportunities Monitoring Form"},
-        {"id": "health_screening", "name": "Health Screening Questionnaire", "category": "F_Health_Screening", "type": "form", "template_name": "Health Screening Questionnaire"},
-        {"id": "identity_rtw", "name": "Identity / Right to Work", "category": "G_Identity_RTW", "type": "document", "document_types": ["passport", "visa", "right_to_work", "driving_licence", "brp"], "allow_multiple_files": True, "min_files": 1},
-        {"id": "reference_1", "name": "Reference 1", "category": "H_References", "type": "document", "document_types": ["reference"], "allow_multiple_files": False},
-        {"id": "reference_2", "name": "Reference 2", "category": "H_References", "type": "document", "document_types": ["reference"], "allow_multiple_files": False},
-        {"id": "dbs", "name": "DBS Certificate", "category": "I_DBS", "type": "document", "document_types": ["dbs"], "allow_multiple_files": False},
-        {"id": "induction", "name": "Induction & Competency Assessment", "category": "J_Induction_Shadowing_Observations", "type": "form", "template_name": "Induction & Competency Assessment"},
-        {"id": "contract", "name": "Contract Acknowledgement", "category": "L_Contract", "type": "form", "template_name": "Contract Acknowledgement Form"},
-        {"id": "handbook", "name": "Employee Handbook Acknowledgement", "category": "O_Other", "type": "form", "template_name": "Employee Handbook Acknowledgement"},
+        # ======== A. Application & CV ========
+        {"id": "application_form", "name": "Application Form", "category": "A_Application", 
+         "type": "form-generated", "template_name": "Application Form", 
+         "allow_multiple_files": False, "source": "form",
+         "description": "Completed application form"},
+        
+        {"id": "cv", "name": "CV / Resume", "category": "A_Application", 
+         "type": "document", "source": "employee",
+         "document_types": ["cv", "resume"], 
+         "allow_multiple_files": True,
+         "description": "CV and supporting documents (cover letter, portfolio)"},
+        
+        # ======== B. Recruitment Checklist ========
+        {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", 
+         "category": "B_Recruitment_Checklist", "type": "form-generated", 
+         "template_name": "Recruitment Compliance Checklist",
+         "allow_multiple_files": True, "source": "internal",
+         "description": "Internal recruitment tracking checklist"},
+        
+        # ======== C. Personal Information ========
+        {"id": "personal_info", "name": "Personal Information Form", 
+         "category": "C_Personal_Information", "type": "form-generated", 
+         "template_name": "Personal Information Form",
+         "allow_multiple_files": True, "source": "form",
+         "description": "Personal details form with supporting docs"},
+        
+        # ======== D. Interview ========
+        {"id": "interview_record", "name": "Interview Record", 
+         "category": "D_Interview", "type": "form-generated",
+         "template_name": "Interview Record Form",
+         "allow_multiple_files": True, "source": "internal",
+         "description": "Interview notes, assessment, and supporting documents"},
+        
+        # ======== E. Equal Opportunities ========
+        {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", 
+         "category": "E_Equal_Opportunities", "type": "form-generated",
+         "template_name": "Equal Opportunities Monitoring Form",
+         "allow_multiple_files": False, "source": "form",
+         "description": "Diversity monitoring form"},
+        
+        # ======== F. Health Screening ========
+        {"id": "health_screening", "name": "Health Screening Questionnaire", 
+         "category": "F_Health_Screening", "type": "form-generated",
+         "template_name": "Health Screening Questionnaire",
+         "allow_multiple_files": True, "source": "form",
+         "description": "Health questionnaire and medical attachments"},
+        
+        # ======== G. Identity & Right to Work (SPLIT INTO 3) ========
+        {"id": "identity_documents", "name": "Identity Documents", 
+         "category": "G_Identity_RTW", "type": "document", "source": "employee",
+         "document_types": ["passport", "driving_licence", "national_id"],
+         "allow_multiple_files": True, "min_files": 1,
+         "description": "Passport, driving licence, or other photo ID"},
+        
+        {"id": "right_to_work_documents", "name": "Right to Work Documents", 
+         "category": "G_Identity_RTW", "type": "document", "source": "employee",
+         "document_types": ["visa", "brp", "share_code", "settled_status"],
+         "allow_multiple_files": True, "min_files": 1,
+         "description": "Visa, BRP, share code evidence, settled status proof"},
+        
+        {"id": "right_to_work_check", "name": "Right to Work Verification", 
+         "category": "G_Identity_RTW", "type": "document", "source": "internal",
+         "document_types": ["rtw_check", "share_code_check"],
+         "allow_multiple_files": True,
+         "description": "Internal RTW verification - share code check result, employer checking service screenshot"},
+        
+        # ======== H. References ========
+        {"id": "reference_1", "name": "Reference 1", "category": "H_References",
+         "type": "document", "source": "employee",
+         "document_types": ["reference"],
+         "allow_multiple_files": True,
+         "description": "First reference letter and attachments"},
+        
+        {"id": "reference_2", "name": "Reference 2", "category": "H_References",
+         "type": "document", "source": "employee",
+         "document_types": ["reference"],
+         "allow_multiple_files": True,
+         "description": "Second reference letter and attachments"},
+        
+        # ======== I. DBS (SPLIT INTO 2) ========
+        {"id": "dbs_certificate", "name": "DBS Certificate", "category": "I_DBS",
+         "type": "document", "source": "employee",
+         "document_types": ["dbs", "dbs_certificate"],
+         "allow_multiple_files": True,
+         "description": "DBS certificate from employee"},
+        
+        {"id": "dbs_check", "name": "DBS Update Service Check", "category": "I_DBS",
+         "type": "document", "source": "internal",
+         "document_types": ["dbs_check", "dbs_update_service"],
+         "allow_multiple_files": True,
+         "description": "Internal DBS verification - update service check result, validation screenshot"},
+        
+        # ======== J. Induction ========
+        {"id": "induction", "name": "Induction & Competency Assessment", 
+         "category": "J_Induction", "type": "form-generated",
+         "template_name": "Induction & Competency Assessment",
+         "allow_multiple_files": True, "source": "internal",
+         "description": "Induction checklist, shadowing records, competency sign-offs"},
+        
+        # ======== L. Contract ========
+        {"id": "contract", "name": "Contract Acknowledgement", 
+         "category": "L_Contract", "type": "form-generated",
+         "template_name": "Contract Acknowledgement Form",
+         "allow_multiple_files": True, "source": "form",
+         "description": "Signed contract/offer letter and appendices"},
+        
+        # ======== O. Handbook ========
+        {"id": "handbook", "name": "Employee Handbook Acknowledgement", 
+         "category": "O_Handbook", "type": "form-generated",
+         "template_name": "Employee Handbook Acknowledgement",
+         "allow_multiple_files": False, "source": "form",
+         "description": "Signed handbook acknowledgement"},
     ],
-    "training": [  # Training requirements for all
-        {"id": "safeguarding", "name": "Safeguarding Training", "category": "N_Training", "type": "training", "training_name": "Safeguarding"},
-        {"id": "manual_handling", "name": "Manual Handling Training", "category": "N_Training", "type": "training", "training_name": "Manual Handling"},
-        {"id": "infection_control", "name": "Infection Control Training", "category": "N_Training", "type": "training", "training_name": "Infection Control"},
-        {"id": "bls", "name": "Basic Life Support (BLS)", "category": "N_Training", "type": "training", "training_name": "Basic Life Support"},
-        {"id": "fire_safety", "name": "Fire Safety Training", "category": "N_Training", "type": "training", "training_name": "Fire Safety"},
-        {"id": "health_safety", "name": "Health & Safety Training", "category": "N_Training", "type": "training", "training_name": "Health & Safety"},
+    
+    "training": [  # Training requirements - all require certificate evidence
+        {"id": "safeguarding", "name": "Safeguarding Training", "category": "N_Training",
+         "type": "training", "training_name": "Safeguarding",
+         "allow_multiple_files": True,
+         "description": "Safeguarding certificate and transcript"},
+        
+        {"id": "manual_handling", "name": "Manual Handling Training", "category": "N_Training",
+         "type": "training", "training_name": "Manual Handling",
+         "allow_multiple_files": True,
+         "description": "Manual handling certificate"},
+        
+        {"id": "infection_control", "name": "Infection Control Training", "category": "N_Training",
+         "type": "training", "training_name": "Infection Control",
+         "allow_multiple_files": True,
+         "description": "Infection control certificate"},
+        
+        {"id": "bls", "name": "Basic Life Support (BLS)", "category": "N_Training",
+         "type": "training", "training_name": "Basic Life Support",
+         "allow_multiple_files": True,
+         "description": "BLS certificate, renewal card"},
+        
+        {"id": "fire_safety", "name": "Fire Safety Training", "category": "N_Training",
+         "type": "training", "training_name": "Fire Safety",
+         "allow_multiple_files": True,
+         "description": "Fire safety certificate"},
+        
+        {"id": "health_safety", "name": "Health & Safety Training", "category": "N_Training",
+         "type": "training", "training_name": "Health & Safety",
+         "allow_multiple_files": True,
+         "description": "Health & Safety certificate"},
     ],
+    
     "nurse_specific": [  # Additional items for Nurses only
-        {"id": "nmc_registration", "name": "NMC Registration", "category": "O_Other", "type": "document", "document_types": ["nmc_registration", "professional_registration"], "allow_multiple_files": True, "min_files": 1},
-        {"id": "clinical_competency", "name": "Clinical Competency Evidence", "category": "N_Training", "type": "document", "document_types": ["clinical_competency", "competency_assessment"], "allow_multiple_files": True, "min_files": 1},
-        {"id": "medication_competency", "name": "Medication Competency", "category": "N_Training", "type": "training", "training_name": "Medication"},
+        {"id": "nmc_registration", "name": "NMC Registration", "category": "O_Professional",
+         "type": "document", "source": "employee",
+         "document_types": ["nmc_registration", "professional_registration"],
+         "allow_multiple_files": True, "min_files": 1,
+         "description": "NMC PIN card, registration letter"},
+        
+        {"id": "clinical_competency", "name": "Clinical Competency Evidence", 
+         "category": "N_Training", "type": "document", "source": "employee",
+         "document_types": ["clinical_competency", "competency_assessment"],
+         "allow_multiple_files": True, "min_files": 1,
+         "description": "Clinical competency assessments, skill sign-offs"},
+        
+        {"id": "medication_competency", "name": "Medication Competency", 
+         "category": "N_Training", "type": "training", "training_name": "Medication",
+         "allow_multiple_files": True,
+         "description": "Medication administration competency certificate"},
     ]
+}
+
+# Legacy ID mapping for data migration
+LEGACY_REQUIREMENT_MAPPING = {
+    "identity_rtw": ["identity_documents", "right_to_work_documents"],  # Split into two
+    "dbs": "dbs_certificate",  # Renamed
 }
 
 def get_mandatory_items_for_role(role: str) -> List[dict]:
@@ -2048,6 +2205,725 @@ async def delete_document_type(doc_type_id: str, user: dict = Depends(require_ad
         raise HTTPException(status_code=404, detail="Document type not found")
     return {"message": "Document type deleted"}
 
+
+# ==================== UNIFIED EVIDENCE MANAGEMENT ====================
+# Evidence-based compliance system - all evidence flows through these endpoints
+
+class EvidenceFileResponse(BaseModel):
+    """Single evidence file within a requirement"""
+    file_id: str
+    file_url: str
+    original_filename: str
+    uploaded_at: str
+    uploaded_by: Optional[str] = None
+    uploaded_by_name: Optional[str] = None
+    file_label: Optional[str] = None
+    source_type: str  # "manual_upload", "form_submission", "imported"
+    content_type: Optional[str] = None
+
+
+class RequirementEvidenceResponse(BaseModel):
+    """Complete evidence status for a requirement"""
+    requirement_id: str
+    requirement_name: str
+    requirement_type: str  # document, form-generated, training
+    category: str
+    source: Optional[str] = None  # employee, internal, form
+    description: Optional[str] = None
+    allow_multiple_files: bool = True
+    
+    # Evidence files
+    evidence_files: List[EvidenceFileResponse] = []
+    has_evidence: bool = False
+    evidence_count: int = 0
+    
+    # Status
+    status: str  # missing, in_progress, completed, completed_no_evidence
+    completed_at: Optional[str] = None
+    
+    # Verification (only valid when has_evidence=True)
+    verified: bool = False
+    verified_at: Optional[str] = None
+    verified_by: Optional[str] = None
+    can_verify: bool = False  # True only when evidence exists
+    
+    # Form linkage
+    linked_form_id: Optional[str] = None
+    linked_form_status: Optional[str] = None
+    
+    # Training specific
+    training_expiry_date: Optional[str] = None
+    training_completion_method: Optional[str] = None  # certificate, manual
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/evidence")
+async def upload_requirement_evidence(
+    employee_id: str,
+    requirement_id: str,
+    file: UploadFile = File(...),
+    file_label: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Upload evidence file for any requirement type.
+    Supports multi-file: adds to existing evidence rather than replacing.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get requirement definition
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    req_type = requirement.get('type', 'document')
+    
+    # Upload file to storage
+    ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
+    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    req_slug = requirement_id.replace('_', '-')
+    storage_filename = f"{employee_name}_{req_slug}_{uuid.uuid4().hex[:8]}.{ext}"
+    path = f"{APP_NAME}/evidence/{employee_id}/{requirement_id}/{storage_filename}"
+    
+    data = await file.read()
+    result = put_object(path, data, file.content_type or "application/octet-stream")
+    
+    # Get user name
+    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    uploaded_by_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    # Create evidence file record
+    file_id = str(uuid.uuid4())
+    evidence_file = {
+        "file_id": file_id,
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "uploaded_at": now,
+        "uploaded_by": user['user_id'],
+        "uploaded_by_name": uploaded_by_name,
+        "file_label": file_label or requirement['name'],
+        "source_type": "manual_upload",
+        "content_type": file.content_type
+    }
+    
+    # Handle based on requirement type
+    if req_type == 'training':
+        # For training, update training_records collection
+        training_name = requirement.get('training_name', requirement['name'])
+        
+        # Find or create training record
+        existing = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"training_name": {"$regex": training_name, "$options": "i"}}
+            ]
+        }, {"_id": 0})
+        
+        if existing:
+            # Add to existing evidence files
+            evidence_files = existing.get('evidence_files', [])
+            # Migrate old certificate_url to evidence_files if needed
+            if existing.get('certificate_url') and not evidence_files:
+                evidence_files.append({
+                    "file_id": str(uuid.uuid4()),
+                    "file_url": existing['certificate_url'],
+                    "original_filename": existing.get('original_filename', 'certificate'),
+                    "uploaded_at": existing.get('uploaded_at', existing.get('created_at')),
+                    "source_type": "migrated"
+                })
+            evidence_files.append(evidence_file)
+            
+            await db.training_records.update_one(
+                {"id": existing['id']},
+                {"$set": {
+                    "evidence_files": evidence_files,
+                    "certificate_url": result["path"],  # Keep for backward compat
+                    "original_filename": file.filename,
+                    "uploaded_at": now,
+                    "status": "completed",
+                    "completion_date": now,
+                    "completion_method": "certificate",
+                    "requirement_id": requirement_id,
+                    "updated_at": now,
+                    "expiry_date": expiry_date
+                }}
+            )
+            record_id = existing['id']
+        else:
+            # Create new training record
+            record_id = str(uuid.uuid4())
+            new_record = {
+                "id": record_id,
+                "employee_id": employee_id,
+                "training_name": training_name,
+                "mandatory": True,
+                "status": "completed",
+                "completion_date": now,
+                "expiry_date": expiry_date,
+                "certificate_url": result["path"],
+                "original_filename": file.filename,
+                "uploaded_at": now,
+                "evidence_files": [evidence_file],
+                "verified": False,
+                "completion_method": "certificate",
+                "requirement_id": requirement_id,
+                "created_at": now
+            }
+            await db.training_records.insert_one(new_record)
+        
+        await log_audit_action(user['user_id'], "upload_evidence", "training_record", record_id, 
+                               {"requirement_id": requirement_id, "filename": file.filename})
+    
+    else:
+        # For documents/form-generated, create/update employee_documents
+        # Check for existing document for this requirement
+        existing = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id
+        }, {"_id": 0})
+        
+        if existing:
+            # Add to existing evidence files
+            evidence_files = existing.get('evidence_files', [])
+            # Migrate old file_url to evidence_files if needed
+            if existing.get('file_url') and not evidence_files:
+                evidence_files.append({
+                    "file_id": str(uuid.uuid4()),
+                    "file_url": existing['file_url'],
+                    "original_filename": existing.get('original_filename', 'document'),
+                    "uploaded_at": existing.get('uploaded_at', existing.get('created_at')),
+                    "source_type": "migrated"
+                })
+            evidence_files.append(evidence_file)
+            
+            await db.employee_documents.update_one(
+                {"id": existing['id']},
+                {"$set": {
+                    "evidence_files": evidence_files,
+                    "file_url": result["path"],  # Keep latest for backward compat
+                    "original_filename": file.filename,
+                    "uploaded_at": now,
+                    "status": "uploaded",
+                    "updated_at": now,
+                    "expiry_date": expiry_date
+                }}
+            )
+            doc_id = existing['id']
+        else:
+            # Create new document
+            doc_id = str(uuid.uuid4())
+            # Find or create appropriate document type
+            doc_type = await db.document_types.find_one({"name": requirement['name']}, {"_id": 0})
+            doc_type_id = doc_type['id'] if doc_type else requirement_id
+            
+            new_doc = {
+                "id": doc_id,
+                "employee_id": employee_id,
+                "document_type_id": doc_type_id,
+                "document_type_name": requirement['name'],
+                "category": requirement.get('category'),
+                "file_url": result["path"],
+                "original_filename": file.filename,
+                "status": "uploaded",
+                "uploaded_by": user['user_id'],
+                "uploaded_at": now,
+                "expiry_date": expiry_date,
+                "verified": False,
+                "requirement_id": requirement_id,
+                "requirement_name": requirement['name'],
+                "document_label": file_label or requirement['name'],
+                "evidence_files": [evidence_file],
+                "source_type": "manual_upload",
+                "created_at": now
+            }
+            await db.employee_documents.insert_one(new_doc)
+        
+        await log_audit_action(user['user_id'], "upload_evidence", "employee_document", doc_id,
+                               {"requirement_id": requirement_id, "filename": file.filename})
+    
+    # Update employee compliance
+    await update_employee_compliance(employee_id)
+    
+    return {
+        "success": True,
+        "message": f"Evidence uploaded for '{requirement['name']}'",
+        "file_id": file_id,
+        "requirement_id": requirement_id,
+        "file_url": result["path"]
+    }
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_id}/evidence")
+async def get_requirement_evidence(
+    employee_id: str,
+    requirement_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get all evidence files for a specific requirement"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    req_type = requirement.get('type', 'document')
+    evidence_files = []
+    status = "missing"
+    verified = False
+    verified_by = None
+    verified_at = None
+    linked_form_id = None
+    linked_form_status = None
+    training_expiry = None
+    training_method = None
+    completed_at = None
+    
+    if req_type == 'training':
+        training_name = requirement.get('training_name', requirement['name'])
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"training_name": {"$regex": training_name, "$options": "i"}}
+            ]
+        }, {"_id": 0})
+        
+        if record:
+            evidence_files = record.get('evidence_files', [])
+            # Backward compat: include certificate_url if no evidence_files
+            if not evidence_files and record.get('certificate_url'):
+                evidence_files = [{
+                    "file_id": record['id'],
+                    "file_url": record['certificate_url'],
+                    "original_filename": record.get('original_filename', 'certificate'),
+                    "uploaded_at": record.get('uploaded_at', record.get('created_at')),
+                    "source_type": "certificate"
+                }]
+            
+            status = record.get('status', 'completed') if evidence_files else "completed_no_evidence"
+            verified = record.get('verified', False)
+            verified_by = record.get('verified_by')
+            verified_at = record.get('verified_at')
+            training_expiry = record.get('expiry_date')
+            training_method = record.get('completion_method')
+            completed_at = record.get('completion_date')
+    else:
+        # Check documents
+        docs = await db.employee_documents.find({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id
+        }, {"_id": 0}).to_list(100)
+        
+        for doc in docs:
+            doc_files = doc.get('evidence_files', [])
+            if not doc_files and doc.get('file_url'):
+                doc_files = [{
+                    "file_id": doc['id'],
+                    "file_url": doc['file_url'],
+                    "original_filename": doc.get('original_filename', 'document'),
+                    "uploaded_at": doc.get('uploaded_at', doc.get('created_at')),
+                    "uploaded_by_name": doc.get('uploaded_by_name'),
+                    "file_label": doc.get('document_label'),
+                    "source_type": doc.get('source_type', 'manual_upload')
+                }]
+            evidence_files.extend(doc_files)
+            
+            if doc.get('verified'):
+                verified = True
+                verified_by = doc.get('verified_by') or doc.get('verified_by_name')
+                verified_at = doc.get('verified_at')
+            
+            completed_at = completed_at or doc.get('uploaded_at')
+        
+        # Check for linked forms
+        if requirement.get('type') == 'form-generated':
+            template_name = requirement.get('template_name')
+            if template_name:
+                form = await db.generated_forms.find_one({
+                    "employee_id": employee_id,
+                    "template_name": {"$regex": template_name, "$options": "i"}
+                }, {"_id": 0})
+                
+                if form:
+                    linked_form_id = form['id']
+                    linked_form_status = form.get('status')
+                    
+                    # If form is completed and has PDF, add to evidence
+                    if form.get('status') in ['completed', 'completed_imported'] and form.get('pdf_url'):
+                        evidence_files.append({
+                            "file_id": form['id'],
+                            "file_url": form['pdf_url'],
+                            "original_filename": f"{template_name}.pdf",
+                            "uploaded_at": form.get('completed_at', form.get('updated_at')),
+                            "source_type": "form_submission",
+                            "file_label": f"Completed {template_name}"
+                        })
+        
+        if evidence_files:
+            status = "completed"
+        elif linked_form_id and linked_form_status in ['draft', 'in_progress']:
+            status = "in_progress"
+    
+    has_evidence = len(evidence_files) > 0
+    
+    return RequirementEvidenceResponse(
+        requirement_id=requirement_id,
+        requirement_name=requirement['name'],
+        requirement_type=requirement.get('type', 'document'),
+        category=requirement.get('category', ''),
+        source=requirement.get('source'),
+        description=requirement.get('description'),
+        allow_multiple_files=requirement.get('allow_multiple_files', True),
+        evidence_files=evidence_files,
+        has_evidence=has_evidence,
+        evidence_count=len(evidence_files),
+        status=status,
+        completed_at=completed_at,
+        verified=verified and has_evidence,
+        verified_at=verified_at if has_evidence else None,
+        verified_by=verified_by if has_evidence else None,
+        can_verify=has_evidence and not verified,
+        linked_form_id=linked_form_id,
+        linked_form_status=linked_form_status,
+        training_expiry_date=training_expiry,
+        training_completion_method=training_method
+    )
+
+
+@api_router.delete("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}")
+async def delete_requirement_evidence(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Remove a specific evidence file from a requirement"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    req_type = requirement.get('type', 'document')
+    now = datetime.now(timezone.utc).isoformat()
+    
+    if req_type == 'training':
+        # Find and update training record
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if record:
+            evidence_files = [f for f in record.get('evidence_files', []) if f.get('file_id') != file_id]
+            update_data = {"evidence_files": evidence_files, "updated_at": now}
+            
+            # If no more evidence, update status
+            if not evidence_files:
+                update_data["certificate_url"] = None
+                update_data["completion_method"] = "manual"
+                update_data["verified"] = False
+            
+            await db.training_records.update_one(
+                {"id": record['id']},
+                {"$set": update_data}
+            )
+    else:
+        # Find and update document
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            evidence_files = [f for f in doc.get('evidence_files', []) if f.get('file_id') != file_id]
+            
+            if not evidence_files and doc['id'] == file_id:
+                # Delete the entire document record
+                await db.employee_documents.delete_one({"id": file_id})
+            else:
+                # Just remove the file from evidence_files
+                update_data = {"evidence_files": evidence_files, "updated_at": now}
+                if not evidence_files:
+                    update_data["verified"] = False
+                await db.employee_documents.update_one(
+                    {"id": doc['id']},
+                    {"$set": update_data}
+                )
+    
+    await log_audit_action(user['user_id'], "delete_evidence", "requirement", requirement_id,
+                           {"file_id": file_id, "employee_id": employee_id})
+    
+    # Update compliance
+    await update_employee_compliance(employee_id)
+    
+    return {"success": True, "message": "Evidence file removed"}
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/view")
+async def view_requirement_evidence(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """View/stream a specific evidence file"""
+    # Find the file URL
+    file_url = None
+    
+    # Check training records
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": requirement_id},
+            {"id": file_id},
+            {"evidence_files.file_id": file_id}
+        ]
+    }, {"_id": 0})
+    
+    if record:
+        for f in record.get('evidence_files', []):
+            if f.get('file_id') == file_id:
+                file_url = f.get('file_url')
+                break
+        if not file_url and record.get('certificate_url'):
+            file_url = record['certificate_url']
+    
+    if not file_url:
+        # Check documents
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            for f in doc.get('evidence_files', []):
+                if f.get('file_id') == file_id:
+                    file_url = f.get('file_url')
+                    break
+            if not file_url and doc.get('file_url'):
+                file_url = doc['file_url']
+    
+    if not file_url:
+        # Check generated forms
+        form = await db.generated_forms.find_one({"id": file_id}, {"_id": 0})
+        if form and form.get('pdf_url'):
+            file_url = form['pdf_url']
+    
+    if not file_url:
+        raise HTTPException(status_code=404, detail="Evidence file not found")
+    
+    try:
+        file_bytes, stored_content_type = get_object(file_url)
+        ext = file_url.split('.')[-1].lower()
+        content_types = {
+            'pdf': 'application/pdf',
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }
+        content_type = stored_content_type or content_types.get(ext, 'application/octet-stream')
+        return Response(content=file_bytes, media_type=content_type)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/download")
+async def download_requirement_evidence(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Download a specific evidence file"""
+    # Find the file
+    file_url = None
+    original_filename = "evidence"
+    
+    # Check training records
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": requirement_id},
+            {"id": file_id},
+            {"evidence_files.file_id": file_id}
+        ]
+    }, {"_id": 0})
+    
+    if record:
+        for f in record.get('evidence_files', []):
+            if f.get('file_id') == file_id:
+                file_url = f.get('file_url')
+                original_filename = f.get('original_filename', 'evidence')
+                break
+        if not file_url and record.get('certificate_url'):
+            file_url = record['certificate_url']
+            original_filename = record.get('original_filename', 'certificate')
+    
+    if not file_url:
+        # Check documents
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            for f in doc.get('evidence_files', []):
+                if f.get('file_id') == file_id:
+                    file_url = f.get('file_url')
+                    original_filename = f.get('original_filename', 'document')
+                    break
+            if not file_url and doc.get('file_url'):
+                file_url = doc['file_url']
+                original_filename = doc.get('original_filename', 'document')
+    
+    if not file_url:
+        raise HTTPException(status_code=404, detail="Evidence file not found")
+    
+    try:
+        file_bytes, _ = get_object(file_url)
+        return Response(
+            content=file_bytes,
+            media_type='application/octet-stream',
+            headers={"Content-Disposition": f"attachment; filename={original_filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download file: {str(e)}")
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")
+async def verify_requirement(
+    employee_id: str,
+    requirement_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Verify a requirement. REQUIRES evidence to exist.
+    Cannot verify empty requirements.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    # Get evidence status
+    evidence = await get_requirement_evidence(employee_id, requirement_id, user)
+    
+    if not evidence.has_evidence:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot verify requirement without evidence. Please upload evidence first."
+        )
+    
+    if evidence.verified:
+        return {"success": True, "message": "Requirement already verified", "verified": True}
+    
+    now = datetime.now(timezone.utc).isoformat()
+    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    verified_by_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    req_type = requirement.get('type', 'document')
+    
+    if req_type == 'training':
+        await db.training_records.update_many(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {
+                "verified": True,
+                "verified_by": verified_by_name,
+                "verified_at": now,
+                "updated_at": now
+            }}
+        )
+    else:
+        await db.employee_documents.update_many(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {
+                "verified": True,
+                "verified_by": user['user_id'],
+                "verified_by_name": verified_by_name,
+                "verified_at": now,
+                "updated_at": now
+            }}
+        )
+    
+    await log_audit_action(user['user_id'], "verify_requirement", "requirement", requirement_id,
+                           {"employee_id": employee_id})
+    
+    await update_employee_compliance(employee_id)
+    
+    return {"success": True, "message": f"'{requirement['name']}' verified", "verified": True}
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/unverify")
+async def unverify_requirement(
+    employee_id: str,
+    requirement_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Remove verification from a requirement"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    req_type = requirement.get('type', 'document')
+    
+    if req_type == 'training':
+        await db.training_records.update_many(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {"verified": False, "verified_by": None, "verified_at": None, "updated_at": now}}
+        )
+    else:
+        await db.employee_documents.update_many(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {"verified": False, "verified_by": None, "verified_by_name": None, "verified_at": None, "updated_at": now}}
+        )
+    
+    await log_audit_action(user['user_id'], "unverify_requirement", "requirement", requirement_id,
+                           {"employee_id": employee_id})
+    
+    return {"success": True, "message": f"Verification removed from '{requirement['name']}'"}
+
+
 # ==================== EMPLOYEE DOCUMENT ROUTES ====================
 
 @api_router.post("/employee-documents", response_model=EmployeeDocumentResponse)
@@ -2136,7 +3012,10 @@ async def get_employee_document(doc_id: str, user: dict = Depends(get_current_us
 
 @api_router.get("/employees/{employee_id}/compliance-requirements")
 async def get_compliance_requirements(employee_id: str, user: dict = Depends(get_current_user)):
-    """Get all compliance requirements with their linked documents (supports multi-file requirements)"""
+    """
+    Get all compliance requirements with evidence-based status.
+    EVIDENCE-BASED COMPLIANCE: Only requirements with viewable evidence count as complete.
+    """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -2164,95 +3043,120 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     requirements = []
     completed_count = 0
     verified_count = 0
+    evidence_backed_count = 0
     
     for item in mandatory_items:
         req_id = item['id']
-        allow_multiple = item.get('allow_multiple_files', False)
+        req_type = item.get('type', 'document')
+        allow_multiple = item.get('allow_multiple_files', True)  # Default to True now
         min_files = item.get('min_files', 1)
+        source = item.get('source', 'employee')
         
         req = {
             "id": req_id,
             "name": item['name'],
             "category": item['category'],
-            "type": item['type'],
+            "type": req_type,
+            "source": source,
+            "description": item.get('description', ''),
             "allow_multiple_files": allow_multiple,
             "min_files": min_files,
             "status": "missing",
-            "documents": [],  # Array of documents for this requirement
+            "documents": [],  # Legacy: Array of document records
+            "evidence_files": [],  # NEW: Unified evidence files array
             "document_count": 0,
+            "evidence_count": 0,
+            "has_evidence": False,  # NEW: Critical for evidence-based compliance
             "form": None,
             "training": None,
             "verified": False,
             "verified_by": None,
             "verified_at": None,
-            "all_verified": False  # True only if ALL documents are verified
+            "all_verified": False,
+            "can_verify": False,  # NEW: True only when evidence exists
+            "completion_method": None  # NEW: "evidence" or "manual" or "form"
         }
         
-        # Find ALL linked documents for this requirement
-        linked_docs = []
-        for doc in all_docs:
-            doc_req_id = doc.get('requirement_id')
-            if doc_req_id == req_id:
-                linked_docs.append(doc)
-            # Also match by document type name if no explicit requirement_id
-            elif not doc_req_id and doc.get('document_type_name'):
-                auto_req_id = get_requirement_id_from_doctype(doc['document_type_name'])
-                if auto_req_id == req_id:
+        evidence_files = []
+        
+        # ======== Handle Documents ========
+        if req_type in ['document', 'form-generated']:
+            # Find ALL linked documents for this requirement
+            linked_docs = []
+            for doc in all_docs:
+                doc_req_id = doc.get('requirement_id')
+                if doc_req_id == req_id:
                     linked_docs.append(doc)
-        
-        # Sort by uploaded_at (newest first), handle None values
-        linked_docs.sort(key=lambda d: d.get('uploaded_at') or '', reverse=True)
-        
-        # For single-file requirements, only keep the most recent document with a file
-        if not allow_multiple and len(linked_docs) > 1:
-            # Prefer the one with highest version number and has a file
-            docs_with_files = [d for d in linked_docs if d.get('file_url')]
-            if docs_with_files:
-                # Sort by version (descending), then by uploaded_at (descending)
-                docs_with_files.sort(key=lambda d: (d.get('version_number', 0), d.get('uploaded_at') or ''), reverse=True)
-                linked_docs = [docs_with_files[0]]
-            else:
-                # No files, just keep the most recent record
-                linked_docs = [linked_docs[0]] if linked_docs else []
-        
-        req['documents'] = linked_docs
-        req['document_count'] = len(linked_docs)
-        
-        if linked_docs:
-            # Check if requirement is complete based on min_files
-            uploaded_docs = [d for d in linked_docs if d.get('file_url') and d.get('status') in ['uploaded', 'approved']]
+                # Also match by document type name if no explicit requirement_id
+                elif not doc_req_id and doc.get('document_type_name'):
+                    auto_req_id = get_requirement_id_from_doctype(doc['document_type_name'])
+                    if auto_req_id == req_id:
+                        linked_docs.append(doc)
+                # Legacy support: match identity_rtw to new split requirements
+                elif doc_req_id == 'identity_rtw' and req_id in ['identity_documents', 'right_to_work_documents']:
+                    # Try to intelligently route based on document type
+                    doc_type = doc.get('document_type_name', '').lower()
+                    if req_id == 'identity_documents' and any(x in doc_type for x in ['passport', 'licence', 'license', 'id']):
+                        linked_docs.append(doc)
+                    elif req_id == 'right_to_work_documents' and any(x in doc_type for x in ['visa', 'brp', 'share', 'work']):
+                        linked_docs.append(doc)
+                # Legacy support: match dbs to dbs_certificate
+                elif doc_req_id == 'dbs' and req_id == 'dbs_certificate':
+                    linked_docs.append(doc)
+            
+            # Sort by uploaded_at (newest first)
+            linked_docs.sort(key=lambda d: d.get('uploaded_at') or '', reverse=True)
+            
+            # Extract evidence files from documents
+            for doc in linked_docs:
+                # Check for evidence_files array (new format)
+                if doc.get('evidence_files'):
+                    for ef in doc['evidence_files']:
+                        evidence_files.append({
+                            "file_id": ef.get('file_id', doc['id']),
+                            "file_url": ef.get('file_url'),
+                            "original_filename": ef.get('original_filename', 'document'),
+                            "uploaded_at": ef.get('uploaded_at'),
+                            "uploaded_by_name": ef.get('uploaded_by_name'),
+                            "file_label": ef.get('file_label') or doc.get('document_label'),
+                            "source_type": ef.get('source_type', 'manual_upload'),
+                            "doc_id": doc['id'],
+                            "verified": doc.get('verified', False)
+                        })
+                # Fallback to file_url (legacy format)
+                elif doc.get('file_url'):
+                    evidence_files.append({
+                        "file_id": doc['id'],
+                        "file_url": doc['file_url'],
+                        "original_filename": doc.get('original_filename', 'document'),
+                        "uploaded_at": doc.get('uploaded_at'),
+                        "uploaded_by_name": doc.get('uploaded_by_name'),
+                        "file_label": doc.get('document_label'),
+                        "source_type": doc.get('source_type', 'manual_upload'),
+                        "doc_id": doc['id'],
+                        "verified": doc.get('verified', False)
+                    })
+            
+            req['documents'] = linked_docs
+            req['document_count'] = len(linked_docs)
+            
+            # Check verification
             verified_docs = [d for d in linked_docs if d.get('verified')]
-            
-            if len(uploaded_docs) >= min_files:
-                req['status'] = 'completed'
-                completed_count += 1
-            elif any(d.get('status') == 'requested' for d in linked_docs):
-                req['status'] = 'pending'
-            else:
-                req['status'] = 'in_progress'
-            
-            # Verification: requirement is verified if ALL docs are verified (or at least min_files verified)
-            if len(verified_docs) >= min_files and len(verified_docs) == len(uploaded_docs):
-                req['verified'] = True
-                req['all_verified'] = True
+            if verified_docs and evidence_files:
+                req['verified'] = len(verified_docs) >= min_files
+                req['all_verified'] = len(verified_docs) == len([d for d in linked_docs if d.get('file_url')])
                 req['verified_by'] = verified_docs[0].get('verified_by_name') or verified_docs[0].get('verified_by')
                 req['verified_at'] = verified_docs[0].get('verified_at')
-                verified_count += 1
-            elif verified_docs:
-                # Partial verification
-                req['verified'] = False
-                req['all_verified'] = False
         
-        # Check for linked form (if type is form)
-        if item['type'] == 'form':
-            # First check by requirement_id
+        # ======== Handle Forms ========
+        if req_type == 'form-generated':
+            # Check for linked form
             linked_form = None
             for form in all_forms:
                 if form.get('requirement_id') == req_id:
                     linked_form = form
                     break
             
-            # Fallback to template name matching
             if not linked_form:
                 template_name = item.get('template_name', item['name'])
                 for form in all_forms:
@@ -2265,28 +3169,66 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     "id": linked_form['id'],
                     "status": linked_form['status'],
                     "locked": linked_form.get('locked', False),
-                    "completed_at": linked_form.get('completed_at')
+                    "completed_at": linked_form.get('completed_at'),
+                    "pdf_url": linked_form.get('pdf_url')
                 }
+                
+                # If form is completed with PDF, add to evidence
                 if linked_form['status'] in ['completed', 'completed_imported', 'signed_off']:
-                    if req['status'] == 'missing':
-                        req['status'] = 'completed'
-                        completed_count += 1
-                elif linked_form['status'] not in ['draft']:
-                    if req['status'] == 'missing':
-                        req['status'] = 'in_progress'
+                    if linked_form.get('pdf_url'):
+                        evidence_files.append({
+                            "file_id": linked_form['id'],
+                            "file_url": linked_form['pdf_url'],
+                            "original_filename": f"{linked_form.get('template_name', 'Form')}.pdf",
+                            "uploaded_at": linked_form.get('completed_at') or linked_form.get('updated_at'),
+                            "source_type": "form_submission",
+                            "file_label": f"Completed {linked_form.get('template_name', 'Form')}",
+                            "verified": False  # Forms need separate verification
+                        })
         
-        # Check for training (if type is training) - use substring matching like check_item_completion
-        if item['type'] == 'training':
+        # ======== Handle Training ========
+        if req_type == 'training':
             training_name = item.get('training_name', item['name'])
             linked_training = None
+            
+            # First try by requirement_id
             for training in all_training:
-                train_name = training.get('training_name', '')
-                # Match if either contains the other (case-insensitive)
-                if training_name.lower() in train_name.lower() or train_name.lower() in training_name.lower():
+                if training.get('requirement_id') == req_id:
                     linked_training = training
                     break
             
+            # Fallback to name matching
+            if not linked_training:
+                for training in all_training:
+                    train_name = training.get('training_name', '')
+                    if training_name.lower() in train_name.lower() or train_name.lower() in training_name.lower():
+                        linked_training = training
+                        break
+            
             if linked_training:
+                # Extract evidence files from training
+                if linked_training.get('evidence_files'):
+                    for ef in linked_training['evidence_files']:
+                        evidence_files.append({
+                            "file_id": ef.get('file_id', linked_training['id']),
+                            "file_url": ef.get('file_url'),
+                            "original_filename": ef.get('original_filename', 'certificate'),
+                            "uploaded_at": ef.get('uploaded_at'),
+                            "source_type": ef.get('source_type', 'certificate'),
+                            "file_label": ef.get('file_label', 'Training Certificate'),
+                            "verified": linked_training.get('verified', False)
+                        })
+                elif linked_training.get('certificate_url'):
+                    evidence_files.append({
+                        "file_id": linked_training['id'],
+                        "file_url": linked_training['certificate_url'],
+                        "original_filename": linked_training.get('original_filename', 'certificate'),
+                        "uploaded_at": linked_training.get('uploaded_at', linked_training.get('completion_date')),
+                        "source_type": "certificate",
+                        "file_label": "Training Certificate",
+                        "verified": linked_training.get('verified', False)
+                    })
+                
                 req['training'] = {
                     "id": linked_training['id'],
                     "status": linked_training['status'],
@@ -2299,27 +3241,58 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     "verified_by": linked_training.get('verified_by'),
                     "verified_at": linked_training.get('verified_at'),
                     "completion_method": linked_training.get('completion_method'),
-                    "has_evidence": bool(linked_training.get('certificate_url'))
+                    "has_evidence": bool(evidence_files)
                 }
-                if linked_training['status'] == 'completed':
-                    if req['status'] == 'missing':
-                        req['status'] = 'completed'
-                        completed_count += 1
-                    # Training is verified if it has both certificate AND verified flag
-                    if linked_training.get('verified') and linked_training.get('certificate_url'):
-                        req['verified'] = True
-                        req['verified_by'] = linked_training.get('verified_by')
-                        req['verified_at'] = linked_training.get('verified_at')
-                        verified_count += 1
-                elif linked_training['status'] not in ['not_started']:
-                    if req['status'] == 'missing':
-                        req['status'] = 'in_progress'
+                
+                if linked_training.get('verified') and evidence_files:
+                    req['verified'] = True
+                    req['verified_by'] = linked_training.get('verified_by')
+                    req['verified_at'] = linked_training.get('verified_at')
+        
+        # ======== Calculate Status (EVIDENCE-BASED) ========
+        req['evidence_files'] = evidence_files
+        req['evidence_count'] = len(evidence_files)
+        req['has_evidence'] = len(evidence_files) > 0
+        req['can_verify'] = req['has_evidence'] and not req['verified']
+        
+        if evidence_files:
+            # Has evidence = complete
+            req['status'] = 'completed'
+            req['completion_method'] = 'evidence'
+            completed_count += 1
+            evidence_backed_count += 1
+            
+            if req['verified']:
+                verified_count += 1
+        elif req.get('form') and req['form']['status'] in ['completed', 'completed_imported']:
+            # Form completed but no PDF/evidence - mark as "completed_no_evidence"
+            if not req['form'].get('pdf_url'):
+                req['status'] = 'completed_no_evidence'
+                req['completion_method'] = 'form_no_pdf'
+                # Does NOT count toward compliance score
+            else:
+                req['status'] = 'completed'
+                req['completion_method'] = 'form'
+                completed_count += 1
+                evidence_backed_count += 1
+        elif req.get('training') and req['training']['status'] == 'completed':
+            # Training completed but no certificate
+            req['status'] = 'completed_no_evidence'
+            req['completion_method'] = 'manual'
+            # Does NOT count toward compliance score
+        elif req.get('form') and req['form']['status'] in ['draft', 'in_progress']:
+            req['status'] = 'in_progress'
+        elif req.get('training') and req['training']['status'] in ['in_progress', 'scheduled']:
+            req['status'] = 'in_progress'
+        else:
+            req['status'] = 'missing'
         
         requirements.append(req)
     
     total_count = len(requirements)
-    completion_percentage = int((completed_count / total_count) * 100) if total_count > 0 else 0
-    verification_percentage = int((verified_count / completed_count) * 100) if completed_count > 0 else 0
+    # EVIDENCE-BASED SCORING: Only evidence-backed completions count
+    completion_percentage = int((evidence_backed_count / total_count) * 100) if total_count > 0 else 0
+    verification_percentage = int((verified_count / evidence_backed_count) * 100) if evidence_backed_count > 0 else 0
     
     return {
         "employee_id": employee_id,
@@ -2328,11 +3301,13 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         "requirements": requirements,
         "summary": {
             "total": total_count,
-            "completed": completed_count,
+            "completed": evidence_backed_count,  # Only evidence-backed
+            "completed_no_evidence": completed_count - evidence_backed_count,  # Flagged items
             "verified": verified_count,
             "missing": total_count - completed_count,
             "completion_percentage": completion_percentage,
-            "verification_percentage": verification_percentage
+            "verification_percentage": verification_percentage,
+            "audit_ready": verified_count == evidence_backed_count and evidence_backed_count == total_count
         }
     }
 
@@ -2609,7 +3584,7 @@ async def unverify_employee_document(doc_id: str, user: dict = Depends(require_m
     return EmployeeDocumentResponse(**doc)
 
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")
-async def verify_requirement(employee_id: str, requirement_id: str, user: dict = Depends(require_manager_or_admin)):
+async def verify_all_documents_in_requirement(employee_id: str, requirement_id: str, user: dict = Depends(require_manager_or_admin)):
     """Verify all documents under a requirement"""
     now = datetime.now(timezone.utc).isoformat()
     

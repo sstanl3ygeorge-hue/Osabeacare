@@ -1880,198 +1880,277 @@ export default function EmployeeProfilePage() {
                         </div>
                         <div className="space-y-2">
                           {categoryItems.map((req) => {
+                            // Use new evidence_files array if available, fallback to documents
+                            const evidenceFiles = req.evidence_files || [];
                             const docs = req.documents || [];
-                            const hasFiles = docs.length > 0;
-                            const verifiedDocs = docs.filter(d => d.verified);
-                            const allVerified = hasFiles && verifiedDocs.length === docs.length;
+                            const hasEvidence = req.has_evidence || evidenceFiles.length > 0 || docs.some(d => d.file_url);
+                            const isVerified = req.verified || (hasEvidence && req.all_verified);
+                            const canVerify = req.can_verify || (hasEvidence && !isVerified);
+                            const isNoEvidence = req.status === 'completed_no_evidence';
+                            
+                            // Determine row styling based on evidence
+                            const getRowStyle = () => {
+                              if (isVerified) return 'bg-success/5 border-success/20';
+                              if (req.status === 'completed' && hasEvidence) return 'bg-info/5 border-info/20';
+                              if (isNoEvidence) return 'bg-warning/5 border-warning/20';
+                              if (req.status === 'in_progress' || req.status === 'pending') return 'bg-warning/5 border-warning/20';
+                              return 'bg-error/5 border-error/20';
+                            };
+                            
+                            // Determine status badge
+                            const getStatusBadge = () => {
+                              if (isVerified) return { text: 'Verified', style: 'bg-success/10 text-success' };
+                              if (req.status === 'completed' && hasEvidence) return { text: 'Complete', style: 'bg-info/10 text-info' };
+                              if (isNoEvidence) return { text: 'No Evidence', style: 'bg-warning/10 text-warning' };
+                              if (req.status === 'pending') return { text: 'Pending', style: 'bg-warning/10 text-warning' };
+                              if (req.status === 'in_progress') return { text: 'In Progress', style: 'bg-warning/10 text-warning' };
+                              return { text: 'Missing', style: 'bg-error/10 text-error' };
+                            };
+                            
+                            const statusBadge = getStatusBadge();
                             
                             return (
                             <div 
                               key={req.id} 
-                              className={`flex items-center justify-between p-3 rounded-xl border ${
-                                allVerified || req.verified ? 'bg-success/5 border-success/20' :
-                                req.status === 'completed' ? 'bg-info/5 border-info/20' :
-                                req.status === 'in_progress' || req.status === 'pending' ? 'bg-warning/5 border-warning/20' :
-                                'bg-error/5 border-error/20'
-                              }`}
+                              className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl border gap-3 ${getRowStyle()}`}
+                              data-testid={`requirement-row-${req.id}`}
                             >
-                              <div className="flex items-center gap-3">
-                                {allVerified || req.verified ? (
-                                  <Shield className="h-5 w-5 text-success" />
-                                ) : req.status === 'completed' ? (
-                                  <CheckCircle className="h-5 w-5 text-info" />
+                              <div className="flex items-start gap-3 flex-1">
+                                {isVerified ? (
+                                  <Shield className="h-5 w-5 text-success flex-shrink-0 mt-0.5" />
+                                ) : req.status === 'completed' && hasEvidence ? (
+                                  <CheckCircle className="h-5 w-5 text-info flex-shrink-0 mt-0.5" />
+                                ) : isNoEvidence ? (
+                                  <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
                                 ) : req.status === 'in_progress' || req.status === 'pending' ? (
-                                  <Clock className="h-5 w-5 text-warning" />
+                                  <Clock className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
                                 ) : (
-                                  <XCircle className="h-5 w-5 text-error" />
+                                  <XCircle className="h-5 w-5 text-error flex-shrink-0 mt-0.5" />
                                 )}
-                                <div>
-                                  <p className="font-medium text-text-primary">
-                                    {req.name}
-                                    {req.allow_multiple_files && docs.length > 0 && (
-                                      <span className="ml-2 text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                                        {docs.length} file{docs.length !== 1 ? 's' : ''}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-medium text-text-primary">{req.name}</p>
+                                    {/* Source badge */}
+                                    {req.source && (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                                        req.source === 'internal' ? 'bg-purple-100 text-purple-700' :
+                                        req.source === 'employee' ? 'bg-blue-100 text-blue-700' :
+                                        'bg-gray-100 text-gray-600'
+                                      }`}>
+                                        {req.source === 'internal' ? 'Internal' : req.source === 'employee' ? 'Employee' : 'Form'}
                                       </span>
                                     )}
-                                  </p>
-                                  {docs.length > 0 && (
+                                    {/* Evidence count badge */}
+                                    {evidenceFiles.length > 0 && (
+                                      <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                                        {evidenceFiles.length} file{evidenceFiles.length !== 1 ? 's' : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Description */}
+                                  {req.description && !hasEvidence && (
+                                    <p className="text-xs text-text-muted mt-0.5">{req.description}</p>
+                                  )}
+                                  
+                                  {/* Evidence files list */}
+                                  {evidenceFiles.length > 0 && (
                                     <div className="text-xs text-text-muted space-y-0.5 mt-1">
-                                      {docs.slice(0, 3).map((doc, idx) => (
-                                        <p key={doc.id} className="flex items-center gap-1">
-                                          <FileText className="h-3 w-3" />
-                                          {doc.document_label || doc.original_filename || 'Document uploaded'}
-                                          {doc.verified && <CheckCircle className="h-3 w-3 text-success" />}
-                                        </p>
+                                      {evidenceFiles.slice(0, 3).map((file, idx) => (
+                                        <div key={file.file_id || idx} className="flex items-center gap-1">
+                                          <FileText className="h-3 w-3 flex-shrink-0" />
+                                          <span className="truncate max-w-[200px]">
+                                            {file.file_label || file.original_filename || 'Document'}
+                                          </span>
+                                          {file.verified && <Shield className="h-3 w-3 text-success flex-shrink-0" />}
+                                        </div>
                                       ))}
-                                      {docs.length > 3 && (
-                                        <p className="text-primary">+{docs.length - 3} more</p>
+                                      {evidenceFiles.length > 3 && (
+                                        <p className="text-primary">+{evidenceFiles.length - 3} more</p>
                                       )}
                                     </div>
                                   )}
-                                  {req.form && (
-                                    <p className="text-xs text-text-muted flex items-center gap-1">
+                                  
+                                  {/* No evidence warning */}
+                                  {isNoEvidence && (
+                                    <p className="text-xs text-warning flex items-center gap-1 mt-1">
+                                      <AlertTriangle className="h-3 w-3" />
+                                      Completed without evidence - not audit-ready
+                                    </p>
+                                  )}
+                                  
+                                  {/* Form status */}
+                                  {req.form && !hasEvidence && (
+                                    <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
                                       <ClipboardList className="h-3 w-3" />
                                       Form: {req.form.status.replace('_', ' ')}
                                     </p>
                                   )}
-                                  {req.training && (
-                                    <div className="text-xs text-text-muted space-y-0.5 mt-1">
-                                      <p className="flex items-center gap-1">
-                                        <GraduationCap className="h-3 w-3" />
-                                        Training: {req.training.status.replace('_', ' ')}
-                                        {req.training.verified && <Shield className="h-3 w-3 text-success ml-1" />}
-                                      </p>
-                                      {req.training.certificate_url ? (
-                                        <p className="flex items-center gap-1 text-success">
-                                          <FileText className="h-3 w-3" />
-                                          {req.training.original_filename || 'Certificate uploaded'}
-                                          {req.training.verified && <span className="text-success">(Verified)</span>}
-                                        </p>
-                                      ) : req.training.status === 'completed' && (
-                                        <p className="flex items-center gap-1 text-warning">
-                                          <AlertTriangle className="h-3 w-3" />
-                                          No certificate uploaded
-                                        </p>
-                                      )}
-                                    </div>
+                                  
+                                  {/* Training status (when no evidence) */}
+                                  {req.training && !hasEvidence && (
+                                    <p className="text-xs text-warning flex items-center gap-1 mt-1">
+                                      <GraduationCap className="h-3 w-3" />
+                                      Training: {req.training.status} - No certificate uploaded
+                                    </p>
                                   )}
                                 </div>
                               </div>
+                              
+                              {/* Actions */}
                               <div className="flex items-center gap-2 flex-wrap justify-end">
-                                <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                                  allVerified || req.verified ? 'bg-success/10 text-success' :
-                                  req.status === 'completed' ? 'bg-info/10 text-info' :
-                                  req.status === 'in_progress' || req.status === 'pending' ? 'bg-warning/10 text-warning' :
-                                  'bg-error/10 text-error'
-                                }`}>
-                                  {allVerified || req.verified ? 'Verified' :
-                                   req.status === 'completed' ? 'Complete' :
-                                   req.status === 'pending' ? 'Pending' :
-                                   req.status === 'in_progress' ? 'In Progress' :
-                                   'Missing'}
+                                {/* Status badge */}
+                                <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusBadge.style}`}>
+                                  {statusBadge.text}
                                 </span>
-                                {docs.length === 0 && req.type === 'document' && !isAuditor() && (
+                                
+                                {/* Upload Evidence button - for any requirement without evidence */}
+                                {!hasEvidence && !isAuditor() && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
-                                    onClick={() => { setSelectedRequirement(req.id); setUploadDialogOpen(true); }}
-                                    className="text-xs h-7 rounded-lg"
+                                    onClick={() => {
+                                      if (req.type === 'training') {
+                                        openTrainingCertDialog(req);
+                                      } else {
+                                        setSelectedRequirement(req.id);
+                                        setUploadDialogOpen(true);
+                                      }
+                                    }}
+                                    className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                                    data-testid={`upload-evidence-${req.id}`}
                                   >
                                     <Upload className="h-3 w-3 mr-1" />
                                     Upload
                                   </Button>
                                 )}
-                                {docs.length > 0 && !allVerified && req.status === 'completed' && !isAuditor() && (
+                                
+                                {/* Add File button - when has evidence and allows multiple */}
+                                {hasEvidence && req.allow_multiple_files && !isAuditor() && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
-                                    onClick={() => handleVerifyRequirement(req.id)}
-                                    className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
+                                    onClick={() => {
+                                      if (req.type === 'training') {
+                                        openTrainingCertDialog(req);
+                                      } else {
+                                        setSelectedRequirement(req.id);
+                                        setUploadDialogOpen(true);
+                                      }
+                                    }}
+                                    className="text-xs h-7 rounded-lg"
+                                    data-testid={`add-file-${req.id}`}
                                   >
-                                    <Shield className="h-3 w-3 mr-1" />
-                                    Verify All
+                                    <Upload className="h-3 w-3 mr-1" />
+                                    Add
                                   </Button>
                                 )}
-                                {/* Training actions */}
-                                {req.type === 'training' && !isAuditor() && (
-                                  <>
-                                    {/* Upload Certificate button - always available for training */}
-                                    {!req.training?.certificate_url && (
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        onClick={() => openTrainingCertDialog(req)}
-                                        className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
-                                        data-testid={`upload-training-cert-${req.id}`}
-                                      >
-                                        <Upload className="h-3 w-3 mr-1" />
-                                        Upload Certificate
-                                      </Button>
-                                    )}
-                                    {/* View/Download buttons when certificate exists */}
-                                    {req.training?.certificate_url && (
-                                      <>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => handleViewTrainingCertificate(req.training.id, req.training.original_filename)}
-                                          className="text-xs h-7 rounded-lg"
-                                          data-testid={`view-training-cert-${req.id}`}
-                                        >
-                                          <Eye className="h-3 w-3 mr-1" />
-                                          View
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => handleDownloadTrainingCertificate(req.training.id, req.training.original_filename)}
-                                          className="text-xs h-7 rounded-lg"
-                                          data-testid={`download-training-cert-${req.id}`}
-                                        >
-                                          <Download className="h-3 w-3 mr-1" />
-                                          Download
-                                        </Button>
-                                        {/* Verify button - only when certificate exists */}
-                                        {!req.training.verified && req.training.status === 'completed' && (
-                                          <Button 
-                                            size="sm" 
-                                            variant="outline"
-                                            onClick={() => handleVerifyTraining(req.training.id)}
-                                            disabled={isVerifyingTraining}
-                                            className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
-                                            data-testid={`verify-training-${req.id}`}
-                                          >
-                                            <Shield className="h-3 w-3 mr-1" />
-                                            Verify
-                                          </Button>
-                                        )}
-                                        {/* Unverify button */}
-                                        {req.training.verified && (
-                                          <Button 
-                                            size="sm" 
-                                            variant="outline"
-                                            onClick={() => handleUnverifyTraining(req.training.id)}
-                                            className="text-xs h-7 text-warning border-warning hover:bg-warning/10 rounded-lg"
-                                            data-testid={`unverify-training-${req.id}`}
-                                          >
-                                            <Shield className="h-3 w-3 mr-1" />
-                                            Unverify
-                                          </Button>
-                                        )}
-                                        {/* Replace certificate */}
-                                        <Button 
-                                          size="sm" 
-                                          variant="outline"
-                                          onClick={() => openTrainingCertDialog(req)}
-                                          className="text-xs h-7 rounded-lg"
-                                          data-testid={`replace-training-cert-${req.id}`}
-                                        >
-                                          <Upload className="h-3 w-3 mr-1" />
-                                          Replace
-                                        </Button>
-                                      </>
-                                    )}
-                                  </>
+                                
+                                {/* View button - when has evidence */}
+                                {evidenceFiles.length > 0 && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      const file = evidenceFiles[0];
+                                      const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
+                                      setPreviewFile({ 
+                                        url: viewUrl, 
+                                        name: file.original_filename || req.name,
+                                        filename: file.original_filename 
+                                      });
+                                      setPreviewOpen(true);
+                                    }}
+                                    className="text-xs h-7 rounded-lg"
+                                    data-testid={`view-evidence-${req.id}`}
+                                  >
+                                    <Eye className="h-3 w-3 mr-1" />
+                                    View
+                                  </Button>
+                                )}
+                                
+                                {/* Download button - when has evidence */}
+                                {evidenceFiles.length > 0 && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => {
+                                      try {
+                                        const file = evidenceFiles[0];
+                                        const response = await axios.get(
+                                          `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/download`,
+                                          { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
+                                        );
+                                        const blob = new Blob([response.data]);
+                                        const url = URL.createObjectURL(blob);
+                                        const link = document.createElement('a');
+                                        link.href = url;
+                                        link.download = file.original_filename || 'evidence';
+                                        link.click();
+                                        URL.revokeObjectURL(url);
+                                        toast.success('Downloaded');
+                                      } catch (e) {
+                                        toast.error('Download failed');
+                                      }
+                                    }}
+                                    className="text-xs h-7 rounded-lg"
+                                    data-testid={`download-evidence-${req.id}`}
+                                  >
+                                    <Download className="h-3 w-3 mr-1" />
+                                    Download
+                                  </Button>
+                                )}
+                                
+                                {/* Verify button - only when has evidence and not verified */}
+                                {canVerify && !isAuditor() && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={async () => {
+                                      try {
+                                        await axios.post(
+                                          `${API}/employees/${employeeId}/requirements/${req.id}/verify`,
+                                          {},
+                                          { headers: { Authorization: `Bearer ${token}` } }
+                                        );
+                                        toast.success(`${req.name} verified`);
+                                        fetchCompliance();
+                                      } catch (e) {
+                                        toast.error(e.response?.data?.detail || 'Verification failed');
+                                      }
+                                    }}
+                                    className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
+                                    data-testid={`verify-${req.id}`}
+                                  >
+                                    <Shield className="h-3 w-3 mr-1" />
+                                    Verify
+                                  </Button>
+                                )}
+                                
+                                {/* Unverify button */}
+                                {isVerified && !isAuditor() && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={async () => {
+                                      try {
+                                        await axios.post(
+                                          `${API}/employees/${employeeId}/requirements/${req.id}/unverify`,
+                                          {},
+                                          { headers: { Authorization: `Bearer ${token}` } }
+                                        );
+                                        toast.success('Verification removed');
+                                        fetchCompliance();
+                                      } catch (e) {
+                                        toast.error('Failed to remove verification');
+                                      }
+                                    }}
+                                    className="text-xs h-7 text-warning border-warning hover:bg-warning/10 rounded-lg"
+                                    data-testid={`unverify-${req.id}`}
+                                  >
+                                    <Shield className="h-3 w-3 mr-1" />
+                                    Unverify
+                                  </Button>
                                 )}
                               </div>
                             </div>

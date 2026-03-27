@@ -268,6 +268,25 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Frontend: "View", "Download", "Verify", "Replace" buttons when certificate exists
   - Frontend: Warning message "No certificate uploaded" for training without evidence
   - Result: Training now follows same pattern as documents: Requirement → Evidence → Verified
+- [x] **Evidence-Based Compliance Redesign** (Completed 2026-03-27):
+  - MAJOR: Complete redesign to match real healthcare compliance workflows
+  - NEW: DBS split into `dbs_certificate` (employee) + `dbs_check` (internal)
+  - NEW: RTW split into `identity_documents` + `right_to_work_documents` + `right_to_work_check`
+  - NEW: Total requirements increased from 20 to 23 for comprehensive tracking
+  - NEW: Unified evidence upload endpoint: POST /api/employees/{id}/requirements/{req_id}/evidence
+  - NEW: Evidence view/download endpoints for any requirement
+  - NEW: Unified verify/unverify endpoints for any requirement
+  - NEW: `evidence_files[]` array replaces single file_url for multi-file support
+  - NEW: Source badges (Employee/Internal/Form) on requirement rows
+  - Feature: Compliance score now EVIDENCE-BASED ONLY (manual completions don't count)
+  - Feature: "completed_no_evidence" status for items without viewable files
+  - Feature: Verification blocked unless evidence exists
+  - Feature: Can_verify flag indicates when verification is allowed
+  - Frontend: Evidence count badge on requirement rows
+  - Frontend: Add, View, Download, Verify, Unverify buttons per requirement
+  - Frontend: Warning message for items completed without evidence
+  - Result: Audit-ready single source of truth for all compliance evidence
+  - Pilot: OCS-0001 successfully tested with DBS Certificate + DBS Check separate
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests

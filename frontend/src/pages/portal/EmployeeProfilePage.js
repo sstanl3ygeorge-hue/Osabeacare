@@ -1584,9 +1584,15 @@ export default function EmployeeProfilePage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Documents</p>
+                    <p className="text-sm text-text-muted">Requirements Complete</p>
                     <p className="text-2xl font-heading font-bold text-text-primary">
-                      {documents.filter(d => d.status === 'approved').length}/{documentTypes.length}
+                      {complianceRequirements?.summary?.completed || 0}/{complianceRequirements?.summary?.total || 0}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-[#F8FAFA] rounded-xl">
+                    <p className="text-sm text-text-muted">Verified</p>
+                    <p className="text-2xl font-heading font-bold text-success">
+                      {complianceRequirements?.summary?.verified || 0}/{complianceRequirements?.summary?.completed || 0}
                     </p>
                   </div>
                   <div className="p-4 bg-[#F8FAFA] rounded-xl">
@@ -1596,15 +1602,9 @@ export default function EmployeeProfilePage() {
                     </p>
                   </div>
                   <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Training Complete</p>
-                    <p className="text-2xl font-heading font-bold text-text-primary">
-                      {training.filter(t => t.status === 'completed').length}/{training.length}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Missing Items</p>
+                    <p className="text-sm text-text-muted">Missing Requirements</p>
                     <p className="text-2xl font-heading font-bold text-warning">
-                      {documents.filter(d => d.status === 'not_started' || d.status === 'requested').length}
+                      {complianceRequirements?.summary?.missing || 0}
                     </p>
                   </div>
                 </div>

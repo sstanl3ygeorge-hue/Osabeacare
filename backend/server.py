@@ -302,13 +302,23 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
         "expiry_date": None
     }
     
+    requirement_id = item["id"]
+    
     if item["type"] == "form":
-        # Check for completed form from template
+        # Check for completed form - FIRST by requirement_id, then by template_name
         form = await db.generated_forms.find_one({
             "employee_id": employee_id,
-            "template_name": item.get("template_name"),
-            "status": {"$in": ["completed", "reviewed", "signed_off"]}
+            "requirement_id": requirement_id,
+            "status": {"$in": ["completed", "completed_imported", "reviewed", "signed_off"]}
         }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "signed_off_at": 1})
+        
+        # Fallback to template name matching
+        if not form:
+            form = await db.generated_forms.find_one({
+                "employee_id": employee_id,
+                "template_name": {"$regex": item.get("template_name", ""), "$options": "i"},
+                "status": {"$in": ["completed", "completed_imported", "reviewed", "signed_off"]}
+            }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "signed_off_at": 1})
         
         if form:
             result["status"] = "complete"
@@ -316,27 +326,42 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
             result["details"] = f"Form ID: {form['id']}"
     
     elif item["type"] == "document":
-        # Check for uploaded documents of required types
-        doc_types = item.get("document_types", [])
-        min_count = item.get("min_count", 1)
+        # Check for documents - FIRST by requirement_id
+        min_count = item.get("min_files", 1)
         
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
-            "document_type": {"$in": doc_types},
+            "requirement_id": requirement_id,
+            "file_url": {"$exists": True, "$ne": None},
             "status": {"$in": ["uploaded", "approved"]}
-        }, {"_id": 0, "id": 1, "status": 1, "document_type": 1, "expiry_date": 1}).to_list(10)
+        }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
+        
+        # Fallback to document_type_name matching for legacy documents
+        if len(docs) < min_count:
+            doc_types = item.get("document_types", [])
+            fallback_docs = await db.employee_documents.find({
+                "employee_id": employee_id,
+                "requirement_id": {"$exists": False},
+                "document_type_name": {"$regex": f"({'|'.join(doc_types)})", "$options": "i"},
+                "file_url": {"$exists": True, "$ne": None},
+                "status": {"$in": ["uploaded", "approved"]}
+            }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
+            docs.extend(fallback_docs)
         
         if len(docs) >= min_count:
             result["status"] = "complete"
-            result["verified"] = all(d.get("status") == "approved" for d in docs)
+            result["verified"] = all(d.get("verified") or d.get("status") == "approved" for d in docs)
             result["details"] = f"{len(docs)} document(s) uploaded"
             # Check for expiring documents
             for doc in docs:
                 if doc.get("expiry_date"):
-                    exp_date = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
-                    if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
-                        result["status"] = "expiring"
-                        result["expiry_date"] = doc["expiry_date"]
+                    try:
+                        exp_date = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
+                        if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
+                            result["status"] = "expiring"
+                            result["expiry_date"] = doc["expiry_date"]
+                    except:
+                        pass
     
     elif item["type"] == "training":
         # Check for completed training
@@ -351,10 +376,13 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
             result["verified"] = True
             result["details"] = f"Completed: {training.get('completed_at', 'N/A')}"
             if training.get("expiry_date"):
-                exp_date = datetime.fromisoformat(training["expiry_date"].replace('Z', '+00:00'))
-                if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
-                    result["status"] = "expiring"
-                    result["expiry_date"] = training["expiry_date"]
+                try:
+                    exp_date = datetime.fromisoformat(training["expiry_date"].replace('Z', '+00:00'))
+                    if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
+                        result["status"] = "expiring"
+                        result["expiry_date"] = training["expiry_date"]
+                except:
+                    pass
     
     return result
 
@@ -1020,24 +1048,18 @@ async def generate_employee_code():
     return f"OCS-{str(num).zfill(4)}"
 
 async def calculate_completion_percentage(employee_id: str) -> int:
-    # Get all required document types
-    required_types = await db.document_types.find({"required_before_active": True}, {"_id": 0}).to_list(100)
-    if not required_types:
+    """Calculate completion percentage based on REQUIREMENT completion, not document count"""
+    # Get employee role
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
+    if not employee:
         return 0
     
-    total_required = len(required_types)
-    approved_count = 0
+    role = employee.get('role', '')
     
-    for doc_type in required_types:
-        doc = await db.employee_documents.find_one({
-            "employee_id": employee_id,
-            "document_type_id": doc_type['id'],
-            "status": DocumentStatus.APPROVED
-        })
-        if doc:
-            approved_count += 1
+    # Use the requirement-based compliance calculation
+    compliance = await calculate_employee_compliance(employee_id, role)
     
-    return int((approved_count / total_required) * 100) if total_required > 0 else 0
+    return compliance.get('completion_percentage', 0)
 
 @api_router.post("/employees", response_model=EmployeeResponse)
 async def create_employee(employee: EmployeeCreate, user: dict = Depends(require_manager_or_admin)):
@@ -2198,23 +2220,35 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         
         # Check for linked form (if type is form)
         if item['type'] == 'form':
-            template_name = item.get('template_name', item['name'])
+            # First check by requirement_id
+            linked_form = None
             for form in all_forms:
-                if template_name.lower() in form.get('template_name', '').lower():
-                    req['form'] = {
-                        "id": form['id'],
-                        "status": form['status'],
-                        "locked": form.get('locked', False),
-                        "completed_at": form.get('completed_at')
-                    }
-                    if form['status'] in ['completed', 'completed_imported', 'signed_off']:
-                        if req['status'] == 'missing':
-                            req['status'] = 'completed'
-                            completed_count += 1
-                    elif form['status'] not in ['draft']:
-                        if req['status'] == 'missing':
-                            req['status'] = 'in_progress'
+                if form.get('requirement_id') == req_id:
+                    linked_form = form
                     break
+            
+            # Fallback to template name matching
+            if not linked_form:
+                template_name = item.get('template_name', item['name'])
+                for form in all_forms:
+                    if template_name.lower() in form.get('template_name', '').lower():
+                        linked_form = form
+                        break
+            
+            if linked_form:
+                req['form'] = {
+                    "id": linked_form['id'],
+                    "status": linked_form['status'],
+                    "locked": linked_form.get('locked', False),
+                    "completed_at": linked_form.get('completed_at')
+                }
+                if linked_form['status'] in ['completed', 'completed_imported', 'signed_off']:
+                    if req['status'] == 'missing':
+                        req['status'] = 'completed'
+                        completed_count += 1
+                elif linked_form['status'] not in ['draft']:
+                    if req['status'] == 'missing':
+                        req['status'] = 'in_progress'
         
         # Check for training (if type is training)
         if item['type'] == 'training':
@@ -4163,11 +4197,8 @@ async def import_form_document(
     user: dict = Depends(require_manager_or_admin)
 ):
     """
-    Import an existing completed document for various form types:
-    - reference_1, reference_2: Reference letters
-    - health_screening: Health Screening Questionnaire
-    - contract: Contract/Offer Letter
-    - induction: Induction documents
+    Import an existing completed document for various form types.
+    ENFORCES ONE FORM PER REQUIREMENT - updates existing rather than creating duplicates.
     """
     
     # Verify employee exists
@@ -4183,43 +4214,7 @@ async def import_form_document(
     requirement_id = form_config['requirement_id']
     category = form_config['category']
     
-    # Map form type to template name
-    template_name_map = {
-        "reference_1": "Reference Request Form",
-        "reference_2": "Reference Request Form",
-        "health_screening": "Health Screening Questionnaire",
-        "contract": "Contract Acknowledgement Form",
-        "induction": "Induction & Competency Assessment",
-        "handbook": "Employee Handbook Acknowledgement",
-    }
-    
-    template_search_name = template_name_map.get(form_type, form_type.replace("_", " ").title())
-    
-    # Find matching template
-    template = await db.templates.find_one(
-        {"name": {"$regex": template_search_name, "$options": "i"}},
-        {"_id": 0}
-    )
-    
-    now = datetime.now(timezone.utc).isoformat()
-    form_id = str(uuid.uuid4())
-    access_token = str(uuid.uuid4())
-    
-    # Upload file to storage
-    try:
-        file_content = await document_file.read()
-        file_ext = document_file.filename.split('.')[-1] if '.' in document_file.filename else 'pdf'
-        employee_name = f"{employee['first_name']}{employee['last_name']}"
-        storage_filename = f"{employee_name}_{form_type}_{datetime.now(timezone.utc).strftime('%d-%m-%Y')}.{file_ext}"
-        file_path = f"osabea-care/forms/{employee_id}/{form_id}/{storage_filename}"
-        put_object(file_path, file_content, document_file.content_type or "application/pdf")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
-    
-    # Auto-fill employee data
-    auto_filled = await auto_fill_employee_data(employee_id)
-    
-    # Create display name
+    # Map form type to template name for display
     display_names = {
         "reference_1": "Reference 1",
         "reference_2": "Reference 2",
@@ -4230,98 +4225,132 @@ async def import_form_document(
     }
     display_name = display_names.get(form_type, form_type.replace("_", " ").title())
     
-    # Create the generated form with imported status
-    form_doc = {
-        "id": form_id,
-        "template_id": template['id'] if template else str(uuid.uuid4()),
-        "template_name": template['name'] if template else display_name,
-        "template_category": category,
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Upload file to storage
+    try:
+        file_content = await document_file.read()
+        file_ext = document_file.filename.split('.')[-1] if '.' in document_file.filename else 'pdf'
+        employee_name = f"{employee['first_name']}{employee['last_name']}"
+        storage_filename = f"{employee_name}_{form_type}_{datetime.now(timezone.utc).strftime('%d-%m-%Y')}.{file_ext}"
+        file_path = f"osabea-care/forms/{employee_id}/{requirement_id}/{storage_filename}"
+        put_object(file_path, file_content, document_file.content_type or "application/pdf")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+    
+    # CHECK FOR EXISTING FORM for this requirement - UPDATE instead of creating duplicate
+    existing_form = await db.generated_forms.find_one({
         "employee_id": employee_id,
-        "employee_name": f"{employee['first_name']} {employee['last_name']}",
-        "employee_code": employee['employee_code'],
-        "form_data": auto_filled,
-        "status": "completed_imported",
-        "employee_signature": None,
-        "employee_signed_at": None,
-        "admin_signature": None,
-        "admin_signed_at": None,
-        "admin_signoff_by": None,
-        "pdf_url": file_path,
-        "locked": True,
-        "notes": notes or f"Imported from existing document. Original file: {document_file.filename}",
-        "version": 1,
-        "access_token": access_token,
-        "created_at": now,
-        "updated_at": now,
-        "created_by": user['user_id'],
-        "sent_at": None,
-        "viewed_at": now,
-        "completed_at": now,
-        "reviewed_at": None,
-        "signed_off_at": None,
-        "imported": True,
-        "original_filename": document_file.filename,
-        "form_type": form_type  # Track the type for filtering
-    }
+        "requirement_id": requirement_id
+    })
     
-    await db.generated_forms.insert_one(form_doc)
-    
-    # Also create an employee document record linked to the requirement
-    doc_id = str(uuid.uuid4())
-    doc_record = {
-        "id": doc_id,
-        "employee_id": employee_id,
-        "document_type_id": str(uuid.uuid4()),
-        "document_type_name": display_name,
-        "requirement_id": requirement_id,
-        "requirement_name": display_name,
-        "category": category,
-        "file_url": file_path,
-        "original_filename": document_file.filename,
-        "status": "approved",
-        "source_type": "imported",
-        "source_form_id": form_id,
-        "notes": notes or "Imported document",
-        "uploaded_at": now,
-        "uploaded_by": user['user_id'],
-        "expiry_date": None,
-        "version_number": 1,
-        "verified": False,
-        "created_at": now,
-        "updated_at": now
-    }
-    
-    # For single-file requirements, check if document already exists and replace
-    if requirement_id:
-        existing_doc = await db.employee_documents.find_one({
-            "employee_id": employee_id,
-            "requirement_id": requirement_id
-        })
-        
-        if existing_doc:
-            doc_record["version_number"] = existing_doc.get("version_number", 1) + 1
-            await db.employee_documents.update_one(
-                {"id": existing_doc["id"]},
-                {"$set": {
-                    "file_url": file_path,
-                    "original_filename": document_file.filename,
-                    "version_number": doc_record["version_number"],
-                    "source_form_id": form_id,
-                    "status": "approved",
-                    "uploaded_at": now,
-                    "updated_at": now,
-                    "notes": notes or "Imported document (replaced)"
-                }}
-            )
-            doc_id = existing_doc["id"]
-        else:
-            await db.employee_documents.insert_one(doc_record)
+    if existing_form:
+        # UPDATE existing form instead of creating new one
+        update_data = {
+            "pdf_url": file_path,
+            "status": "completed_imported",
+            "locked": True,
+            "notes": notes or f"Imported from existing document. Original file: {document_file.filename}",
+            "original_filename": document_file.filename,
+            "updated_at": now,
+            "completed_at": now,
+            "version": existing_form.get('version', 1) + 1
+        }
+        await db.generated_forms.update_one({"id": existing_form['id']}, {"$set": update_data})
+        form_id = existing_form['id']
+        action = "updated"
     else:
+        # Create new form with requirement_id
+        form_id = str(uuid.uuid4())
+        access_token = str(uuid.uuid4())
+        auto_filled = await auto_fill_employee_data(employee_id)
+        
+        form_doc = {
+            "id": form_id,
+            "template_id": str(uuid.uuid4()),
+            "template_name": display_name,
+            "template_category": category,
+            "employee_id": employee_id,
+            "employee_name": f"{employee['first_name']} {employee['last_name']}",
+            "employee_code": employee.get('employee_code', ''),
+            "form_data": auto_filled,
+            "status": "completed_imported",
+            "employee_signature": None,
+            "employee_signed_at": None,
+            "admin_signature": None,
+            "admin_signed_at": None,
+            "admin_signoff_by": None,
+            "pdf_url": file_path,
+            "locked": True,
+            "notes": notes or f"Imported from existing document. Original file: {document_file.filename}",
+            "version": 1,
+            "access_token": access_token,
+            "created_at": now,
+            "updated_at": now,
+            "created_by": user['user_id'],
+            "sent_at": None,
+            "viewed_at": now,
+            "completed_at": now,
+            "reviewed_at": None,
+            "signed_off_at": None,
+            "imported": True,
+            "original_filename": document_file.filename,
+            "requirement_id": requirement_id  # CRITICAL: Link form to requirement
+        }
+        await db.generated_forms.insert_one(form_doc)
+        action = "created"
+    
+    # Also update/create employee document record
+    existing_doc = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id
+    })
+    
+    if existing_doc:
+        # Update existing document
+        doc_update = {
+            "file_url": file_path,
+            "original_filename": document_file.filename,
+            "status": "approved",
+            "source_type": "imported",
+            "source_form_id": form_id,
+            "notes": notes or "Imported document (updated)",
+            "uploaded_at": now,
+            "updated_at": now,
+            "version_number": existing_doc.get("version_number", 1) + 1
+        }
+        await db.employee_documents.update_one({"id": existing_doc["id"]}, {"$set": doc_update})
+        doc_id = existing_doc["id"]
+    else:
+        # Create new document record
+        doc_id = str(uuid.uuid4())
+        doc_record = {
+            "id": doc_id,
+            "employee_id": employee_id,
+            "document_type_id": str(uuid.uuid4()),
+            "document_type_name": display_name,
+            "requirement_id": requirement_id,
+            "requirement_name": display_name,
+            "category": category,
+            "file_url": file_path,
+            "original_filename": document_file.filename,
+            "status": "approved",
+            "source_type": "imported",
+            "source_form_id": form_id,
+            "notes": notes or "Imported document",
+            "uploaded_at": now,
+            "uploaded_by": user['user_id'],
+            "expiry_date": None,
+            "version_number": 1,
+            "verified": False,
+            "created_at": now,
+            "updated_at": now
+        }
         await db.employee_documents.insert_one(doc_record)
     
-    await log_audit_action(user['user_id'], "import_document", "generated_form", form_id, {
+    await log_audit_action(user['user_id'], f"import_document_{action}", "generated_form", form_id, {
         "form_type": form_type,
-        "template_name": template['name'] if template else display_name,
+        "requirement_id": requirement_id,
         "employee_id": employee_id,
         "original_file": document_file.filename
     })
@@ -4331,9 +4360,11 @@ async def import_form_document(
         "form_id": form_id,
         "document_id": doc_id,
         "form_type": form_type,
+        "requirement_id": requirement_id,
         "form_status": "completed_imported",
+        "action": action,
         "original_filename": document_file.filename,
-        "message": f"{display_name} imported successfully"
+        "message": f"{display_name} {action} successfully"
     }
 
 # ==================== EMAIL TEMPLATES ====================
@@ -5330,6 +5361,184 @@ async def seed_data():
         await db.users.insert_one(admin_user)
     
     return {"message": "Seed data created successfully", "document_types": len(document_categories)}
+
+# CLEANUP endpoint to remove duplicate forms and fix requirement linking
+@api_router.post("/admin/cleanup-duplicates")
+async def cleanup_duplicates(user: dict = Depends(require_manager_or_admin)):
+    """
+    Clean up duplicate forms and documents:
+    1. For each requirement, keep only the MOST RECENT form
+    2. Delete duplicate forms
+    3. Add requirement_id to forms that don't have it
+    4. Add requirement_id to documents that don't have it
+    """
+    
+    results = {
+        "forms_deleted": 0,
+        "forms_updated": 0,
+        "documents_updated": 0,
+        "documents_deleted": 0,
+        "details": []
+    }
+    
+    # Define form name to requirement_id mapping
+    form_to_requirement = {
+        "Reference 1": "reference_1",
+        "Reference Request Form": "reference_1",  # Older name
+        "Reference 2": "reference_2",
+        "Health Screening Questionnaire": "health_screening",
+        "Contract Acknowledgement Form": "contract",
+        "Contract Acknowledgement": "contract",
+        "Induction & Competency Assessment": "induction",
+        "Employee Handbook Acknowledgement": "handbook",
+        "Application Form": "application_form",
+        "Interview Record Form": "interview_record",
+        "Personal Information Form": "personal_info",
+        "Equal Opportunities Monitoring Form": "equal_opportunities",
+        "Recruitment Compliance Checklist": "recruitment_checklist",
+    }
+    
+    # Get all employees
+    employees = await db.employees.find({}, {"_id": 0, "id": 1}).to_list(1000)
+    
+    for emp in employees:
+        employee_id = emp['id']
+        
+        # Get all forms for this employee
+        forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
+        
+        # Group forms by requirement
+        forms_by_req = {}
+        for form in forms:
+            # Determine requirement_id
+            req_id = form.get('requirement_id')
+            if not req_id:
+                # Try to match by template name
+                template_name = form.get('template_name', '')
+                req_id = form_to_requirement.get(template_name)
+                
+                # Handle "Reference 1" forms (may have different template_id but same name)
+                if not req_id and 'Reference' in template_name:
+                    if '2' in template_name:
+                        req_id = 'reference_2'
+                    else:
+                        req_id = 'reference_1'
+            
+            if req_id:
+                if req_id not in forms_by_req:
+                    forms_by_req[req_id] = []
+                forms_by_req[req_id].append(form)
+        
+        # For each requirement, keep only the most recent form
+        for req_id, req_forms in forms_by_req.items():
+            if len(req_forms) > 1:
+                # Sort by completed_at or created_at (most recent first)
+                req_forms.sort(key=lambda f: f.get('completed_at') or f.get('created_at') or '', reverse=True)
+                
+                # Keep the first (most recent) one
+                keep_form = req_forms[0]
+                
+                # Update the kept form with requirement_id if missing
+                if not keep_form.get('requirement_id'):
+                    await db.generated_forms.update_one(
+                        {"id": keep_form['id']},
+                        {"$set": {"requirement_id": req_id}}
+                    )
+                    results['forms_updated'] += 1
+                
+                # Delete duplicates
+                for dup_form in req_forms[1:]:
+                    await db.generated_forms.delete_one({"id": dup_form['id']})
+                    results['forms_deleted'] += 1
+                    results['details'].append(f"Deleted duplicate form: {dup_form.get('template_name')} for employee {employee_id}")
+            elif len(req_forms) == 1:
+                # Single form - just update requirement_id if missing
+                if not req_forms[0].get('requirement_id'):
+                    await db.generated_forms.update_one(
+                        {"id": req_forms[0]['id']},
+                        {"$set": {"requirement_id": req_id}}
+                    )
+                    results['forms_updated'] += 1
+        
+        # Now clean up documents
+        doc_to_requirement = {
+            "Application Form": "application_form",
+            "CV / Resume": "cv",
+            "CV": "cv",
+            "Resume": "cv",
+            "DBS Certificate": "dbs",
+            "DBS Form / Update Service": "dbs",
+            "Reference 1": "reference_1",
+            "Reference 2": "reference_2",
+            "Right to Work in UK": "identity_rtw",
+            "Passport": "identity_rtw",
+            "Health Screening Form": "health_screening",
+            "Health Screening Questionnaire": "health_screening",
+            "Contract of Employment": "contract",
+            "Contract Acknowledgement": "contract",
+            "Employee Handbook Receipt": "handbook",
+            "Employee Handbook Acknowledgement": "handbook",
+            "Interview Questions": "interview_record",
+            "Induction & Competency Assessment": "induction",
+        }
+        
+        # Get all documents for this employee
+        docs = await db.employee_documents.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
+        
+        # Group documents by requirement
+        docs_by_req = {}
+        for doc in docs:
+            req_id = doc.get('requirement_id')
+            if not req_id:
+                # Try to match by document type name
+                doc_type_name = doc.get('document_type_name', '')
+                req_id = doc_to_requirement.get(doc_type_name)
+            
+            if req_id:
+                if req_id not in docs_by_req:
+                    docs_by_req[req_id] = []
+                docs_by_req[req_id].append(doc)
+        
+        # For single-file requirements, keep only the most recent
+        single_file_reqs = ['cv', 'dbs', 'reference_1', 'reference_2', 'application_form', 
+                           'health_screening', 'contract', 'induction', 'handbook',
+                           'interview_record', 'personal_info', 'recruitment_checklist']
+        
+        for req_id, req_docs in docs_by_req.items():
+            # Update all docs with missing requirement_id
+            for doc in req_docs:
+                if not doc.get('requirement_id'):
+                    await db.employee_documents.update_one(
+                        {"id": doc['id']},
+                        {"$set": {"requirement_id": req_id, "requirement_name": req_id.replace('_', ' ').title()}}
+                    )
+                    results['documents_updated'] += 1
+            
+            # For single-file requirements with multiple docs, keep only the best one
+            if req_id in single_file_reqs and len(req_docs) > 1:
+                # Sort by: has file > verified > approved > version > uploaded_at
+                req_docs.sort(key=lambda d: (
+                    1 if d.get('file_url') else 0,
+                    1 if d.get('verified') else 0,
+                    1 if d.get('status') == 'approved' else 0,
+                    d.get('version_number', 0),
+                    d.get('uploaded_at') or ''
+                ), reverse=True)
+                
+                keep_doc = req_docs[0]
+                
+                # Delete duplicates (only those without files or lower priority)
+                for dup_doc in req_docs[1:]:
+                    if not dup_doc.get('file_url'):
+                        # Delete placeholder docs without files
+                        await db.employee_documents.delete_one({"id": dup_doc['id']})
+                        results['documents_deleted'] += 1
+    
+    return {
+        "success": True,
+        "message": "Cleanup completed",
+        **results
+    }
 
 # Health check
 @api_router.get("/")

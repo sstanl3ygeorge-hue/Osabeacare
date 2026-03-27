@@ -175,6 +175,60 @@ def get_mandatory_items_for_role(role: str) -> List[dict]:
     
     return items
 
+# Folder mapping for form types to document folders
+FORM_TO_FOLDER_MAP = {
+    "Application Form": "A_Application_Form",
+    "Recruitment Compliance Checklist": "B_Recruitment_Checklist",
+    "Personal Information Form": "C_Personal_Information",
+    "Interview Record Form": "D_Interview",
+    "Interview Record": "D_Interview",
+    "Equal Opportunities Monitoring Form": "E_Equal_Opportunities",
+    "Equal Opportunities Monitoring": "E_Equal_Opportunities",
+    "Health Screening Questionnaire": "F_Health_Screening",
+    "Health Screening": "F_Health_Screening",
+    "Identity Verification": "G_Identity_RTW",
+    "Right to Work": "G_Identity_RTW",
+    "Reference Form": "H_References",
+    "Reference 1": "H_References",
+    "Reference 2": "H_References",
+    "DBS Declaration": "I_DBS",
+    "Induction & Competency Assessment": "J_Induction_Shadowing_Observations",
+    "Induction Checklist": "J_Induction_Shadowing_Observations",
+    "HMRC Starter Checklist": "K_HMRC",
+    "Contract Acknowledgement Form": "L_Contract",
+    "Contract Acknowledgement": "L_Contract",
+    "Supervision Form": "M_Supervision_Appraisals",
+    "Training Certificate": "N_Training",
+    "Employee Handbook Acknowledgement": "O_Other",
+}
+
+def get_folder_for_form(form_name: str) -> str:
+    """Get the document folder for a form type"""
+    # Direct match
+    if form_name in FORM_TO_FOLDER_MAP:
+        return FORM_TO_FOLDER_MAP[form_name]
+    
+    # Partial match
+    form_lower = form_name.lower()
+    for key, folder in FORM_TO_FOLDER_MAP.items():
+        if key.lower() in form_lower or form_lower in key.lower():
+            return folder
+    
+    return "O_Other"  # Default folder
+
+def generate_document_filename(employee_name: str, form_type: str, date_str: str = None) -> str:
+    """Generate structured document filename: EmployeeName_FormType_Date.pdf"""
+    import re
+    # Clean employee name
+    clean_name = re.sub(r'[^a-zA-Z0-9]', '', employee_name.replace(' ', ''))
+    # Clean form type
+    clean_form = re.sub(r'[^a-zA-Z0-9]', '', form_type.replace(' ', ''))
+    # Get date
+    if not date_str:
+        date_str = datetime.now(timezone.utc).strftime('%d-%m-%Y')
+    
+    return f"{clean_name}_{clean_form}_{date_str}.pdf"
+
 async def check_item_completion(employee_id: str, item: dict) -> dict:
     """Check if a specific mandatory item is complete for an employee"""
     result = {
@@ -411,6 +465,9 @@ class EmployeeDocumentUpdate(BaseModel):
     expiry_date: Optional[str] = None
     notes: Optional[str] = None
     reviewed_by: Optional[str] = None
+    verified: Optional[bool] = None
+    verified_by: Optional[str] = None
+    verified_at: Optional[str] = None
 
 class EmployeeDocumentResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -429,6 +486,13 @@ class EmployeeDocumentResponse(BaseModel):
     expiry_date: Optional[str] = None
     notes: Optional[str] = None
     version_number: int = 1
+    # Verification fields
+    verified: bool = False
+    verified_by: Optional[str] = None
+    verified_by_name: Optional[str] = None
+    verified_at: Optional[str] = None
+    source_type: Optional[str] = None  # "manual", "imported", "form_submission"
+    source_form_id: Optional[str] = None  # Link to generated form if applicable
 
 # Policy Models
 class PolicyCreate(BaseModel):
@@ -1974,11 +2038,68 @@ async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, 
         update_data['reviewed_by'] = user['user_id']
         update_data['reviewed_at'] = datetime.now(timezone.utc).isoformat()
     
+    # Handle verification
+    if update_data.get('verified'):
+        update_data['verified_by'] = user['user_id']
+        update_data['verified_at'] = datetime.now(timezone.utc).isoformat()
+    
     result = await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     
     await log_audit_action(user['user_id'], "update_document", "employee_document", doc_id, update_data)
+    
+    doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    
+    # Get verifier name if verified
+    if doc.get('verified_by'):
+        verifier = await db.users.find_one({"user_id": doc['verified_by']}, {"_id": 0, "full_name": 1})
+        doc['verified_by_name'] = verifier.get('full_name') if verifier else None
+    
+    return EmployeeDocumentResponse(**doc)
+
+@api_router.post("/employee-documents/{doc_id}/verify")
+async def verify_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Mark a document as verified"""
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Ensure document is approved before verification
+    if doc.get('status') not in ['approved', 'uploaded']:
+        raise HTTPException(status_code=400, detail="Document must be approved before verification")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "verified": True,
+        "verified_by": user['user_id'],
+        "verified_at": now,
+        "status": "approved"  # Ensure status is approved
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {"verified": True})
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    
+    # Get verifier name
+    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "full_name": 1})
+    updated_doc['verified_by_name'] = verifier.get('full_name') if verifier else None
+    
+    return EmployeeDocumentResponse(**updated_doc)
+
+@api_router.post("/employee-documents/{doc_id}/unverify")
+async def unverify_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Remove verification from a document"""
+    result = await db.employee_documents.update_one(
+        {"id": doc_id},
+        {"$set": {"verified": False, "verified_by": None, "verified_at": None}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    await log_audit_action(user['user_id'], "unverify_document", "employee_document", doc_id, {"verified": False})
     
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**doc)
@@ -2851,6 +2972,176 @@ async def signoff_form(form_id: str, admin_signature: str, notes: Optional[str] 
     
     updated_form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
     return GeneratedFormResponse(**updated_form)
+
+@api_router.post("/generated-forms/{form_id}/save-as-document")
+async def save_form_as_document(form_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Convert a completed form to a PDF document and save to employee's folder"""
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": form['employee_id']}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get template
+    template = await db.templates.find_one({"id": form['template_id']}, {"_id": 0})
+    template_name = form.get('template_name') or (template['name'] if template else 'Form')
+    
+    # Determine folder
+    folder = get_folder_for_form(template_name)
+    
+    # Generate filename
+    employee_name = f"{employee['first_name']} {employee['last_name']}"
+    filename = generate_document_filename(employee_name, template_name)
+    
+    # Generate PDF
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    # TA_CENTER and TA_LEFT already imported at top level
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=40, bottomMargin=40, leftMargin=40, rightMargin=40)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('FormTitle', parent=styles['Heading1'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    elements.append(Paragraph(template_name, title_style))
+    
+    # Employee info
+    info_style = ParagraphStyle('InfoStyle', parent=styles['Normal'], fontSize=10, spaceAfter=5)
+    elements.append(Paragraph(f"<b>Employee:</b> {employee_name} ({employee.get('employee_code', 'N/A')})", info_style))
+    elements.append(Paragraph(f"<b>Role:</b> {employee.get('role', 'N/A')}", info_style))
+    elements.append(Paragraph(f"<b>Date:</b> {datetime.now(timezone.utc).strftime('%d/%m/%Y')}", info_style))
+    elements.append(Spacer(1, 20))
+    
+    # Form data
+    form_data = form.get('form_data', {})
+    if form_data:
+        elements.append(Paragraph("<b>Form Data</b>", styles['Heading2']))
+        elements.append(Spacer(1, 10))
+        
+        # Create table for form data
+        table_data = [['Field', 'Value']]
+        for key, value in form_data.items():
+            if value:  # Only show non-empty values
+                display_key = key.replace('_', ' ').title()
+                display_value = str(value)[:100]  # Truncate long values
+                table_data.append([display_key, display_value])
+        
+        if len(table_data) > 1:
+            table = Table(table_data, colWidths=[200, 300])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#004D4D')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFA')]),
+            ]))
+            elements.append(table)
+    
+    elements.append(Spacer(1, 30))
+    
+    # Signatures section
+    if form.get('employee_signature') or form.get('admin_signature'):
+        elements.append(Paragraph("<b>Signatures</b>", styles['Heading2']))
+        elements.append(Spacer(1, 10))
+        
+        if form.get('employee_signature'):
+            elements.append(Paragraph(f"Employee Signature: {form['employee_signature']}", info_style))
+            if form.get('employee_signed_at'):
+                elements.append(Paragraph(f"Signed: {form['employee_signed_at'][:10]}", info_style))
+        
+        if form.get('admin_signature'):
+            elements.append(Paragraph(f"Admin Signature: {form['admin_signature']}", info_style))
+            if form.get('admin_signed_at'):
+                elements.append(Paragraph(f"Signed: {form['admin_signed_at'][:10]}", info_style))
+    
+    # Status footer
+    elements.append(Spacer(1, 30))
+    status_text = f"Status: {form.get('status', 'Unknown').upper()}"
+    if form.get('locked'):
+        status_text += " (LOCKED)"
+    elements.append(Paragraph(f"<i>{status_text}</i>", info_style))
+    elements.append(Paragraph(f"<i>Generated: {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}</i>", info_style))
+    
+    doc.build(elements)
+    pdf_content = buffer.getvalue()
+    buffer.close()
+    
+    # Upload PDF to storage
+    now = datetime.now(timezone.utc).isoformat()
+    file_path = f"osabea-care/documents/{employee['id']}/{folder}/{filename}"
+    put_object(file_path, pdf_content, "application/pdf")
+    
+    # Find or create document type
+    doc_type = await db.document_types.find_one(
+        {"name": {"$regex": template_name, "$options": "i"}},
+        {"_id": 0}
+    )
+    
+    if not doc_type:
+        # Try partial match
+        doc_type = await db.document_types.find_one(
+            {"category": {"$regex": folder.replace('_', ' '), "$options": "i"}},
+            {"_id": 0}
+        )
+    
+    doc_type_id = doc_type['id'] if doc_type else str(uuid.uuid4())
+    doc_type_name = doc_type['name'] if doc_type else template_name
+    
+    # Create employee document record
+    doc_id = str(uuid.uuid4())
+    emp_doc = {
+        "id": doc_id,
+        "employee_id": employee['id'],
+        "document_type_id": doc_type_id,
+        "document_type_name": doc_type_name,
+        "category": folder,
+        "file_url": file_path,
+        "original_filename": filename,
+        "status": DocumentStatus.APPROVED,
+        "uploaded_by": user['user_id'],
+        "uploaded_at": now,
+        "reviewed_by": user['user_id'],
+        "reviewed_at": now,
+        "expiry_date": None,
+        "notes": f"Auto-generated from form submission. Form ID: {form_id}",
+        "version_number": 1,
+        "verified": False,
+        "source_type": "form_submission",
+        "source_form_id": form_id,
+        "created_at": now
+    }
+    
+    await db.employee_documents.insert_one(emp_doc)
+    
+    # Update form with PDF URL
+    await db.generated_forms.update_one(
+        {"id": form_id},
+        {"$set": {"pdf_url": file_path, "saved_as_document_id": doc_id}}
+    )
+    
+    await log_audit_action(user['user_id'], "save_form_as_document", "generated_form", form_id, {
+        "document_id": doc_id,
+        "filename": filename,
+        "folder": folder
+    })
+    
+    return {
+        "success": True,
+        "document_id": doc_id,
+        "filename": filename,
+        "folder": folder,
+        "file_url": file_path
+    }
 
 @api_router.post("/generated-forms/{form_id}/archive")
 async def archive_form(form_id: str, user: dict = Depends(require_admin)):

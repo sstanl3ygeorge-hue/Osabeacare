@@ -193,6 +193,18 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Application document stored in A_Application folder with "approved" status
   - CV stored in C_Personal Information folder
   - Avoids duplicate data entry for real-world onboarding
+- [x] **Document Verification System** (Completed 2026-03-27):
+  - Documents have verification status: Pending/Completed/Verified
+  - "Mark as Verified" button for approved documents
+  - Verification records: verified_by, verified_at, verified_by_name
+  - Green "Verified" badge displays in Documents tab
+  - Unverify option to remove verification
+- [x] **Save Form as Document** (Completed 2026-03-27):
+  - "Save as Doc" button appears for completed/imported forms
+  - Auto-generates PDF from form data using reportlab
+  - Saves to correct employee folder based on form type (A_Application, H_References, etc.)
+  - Structured filename: EmployeeName_FormType_Date.pdf
+  - Creates employee document record linked to source form
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -335,4 +347,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Import Application Form workflow for pre-filled onboarding
+2026-03-27 - Document Verification System and Save Form as Document workflow

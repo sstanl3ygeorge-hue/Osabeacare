@@ -352,6 +352,46 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const handleVerifyDocument = async (docId) => {
+    try {
+      await axios.post(`${API}/employee-documents/${docId}/verify`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Document verified');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to verify document');
+    }
+  };
+
+  const handleUnverifyDocument = async (docId) => {
+    try {
+      await axios.post(`${API}/employee-documents/${docId}/unverify`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Verification removed');
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to remove verification');
+    }
+  };
+
+  const handleSaveFormAsDocument = async (formId, e) => {
+    e.stopPropagation(); // Prevent navigation to form editor
+    try {
+      toast.loading('Saving form as document...');
+      const response = await axios.post(`${API}/generated-forms/${formId}/save-as-document`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.dismiss();
+      toast.success(`Saved to ${response.data.folder}`);
+      fetchData();
+    } catch (error) {
+      toast.dismiss();
+      toast.error(error.response?.data?.detail || 'Failed to save form as document');
+    }
+  };
+
   const handleBulkUpload = async () => {
     if (bulkFiles.length === 0) {
       toast.error('Please select files to upload');
@@ -1196,6 +1236,24 @@ export default function EmployeeProfilePage() {
                           {form.locked && (
                             <span className="text-success text-xs">Locked</span>
                           )}
+                          {(form.status === 'completed' || form.status === 'completed_imported' || form.status === 'signed_off') && !form.saved_as_document_id && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-primary border-primary hover:bg-primary/10 rounded-lg text-xs"
+                              onClick={(e) => handleSaveFormAsDocument(form.id, e)}
+                              data-testid={`save-form-doc-${form.id}`}
+                            >
+                              <FileDown className="h-3 w-3 mr-1" />
+                              Save as Doc
+                            </Button>
+                          )}
+                          {form.saved_as_document_id && (
+                            <span className="text-xs text-success flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3" />
+                              Saved
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -1402,6 +1460,7 @@ export default function EmployeeProfilePage() {
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Document</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Category</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
+                        <th className="text-left p-4 font-medium text-text-muted text-sm">Verification</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Uploaded</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Actions</th>
                       </tr>
@@ -1414,6 +1473,12 @@ export default function EmployeeProfilePage() {
                             {doc.original_filename && (
                               <p className="text-sm text-text-muted">{doc.original_filename}</p>
                             )}
+                            {doc.source_type && (
+                              <span className="text-xs bg-[#F0F4F5] text-text-muted px-2 py-0.5 rounded-full">
+                                {doc.source_type === 'form_submission' ? 'From Form' : 
+                                 doc.source_type === 'imported' ? 'Imported' : 'Manual'}
+                              </span>
+                            )}
                           </td>
                           <td className="p-4 text-text-muted">{doc.category}</td>
                           <td className="p-4">
@@ -1421,11 +1486,26 @@ export default function EmployeeProfilePage() {
                               {doc.status?.replace('_', ' ')}
                             </span>
                           </td>
+                          <td className="p-4">
+                            {doc.verified ? (
+                              <div className="flex items-center gap-1">
+                                <span className="flex items-center gap-1 text-xs bg-success/10 text-success px-2 py-1 rounded-full">
+                                  <CheckCircle className="h-3 w-3" />
+                                  Verified
+                                </span>
+                                {doc.verified_by_name && (
+                                  <span className="text-xs text-text-muted">by {doc.verified_by_name}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-text-muted">Not verified</span>
+                            )}
+                          </td>
                           <td className="p-4 text-text-muted text-sm">
                             {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : '-'}
                           </td>
                           <td className="p-4">
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                               {doc.file_url && (
                                 <>
                                   <Button 
@@ -1489,6 +1569,29 @@ export default function EmployeeProfilePage() {
                                     Reject
                                   </Button>
                                 </>
+                              )}
+                              {!isAuditor() && doc.status === 'approved' && !doc.verified && (
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleVerifyDocument(doc.id)}
+                                  className="text-success border-success hover:bg-success/10 rounded-lg"
+                                  data-testid={`verify-doc-${doc.id}`}
+                                >
+                                  <Shield className="h-3 w-3 mr-1" />
+                                  Verify
+                                </Button>
+                              )}
+                              {!isAuditor() && doc.verified && (
+                                <Button 
+                                  size="sm" 
+                                  variant="ghost"
+                                  onClick={() => handleUnverifyDocument(doc.id)}
+                                  className="text-text-muted hover:text-error rounded-lg"
+                                  title="Remove verification"
+                                >
+                                  <XCircle className="h-3 w-3" />
+                                </Button>
                               )}
                             </div>
                           </td>

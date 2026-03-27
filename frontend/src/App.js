@@ -24,6 +24,8 @@ import PoliciesPage from "./pages/portal/PoliciesPage";
 import TrainingPage from "./pages/portal/TrainingPage";
 import AuditViewPage from "./pages/portal/AuditViewPage";
 import SettingsPage from "./pages/portal/SettingsPage";
+import TemplatesPage from "./pages/portal/TemplatesPage";
+import FormEditorPage from "./pages/portal/FormEditorPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -66,6 +68,8 @@ function AppRouter() {
         <Route path="documents" element={<DocumentsPage />} />
         <Route path="policies" element={<PoliciesPage />} />
         <Route path="training" element={<TrainingPage />} />
+        <Route path="templates" element={<TemplatesPage />} />
+        <Route path="forms/:formId" element={<FormEditorPage />} />
         <Route path="audit" element={<AuditViewPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>

@@ -13,12 +13,13 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, FolderOpen, FileCheck, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/portal/dashboard', icon: LayoutDashboard },
   { name: 'Employees', href: '/portal/employees', icon: Users },
+  { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Documents', href: '/portal/documents', icon: FolderOpen },
   { name: 'Policies', href: '/portal/policies', icon: FileCheck },
   { name: 'Training', href: '/portal/training', icon: GraduationCap },

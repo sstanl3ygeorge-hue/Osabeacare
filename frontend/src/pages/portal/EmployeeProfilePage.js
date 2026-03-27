@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -10,11 +10,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Label } from '../../components/ui/label';
 import { Input } from '../../components/ui/input';
+import { Checkbox } from '../../components/ui/checkbox';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
-  GraduationCap, ClipboardList, History, User
+  GraduationCap, ClipboardList, History, User, FolderUp, Eye
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -43,28 +44,39 @@ const statusColors = {
 
 export default function EmployeeProfilePage() {
   const { employeeId } = useParams();
+  const navigate = useNavigate();
   const [employee, setEmployee] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);
   const [policies, setPolicies] = useState([]);
   const [training, setTraining] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [generatedForms, setGeneratedForms] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
+  const [generateFormsOpen, setGenerateFormsOpen] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
+  const [bulkFiles, setBulkFiles] = useState([]);
+  const [bulkDocTypes, setBulkDocTypes] = useState({});
+  const [selectedTemplates, setSelectedTemplates] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
   const { token, isAuditor } = useAuth();
 
   const fetchData = async () => {
     try {
-      const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes] = await Promise.all([
+      const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes] = await Promise.all([
         axios.get(`${API}/employees/${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/audit-logs?entity_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API}/audit-logs?entity_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       
       setEmployee(empRes.data);
@@ -73,6 +85,8 @@ export default function EmployeeProfilePage() {
       setPolicies(policiesRes.data);
       setTraining(trainingRes.data);
       setAuditLogs(logsRes.data);
+      setGeneratedForms(formsRes.data);
+      setTemplates(templatesRes.data);
     } catch (error) {
       console.error('Failed to fetch employee data:', error);
       toast.error('Failed to load employee data');
@@ -135,6 +149,111 @@ export default function EmployeeProfilePage() {
       toast.error('Failed to update document');
     }
   };
+
+  const handleBulkUpload = async () => {
+    if (bulkFiles.length === 0) {
+      toast.error('Please select files to upload');
+      return;
+    }
+    
+    // Check all files have doc type assigned
+    const missingTypes = bulkFiles.filter((_, i) => !bulkDocTypes[i]);
+    if (missingTypes.length > 0) {
+      toast.error('Please assign document types to all files');
+      return;
+    }
+    
+    setIsUploading(true);
+    
+    try {
+      const formData = new FormData();
+      bulkFiles.forEach((file) => formData.append('files', file));
+      const typeIds = bulkFiles.map((_, i) => bulkDocTypes[i]).join(',');
+      
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/bulk-upload?document_type_ids=${typeIds}`,
+        formData,
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      
+      toast.success(`Uploaded ${response.data.successful} documents`);
+      if (response.data.errors?.length > 0) {
+        response.data.errors.forEach(err => toast.error(err));
+      }
+      
+      setBulkUploadOpen(false);
+      setBulkFiles([]);
+      setBulkDocTypes({});
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to upload documents');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleGenerateForms = async () => {
+    if (selectedTemplates.length === 0) {
+      toast.error('Please select at least one template');
+      return;
+    }
+    
+    setIsGenerating(true);
+    
+    try {
+      const response = await axios.post(
+        `${API}/generated-forms/bulk`,
+        null,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            employee_id: employeeId,
+            template_ids: selectedTemplates
+          },
+          paramsSerializer: params => {
+            return Object.keys(params).map(key => {
+              if (Array.isArray(params[key])) {
+                return params[key].map(v => `${key}=${v}`).join('&');
+              }
+              return `${key}=${params[key]}`;
+            }).join('&');
+          }
+        }
+      );
+      
+      toast.success(`Generated ${response.data.created} forms`);
+      if (response.data.errors?.length > 0) {
+        response.data.errors.forEach(err => toast.warning(err));
+      }
+      
+      setGenerateFormsOpen(false);
+      setSelectedTemplates([]);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to generate forms');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const toggleTemplateSelection = (templateId) => {
+    setSelectedTemplates(prev => 
+      prev.includes(templateId)
+        ? prev.filter(id => id !== templateId)
+        : [...prev, templateId]
+    );
+  };
+
+  const groupedTemplates = templates.reduce((acc, template) => {
+    if (!acc[template.category]) acc[template.category] = [];
+    acc[template.category].push(template);
+    return acc;
+  }, {});
 
   if (loading) {
     return (
@@ -279,6 +398,193 @@ export default function EmployeeProfilePage() {
                   </form>
                 </DialogContent>
               </Dialog>
+
+              {/* Bulk Upload Dialog */}
+              <Dialog open={bulkUploadOpen} onOpenChange={setBulkUploadOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="rounded-xl" data-testid="bulk-upload-btn">
+                    <FolderUp className="mr-2 h-4 w-4" />
+                    Bulk Upload
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading">Bulk Document Upload</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 mt-4">
+                    <div className="space-y-2">
+                      <Label>Select Files</Label>
+                      <Input
+                        type="file"
+                        multiple
+                        onChange={(e) => {
+                          setBulkFiles(Array.from(e.target.files));
+                          setBulkDocTypes({});
+                        }}
+                        className="rounded-xl"
+                        data-testid="bulk-file-input"
+                      />
+                    </div>
+                    
+                    {bulkFiles.length > 0 && (
+                      <div className="space-y-3 max-h-64 overflow-y-auto">
+                        <p className="text-sm text-text-muted">{bulkFiles.length} files selected. Assign document types:</p>
+                        {bulkFiles.map((file, index) => (
+                          <div key={index} className="flex items-center gap-3 p-3 bg-[#F8FAFA] rounded-xl">
+                            <FileText className="h-5 w-5 text-text-muted flex-shrink-0" />
+                            <span className="text-sm text-text-primary flex-1 truncate">{file.name}</span>
+                            <Select 
+                              value={bulkDocTypes[index] || ''} 
+                              onValueChange={(v) => setBulkDocTypes(prev => ({...prev, [index]: v}))}
+                            >
+                              <SelectTrigger className="w-48 rounded-lg text-sm">
+                                <SelectValue placeholder="Select type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {documentTypes.map((type) => (
+                                  <SelectItem key={type.id} value={type.id}>
+                                    {type.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    <div className="flex justify-end gap-3 pt-4">
+                      <Button type="button" variant="outline" onClick={() => setBulkUploadOpen(false)} className="rounded-xl">
+                        Cancel
+                      </Button>
+                      <Button 
+                        onClick={handleBulkUpload} 
+                        disabled={isUploading || bulkFiles.length === 0}
+                        className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                        data-testid="bulk-upload-submit"
+                      >
+                        {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : `Upload ${bulkFiles.length} Files`}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Generate Forms Dialog */}
+              <Dialog open={generateFormsOpen} onOpenChange={setGenerateFormsOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="rounded-xl" data-testid="generate-forms-btn">
+                    <ClipboardList className="mr-2 h-4 w-4" />
+                    Generate Forms
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading">Generate Compliance Forms</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 mt-4 overflow-y-auto flex-1 pr-2">
+                    <p className="text-sm text-text-muted">
+                      Select templates to generate for <strong>{employee?.first_name} {employee?.last_name}</strong>. 
+                      Employee details will be auto-filled.
+                    </p>
+                    
+                    {templates.length === 0 ? (
+                      <div className="text-center py-8 text-text-muted">
+                        <ClipboardList className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                        <p>No templates available. Load templates first.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {Object.entries(groupedTemplates).map(([category, categoryTemplates]) => (
+                          <div key={category} className="space-y-2">
+                            <h4 className="font-medium text-text-primary text-sm">{category}</h4>
+                            <div className="space-y-2">
+                              {categoryTemplates.map((template) => {
+                                const existingForm = generatedForms.find(
+                                  f => f.template_id === template.id && !['archived', 'signed_off'].includes(f.status)
+                                );
+                                const isSelected = selectedTemplates.includes(template.id);
+                                
+                                return (
+                                  <div 
+                                    key={template.id}
+                                    className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${
+                                      existingForm 
+                                        ? 'bg-gray-50 border-gray-200 opacity-60' 
+                                        : isSelected 
+                                          ? 'bg-primary/5 border-primary' 
+                                          : 'bg-[#F8FAFA] border-[#E4E8EB] hover:border-primary/30'
+                                    }`}
+                                  >
+                                    <Checkbox
+                                      id={template.id}
+                                      checked={isSelected}
+                                      disabled={!!existingForm}
+                                      onCheckedChange={() => toggleTemplateSelection(template.id)}
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <label 
+                                        htmlFor={template.id}
+                                        className={`text-sm font-medium cursor-pointer ${existingForm ? 'text-text-muted' : 'text-text-primary'}`}
+                                      >
+                                        {template.name}
+                                      </label>
+                                      {template.description && (
+                                        <p className="text-xs text-text-muted mt-0.5 line-clamp-1">{template.description}</p>
+                                      )}
+                                      {existingForm && (
+                                        <div className="flex items-center gap-2 mt-1">
+                                          <span className="text-xs text-warning">Form exists ({existingForm.status})</span>
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-6 px-2 text-xs"
+                                            onClick={() => navigate(`/portal/forms/${existingForm.id}`)}
+                                          >
+                                            <Eye className="h-3 w-3 mr-1" />
+                                            View
+                                          </Button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-1">
+                                      {template.requires_employee_signature && (
+                                        <span className="text-xs bg-accent text-primary px-2 py-0.5 rounded">Emp Sign</span>
+                                      )}
+                                      {template.requires_admin_signature && (
+                                        <span className="text-xs bg-secondary/10 text-secondary px-2 py-0.5 rounded">Admin Sign</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="flex justify-between items-center gap-3 pt-4 border-t border-[#E4E8EB] mt-4">
+                    <span className="text-sm text-text-muted">
+                      {selectedTemplates.length} template{selectedTemplates.length !== 1 ? 's' : ''} selected
+                    </span>
+                    <div className="flex gap-3">
+                      <Button type="button" variant="outline" onClick={() => setGenerateFormsOpen(false)} className="rounded-xl">
+                        Cancel
+                      </Button>
+                      <Button 
+                        onClick={handleGenerateForms}
+                        disabled={isGenerating || selectedTemplates.length === 0}
+                        className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                        data-testid="generate-forms-submit"
+                      >
+                        {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : `Generate ${selectedTemplates.length} Forms`}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           )}
         </CardContent>
@@ -286,13 +592,17 @@ export default function EmployeeProfilePage() {
 
       {/* Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl">
+        <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
           <TabsTrigger value="overview" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <User className="h-4 w-4 mr-2" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+          <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <ClipboardList className="h-4 w-4 mr-2" />
+            Forms
+          </TabsTrigger>
+          <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <CheckCircle className="h-4 w-4 mr-2" />
             Checklist
           </TabsTrigger>
           <TabsTrigger value="documents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
@@ -312,6 +622,72 @@ export default function EmployeeProfilePage() {
             Audit Log
           </TabsTrigger>
         </TabsList>
+
+        {/* Generated Forms Tab */}
+        <TabsContent value="forms">
+          <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader>
+              <CardTitle className="font-heading text-lg flex items-center justify-between">
+                <span>Compliance Forms</span>
+                <span className="text-sm font-normal text-text-muted">{generatedForms.length} forms</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {generatedForms.length === 0 ? (
+                <div className="text-center py-8">
+                  <ClipboardList className="h-12 w-12 mx-auto text-text-muted/50 mb-3" />
+                  <p className="text-text-muted">No forms generated yet</p>
+                  <p className="text-sm text-text-muted">Click "Generate Forms" to create compliance forms for this employee.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {generatedForms.map((form) => {
+                    const statusConfig = {
+                      draft: { color: 'bg-gray-100 text-text-muted', icon: Clock },
+                      sent: { color: 'bg-info/10 text-info', icon: Mail },
+                      in_progress: { color: 'bg-warning/10 text-warning', icon: Clock },
+                      completed: { color: 'bg-info/10 text-info', icon: CheckCircle },
+                      reviewed: { color: 'bg-warning/10 text-warning', icon: Eye },
+                      signed_off: { color: 'bg-success/10 text-success', icon: CheckCircle },
+                      archived: { color: 'bg-gray-100 text-text-muted', icon: FileText }
+                    };
+                    const config = statusConfig[form.status] || statusConfig.draft;
+                    const StatusIcon = config.icon;
+                    
+                    return (
+                      <div 
+                        key={form.id} 
+                        className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl hover:bg-[#F0F4F5] transition-colors cursor-pointer"
+                        onClick={() => navigate(`/portal/forms/${form.id}`)}
+                        data-testid={`form-${form.id}`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`p-2 rounded-lg ${config.color}`}>
+                            <StatusIcon className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-text-primary">{form.template_name}</p>
+                            <p className="text-sm text-text-muted">
+                              {form.template_category} • Created {new Date(form.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${config.color}`}>
+                            {form.status.replace('_', ' ')}
+                          </span>
+                          {form.locked && (
+                            <span className="text-success text-xs">Locked</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Overview Tab */}
         <TabsContent value="overview">

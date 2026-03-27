@@ -15,6 +15,7 @@ import jwt
 import bcrypt
 import requests
 import resend
+from templates_data import COMPLIANCE_TEMPLATES
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -338,6 +339,99 @@ class EmailRequest(BaseModel):
     subject: str
     html_content: str
 
+# ==================== TEMPLATE LIBRARY MODELS ====================
+
+class FormStatus:
+    DRAFT = "draft"
+    SENT = "sent"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    REVIEWED = "reviewed"
+    SIGNED_OFF = "signed_off"
+    ARCHIVED = "archived"
+
+class TemplateCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    category: str  # e.g., "Identity", "References", "Training", "Contract"
+    linked_document_type_id: Optional[str] = None  # Links to document_types
+    form_fields: List[Dict[str, Any]] = []  # JSON schema for form fields
+    requires_employee_signature: bool = True
+    requires_admin_signature: bool = True
+    content_html: str = ""  # HTML template content
+    visibility: str = "normal"  # normal, restricted, confidential
+    role_specific: Optional[str] = None  # None = all roles, "Nurse", "Healthcare Assistant"
+    section: Optional[str] = None  # Recruitment, Interview, Compliance, etc.
+
+class TemplateResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    description: Optional[str] = None
+    category: str
+    linked_document_type_id: Optional[str] = None
+    form_fields: List[Dict[str, Any]] = []
+    requires_employee_signature: bool = True
+    requires_admin_signature: bool = True
+    content_html: str = ""
+    active: bool = True
+    version: int = 1
+    visibility: str = "normal"
+    role_specific: Optional[str] = None
+    section: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class GeneratedFormCreate(BaseModel):
+    template_id: str
+    employee_id: str
+    form_data: Dict[str, Any] = {}
+
+class GeneratedFormUpdate(BaseModel):
+    form_data: Optional[Dict[str, Any]] = None
+    status: Optional[str] = None
+    employee_signature: Optional[str] = None
+    employee_signed_at: Optional[str] = None
+    admin_signature: Optional[str] = None
+    admin_signed_at: Optional[str] = None
+    notes: Optional[str] = None
+
+class GeneratedFormResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    template_id: str
+    template_name: Optional[str] = None
+    template_category: Optional[str] = None
+    employee_id: str
+    employee_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    form_data: Dict[str, Any] = {}
+    status: str
+    employee_signature: Optional[str] = None
+    employee_signed_at: Optional[str] = None
+    admin_signature: Optional[str] = None
+    admin_signed_at: Optional[str] = None
+    admin_signoff_by: Optional[str] = None
+    pdf_url: Optional[str] = None
+    locked: bool = False
+    notes: Optional[str] = None
+    version: int = 1
+    access_token: Optional[str] = None
+    created_at: str
+    updated_at: str
+    sent_at: Optional[str] = None
+    viewed_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    signed_off_at: Optional[str] = None
+
+class BulkUploadResult(BaseModel):
+    employee_id: str
+    employee_name: str
+    successful: int = 0
+    failed: int = 0
+    errors: List[str] = []
+
 # ==================== AUTH HELPERS ====================
 
 def hash_password(password: str) -> str:
@@ -488,7 +582,7 @@ async def generate_employee_code():
     if last_employee and last_employee.get('employee_code'):
         try:
             num = int(last_employee['employee_code'].split('-')[1]) + 1
-        except:
+        except (IndexError, ValueError):
             num = 1
     else:
         num = 1
@@ -1046,7 +1140,725 @@ async def get_audit_logs(
     
     return logs
 
-# ==================== PUBLIC ROUTES ====================
+# ==================== TEMPLATE LIBRARY ROUTES ====================
+
+@api_router.post("/templates", response_model=TemplateResponse)
+async def create_template(template: TemplateCreate, user: dict = Depends(require_admin)):
+    template_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    template_doc = {
+        "id": template_id,
+        **template.model_dump(),
+        "active": True,
+        "version": 1,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user['user_id']
+    }
+    await db.templates.insert_one(template_doc)
+    
+    await log_audit_action(user['user_id'], "create_template", "template", template_id, {"name": template.name})
+    
+    return TemplateResponse(**template_doc)
+
+@api_router.get("/templates", response_model=List[TemplateResponse])
+async def get_templates(
+    category: Optional[str] = None,
+    active: bool = True,
+    user: dict = Depends(get_current_user)
+):
+    query = {"active": active}
+    if category:
+        query["category"] = category
+    
+    templates = await db.templates.find(query, {"_id": 0}).to_list(100)
+    return [TemplateResponse(**t) for t in templates]
+
+@api_router.get("/templates/{template_id}", response_model=TemplateResponse)
+async def get_template(template_id: str, user: dict = Depends(get_current_user)):
+    template = await db.templates.find_one({"id": template_id}, {"_id": 0})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return TemplateResponse(**template)
+
+@api_router.put("/templates/{template_id}", response_model=TemplateResponse)
+async def update_template(template_id: str, update: TemplateCreate, user: dict = Depends(require_admin)):
+    template = await db.templates.find_one({"id": template_id}, {"_id": 0})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    update_data = update.model_dump()
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["version"] = template.get("version", 1) + 1
+    
+    await db.templates.update_one({"id": template_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "update_template", "template", template_id, {"name": update.name})
+    
+    updated = await db.templates.find_one({"id": template_id}, {"_id": 0})
+    return TemplateResponse(**updated)
+
+@api_router.delete("/templates/{template_id}")
+async def delete_template(template_id: str, user: dict = Depends(require_admin)):
+    # Soft delete - just mark as inactive
+    result = await db.templates.update_one({"id": template_id}, {"$set": {"active": False}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    await log_audit_action(user['user_id'], "delete_template", "template", template_id, {})
+    return {"message": "Template archived"}
+
+# ==================== GENERATED FORMS ROUTES ====================
+
+async def auto_fill_employee_data(employee_id: str) -> dict:
+    """Get employee data for auto-filling forms"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        return {}
+    
+    return {
+        "employee_name": f"{employee['first_name']} {employee['last_name']}",
+        "employee_first_name": employee['first_name'],
+        "employee_last_name": employee['last_name'],
+        "employee_id": employee['employee_code'],
+        "employee_email": employee['email'],
+        "employee_phone": employee.get('phone', ''),
+        "employee_role": employee['role'],
+        "employee_branch": employee['branch'],
+        "employee_manager": employee.get('manager_name', ''),
+        "employee_start_date": employee.get('start_date', ''),
+        "date_generated": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "date_generated_formatted": datetime.now(timezone.utc).strftime("%d %B %Y")
+    }
+
+@api_router.post("/generated-forms", response_model=GeneratedFormResponse)
+async def create_generated_form(form: GeneratedFormCreate, user: dict = Depends(require_manager_or_admin)):
+    form_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get template
+    template = await db.templates.find_one({"id": form.template_id}, {"_id": 0})
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": form.employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Auto-fill employee data
+    auto_filled = await auto_fill_employee_data(form.employee_id)
+    merged_data = {**auto_filled, **form.form_data}
+    
+    # Generate access token for employee/external access
+    access_token = str(uuid.uuid4())
+    
+    form_doc = {
+        "id": form_id,
+        "template_id": form.template_id,
+        "template_name": template['name'],
+        "template_category": template['category'],
+        "employee_id": form.employee_id,
+        "employee_name": f"{employee['first_name']} {employee['last_name']}",
+        "employee_code": employee['employee_code'],
+        "form_data": merged_data,
+        "status": FormStatus.DRAFT,
+        "employee_signature": None,
+        "employee_signed_at": None,
+        "admin_signature": None,
+        "admin_signed_at": None,
+        "admin_signoff_by": None,
+        "pdf_url": None,
+        "locked": False,
+        "notes": None,
+        "version": 1,
+        "access_token": access_token,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user['user_id'],
+        "sent_at": None,
+        "viewed_at": None,
+        "completed_at": None,
+        "reviewed_at": None,
+        "signed_off_at": None
+    }
+    await db.generated_forms.insert_one(form_doc)
+    
+    await log_audit_action(user['user_id'], "create_form", "generated_form", form_id, {
+        "template_name": template['name'],
+        "employee_id": form.employee_id
+    })
+    
+    return GeneratedFormResponse(**form_doc)
+
+@api_router.get("/generated-forms", response_model=List[GeneratedFormResponse])
+async def get_generated_forms(
+    employee_id: Optional[str] = None,
+    template_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    query = {}
+    if employee_id:
+        query["employee_id"] = employee_id
+    if template_id:
+        query["template_id"] = template_id
+    if status:
+        query["status"] = status
+    
+    forms = await db.generated_forms.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [GeneratedFormResponse(**f) for f in forms]
+
+@api_router.get("/generated-forms/{form_id}", response_model=GeneratedFormResponse)
+async def get_generated_form(form_id: str, user: dict = Depends(get_current_user)):
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    return GeneratedFormResponse(**form)
+
+# Public access endpoint for employees to complete forms via access token
+@api_router.get("/forms/access/{access_token}")
+async def get_form_by_token(access_token: str):
+    form = await db.generated_forms.find_one({"access_token": access_token}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or link expired")
+    
+    if form['locked']:
+        raise HTTPException(status_code=403, detail="Form is locked and cannot be edited")
+    
+    # Mark as viewed if not already
+    if not form.get('viewed_at'):
+        await db.generated_forms.update_one(
+            {"id": form['id']},
+            {"$set": {"viewed_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        await log_audit_action("system", "form_viewed", "generated_form", form['id'], {"access_type": "token"})
+    
+    # Get template for form fields
+    template = await db.templates.find_one({"id": form['template_id']}, {"_id": 0})
+    
+    return {
+        "form": GeneratedFormResponse(**form),
+        "template": template
+    }
+
+@api_router.put("/forms/access/{access_token}/submit")
+async def submit_form_by_token(access_token: str, data: dict):
+    form = await db.generated_forms.find_one({"access_token": access_token}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or link expired")
+    
+    if form['locked']:
+        raise HTTPException(status_code=403, detail="Form is locked and cannot be edited")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    update_data = {
+        "form_data": {**form['form_data'], **data.get('form_data', {})},
+        "status": FormStatus.COMPLETED,
+        "completed_at": now,
+        "updated_at": now
+    }
+    
+    # Handle employee signature
+    if data.get('employee_signature'):
+        update_data['employee_signature'] = data['employee_signature']
+        update_data['employee_signed_at'] = now
+    
+    await db.generated_forms.update_one({"id": form['id']}, {"$set": update_data})
+    
+    await log_audit_action("employee", "form_completed", "generated_form", form['id'], {"access_type": "token"})
+    
+    return {"message": "Form submitted successfully"}
+
+@api_router.put("/generated-forms/{form_id}", response_model=GeneratedFormResponse)
+async def update_generated_form(form_id: str, update: GeneratedFormUpdate, user: dict = Depends(require_manager_or_admin)):
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    if form['locked']:
+        raise HTTPException(status_code=403, detail="Form is locked and cannot be edited")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    update_data["updated_at"] = now
+    
+    # Track status changes
+    if update.status:
+        if update.status == FormStatus.SENT and not form.get('sent_at'):
+            update_data['sent_at'] = now
+        elif update.status == FormStatus.COMPLETED and not form.get('completed_at'):
+            update_data['completed_at'] = now
+        elif update.status == FormStatus.REVIEWED and not form.get('reviewed_at'):
+            update_data['reviewed_at'] = now
+        elif update.status == FormStatus.SIGNED_OFF and not form.get('signed_off_at'):
+            update_data['signed_off_at'] = now
+            update_data['admin_signoff_by'] = user['user_id']
+    
+    await db.generated_forms.update_one({"id": form_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "update_form", "generated_form", form_id, {"status": update.status})
+    
+    updated_form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    return GeneratedFormResponse(**updated_form)
+
+@api_router.post("/generated-forms/{form_id}/send")
+async def send_form_to_employee(form_id: str, send_email: bool = True, user: dict = Depends(require_manager_or_admin)):
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    employee = await db.employees.find_one({"id": form['employee_id']}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update status
+    await db.generated_forms.update_one(
+        {"id": form_id},
+        {"$set": {"status": FormStatus.SENT, "sent_at": now, "updated_at": now}}
+    )
+    
+    # Generate access link
+    access_link = f"{os.environ.get('FRONTEND_URL', '')}/form/{form['access_token']}"
+    
+    # Send email if configured
+    if send_email and resend.api_key:
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": SENDER_EMAIL,
+                "to": [employee['email']],
+                "subject": f"Form to complete: {form['template_name']}",
+                "html": f"""
+                <h2>Form Request from Osabea Care Solutions</h2>
+                <p>Dear {employee['first_name']},</p>
+                <p>Please complete the following form:</p>
+                <p><strong>{form['template_name']}</strong></p>
+                <p><a href="{access_link}" style="display: inline-block; padding: 12px 24px; background-color: #0F5C5E; color: white; text-decoration: none; border-radius: 8px;">Complete Form</a></p>
+                <p>Or copy this link: {access_link}</p>
+                <p>Thank you,<br>Osabea Care Solutions Team</p>
+                """
+            })
+        except Exception as e:
+            logger.error(f"Failed to send form email: {e}")
+    
+    await log_audit_action(user['user_id'], "send_form", "generated_form", form_id, {"employee_email": employee['email']})
+    
+    return {"message": "Form sent", "access_link": access_link}
+
+@api_router.post("/generated-forms/{form_id}/signoff")
+async def signoff_form(form_id: str, admin_signature: str, notes: Optional[str] = None, user: dict = Depends(require_admin)):
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    if form['locked']:
+        raise HTTPException(status_code=403, detail="Form is already signed off and locked")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    update_data = {
+        "status": FormStatus.SIGNED_OFF,
+        "admin_signature": admin_signature,
+        "admin_signed_at": now,
+        "admin_signoff_by": user['user_id'],
+        "signed_off_at": now,
+        "locked": True,
+        "updated_at": now
+    }
+    if notes:
+        update_data['notes'] = notes
+    
+    await db.generated_forms.update_one({"id": form_id}, {"$set": update_data})
+    
+    # Link to employee document if template is linked
+    template = await db.templates.find_one({"id": form['template_id']}, {"_id": 0})
+    if template and template.get('linked_document_type_id'):
+        # Update or create employee document record
+        existing_doc = await db.employee_documents.find_one({
+            "employee_id": form['employee_id'],
+            "document_type_id": template['linked_document_type_id']
+        })
+        
+        if existing_doc:
+            await db.employee_documents.update_one(
+                {"id": existing_doc['id']},
+                {"$set": {
+                    "status": DocumentStatus.APPROVED,
+                    "reviewed_by": user['user_id'],
+                    "reviewed_at": now,
+                    "notes": f"Signed off via generated form: {form_id}"
+                }}
+            )
+        else:
+            doc_id = str(uuid.uuid4())
+            doc_type = await db.document_types.find_one({"id": template['linked_document_type_id']}, {"_id": 0})
+            await db.employee_documents.insert_one({
+                "id": doc_id,
+                "employee_id": form['employee_id'],
+                "document_type_id": template['linked_document_type_id'],
+                "document_type_name": doc_type['name'] if doc_type else template['name'],
+                "category": doc_type['category'] if doc_type else template['category'],
+                "file_url": None,
+                "original_filename": f"{template['name']} - Signed Form",
+                "status": DocumentStatus.APPROVED,
+                "uploaded_by": user['user_id'],
+                "uploaded_at": now,
+                "reviewed_by": user['user_id'],
+                "reviewed_at": now,
+                "expiry_date": None,
+                "notes": f"Generated form signed off: {form_id}",
+                "version_number": 1,
+                "generated_form_id": form_id,
+                "created_at": now
+            })
+    
+    await log_audit_action(user['user_id'], "signoff_form", "generated_form", form_id, {"locked": True})
+    
+    updated_form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    return GeneratedFormResponse(**updated_form)
+
+@api_router.post("/generated-forms/{form_id}/archive")
+async def archive_form(form_id: str, user: dict = Depends(require_admin)):
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.generated_forms.update_one(
+        {"id": form_id},
+        {"$set": {"status": FormStatus.ARCHIVED, "updated_at": now}}
+    )
+    
+    await log_audit_action(user['user_id'], "archive_form", "generated_form", form_id, {})
+    
+    return {"message": "Form archived"}
+
+# ==================== BULK UPLOAD ROUTES ====================
+
+@api_router.post("/employees/{employee_id}/bulk-upload")
+async def bulk_upload_documents(
+    employee_id: str,
+    files: List[UploadFile] = File(...),
+    document_type_ids: str = Query(..., description="Comma-separated document type IDs"),
+    user: dict = Depends(require_manager_or_admin)
+):
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    type_ids = document_type_ids.split(',')
+    
+    if len(files) != len(type_ids):
+        raise HTTPException(status_code=400, detail="Number of files must match number of document type IDs")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    results = {"successful": 0, "failed": 0, "errors": [], "documents": []}
+    
+    for file, doc_type_id in zip(files, type_ids):
+        try:
+            doc_type = await db.document_types.find_one({"id": doc_type_id.strip()}, {"_id": 0})
+            if not doc_type:
+                results["errors"].append(f"Document type {doc_type_id} not found")
+                results["failed"] += 1
+                continue
+            
+            # Check if document already exists
+            existing = await db.employee_documents.find_one({
+                "employee_id": employee_id,
+                "document_type_id": doc_type_id.strip()
+            })
+            
+            # Upload file to storage
+            ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
+            path = f"{APP_NAME}/documents/{employee_id}/{uuid.uuid4()}.{ext}"
+            data = await file.read()
+            result = put_object(path, data, file.content_type or "application/octet-stream")
+            
+            if existing:
+                # Update existing document
+                await db.employee_documents.update_one(
+                    {"id": existing['id']},
+                    {"$set": {
+                        "file_url": result["path"],
+                        "original_filename": file.filename,
+                        "status": DocumentStatus.UPLOADED,
+                        "uploaded_by": user['user_id'],
+                        "uploaded_at": now,
+                        "version_number": existing.get('version_number', 0) + 1
+                    }}
+                )
+                doc_id = existing['id']
+            else:
+                # Create new document
+                doc_id = str(uuid.uuid4())
+                await db.employee_documents.insert_one({
+                    "id": doc_id,
+                    "employee_id": employee_id,
+                    "document_type_id": doc_type_id.strip(),
+                    "document_type_name": doc_type['name'],
+                    "category": doc_type['category'],
+                    "file_url": result["path"],
+                    "original_filename": file.filename,
+                    "status": DocumentStatus.UPLOADED,
+                    "uploaded_by": user['user_id'],
+                    "uploaded_at": now,
+                    "reviewed_by": None,
+                    "reviewed_at": None,
+                    "expiry_date": None,
+                    "notes": None,
+                    "version_number": 1,
+                    "created_at": now
+                })
+            
+            results["successful"] += 1
+            results["documents"].append({
+                "id": doc_id,
+                "document_type": doc_type['name'],
+                "filename": file.filename
+            })
+            
+            await log_audit_action(user['user_id'], "bulk_upload_document", "employee_document", doc_id, {
+                "employee_id": employee_id,
+                "document_type": doc_type['name'],
+                "filename": file.filename
+            })
+            
+        except Exception as e:
+            results["errors"].append(f"Failed to upload {file.filename}: {str(e)}")
+            results["failed"] += 1
+    
+    return results
+
+# ==================== COMPLIANCE SUMMARY EXPORT ====================
+
+@api_router.get("/employees/{employee_id}/compliance-summary")
+async def get_compliance_summary(employee_id: str, user: dict = Depends(get_current_user)):
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get all document types
+    doc_types = await db.document_types.find({}, {"_id": 0}).sort("sort_order", 1).to_list(100)
+    
+    # Get employee documents
+    emp_docs = await db.employee_documents.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    emp_docs_map = {d['document_type_id']: d for d in emp_docs}
+    
+    # Get policies
+    policy_assignments = await db.policy_assignments.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    
+    # Get training
+    training_records = await db.training_records.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    
+    # Get generated forms
+    generated_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    
+    # Build compliance checklist
+    checklist = {}
+    for doc_type in doc_types:
+        category = doc_type['category']
+        if category not in checklist:
+            checklist[category] = []
+        
+        emp_doc = emp_docs_map.get(doc_type['id'])
+        checklist[category].append({
+            "name": doc_type['name'],
+            "required": doc_type.get('required_before_active', False),
+            "status": emp_doc['status'] if emp_doc else 'not_started',
+            "uploaded_at": emp_doc.get('uploaded_at') if emp_doc else None,
+            "reviewed_at": emp_doc.get('reviewed_at') if emp_doc else None,
+            "expiry_date": emp_doc.get('expiry_date') if emp_doc else None
+        })
+    
+    # Calculate stats
+    total_required = sum(1 for dt in doc_types if dt.get('required_before_active'))
+    approved_required = sum(1 for dt in doc_types if dt.get('required_before_active') and emp_docs_map.get(dt['id'], {}).get('status') == 'approved')
+    
+    return {
+        "employee": {
+            "id": employee['id'],
+            "employee_code": employee['employee_code'],
+            "name": f"{employee['first_name']} {employee['last_name']}",
+            "role": employee['role'],
+            "branch": employee['branch'],
+            "status": employee['status'],
+            "start_date": employee.get('start_date'),
+            "manager": employee.get('manager_name')
+        },
+        "compliance_score": int((approved_required / total_required) * 100) if total_required > 0 else 0,
+        "stats": {
+            "total_documents": len(emp_docs),
+            "approved_documents": sum(1 for d in emp_docs if d['status'] == 'approved'),
+            "pending_documents": sum(1 for d in emp_docs if d['status'] in ['uploaded', 'under_review']),
+            "missing_required": total_required - approved_required,
+            "policies_assigned": len(policy_assignments),
+            "policies_signed": sum(1 for p in policy_assignments if p['status'] == 'signed'),
+            "training_records": len(training_records),
+            "training_completed": sum(1 for t in training_records if t['status'] == 'completed'),
+            "forms_completed": sum(1 for f in generated_forms if f['status'] in ['completed', 'signed_off'])
+        },
+        "checklist": checklist,
+        "policies": policy_assignments,
+        "training": training_records,
+        "generated_forms": generated_forms,
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
+# ==================== SEED TEMPLATES ====================
+
+@api_router.post("/seed-templates")
+async def seed_templates(user: dict = Depends(require_admin)):
+    """Seed comprehensive compliance form templates"""
+    now = datetime.now(timezone.utc).isoformat()
+    
+    created_count = 0
+    updated_count = 0
+    
+    for template_data in COMPLIANCE_TEMPLATES:
+        # Check if template already exists
+        existing = await db.templates.find_one({"name": template_data['name']})
+        
+        if existing:
+            # Update existing template with new fields
+            update_data = {
+                "description": template_data.get('description', ''),
+                "category": template_data.get('category', ''),
+                "section": template_data.get('section', template_data.get('category', '')),
+                "visibility": template_data.get('visibility', 'normal'),
+                "role_specific": template_data.get('role_specific'),
+                "form_fields": template_data.get('form_fields', []),
+                "requires_employee_signature": template_data.get('requires_employee_signature', True),
+                "requires_admin_signature": template_data.get('requires_admin_signature', True),
+                "updated_at": now,
+                "version": existing.get('version', 1) + 1
+            }
+            await db.templates.update_one({"id": existing['id']}, {"$set": update_data})
+            updated_count += 1
+        else:
+            # Create new template
+            template_doc = {
+                "id": str(uuid.uuid4()),
+                "name": template_data['name'],
+                "description": template_data.get('description', ''),
+                "category": template_data.get('category', ''),
+                "section": template_data.get('section', template_data.get('category', '')),
+                "visibility": template_data.get('visibility', 'normal'),
+                "role_specific": template_data.get('role_specific'),
+                "linked_document_type_id": None,
+                "form_fields": template_data.get('form_fields', []),
+                "requires_employee_signature": template_data.get('requires_employee_signature', True),
+                "requires_admin_signature": template_data.get('requires_admin_signature', True),
+                "content_html": "",
+                "active": True,
+                "version": 1,
+                "created_at": now,
+                "updated_at": now,
+                "created_by": user['user_id']
+            }
+            await db.templates.insert_one(template_doc)
+            created_count += 1
+    
+    return {
+        "message": "Templates seeded successfully",
+        "created": created_count,
+        "updated": updated_count,
+        "total_templates": len(COMPLIANCE_TEMPLATES)
+    }
+
+@api_router.post("/generated-forms/bulk")
+async def bulk_generate_forms(
+    employee_id: str = Query(...),
+    template_ids: List[str] = Query(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Generate multiple forms for a single employee"""
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    auto_filled = await auto_fill_employee_data(employee_id)
+    
+    created_forms = []
+    errors = []
+    
+    for template_id in template_ids:
+        try:
+            # Get template
+            template = await db.templates.find_one({"id": template_id}, {"_id": 0})
+            if not template:
+                errors.append(f"Template {template_id} not found")
+                continue
+            
+            # Check if form already exists for this employee/template
+            existing = await db.generated_forms.find_one({
+                "template_id": template_id,
+                "employee_id": employee_id,
+                "status": {"$nin": ["archived", "signed_off"]}
+            })
+            
+            if existing:
+                errors.append(f"Active form already exists for {template['name']}")
+                continue
+            
+            form_id = str(uuid.uuid4())
+            access_token = str(uuid.uuid4())
+            
+            form_doc = {
+                "id": form_id,
+                "template_id": template_id,
+                "template_name": template['name'],
+                "template_category": template['category'],
+                "employee_id": employee_id,
+                "employee_name": f"{employee['first_name']} {employee['last_name']}",
+                "employee_code": employee['employee_code'],
+                "form_data": auto_filled,
+                "status": FormStatus.DRAFT,
+                "employee_signature": None,
+                "employee_signed_at": None,
+                "admin_signature": None,
+                "admin_signed_at": None,
+                "admin_signoff_by": None,
+                "pdf_url": None,
+                "locked": False,
+                "notes": None,
+                "version": 1,
+                "access_token": access_token,
+                "created_at": now,
+                "updated_at": now,
+                "created_by": user['user_id'],
+                "sent_at": None,
+                "viewed_at": None,
+                "completed_at": None,
+                "reviewed_at": None,
+                "signed_off_at": None
+            }
+            await db.generated_forms.insert_one(form_doc)
+            created_forms.append({
+                "id": form_id,
+                "template_name": template['name'],
+                "status": "created"
+            })
+            
+            await log_audit_action(user['user_id'], "bulk_create_form", "generated_form", form_id, {
+                "template_name": template['name'],
+                "employee_id": employee_id
+            })
+            
+        except Exception as e:
+            errors.append(f"Error creating form for template {template_id}: {str(e)}")
+    
+    return {
+        "created": len(created_forms),
+        "forms": created_forms,
+        "errors": errors
+    }
 
 @api_router.post("/contact")
 async def submit_contact_form(form: ContactForm):

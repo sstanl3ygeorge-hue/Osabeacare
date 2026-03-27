@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '../../components/ui/dialog';
 import { Label } from '../../components/ui/label';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { Search, UserPlus, Filter, Loader2, ArrowUpDown } from 'lucide-react';
+import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -25,15 +26,20 @@ const statusColors = {
 };
 
 export default function EmployeesPage() {
+  const navigate = useNavigate();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [assignmentFilter, setAssignmentFilter] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [assignments, setAssignments] = useState([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { token, isAuditor } = useAuth();
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const { token, isAuditor, user } = useAuth();
 
   const [newEmployee, setNewEmployee] = useState({
     first_name: '',
@@ -49,8 +55,10 @@ export default function EmployeesPage() {
     try {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
-      if (statusFilter) params.append('status', statusFilter);
+      if (statusFilter && statusFilter !== 'archived') params.append('status', statusFilter);
       if (assignmentFilter) params.append('assignment', assignmentFilter);
+      if (showArchived || statusFilter === 'archived') params.append('include_archived', 'true');
+      if (statusFilter === 'archived') params.append('status', 'archived');
       
       const response = await axios.get(`${API}/employees?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -77,7 +85,53 @@ export default function EmployeesPage() {
   useEffect(() => {
     fetchEmployees();
     fetchAssignments();
-  }, [token, search, statusFilter, assignmentFilter]);
+  }, [token, search, statusFilter, assignmentFilter, showArchived]);
+
+  const handleArchiveEmployee = async () => {
+    if (!selectedEmployee) return;
+    
+    try {
+      await axios.post(`${API}/employees/${selectedEmployee.id}/archive`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`${selectedEmployee.first_name} ${selectedEmployee.last_name} has been archived`);
+      setArchiveDialogOpen(false);
+      setSelectedEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to archive employee');
+    }
+  };
+
+  const handleRestoreEmployee = async (emp) => {
+    try {
+      await axios.post(`${API}/employees/${emp.id}/restore`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`${emp.first_name} ${emp.last_name} has been restored`);
+      fetchEmployees();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to restore employee');
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    if (!selectedEmployee) return;
+    
+    try {
+      await axios.delete(`${API}/employees/${selectedEmployee.id}/permanent`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success(`${selectedEmployee.first_name} ${selectedEmployee.last_name} has been permanently deleted`);
+      setDeleteDialogOpen(false);
+      setSelectedEmployee(null);
+      fetchEmployees();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete employee');
+    }
+  };
+
+  const isSuperAdmin = () => user?.role === 'super_admin';
 
   const handleAddEmployee = async (e) => {
     e.preventDefault();
@@ -251,13 +305,14 @@ export default function EmployeesPage() {
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="all">All Active</SelectItem>
                 <SelectItem value="new">New</SelectItem>
                 <SelectItem value="screening">Screening</SelectItem>
                 <SelectItem value="interview">Interview</SelectItem>
                 <SelectItem value="onboarding">Onboarding</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
               </SelectContent>
             </Select>
             {assignments.length > 0 && (
@@ -301,15 +356,16 @@ export default function EmployeesPage() {
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Assignment</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Compliance</th>
+                    {!isAuditor() && <th className="text-left p-4 font-medium text-text-muted text-sm w-16">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {employees.map((emp) => (
-                    <tr key={emp.id} className="border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors">
+                    <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
                       <td className="p-4">
                         <Link to={`/portal/employees/${emp.id}`} className="flex items-center gap-3" data-testid={`emp-link-${emp.id}`}>
-                          <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center">
-                            <span className="text-primary font-medium text-sm">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${emp.status === 'archived' ? 'bg-gray-200' : 'bg-accent'}`}>
+                            <span className={`font-medium text-sm ${emp.status === 'archived' ? 'text-gray-500' : 'text-primary'}`}>
                               {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
                             </span>
                           </div>
@@ -341,6 +397,60 @@ export default function EmployeesPage() {
                           <span className="text-sm text-text-muted">{emp.completion_percentage}%</span>
                         </div>
                       </td>
+                      {!isAuditor() && (
+                        <td className="p-4">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" data-testid={`emp-actions-${emp.id}`}>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={() => navigate(`/portal/employees/${emp.id}`)}>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Edit Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => navigate(`/portal/employees/${emp.id}`)}>
+                                <FileDown className="h-4 w-4 mr-2" />
+                                Export File
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {emp.status === 'archived' ? (
+                                <DropdownMenuItem onClick={() => handleRestoreEmployee(emp)}>
+                                  <RotateCcw className="h-4 w-4 mr-2" />
+                                  Restore Employee
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem 
+                                  onClick={() => {
+                                    setSelectedEmployee(emp);
+                                    setArchiveDialogOpen(true);
+                                  }}
+                                  className="text-warning"
+                                >
+                                  <Archive className="h-4 w-4 mr-2" />
+                                  Archive Employee
+                                </DropdownMenuItem>
+                              )}
+                              {isSuperAdmin() && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem 
+                                    onClick={() => {
+                                      setSelectedEmployee(emp);
+                                      setDeleteDialogOpen(true);
+                                    }}
+                                    className="text-error"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Permanently
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -349,6 +459,74 @@ export default function EmployeesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Archive Confirmation Dialog */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Archive className="h-5 w-5 text-warning" />
+              Archive Employee
+            </DialogTitle>
+            <DialogDescription className="text-text-muted">
+              Are you sure you want to archive <strong>{selectedEmployee?.first_name} {selectedEmployee?.last_name}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <p className="text-sm text-text-muted">This will:</p>
+            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+              <li>Hide employee from the active employees list</li>
+              <li>Retain all documents, forms, and audit history</li>
+              <li>Allow restoration at any time</li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleArchiveEmployee} className="bg-warning hover:bg-warning/90 text-white rounded-xl">
+              <Archive className="h-4 w-4 mr-2" />
+              Archive Employee
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-error">
+              <AlertTriangle className="h-5 w-5" />
+              Permanent Deletion
+            </DialogTitle>
+            <DialogDescription className="text-text-muted">
+              Are you sure you want to <strong>permanently delete</strong> {selectedEmployee?.first_name} {selectedEmployee?.last_name}?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4 bg-error/5 p-4 rounded-xl border border-error/20">
+            <p className="text-sm font-medium text-error">This action cannot be undone!</p>
+            <p className="text-sm text-text-muted">All of the following will be permanently deleted:</p>
+            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+              <li>Employee record</li>
+              <li>All uploaded documents</li>
+              <li>All compliance forms</li>
+              <li>Training records</li>
+              <li>Policy assignments</li>
+            </ul>
+            <p className="text-xs text-text-muted mt-2">Only use this for duplicate records, test data, or incorrect entries.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handlePermanentDelete} className="bg-error hover:bg-error/90 text-white rounded-xl">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

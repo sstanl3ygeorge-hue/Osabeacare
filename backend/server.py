@@ -740,6 +740,7 @@ async def get_employees(
     status: Optional[str] = None,
     role: Optional[str] = None,
     search: Optional[str] = None,
+    include_archived: bool = False,
     missing_dbs: bool = False,
     missing_rtw: bool = False,
     missing_references: bool = False,
@@ -757,6 +758,10 @@ async def get_employees(
     
     if status:
         query["status"] = status
+    elif not include_archived:
+        # By default, exclude archived employees unless specifically requested
+        query["status"] = {"$ne": EmployeeStatus.ARCHIVED}
+    
     if role:
         query["role"] = role
     if search:
@@ -807,6 +812,131 @@ async def delete_employee(employee_id: str, user: dict = Depends(require_admin))
     
     await log_audit_action(user['user_id'], "delete_employee", "employee", employee_id, {})
     return {"message": "Employee deleted"}
+
+@api_router.post("/employees/{employee_id}/archive")
+async def archive_employee(employee_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Archive an employee - soft delete that retains all data"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if employee.get("status") == EmployeeStatus.ARCHIVED:
+        raise HTTPException(status_code=400, detail="Employee is already archived")
+    
+    previous_status = employee.get("status")
+    update_data = {
+        "status": EmployeeStatus.ARCHIVED,
+        "archived_at": datetime.now(timezone.utc).isoformat(),
+        "archived_by": user['user_id'],
+        "previous_status": previous_status,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'], 
+        "archive_employee", 
+        "employee", 
+        employee_id, 
+        {
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "employee_code": employee.get('employee_code'),
+            "previous_status": previous_status,
+            "reason": "Employee archived"
+        }
+    )
+    
+    return {"message": "Employee archived successfully", "employee_id": employee_id}
+
+@api_router.post("/employees/{employee_id}/restore")
+async def restore_employee(employee_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Restore an archived employee to their previous status"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if employee.get("status") != EmployeeStatus.ARCHIVED:
+        raise HTTPException(status_code=400, detail="Employee is not archived")
+    
+    restore_status = employee.get("previous_status", EmployeeStatus.INACTIVE)
+    update_data = {
+        "status": restore_status,
+        "archived_at": None,
+        "archived_by": None,
+        "previous_status": None,
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'], 
+        "restore_employee", 
+        "employee", 
+        employee_id, 
+        {
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "restored_to_status": restore_status
+        }
+    )
+    
+    return {"message": "Employee restored successfully", "employee_id": employee_id, "status": restore_status}
+
+@api_router.delete("/employees/{employee_id}/permanent")
+async def permanent_delete_employee(employee_id: str, user: dict = Depends(require_admin)):
+    """Permanently delete an employee and all related data. Super Admin only.
+    Use only for: duplicate records, test/demo records, incorrect entries."""
+    
+    # Only super_admin can permanently delete
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can permanently delete employees")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_info = {
+        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+        "employee_code": employee.get('employee_code'),
+        "email": employee.get('email'),
+        "status_at_deletion": employee.get('status')
+    }
+    
+    # Delete employee record
+    await db.employees.delete_one({"id": employee_id})
+    
+    # Delete related records
+    deleted_docs = await db.employee_documents.delete_many({"employee_id": employee_id})
+    deleted_forms = await db.generated_forms.delete_many({"employee_id": employee_id})
+    deleted_policies = await db.policy_assignments.delete_many({"employee_id": employee_id})
+    deleted_training = await db.training_records.delete_many({"employee_id": employee_id})
+    
+    await log_audit_action(
+        user['user_id'], 
+        "permanent_delete_employee", 
+        "employee", 
+        employee_id, 
+        {
+            **employee_info,
+            "deleted_documents": deleted_docs.deleted_count,
+            "deleted_forms": deleted_forms.deleted_count,
+            "deleted_policies": deleted_policies.deleted_count,
+            "deleted_training": deleted_training.deleted_count,
+            "action": "PERMANENT DELETION - All employee data removed"
+        }
+    )
+    
+    return {
+        "message": "Employee permanently deleted",
+        "employee_id": employee_id,
+        "deleted_records": {
+            "documents": deleted_docs.deleted_count,
+            "forms": deleted_forms.deleted_count,
+            "policies": deleted_policies.deleted_count,
+            "training": deleted_training.deleted_count
+        }
+    }
 
 # ==================== DOCUMENT TYPE ROUTES ====================
 

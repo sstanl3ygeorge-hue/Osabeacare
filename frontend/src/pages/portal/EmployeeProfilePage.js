@@ -6,17 +6,20 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { Progress } from '../../components/ui/progress';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '../../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { Label } from '../../components/ui/label';
 import { Input } from '../../components/ui/input';
 import { Checkbox } from '../../components/ui/checkbox';
+import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, MapPin, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
-  GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield
+  GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
+  MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -58,6 +61,9 @@ export default function EmployeeProfilePage() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [generateFormsOpen, setGenerateFormsOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
   const [bulkFiles, setBulkFiles] = useState([]);
@@ -65,7 +71,33 @@ export default function EmployeeProfilePage() {
   const [selectedTemplates, setSelectedTemplates] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const { token, isAuditor } = useAuth();
+  const [isSaving, setIsSaving] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const { token, isAuditor, user } = useAuth();
+
+  const roles = [
+    'Care Assistant',
+    'Senior Care Assistant',
+    'Support Worker',
+    'Healthcare Assistant',
+    'Nurse',
+    'Live-in Carer',
+    'Night Carer',
+    'Team Leader',
+    'Care Coordinator'
+  ];
+
+  const statuses = [
+    { value: 'new', label: 'New' },
+    { value: 'screening', label: 'Screening' },
+    { value: 'interview', label: 'Interview' },
+    { value: 'compliance_review', label: 'Compliance Review' },
+    { value: 'onboarding', label: 'Onboarding' },
+    { value: 'active', label: 'Active' },
+    { value: 'inactive', label: 'Inactive' }
+  ];
+
+  const isSuperAdmin = () => user?.role === 'super_admin';
 
   const fetchData = async () => {
     try {
@@ -250,6 +282,75 @@ export default function EmployeeProfilePage() {
     );
   };
 
+  const openEditDialog = () => {
+    setEditForm({
+      first_name: employee?.first_name || '',
+      last_name: employee?.last_name || '',
+      email: employee?.email || '',
+      phone: employee?.phone || '',
+      role: employee?.role || '',
+      status: employee?.status || '',
+      assignment: employee?.assignment || 'Unassigned',
+      start_date: employee?.start_date || '',
+      notes: employee?.notes || ''
+    });
+    setEditDialogOpen(true);
+  };
+
+  const handleSaveEmployee = async () => {
+    setIsSaving(true);
+    try {
+      await axios.put(`${API}/employees/${employeeId}`, editForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Employee details updated');
+      setEditDialogOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update employee');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleArchiveEmployee = async () => {
+    try {
+      await axios.post(`${API}/employees/${employeeId}/archive`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Employee archived successfully');
+      setArchiveDialogOpen(false);
+      navigate('/portal/employees');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to archive employee');
+    }
+  };
+
+  const handleRestoreEmployee = async () => {
+    try {
+      await axios.post(`${API}/employees/${employeeId}/restore`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Employee restored successfully');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to restore employee');
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    try {
+      await axios.delete(`${API}/employees/${employeeId}/permanent`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Employee permanently deleted');
+      setDeleteDialogOpen(false);
+      navigate('/portal/employees');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete employee');
+    }
+  };
+
   const groupedTemplates = templates.reduce((acc, template) => {
     if (!acc[template.category]) acc[template.category] = [];
     acc[template.category].push(template);
@@ -316,9 +417,57 @@ export default function EmployeeProfilePage() {
             </div>
 
             <div className="flex flex-col items-end gap-4">
-              <div className="text-right">
-                <p className="text-sm text-text-muted">Compliance Score</p>
-                <p className="text-3xl font-heading font-bold text-text-primary">{employee.completion_percentage}%</p>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <p className="text-sm text-text-muted">Compliance Score</p>
+                  <p className="text-3xl font-heading font-bold text-text-primary">{employee.completion_percentage}%</p>
+                </div>
+                {!isAuditor() && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-10 w-10 p-0 rounded-xl" data-testid="employee-actions-btn">
+                        <MoreHorizontal className="h-5 w-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem onClick={openEditDialog}>
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <FileDown className="h-4 w-4 mr-2" />
+                        Export Employee File
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      {employee.status === 'archived' ? (
+                        <DropdownMenuItem onClick={handleRestoreEmployee}>
+                          <RotateCcw className="h-4 w-4 mr-2" />
+                          Restore Employee
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem 
+                          onClick={() => setArchiveDialogOpen(true)}
+                          className="text-warning"
+                        >
+                          <Archive className="h-4 w-4 mr-2" />
+                          Archive Employee
+                        </DropdownMenuItem>
+                      )}
+                      {isSuperAdmin() && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem 
+                            onClick={() => setDeleteDialogOpen(true)}
+                            className="text-error"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Delete Permanently
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
               </div>
               <Progress value={employee.completion_percentage} className="w-32 h-2" />
             </div>
@@ -985,6 +1134,195 @@ export default function EmployeeProfilePage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Employee Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Edit className="h-5 w-5 text-primary" />
+              Edit Employee Details
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>First Name *</Label>
+                <Input
+                  value={editForm.first_name}
+                  onChange={(e) => setEditForm({...editForm, first_name: e.target.value})}
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Last Name *</Label>
+                <Input
+                  value={editForm.last_name}
+                  onChange={(e) => setEditForm({...editForm, last_name: e.target.value})}
+                  className="rounded-xl"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                value={editForm.email}
+                onChange={(e) => setEditForm({...editForm, email: e.target.value})}
+                className="rounded-xl"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Phone</Label>
+              <Input
+                type="tel"
+                value={editForm.phone}
+                onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
+                className="rounded-xl"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Role *</Label>
+                <Select value={editForm.role} onValueChange={(value) => setEditForm({...editForm, role: value})}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.map((role) => (
+                      <SelectItem key={role} value={role}>{role}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={editForm.status} onValueChange={(value) => setEditForm({...editForm, status: value})}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statuses.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Current Placement</Label>
+                <Input
+                  value={editForm.assignment}
+                  onChange={(e) => setEditForm({...editForm, assignment: e.target.value})}
+                  placeholder="e.g., Sunrise Care Home"
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Start Date</Label>
+                <Input
+                  type="date"
+                  value={editForm.start_date}
+                  onChange={(e) => setEditForm({...editForm, start_date: e.target.value})}
+                  className="rounded-xl"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={editForm.notes}
+                onChange={(e) => setEditForm({...editForm, notes: e.target.value})}
+                placeholder="Internal notes about this employee..."
+                className="rounded-xl min-h-[80px]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-6">
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEmployee} disabled={isSaving} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Archive Confirmation Dialog */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Archive className="h-5 w-5 text-warning" />
+              Archive Employee
+            </DialogTitle>
+            <DialogDescription className="text-text-muted">
+              Are you sure you want to archive <strong>{employee?.first_name} {employee?.last_name}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            <p className="text-sm text-text-muted">This will:</p>
+            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+              <li>Hide employee from the active employees list</li>
+              <li>Retain all documents, forms, and audit history</li>
+              <li>Allow restoration at any time</li>
+            </ul>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handleArchiveEmployee} className="bg-warning hover:bg-warning/90 text-white rounded-xl">
+              <Archive className="h-4 w-4 mr-2" />
+              Archive Employee
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Permanent Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-error">
+              <AlertTriangle className="h-5 w-5" />
+              Permanent Deletion
+            </DialogTitle>
+            <DialogDescription className="text-text-muted">
+              Are you sure you want to <strong>permanently delete</strong> {employee?.first_name} {employee?.last_name}?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-4 bg-error/5 p-4 rounded-xl border border-error/20">
+            <p className="text-sm font-medium text-error">This action cannot be undone!</p>
+            <p className="text-sm text-text-muted">All of the following will be permanently deleted:</p>
+            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+              <li>Employee record</li>
+              <li>All uploaded documents</li>
+              <li>All compliance forms</li>
+              <li>Training records</li>
+              <li>Policy assignments</li>
+            </ul>
+            <p className="text-xs text-text-muted mt-2">Only use this for duplicate records, test data, or incorrect entries.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button onClick={handlePermanentDelete} className="bg-error hover:bg-error/90 text-white rounded-xl">
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

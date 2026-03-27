@@ -1,84 +1,172 @@
-# Osabea Care Solutions - Care Recruitment Agency Website & Compliance Portal
+# Care Recruitment Agency Compliance Portal - PRD
 
 ## Original Problem Statement
-Build a modern public-facing care recruitment website plus a secure internal compliance portal for recruitment, onboarding, employee document tracking, and audit visibility. Make the agency look professional externally and highly organised internally, with a system that is easy to show to local council auditors and supports CQC-ready recruitment and onboarding processes.
-
-## Architecture
-- **Backend**: FastAPI with MongoDB, Object Storage for documents
-- **Frontend**: React with Tailwind CSS, Shadcn/UI components
-- **Authentication**: JWT + Emergent Google OAuth
-- **Email**: Resend integration (configured but requires API key)
+Build a comprehensive compliance management portal for a UK care recruitment agency (Osabea Care Solutions) to:
+- Manage employee onboarding and compliance documents
+- Track training and policy acknowledgements
+- Generate and manage compliance forms with digital signatures
+- Support CQC audit requirements
 
 ## User Personas
-1. **Super Admin**: Full system access, manage users/branches/templates
-2. **Admin/Compliance Officer**: Manage employee records, documents, policies
-3. **Branch Manager**: View/manage branch-level employees and records
-4. **Employee/Applicant**: Upload documents, acknowledge policies, track progress
-5. **Auditor**: Read-only access to compliance dashboards
+1. **Super Admin**: Full system access, manages all employees and compliance
+2. **Manager**: Manages team compliance, reviews documents
+3. **Auditor**: Read-only access for compliance audits
+4. **Employee**: Completes assigned forms (future portal)
 
-## Core Requirements (Static)
-- Public website: Home, About, Services, Recruitment, Compliance, Contact, Apply Now
-- Internal portal: Dashboard, Employees, Documents, Policies, Training, Audit View
-- Role-based access control
-- Document upload and management with object storage
-- Policy assignment and acknowledgement tracking
-- Training record management
-- Audit logging
+## Core Requirements
 
-## What's Been Implemented (March 2026)
+### Completed Features ✅
 
-### Public Website
-- ✅ Homepage with hero, features, services, recruitment process, compliance section
-- ✅ About page with values and approach
-- ✅ Services page with care service types
-- ✅ Recruitment page with benefits and requirements
-- ✅ Compliance page explaining safer recruitment
-- ✅ Contact page with form
-- ✅ Apply Now with multi-step application form
+#### Phase 1: Foundation (Completed 2026-03-27)
+- [x] React + FastAPI + MongoDB full-stack architecture
+- [x] JWT + Google OAuth authentication via Emergent Auth
+- [x] Employee records management (CRUD)
+- [x] Object storage integration for documents
+- [x] Document types and compliance tracking
+- [x] Policy management with version control
+- [x] Training records tracking
+- [x] Audit logging for all actions
+- [x] Public website with services, about, careers pages
+- [x] Responsive design with Shadcn/UI components
 
-### Internal Portal
-- ✅ Login with JWT email/password and Google OAuth
-- ✅ Dashboard with compliance metrics
-- ✅ Employee list with filters and search
-- ✅ Employee profile with 7 tabs (Overview, Checklist, Documents, Policies, Training, Supervision, Audit Log)
-- ✅ Document upload functionality
-- ✅ Policy creation and assignment
-- ✅ Training record management
-- ✅ Audit view for read-only compliance overview
-- ✅ 41 document types seeded from care worker checklist
+#### Phase 2: Template Library & Document Control (Completed 2026-03-27)
+- [x] **12 Compliance Templates** (role-aware for HCA vs Nurse):
+  - Application Form
+  - Interview Record Form
+  - Recruitment Compliance Checklist
+  - Health Screening Questionnaire (restricted)
+  - Induction & Competency Assessment
+  - Contract Acknowledgement Form
+  - Personal Information Form
+  - Equal Opportunities Monitoring Form (confidential)
+  - Supervision Record
+  - Annual Appraisal Form
+  - Reference Request & Verification Form
+  - DBS Review & Risk Assessment
 
-### Backend
-- ✅ Complete REST API with 19+ endpoints
-- ✅ Auto-generated employee codes (OCS-0001 format)
-- ✅ Compliance score calculation
-- ✅ Document versioning support
-- ✅ Audit logging for all actions
+- [x] **Form Generation System**:
+  - Auto-fill employee details (name, ID, role, branch, email, phone)
+  - Role-based field filtering (nurse-only NMC sections)
+  - Status workflow: Draft → Sent → In Progress → Completed → Reviewed → Signed Off → Archived
+  - Form versioning and audit trail
 
-## Prioritized Backlog
+- [x] **Digital Signatures**:
+  - Typed name signature (fast for mobile)
+  - Canvas-based drawn signature (for formal records)
+  - Date signed capture
+  - Confirmation tick boxes (declarations)
+  - Admin signature and sign-off
+  - Form locking after sign-off
 
-### P0 - Critical (Core functionality complete)
-- [x] Public website pages
-- [x] Authentication system
-- [x] Employee CRUD
-- [x] Document management
-- [x] Policy management
+- [x] **Bulk Operations**:
+  - Bulk document upload with type assignment
+  - Bulk form generation for employees
+  - Generate multiple templates at once without navigating away
 
-### P1 - Important
-- [ ] Email notifications for document requests (requires RESEND_API_KEY)
-- [ ] Expiry alerts for documents
+- [x] **PDF Export**:
+  - Export forms as clean A4 PDFs
+  - Print-friendly layout
+  - Signature display in exported documents
+
+- [x] **Visibility Controls**:
+  - Normal: Standard access
+  - Restricted: HR and authorized personnel only (health forms)
+  - Confidential: Strictly controlled (equal opportunities)
+
+### Upcoming Features (P0)
+- [ ] PDF generation backend (server-side PDF for archival)
+- [ ] Email notifications via Resend for form requests
+- [ ] Document expiry reminders
+
+### Backlog (P1-P2)
+- [ ] Bulk document requests
 - [ ] Bulk policy assignment
-- [ ] PDF export of employee compliance summary
+- [ ] Employee self-service portal
+- [ ] Mobile app consideration
+- [ ] Advanced reporting dashboard
 
-### P2 - Nice-to-have
-- [ ] Automated reminder emails
-- [ ] Digital signatures for forms
-- [ ] Branch-specific dashboards
-- [ ] Candidate pipeline stages
-- [ ] Notes and follow-up tasks
+## Technical Architecture
 
-## Next Action Items
-1. Add RESEND_API_KEY to enable email notifications
-2. Implement document expiry alerts
-3. Add bulk operations (document requests, policy assignments)
-4. Create PDF export for compliance summaries
-5. Add more detailed training matrix view
+```
+/app/
+├── backend/
+│   ├── server.py          # FastAPI application
+│   ├── templates_data.py  # 12 template definitions
+│   ├── requirements.txt   # Python dependencies
+│   └── .env              # Environment variables
+├── frontend/
+│   ├── src/
+│   │   ├── App.js        # React Router setup
+│   │   ├── context/      # AuthContext
+│   │   ├── components/
+│   │   │   ├── portal/   # SignaturePad, FormFieldRenderer, PortalLayout
+│   │   │   └── ui/       # Shadcn components
+│   │   └── pages/
+│   │       ├── portal/   # Dashboard, Employees, Templates, FormEditor
+│   │       └── public/   # Website pages
+│   └── package.json
+└── memory/
+    └── PRD.md
+```
+
+## Key API Endpoints
+
+### Templates
+- `GET /api/templates` - List all templates
+- `POST /api/seed-templates` - Seed 12 compliance templates
+- `GET /api/templates/:id` - Get template details with form fields
+
+### Generated Forms
+- `POST /api/generated-forms` - Create form for employee
+- `GET /api/generated-forms` - List forms (filter by employee_id)
+- `PUT /api/generated-forms/:id` - Update form data/status
+- `POST /api/generated-forms/bulk` - Bulk generate forms
+- `POST /api/generated-forms/:id/signoff` - Admin sign-off (locks form)
+- `POST /api/generated-forms/:id/send` - Send to employee
+
+### Documents
+- `POST /api/employees/:id/bulk-upload` - Bulk document upload
+- `POST /api/employee-documents/:id/upload` - Single document upload
+
+## Database Collections
+
+### templates
+```javascript
+{
+  id, name, description, category, section,
+  visibility: "normal" | "restricted" | "confidential",
+  role_specific: null | "Nurse" | "Healthcare Assistant",
+  form_fields: [...],
+  requires_employee_signature, requires_admin_signature,
+  active, version, created_at, updated_at
+}
+```
+
+### generated_forms
+```javascript
+{
+  id, template_id, template_name, template_category,
+  employee_id, employee_name, employee_code,
+  form_data: {...},
+  status: "draft" | "sent" | "in_progress" | "completed" | "reviewed" | "signed_off" | "archived",
+  employee_signature, employee_signed_at,
+  admin_signature, admin_signed_at, admin_signoff_by,
+  locked: boolean,
+  version, access_token,
+  created_at, updated_at, sent_at, viewed_at, completed_at, signed_off_at
+}
+```
+
+## Credentials
+
+### Demo Admin
+- Email: admin@osabea.care
+- Password: admin123
+- Role: super_admin
+
+### Test Employees
+- Sarah Thompson (OCS-0005) - Nurse - London
+- Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
+
+## Last Updated
+2026-03-27 - Template Library & Document Control workflow completed

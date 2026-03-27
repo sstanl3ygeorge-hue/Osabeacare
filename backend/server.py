@@ -93,7 +93,7 @@ api_router = APIRouter(prefix="/api")
 class UserRole:
     SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
-    BRANCH_MANAGER = "branch_manager"
+    BRANCH_MANAGER = "branch_manager"  # Legacy - now manages assignments
     EMPLOYEE = "employee"
     AUDITOR = "auditor"
 
@@ -123,7 +123,7 @@ class UserCreate(BaseModel):
     password: str
     name: str
     role: str = UserRole.EMPLOYEE
-    branch: Optional[str] = None
+    assignment: Optional[str] = "Unassigned"  # Current placement (client, care home, hospital, or Unassigned)
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -135,7 +135,7 @@ class UserResponse(BaseModel):
     email: str
     name: str
     role: str
-    branch: Optional[str] = None
+    assignment: Optional[str] = "Unassigned"  # Current placement (client, care home, hospital, or Unassigned)
     picture: Optional[str] = None
     created_at: str
 
@@ -146,7 +146,7 @@ class EmployeeCreate(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     role: str
-    branch: str
+    assignment: str = "Unassigned"
     status: str = EmployeeStatus.NEW
     start_date: Optional[str] = None
     manager_name: Optional[str] = None
@@ -159,7 +159,7 @@ class EmployeeUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     role: Optional[str] = None
-    branch: Optional[str] = None
+    assignment: Optional[str] = "Unassigned"  # Current placement (client, care home, hospital, or Unassigned)
     status: Optional[str] = None
     start_date: Optional[str] = None
     manager_name: Optional[str] = None
@@ -175,7 +175,7 @@ class EmployeeResponse(BaseModel):
     email: str
     phone: Optional[str] = None
     role: str
-    branch: str
+    assignment: str = "Unassigned"
     status: str
     start_date: Optional[str] = None
     manager_name: Optional[str] = None
@@ -495,7 +495,7 @@ async def register(user: UserCreate):
         "password": hash_password(user.password),
         "name": user.name,
         "role": user.role,
-        "branch": user.branch,
+        "assignment": user.assignment if hasattr(user, 'assignment') else "Unassigned",
         "picture": None,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
@@ -554,7 +554,7 @@ async def exchange_session(session_id: str = Header(None, alias="X-Session-ID"))
                 "name": session_data.get('name', ''),
                 "picture": session_data.get('picture'),
                 "role": UserRole.EMPLOYEE,
-                "branch": None,
+                "assignment": "Unassigned",
                 "password": None,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
@@ -631,7 +631,7 @@ async def create_employee(employee: EmployeeCreate, user: dict = Depends(require
 
 @api_router.get("/employees", response_model=List[EmployeeResponse])
 async def get_employees(
-    branch: Optional[str] = None,
+    assignment: Optional[str] = None,
     status: Optional[str] = None,
     role: Optional[str] = None,
     search: Optional[str] = None,
@@ -644,11 +644,11 @@ async def get_employees(
 ):
     query = {}
     
-    # Branch filter for branch managers
+    # Assignment filter for branch managers (legacy role)
     if user['role'] == UserRole.BRANCH_MANAGER:
-        query["branch"] = user.get('branch')
-    elif branch:
-        query["branch"] = branch
+        query["assignment"] = user.get('assignment')
+    elif assignment:
+        query["assignment"] = assignment
     
     if status:
         query["status"] = status
@@ -1053,14 +1053,14 @@ async def upload_training_certificate(record_id: str, file: UploadFile = File(..
 
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
 async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
-    branch_filter = {}
+    assignment_filter = {}
     if user['role'] == UserRole.BRANCH_MANAGER:
-        branch_filter = {"branch": user.get('branch')}
+        assignment_filter = {"assignment": user.get('assignment')}
     
     # Get counts
-    total_employees = await db.employees.count_documents({**branch_filter, "status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING]}})
-    total_applicants = await db.employees.count_documents({**branch_filter, "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, EmployeeStatus.COMPLIANCE_REVIEW]}})
-    onboarding = await db.employees.count_documents({**branch_filter, "status": EmployeeStatus.ONBOARDING})
+    total_employees = await db.employees.count_documents({**assignment_filter, "status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING]}})
+    total_applicants = await db.employees.count_documents({**assignment_filter, "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, EmployeeStatus.COMPLIANCE_REVIEW]}})
+    onboarding = await db.employees.count_documents({**assignment_filter, "status": EmployeeStatus.ONBOARDING})
     
     # Get DBS document type
     dbs_type = await db.document_types.find_one({"name": {"$regex": "DBS", "$options": "i"}}, {"_id": 0})
@@ -1225,7 +1225,7 @@ async def auto_fill_employee_data(employee_id: str) -> dict:
         "employee_email": employee['email'],
         "employee_phone": employee.get('phone', ''),
         "employee_role": employee['role'],
-        "employee_branch": employee['branch'],
+        "employee_assignment": employee.get('assignment', 'Unassigned'),
         "employee_manager": employee.get('manager_name', ''),
         "employee_start_date": employee.get('start_date', ''),
         "date_generated": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -1685,7 +1685,7 @@ async def get_compliance_summary(employee_id: str, user: dict = Depends(get_curr
             "employee_code": employee['employee_code'],
             "name": f"{employee['first_name']} {employee['last_name']}",
             "role": employee['role'],
-            "branch": employee['branch'],
+            "assignment": employee.get('assignment', 'Unassigned'),
             "status": employee['status'],
             "start_date": employee.get('start_date'),
             "manager": employee.get('manager_name')
@@ -1911,7 +1911,7 @@ async def submit_application(form: ApplicationForm):
         "email": form.email,
         "phone": form.phone,
         "role": form.role_applied,
-        "branch": "Pending Assignment",
+        "assignment": "Unassigned",
         "status": EmployeeStatus.NEW,
         "start_date": None,
         "manager_name": None,
@@ -1936,7 +1936,7 @@ async def submit_application(form: ApplicationForm):
         "password": hash_password(temp_password),
         "name": f"{form.first_name} {form.last_name}",
         "role": UserRole.EMPLOYEE,
-        "branch": None,
+        "assignment": "Unassigned",
         "picture": None,
         "employee_id": app_id,
         "created_at": now
@@ -1945,10 +1945,11 @@ async def submit_application(form: ApplicationForm):
     
     return {"message": "Your application has been submitted successfully. We will review it and be in touch.", "reference": employee_code}
 
-@api_router.get("/branches")
-async def get_branches():
-    branches = await db.employees.distinct("branch")
-    return [b for b in branches if b and b != "Pending Assignment"]
+@api_router.get("/assignments")
+async def get_assignments():
+    """Get all unique assignments/placements"""
+    assignments = await db.employees.distinct("assignment")
+    return [a for a in assignments if a and a != "Unassigned"]
 
 @api_router.get("/roles")
 async def get_roles():
@@ -2156,7 +2157,7 @@ async def seed_data():
             "password": hash_password("admin123"),
             "name": "System Admin",
             "role": UserRole.SUPER_ADMIN,
-            "branch": None,
+            "assignment": None,
             "picture": None,
             "created_at": datetime.now(timezone.utc).isoformat()
         }

@@ -307,7 +307,7 @@ COMPLIANCE_TEMPLATES = [
             {"name": "start_date", "label": "Employment Start Date", "type": "date", "required": True},
             {"name": "induction_date", "label": "Induction Completed Date", "type": "date", "required": True},
             {"name": "supervisor", "label": "Induction Supervisor/Trainer", "type": "text", "required": True},
-            {"name": "branch", "label": "Branch/Location", "type": "text", "required": True},
+            {"name": "assignment", "label": "Current Assignment/Placement", "type": "text", "required": True},
             
             {"name": "section_company", "type": "section_header", "label": "Company Induction"},
             {"name": "company_intro", "label": "Company introduction and values", "type": "checkbox", "required": True},

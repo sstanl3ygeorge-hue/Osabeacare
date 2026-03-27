@@ -29,8 +29,8 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [branchFilter, setBranchFilter] = useState('');
-  const [branches, setBranches] = useState([]);
+  const [assignmentFilter, setAssignmentFilter] = useState('');
+  const [assignments, setAssignments] = useState([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { token, isAuditor } = useAuth();
@@ -41,7 +41,7 @@ export default function EmployeesPage() {
     email: '',
     phone: '',
     role: 'Care Assistant',
-    branch: '',
+    assignment: 'Unassigned',
     status: 'new'
   });
 
@@ -50,7 +50,7 @@ export default function EmployeesPage() {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
       if (statusFilter) params.append('status', statusFilter);
-      if (branchFilter) params.append('branch', branchFilter);
+      if (assignmentFilter) params.append('assignment', assignmentFilter);
       
       const response = await axios.get(`${API}/employees?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -63,21 +63,21 @@ export default function EmployeesPage() {
     }
   };
 
-  const fetchBranches = async () => {
+  const fetchAssignments = async () => {
     try {
-      const response = await axios.get(`${API}/branches`, {
+      const response = await axios.get(`${API}/assignments`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setBranches(response.data);
+      setAssignments(response.data);
     } catch (error) {
-      console.error('Failed to fetch branches:', error);
+      console.error('Failed to fetch assignments:', error);
     }
   };
 
   useEffect(() => {
     fetchEmployees();
-    fetchBranches();
-  }, [token, search, statusFilter, branchFilter]);
+    fetchAssignments();
+  }, [token, search, statusFilter, assignmentFilter]);
 
   const handleAddEmployee = async (e) => {
     e.preventDefault();
@@ -95,7 +95,7 @@ export default function EmployeesPage() {
         email: '',
         phone: '',
         role: 'Care Assistant',
-        branch: '',
+        assignment: 'Unassigned',
         status: 'new'
       });
       fetchEmployees();
@@ -205,14 +205,14 @@ export default function EmployeesPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Branch *</Label>
+                    <Label>Assignment *</Label>
                     <Input
-                      value={newEmployee.branch}
-                      onChange={(e) => setNewEmployee({...newEmployee, branch: e.target.value})}
-                      placeholder="e.g., London"
+                      value={newEmployee.assignment}
+                      onChange={(e) => setNewEmployee({...newEmployee, assignment: e.target.value})}
+                      placeholder="e.g., Sunrise Care Home, Unassigned"
                       required
                       className="rounded-xl"
-                      data-testid="emp-branch"
+                      data-testid="emp-assignment"
                     />
                   </div>
                 </div>
@@ -260,15 +260,16 @@ export default function EmployeesPage() {
                 <SelectItem value="inactive">Inactive</SelectItem>
               </SelectContent>
             </Select>
-            {branches.length > 0 && (
-              <Select value={branchFilter || "all"} onValueChange={(v) => setBranchFilter(v === "all" ? "" : v)}>
-                <SelectTrigger className="w-full sm:w-40 rounded-xl" data-testid="branch-filter">
-                  <SelectValue placeholder="Branch" />
+            {assignments.length > 0 && (
+              <Select value={assignmentFilter || "all"} onValueChange={(v) => setAssignmentFilter(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="assignment-filter">
+                  <SelectValue placeholder="Assignment" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                  <SelectItem value="all">All Assignments</SelectItem>
+                  <SelectItem value="Unassigned">Unassigned</SelectItem>
+                  {assignments.map((assignment) => (
+                    <SelectItem key={assignment} value={assignment}>{assignment}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -297,7 +298,7 @@ export default function EmployeesPage() {
                   <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Employee</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Branch</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Assignment</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Compliance</th>
                   </tr>
@@ -322,7 +323,7 @@ export default function EmployeesPage() {
                         <span className="text-text-primary">{emp.role}</span>
                       </td>
                       <td className="p-4 hidden lg:table-cell">
-                        <span className="text-text-muted">{emp.branch}</span>
+                        <span className="text-text-muted">{emp.assignment || 'Unassigned'}</span>
                       </td>
                       <td className="p-4">
                         <span className={`status-chip ${statusColors[emp.status] || 'status-neutral'}`}>

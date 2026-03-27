@@ -337,7 +337,7 @@ export default function EmployeeProfilePage() {
             )}
             <div className="flex items-center gap-3">
               <MapPin className="h-5 w-5 text-text-muted" />
-              <span className="text-sm text-text-primary">{employee.branch}</span>
+              <span className="text-sm text-text-primary">{employee.assignment || 'Unassigned'}</span>
             </div>
             {employee.start_date && (
               <div className="flex items-center gap-3">
@@ -712,8 +712,8 @@ export default function EmployeeProfilePage() {
                     <p className="font-medium text-text-primary">{employee.role}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-text-muted">Branch</p>
-                    <p className="font-medium text-text-primary">{employee.branch}</p>
+                    <p className="text-sm text-text-muted">Assignment</p>
+                    <p className="font-medium text-text-primary">{employee.assignment || 'Unassigned'}</p>
                   </div>
                   <div>
                     <p className="text-sm text-text-muted">Email</p>

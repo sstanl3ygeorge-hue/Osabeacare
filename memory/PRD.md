@@ -112,6 +112,17 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 
 ## Database Collections
 
+### employees
+```javascript
+{
+  id, employee_code, first_name, last_name, email, phone,
+  role: "Healthcare Assistant" | "Nurse" | "Care Assistant" | ...,
+  assignment: "Unassigned" | "Sunrise Care Home" | "...",  // Current placement
+  status: "new" | "screening" | "interview" | "onboarding" | "active" | "inactive",
+  completion_percentage, created_at, updated_at
+}
+```
+
 ### templates
 ```javascript
 {

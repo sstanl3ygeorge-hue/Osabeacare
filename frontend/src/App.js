@@ -1,53 +1,86 @@
-import { useEffect } from "react";
-import "@/App.css";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import axios from "axios";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { Toaster } from "./components/ui/sonner";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+// Public Pages
+import HomePage from "./pages/public/HomePage";
+import AboutPage from "./pages/public/AboutPage";
+import ServicesPage from "./pages/public/ServicesPage";
+import RecruitmentPage from "./pages/public/RecruitmentPage";
+import CompliancePage from "./pages/public/CompliancePage";
+import ContactPage from "./pages/public/ContactPage";
+import ApplyPage from "./pages/public/ApplyPage";
 
-const Home = () => {
-  const helloWorldApi = async () => {
-    try {
-      const response = await axios.get(`${API}/`);
-      console.log(response.data.message);
-    } catch (e) {
-      console.error(e, `errored out requesting / api`);
-    }
-  };
+// Auth Pages
+import LoginPage from "./pages/auth/LoginPage";
+import AuthCallback from "./pages/auth/AuthCallback";
 
-  useEffect(() => {
-    helloWorldApi();
-  }, []);
+// Portal Pages
+import PortalLayout from "./components/portal/PortalLayout";
+import DashboardPage from "./pages/portal/DashboardPage";
+import EmployeesPage from "./pages/portal/EmployeesPage";
+import EmployeeProfilePage from "./pages/portal/EmployeeProfilePage";
+import DocumentsPage from "./pages/portal/DocumentsPage";
+import PoliciesPage from "./pages/portal/PoliciesPage";
+import TrainingPage from "./pages/portal/TrainingPage";
+import AuditViewPage from "./pages/portal/AuditViewPage";
+import SettingsPage from "./pages/portal/SettingsPage";
+
+// Auth Context
+import { AuthProvider } from "./context/AuthContext";
+import ProtectedRoute from "./components/auth/ProtectedRoute";
+
+function AppRouter() {
+  const location = useLocation();
+  
+  // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+  // Check URL fragment for session_id during render (NOT in useEffect)
+  if (location.hash?.includes('session_id=')) {
+    return <AuthCallback />;
+  }
 
   return (
-    <div>
-      <header className="App-header">
-        <a
-          className="App-link"
-          href="https://emergent.sh"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img src="https://avatars.githubusercontent.com/in/1201222?s=120&u=2686cf91179bbafbc7a71bfbc43004cf9ae1acea&v=4" />
-        </a>
-        <p className="mt-5">Building something incredible ~!</p>
-      </header>
-    </div>
+    <Routes>
+      {/* Public Routes */}
+      <Route path="/" element={<HomePage />} />
+      <Route path="/about" element={<AboutPage />} />
+      <Route path="/services" element={<ServicesPage />} />
+      <Route path="/recruitment" element={<RecruitmentPage />} />
+      <Route path="/compliance" element={<CompliancePage />} />
+      <Route path="/contact" element={<ContactPage />} />
+      <Route path="/apply" element={<ApplyPage />} />
+      
+      {/* Auth Routes */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
+      
+      {/* Portal Routes - Protected */}
+      <Route path="/portal" element={
+        <ProtectedRoute>
+          <PortalLayout />
+        </ProtectedRoute>
+      }>
+        <Route index element={<DashboardPage />} />
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="employees" element={<EmployeesPage />} />
+        <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
+        <Route path="documents" element={<DocumentsPage />} />
+        <Route path="policies" element={<PoliciesPage />} />
+        <Route path="training" element={<TrainingPage />} />
+        <Route path="audit" element={<AuditViewPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+      </Route>
+    </Routes>
   );
-};
+}
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Home />}>
-            <Route index element={<Home />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRouter />
+        <Toaster position="top-right" richColors />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

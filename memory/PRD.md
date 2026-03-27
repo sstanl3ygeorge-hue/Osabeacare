@@ -177,6 +177,15 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - View button fetches PDF via axios with auth token, opens in new tab
   - Download button downloads with proper Content-Disposition header
   - Works for both policies and insurance/certificates
+- [x] **Document Preview Modal** (Completed 2026-03-27):
+  - Google Drive/Dropbox style in-app document preview
+  - PDF viewer with react-pdf: zoom controls (slider + buttons), page navigation, rotate
+  - Image preview with zoom
+  - Fullscreen mode toggle
+  - Download and Open in New Tab buttons
+  - Loading and error states
+  - White background, rounded corners, responsive (large on desktop, fullscreen on mobile)
+  - Integrated in Compliance Centre (policies, insurance) and Employee Profile (documents)
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -319,4 +328,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Policy View fix (authenticated file serving), PDF Export, and Navigation State Preservation completed
+2026-03-27 - Document Preview Modal with PDF viewer, zoom controls, fullscreen mode

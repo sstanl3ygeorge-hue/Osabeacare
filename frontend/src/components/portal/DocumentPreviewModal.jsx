@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { Dialog, DialogContent } from '../ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '../ui/dialog';
 import { Button } from '../ui/button';
 import { Slider } from '../ui/slider';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { 
   X, Download, ExternalLink, ZoomIn, ZoomOut, RotateCw,
   ChevronLeft, ChevronRight, Loader2, FileText, Image as ImageIcon,
@@ -403,6 +404,14 @@ export default function DocumentPreviewModal({
         `}
         data-testid="document-preview-modal"
       >
+        {/* Accessibility: Hidden title and description for screen readers */}
+        <VisuallyHidden>
+          <DialogTitle>{fileName || 'Document Preview'}</DialogTitle>
+          <DialogDescription>
+            Preview of {fileName || 'document'}. Use the toolbar to navigate pages, zoom, download, or open in a new tab.
+          </DialogDescription>
+        </VisuallyHidden>
+        
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-white shrink-0 rounded-t-xl">
           <div className="flex items-center gap-3 min-w-0 flex-1">

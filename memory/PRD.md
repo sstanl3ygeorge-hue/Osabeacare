@@ -226,6 +226,13 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Checklist shows file count badges (e.g., "3 files")
   - Compliance score based on requirement completion, not file count
   - Delete endpoint blocks deletion for single-file requirements
+- [x] **Import Document for All Form Types** (Completed 2026-03-27):
+  - New "Import Other Document" option in Generate Forms dropdown
+  - Supports: Reference 1, Reference 2, Health Screening, Contract, Induction, Handbook
+  - Creates form with status "completed_imported" and links document to requirement
+  - Documents stored in correct compliance folder with requirement_id
+  - Checklist automatically updates to show requirement as complete
+  - Optional notes field for import context
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -368,4 +375,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Multi-File Document Support (Single vs Multi-file requirements)
+2026-03-27 - Import Document extended to Reference Forms, Health Screening, Contracts

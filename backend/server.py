@@ -4209,6 +4209,11 @@ FORM_TYPE_TO_REQUIREMENT = {
     "contract": {"requirement_id": "contract", "category": "L_Contract"},
     "induction": {"requirement_id": "induction", "category": "J_Induction_Shadowing_Observations"},
     "handbook": {"requirement_id": "handbook", "category": "O_Other"},
+    "recruitment_checklist": {"requirement_id": "recruitment_checklist", "category": "B_Recruitment_Checklist"},
+    "personal_info": {"requirement_id": "personal_info", "category": "C_Personal_Information"},
+    "interview_record": {"requirement_id": "interview_record", "category": "D_Interview"},
+    "equal_opportunities": {"requirement_id": "equal_opportunities", "category": "E_Equal_Opportunities"},
+    "application_form": {"requirement_id": "application_form", "category": "A_Application_Form"},
 }
 
 @api_router.post("/generated-forms/import-document")

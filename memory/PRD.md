@@ -9,6 +9,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Track training and policy acknowledgements
 - Generate and manage compliance forms with digital signatures
 - Support CQC audit requirements
+- Organisation-level compliance tracking (Compliance Centre)
 
 ## User Personas
 1. **Super Admin**: Full system access, manages all employees and compliance
@@ -79,6 +80,25 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Role-Based Logic**: Medication Training shows N/A for Healthcare Assistants
 - [x] **Overall Compliance Progress Bar** with color-coded segments
 
+#### Phase 3: Compliance Centre - Organisation Level (Completed 2026-03-27)
+- [x] **30 Organisation Policies** categorised into:
+  - **Core Policies** (10): Safeguarding Adults, Safeguarding Children, Mental Capacity Act & DoLS, Medication, Infection Prevention & Control, Health & Safety, Manual Handling, Fire Safety, First Aid, COSHH
+  - **Operational Policies** (10): Lone Working, Risk Assessment, Care Planning, Record Keeping, Confidentiality, Whistleblowing, Complaints, Incident Reporting, Business Continuity, Service User Feedback
+  - **Governance & Compliance** (10): Recruitment & Selection, DBS & Vetting, Induction & Probation, Training & Development, Supervision & Appraisal, Disciplinary & Grievance, Equality Diversity & Inclusion, Data Protection & GDPR, Social Media, Code of Conduct
+- [x] **6 Insurance & Certificates**:
+  - Public Liability Insurance
+  - Employer's Liability Insurance
+  - Professional Indemnity Insurance
+  - CQC Registration Certificate
+  - ICO Registration Certificate
+  - Company Registration Certificate
+- [x] **Auto-seeding on startup** - All policies and insurance seeded as "Missing" placeholders
+- [x] **Policy Upload & Versioning** - Admin can upload documents with version numbers and review dates
+- [x] **Status Tracking**: missing, active, expired, under_review
+- [x] **Dashboard Summary Cards** - Policy count, Insurance status, Open incidents, Active staff
+- [x] **Incident & Outbreak Logs** - Create/track incidents with reference numbers (INC-YYYY-NNNN)
+- [x] **Reports Tab** - Staff DBS Dates, Training Report (12 months)
+
 ### Upcoming Features (P0)
 - [ ] PDF generation backend (server-side PDF for archival)
 - [ ] Email notifications via Resend for form requests
@@ -97,7 +117,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 /app/
 ├── backend/
 │   ├── server.py          # FastAPI application
-│   ├── templates_data.py  # 12 template definitions
+│   ├── templates_data.py  # 13 template definitions
 │   ├── requirements.txt   # Python dependencies
 │   └── .env              # Environment variables
 ├── frontend/
@@ -108,7 +128,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 │   │   │   ├── portal/   # SignaturePad, FormFieldRenderer, PortalLayout
 │   │   │   └── ui/       # Shadcn components
 │   │   └── pages/
-│   │       ├── portal/   # Dashboard, Employees, Templates, FormEditor
+│   │       ├── portal/   # Dashboard, Employees, Templates, FormEditor, ComplianceCentre
 │   │       └── public/   # Website pages
 │   └── package.json
 └── memory/
@@ -119,7 +139,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 
 ### Templates
 - `GET /api/templates` - List all templates
-- `POST /api/seed-templates` - Seed 12 compliance templates
+- `POST /api/seed-templates` - Seed 13 compliance templates
 - `GET /api/templates/:id` - Get template details with form fields
 
 ### Generated Forms
@@ -133,6 +153,15 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 ### Documents
 - `POST /api/employees/:id/bulk-upload` - Bulk document upload
 - `POST /api/employee-documents/:id/upload` - Single document upload
+
+### Compliance Centre
+- `GET /api/compliance/policies` - List all 30 organisation policies
+- `POST /api/compliance/policies/:id/upload` - Upload policy document
+- `GET /api/compliance/insurance` - List all 6 insurance/certificates
+- `POST /api/compliance/insurance/:id/upload` - Upload insurance document
+- `GET /api/compliance/incidents` - List incident logs
+- `POST /api/compliance/incidents` - Create incident report
+- `GET /api/compliance/dashboard` - Dashboard summary statistics
 
 ## Database Collections
 
@@ -174,6 +203,36 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 }
 ```
 
+### org_policies
+```javascript
+{
+  id, name, category, version, status,
+  file_url, original_filename, review_date,
+  last_reviewed_at, reviewed_by, notes,
+  created_at, updated_at, created_by
+}
+```
+
+### insurance_docs
+```javascript
+{
+  id, name, insurance_type, status,
+  file_url, original_filename, expiry_date,
+  policy_number, provider, notes,
+  created_at, updated_at
+}
+```
+
+### incident_logs
+```javascript
+{
+  id, incident_type, reference_number, title, description,
+  date_occurred, location, persons_involved,
+  immediate_actions, root_cause, corrective_actions, lessons_learned,
+  status, reported_by, reported_at, closed_at, closed_by, attachments
+}
+```
+
 ## Credentials
 
 ### Demo Admin
@@ -186,4 +245,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Template Library & Document Control workflow completed
+2026-03-27 - Compliance Centre completed with 30 policies, 6 insurance/certificates, incidents, and reports

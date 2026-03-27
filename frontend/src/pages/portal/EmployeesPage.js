@@ -462,29 +462,29 @@ export default function EmployeesPage() {
 
       {/* Archive Confirmation Dialog */}
       <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
-        <DialogContent>
+        <DialogContent className="bg-white">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
-              <Archive className="h-5 w-5 text-warning" />
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <Archive className="h-5 w-5 text-amber-500" />
               Archive Employee
             </DialogTitle>
-            <DialogDescription className="text-text-muted">
-              Are you sure you want to archive <strong>{selectedEmployee?.first_name} {selectedEmployee?.last_name}</strong>?
+            <DialogDescription className="text-gray-500">
+              Are you sure you want to archive <strong className="text-gray-900">{selectedEmployee?.first_name} {selectedEmployee?.last_name}</strong>?
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
-            <p className="text-sm text-text-muted">This will:</p>
-            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+            <p className="text-sm text-gray-600">This will:</p>
+            <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
               <li>Hide employee from the active employees list</li>
               <li>Retain all documents, forms, and audit history</li>
               <li>Allow restoration at any time</li>
             </ul>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} className="rounded-xl">
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} className="rounded-xl border-gray-300 text-gray-700 hover:bg-gray-50">
               Cancel
             </Button>
-            <Button onClick={handleArchiveEmployee} className="bg-warning hover:bg-warning/90 text-white rounded-xl">
+            <Button onClick={handleArchiveEmployee} className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl">
               <Archive className="h-4 w-4 mr-2" />
               Archive Employee
             </Button>
@@ -494,33 +494,33 @@ export default function EmployeesPage() {
 
       {/* Permanent Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="bg-white">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2 text-error">
+            <DialogTitle className="font-heading flex items-center gap-2 text-red-600">
               <AlertTriangle className="h-5 w-5" />
               Permanent Deletion
             </DialogTitle>
-            <DialogDescription className="text-text-muted">
-              Are you sure you want to <strong>permanently delete</strong> {selectedEmployee?.first_name} {selectedEmployee?.last_name}?
+            <DialogDescription className="text-gray-500">
+              Are you sure you want to <strong className="text-gray-900">permanently delete</strong> {selectedEmployee?.first_name} {selectedEmployee?.last_name}?
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-4 bg-error/5 p-4 rounded-xl border border-error/20">
-            <p className="text-sm font-medium text-error">This action cannot be undone!</p>
-            <p className="text-sm text-text-muted">All of the following will be permanently deleted:</p>
-            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+          <div className="space-y-3 py-4 bg-red-50 p-4 rounded-xl border border-red-200">
+            <p className="text-sm font-medium text-red-600">This action cannot be undone!</p>
+            <p className="text-sm text-gray-600">All of the following will be permanently deleted:</p>
+            <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
               <li>Employee record</li>
               <li>All uploaded documents</li>
               <li>All compliance forms</li>
               <li>Training records</li>
               <li>Policy assignments</li>
             </ul>
-            <p className="text-xs text-text-muted mt-2">Only use this for duplicate records, test data, or incorrect entries.</p>
+            <p className="text-xs text-gray-500 mt-2">Only use this for duplicate records, test data, or incorrect entries.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl border-gray-300 text-gray-700 hover:bg-gray-50">
               Cancel
             </Button>
-            <Button onClick={handlePermanentDelete} className="bg-error hover:bg-error/90 text-white rounded-xl">
+            <Button onClick={handlePermanentDelete} className="bg-red-600 hover:bg-red-700 text-white rounded-xl">
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Permanently
             </Button>

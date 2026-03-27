@@ -1137,76 +1137,76 @@ export default function EmployeeProfilePage() {
 
       {/* Edit Employee Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto bg-white">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
-              <Edit className="h-5 w-5 text-primary" />
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <Edit className="h-5 w-5 text-teal-600" />
               Edit Employee Details
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>First Name *</Label>
+                <Label className="text-gray-700 font-medium">First Name *</Label>
                 <Input
                   value={editForm.first_name}
                   onChange={(e) => setEditForm({...editForm, first_name: e.target.value})}
-                  className="rounded-xl"
+                  className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Last Name *</Label>
+                <Label className="text-gray-700 font-medium">Last Name *</Label>
                 <Input
                   value={editForm.last_name}
                   onChange={(e) => setEditForm({...editForm, last_name: e.target.value})}
-                  className="rounded-xl"
+                  className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
                 />
               </div>
             </div>
             
             <div className="space-y-2">
-              <Label>Email *</Label>
+              <Label className="text-gray-700 font-medium">Email *</Label>
               <Input
                 type="email"
                 value={editForm.email}
                 onChange={(e) => setEditForm({...editForm, email: e.target.value})}
-                className="rounded-xl"
+                className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
               />
             </div>
             
             <div className="space-y-2">
-              <Label>Phone</Label>
+              <Label className="text-gray-700 font-medium">Phone</Label>
               <Input
                 type="tel"
                 value={editForm.phone}
                 onChange={(e) => setEditForm({...editForm, phone: e.target.value})}
-                className="rounded-xl"
+                className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
               />
             </div>
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Role *</Label>
+                <Label className="text-gray-700 font-medium">Role *</Label>
                 <Select value={editForm.role} onValueChange={(value) => setEditForm({...editForm, role: value})}>
-                  <SelectTrigger className="rounded-xl">
+                  <SelectTrigger className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 focus:ring-2 focus:ring-teal-600 focus:border-teal-600">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-white border-gray-200">
                     {roles.map((role) => (
-                      <SelectItem key={role} value={role}>{role}</SelectItem>
+                      <SelectItem key={role} value={role} className="text-gray-900">{role}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Status</Label>
+                <Label className="text-gray-700 font-medium">Status</Label>
                 <Select value={editForm.status} onValueChange={(value) => setEditForm({...editForm, status: value})}>
-                  <SelectTrigger className="rounded-xl">
+                  <SelectTrigger className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 focus:ring-2 focus:ring-teal-600 focus:border-teal-600">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-white border-gray-200">
                     {statuses.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                      <SelectItem key={s.value} value={s.value} className="text-gray-900">{s.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1215,40 +1215,40 @@ export default function EmployeeProfilePage() {
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Current Placement</Label>
+                <Label className="text-gray-700 font-medium">Current Placement</Label>
                 <Input
                   value={editForm.assignment}
                   onChange={(e) => setEditForm({...editForm, assignment: e.target.value})}
                   placeholder="e.g., Sunrise Care Home"
-                  className="rounded-xl"
+                  className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
                 />
               </div>
               <div className="space-y-2">
-                <Label>Start Date</Label>
+                <Label className="text-gray-700 font-medium">Start Date</Label>
                 <Input
                   type="date"
                   value={editForm.start_date}
                   onChange={(e) => setEditForm({...editForm, start_date: e.target.value})}
-                  className="rounded-xl"
+                  className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
                 />
               </div>
             </div>
             
             <div className="space-y-2">
-              <Label>Notes</Label>
+              <Label className="text-gray-700 font-medium">Notes</Label>
               <Textarea
                 value={editForm.notes}
                 onChange={(e) => setEditForm({...editForm, notes: e.target.value})}
                 placeholder="Internal notes about this employee..."
-                className="rounded-xl min-h-[80px]"
+                className="rounded-xl min-h-[80px] bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
               />
             </div>
           </div>
           <DialogFooter className="mt-6">
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="rounded-xl">
+            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="rounded-xl border-gray-300 text-gray-700 hover:bg-gray-50">
               Cancel
             </Button>
-            <Button onClick={handleSaveEmployee} disabled={isSaving} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+            <Button onClick={handleSaveEmployee} disabled={isSaving} className="bg-teal-600 hover:bg-teal-700 text-white rounded-xl">
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Save Changes
             </Button>
@@ -1258,29 +1258,29 @@ export default function EmployeeProfilePage() {
 
       {/* Archive Confirmation Dialog */}
       <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
-        <DialogContent>
+        <DialogContent className="bg-white">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
-              <Archive className="h-5 w-5 text-warning" />
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <Archive className="h-5 w-5 text-amber-500" />
               Archive Employee
             </DialogTitle>
-            <DialogDescription className="text-text-muted">
-              Are you sure you want to archive <strong>{employee?.first_name} {employee?.last_name}</strong>?
+            <DialogDescription className="text-gray-500">
+              Are you sure you want to archive <strong className="text-gray-900">{employee?.first_name} {employee?.last_name}</strong>?
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
-            <p className="text-sm text-text-muted">This will:</p>
-            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+            <p className="text-sm text-gray-600">This will:</p>
+            <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
               <li>Hide employee from the active employees list</li>
               <li>Retain all documents, forms, and audit history</li>
               <li>Allow restoration at any time</li>
             </ul>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} className="rounded-xl">
+            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} className="rounded-xl border-gray-300 text-gray-700 hover:bg-gray-50">
               Cancel
             </Button>
-            <Button onClick={handleArchiveEmployee} className="bg-warning hover:bg-warning/90 text-white rounded-xl">
+            <Button onClick={handleArchiveEmployee} className="bg-amber-500 hover:bg-amber-600 text-white rounded-xl">
               <Archive className="h-4 w-4 mr-2" />
               Archive Employee
             </Button>
@@ -1290,33 +1290,33 @@ export default function EmployeeProfilePage() {
 
       {/* Permanent Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
+        <DialogContent className="bg-white">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2 text-error">
+            <DialogTitle className="font-heading flex items-center gap-2 text-red-600">
               <AlertTriangle className="h-5 w-5" />
               Permanent Deletion
             </DialogTitle>
-            <DialogDescription className="text-text-muted">
-              Are you sure you want to <strong>permanently delete</strong> {employee?.first_name} {employee?.last_name}?
+            <DialogDescription className="text-gray-500">
+              Are you sure you want to <strong className="text-gray-900">permanently delete</strong> {employee?.first_name} {employee?.last_name}?
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-4 bg-error/5 p-4 rounded-xl border border-error/20">
-            <p className="text-sm font-medium text-error">This action cannot be undone!</p>
-            <p className="text-sm text-text-muted">All of the following will be permanently deleted:</p>
-            <ul className="text-sm text-text-muted list-disc list-inside space-y-1">
+          <div className="space-y-3 py-4 bg-red-50 p-4 rounded-xl border border-red-200">
+            <p className="text-sm font-medium text-red-600">This action cannot be undone!</p>
+            <p className="text-sm text-gray-600">All of the following will be permanently deleted:</p>
+            <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
               <li>Employee record</li>
               <li>All uploaded documents</li>
               <li>All compliance forms</li>
               <li>Training records</li>
               <li>Policy assignments</li>
             </ul>
-            <p className="text-xs text-text-muted mt-2">Only use this for duplicate records, test data, or incorrect entries.</p>
+            <p className="text-xs text-gray-500 mt-2">Only use this for duplicate records, test data, or incorrect entries.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl">
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="rounded-xl border-gray-300 text-gray-700 hover:bg-gray-50">
               Cancel
             </Button>
-            <Button onClick={handlePermanentDelete} className="bg-error hover:bg-error/90 text-white rounded-xl">
+            <Button onClick={handlePermanentDelete} className="bg-red-600 hover:bg-red-700 text-white rounded-xl">
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Permanently
             </Button>

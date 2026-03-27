@@ -172,6 +172,11 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Employee profile preserves active tab
   - Compliance Centre preserves active tab
   - Templates page preserves search and category filter
+- [x] **Policy View Fix** (Completed 2026-03-27):
+  - Replaced direct storage URLs with authenticated backend file-serving
+  - View button fetches PDF via axios with auth token, opens in new tab
+  - Download button downloads with proper Content-Disposition header
+  - Works for both policies and insurance/certificates
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -314,4 +319,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - PDF Compliance Summary Export (Download + Print) and Navigation State Preservation completed
+2026-03-27 - Policy View fix (authenticated file serving), PDF Export, and Navigation State Preservation completed

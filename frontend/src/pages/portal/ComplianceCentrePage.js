@@ -39,6 +39,70 @@ export default function ComplianceCentrePage() {
     setSearchParams({ tab: value }, { replace: true });
   };
   
+  // View document with authentication - opens in new tab
+  const handleViewDocument = async (type, id, title) => {
+    try {
+      toast.loading('Loading document...');
+      
+      const endpoint = type === 'policy' 
+        ? `${API}/compliance/policies/${id}/file`
+        : `${API}/compliance/insurance/${id}/file`;
+      
+      const response = await axios.get(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      
+      // Open in new window
+      const newWindow = window.open(url, '_blank');
+      if (newWindow) {
+        newWindow.document.title = title;
+      }
+      
+      toast.dismiss();
+      toast.success('Document opened in new tab');
+      
+      // Clean up blob URL after a delay (to allow the new tab to load)
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (error) {
+      console.error('Failed to load document:', error);
+      toast.dismiss();
+      toast.error('Failed to load document');
+    }
+  };
+  
+  // Download document with authentication
+  const handleDownloadDocument = async (type, id, filename) => {
+    try {
+      const endpoint = type === 'policy' 
+        ? `${API}/compliance/policies/${id}/download`
+        : `${API}/compliance/insurance/${id}/download`;
+      
+      const response = await axios.get(endpoint, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      const blob = new Blob([response.data]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || 'document.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      
+      toast.success('Document downloaded');
+    } catch (error) {
+      console.error('Failed to download document:', error);
+      toast.error('Failed to download document');
+    }
+  };
+  
   // Upload states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedPolicy, setSelectedPolicy] = useState(null);
@@ -476,7 +540,8 @@ export default function ComplianceCentrePage() {
                                       variant="outline" 
                                       size="sm"
                                       className="rounded-lg"
-                                      onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/policies/${policy.id}/file`, '_blank')}
+                                      onClick={() => handleViewDocument('policy', policy.id, policy.name)}
+                                      data-testid={`view-policy-${policy.id}`}
                                     >
                                       <Eye className="h-4 w-4 mr-1" />
                                       View
@@ -485,7 +550,8 @@ export default function ComplianceCentrePage() {
                                       variant="outline" 
                                       size="sm"
                                       className="rounded-lg"
-                                      onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/policies/${policy.id}/download`, '_blank')}
+                                      onClick={() => handleDownloadDocument('policy', policy.id, policy.original_filename || `${policy.name}.pdf`)}
+                                      data-testid={`download-policy-${policy.id}`}
                                     >
                                       <Download className="h-4 w-4 mr-1" />
                                       Download
@@ -592,7 +658,8 @@ export default function ComplianceCentrePage() {
                               variant="outline" 
                               size="sm"
                               className="rounded-lg"
-                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/insurance/${ins.id}/file`, '_blank')}
+                              onClick={() => handleViewDocument('insurance', ins.id, ins.name)}
+                              data-testid={`view-insurance-${ins.id}`}
                             >
                               <Eye className="h-4 w-4 mr-1" />
                               View
@@ -601,7 +668,8 @@ export default function ComplianceCentrePage() {
                               variant="outline" 
                               size="sm"
                               className="rounded-lg"
-                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/insurance/${ins.id}/download`, '_blank')}
+                              onClick={() => handleDownloadDocument('insurance', ins.id, ins.original_filename || `${ins.name}.pdf`)}
+                              data-testid={`download-insurance-${ins.id}`}
                             >
                               <Download className="h-4 w-4 mr-1" />
                               Download

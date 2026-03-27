@@ -33,6 +33,31 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] Public website with services, about, careers pages
 - [x] Responsive design with Shadcn/UI components
 
+#### Phase 1.5: Employee Record Management Controls (Completed 2026-03-27)
+- [x] **Edit Employee Details** - Full dialog with:
+  - Full name, email, phone
+  - Role selector (9 roles)
+  - Status selector (new, screening, interview, compliance_review, onboarding, active, inactive)
+  - Current placement (assignment)
+  - Start date
+  - Internal notes
+- [x] **Actions Menu** on employees list and profile:
+  - Edit Details
+  - Export Employee File
+  - Archive Employee
+  - Delete Permanently (Super Admin only)
+- [x] **Archive Employee (Soft Delete)**:
+  - Hides from active employees list
+  - Retains all documents, forms, policies, audit history
+  - "Archived" filter in status dropdown
+  - Restore functionality available
+  - Action logged in audit trail
+- [x] **Permanent Delete (Super Admin Only)**:
+  - Confirmation modal with warning
+  - Deletes employee + all related records
+  - For duplicate/test/incorrect entries only
+  - Action logged in audit trail
+
 #### Phase 2: Template Library & Document Control (Completed 2026-03-27)
 - [x] **13 Compliance Templates** (role-aware for HCA vs Nurse):
   - Application Form

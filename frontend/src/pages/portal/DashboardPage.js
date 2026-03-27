@@ -98,10 +98,10 @@ export default function DashboardPage() {
                 Add New Employee
               </Button>
             </Link>
-            <Link to="/portal/documents" className="block">
-              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-documents">
+            <Link to="/portal/templates" className="block">
+              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-templates">
                 <FileCheck className="mr-2 h-4 w-4" />
-                Review Documents
+                Form Templates
               </Button>
             </Link>
             <Link to="/portal/compliance-centre" className="block">

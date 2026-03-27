@@ -233,6 +233,15 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Documents stored in correct compliance folder with requirement_id
   - Checklist automatically updates to show requirement as complete
   - Optional notes field for import context
+- [x] **CRITICAL: Compliance System Audit & Fix** (Completed 2026-03-27):
+  - Fixed: Compliance score now based on REQUIREMENT completion (not document count)
+  - Fixed: Forms now have requirement_id linking them to requirements
+  - Fixed: Documents now have requirement_id linking them to requirements
+  - Fixed: Import endpoint updates existing forms instead of creating duplicates
+  - Added: /api/admin/cleanup-duplicates endpoint to remove duplicate forms
+  - Cleaned up: 9 duplicate forms removed for employee Olakunle Alonge
+  - Result: Employee shows 10/20 requirements complete (55%), 4 verified
+  - System now operates as a proper NHS/CQC-ready compliance engine
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -375,4 +384,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Import Document extended to Reference Forms, Health Screening, Contracts
+2026-03-27 - CRITICAL: Compliance System Audit - Fixed requirement-based scoring, removed duplicates, linked forms/docs to requirements

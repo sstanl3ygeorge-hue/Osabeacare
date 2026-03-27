@@ -2250,25 +2250,31 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     if req['status'] == 'missing':
                         req['status'] = 'in_progress'
         
-        # Check for training (if type is training)
+        # Check for training (if type is training) - use substring matching like check_item_completion
         if item['type'] == 'training':
             training_name = item.get('training_name', item['name'])
+            linked_training = None
             for training in all_training:
-                if training_name.lower() in training.get('training_name', '').lower():
-                    req['training'] = {
-                        "id": training['id'],
-                        "status": training['status'],
-                        "completed_at": training.get('completed_at'),
-                        "expiry_date": training.get('expiry_date')
-                    }
-                    if training['status'] == 'completed':
-                        if req['status'] == 'missing':
-                            req['status'] = 'completed'
-                            completed_count += 1
-                    elif training['status'] not in ['not_started']:
-                        if req['status'] == 'missing':
-                            req['status'] = 'in_progress'
+                train_name = training.get('training_name', '')
+                # Match if either contains the other (case-insensitive)
+                if training_name.lower() in train_name.lower() or train_name.lower() in training_name.lower():
+                    linked_training = training
                     break
+            
+            if linked_training:
+                req['training'] = {
+                    "id": linked_training['id'],
+                    "status": linked_training['status'],
+                    "completed_at": linked_training.get('completed_at'),
+                    "expiry_date": linked_training.get('expiry_date')
+                }
+                if linked_training['status'] == 'completed':
+                    if req['status'] == 'missing':
+                        req['status'] = 'completed'
+                        completed_count += 1
+                elif linked_training['status'] not in ['not_started']:
+                    if req['status'] == 'missing':
+                        req['status'] = 'in_progress'
         
         requirements.append(req)
     

@@ -432,6 +432,111 @@ class BulkUploadResult(BaseModel):
     failed: int = 0
     errors: List[str] = []
 
+# ==================== COMPLIANCE CENTRE MODELS ====================
+
+class OrgPolicyStatus(str):
+    MISSING = "missing"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    UNDER_REVIEW = "under_review"
+
+class OrgPolicyCreate(BaseModel):
+    name: str
+    category: str
+    version: str = "v1.0"
+    review_date: Optional[str] = None
+    notes: Optional[str] = None
+
+class OrgPolicyUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    version: Optional[str] = None
+    review_date: Optional[str] = None
+    notes: Optional[str] = None
+    status: Optional[str] = None
+
+class OrgPolicyResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    category: str
+    version: str
+    status: str  # missing, active, expired, under_review
+    file_url: Optional[str] = None
+    original_filename: Optional[str] = None
+    review_date: Optional[str] = None
+    last_reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class InsuranceDocCreate(BaseModel):
+    name: str
+    insurance_type: str  # public_liability, employers_liability
+    expiry_date: str
+    policy_number: Optional[str] = None
+    provider: Optional[str] = None
+    notes: Optional[str] = None
+
+class InsuranceDocResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    insurance_type: str
+    status: str  # valid, expiring_soon, expired, missing
+    file_url: Optional[str] = None
+    original_filename: Optional[str] = None
+    expiry_date: Optional[str] = None
+    policy_number: Optional[str] = None
+    provider: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class IncidentLogCreate(BaseModel):
+    incident_type: str  # incident, outbreak, near_miss, complaint
+    title: str
+    description: str
+    date_occurred: str
+    location: Optional[str] = None
+    persons_involved: Optional[str] = None
+    immediate_actions: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_actions: Optional[str] = None
+    lessons_learned: Optional[str] = None
+
+class IncidentLogUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_actions: Optional[str] = None
+    lessons_learned: Optional[str] = None
+    closed_at: Optional[str] = None
+    closed_by: Optional[str] = None
+
+class IncidentLogResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    incident_type: str
+    reference_number: str
+    title: str
+    description: str
+    date_occurred: str
+    location: Optional[str] = None
+    persons_involved: Optional[str] = None
+    immediate_actions: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_actions: Optional[str] = None
+    lessons_learned: Optional[str] = None
+    status: str  # open, investigating, resolved, closed
+    reported_by: str
+    reported_at: str
+    closed_at: Optional[str] = None
+    closed_by: Optional[str] = None
+    attachments: List[str] = []
+
 # ==================== AUTH HELPERS ====================
 
 def hash_password(password: str) -> str:
@@ -1927,6 +2032,482 @@ async def send_templated_email(request: SendEmailRequest, user: dict = Depends(r
     except Exception as e:
         logger.error(f"Failed to send email: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
+# ==================== COMPLIANCE CENTRE - ORG POLICIES ====================
+
+# Core policies that should exist as placeholders
+CORE_POLICIES = [
+    {"name": "Safeguarding Adults Policy", "category": "Safeguarding"},
+    {"name": "Safeguarding Children Policy", "category": "Safeguarding"},
+    {"name": "Medication Policy", "category": "Clinical"},
+    {"name": "Infection Control Policy", "category": "Health & Safety"},
+    {"name": "Health & Safety Policy", "category": "Health & Safety"},
+    {"name": "Risk Assessment Policy", "category": "Health & Safety"},
+    {"name": "Incident Reporting Policy", "category": "Governance"},
+    {"name": "Complaints Policy", "category": "Governance"},
+    {"name": "Equality & Diversity Policy", "category": "HR"},
+    {"name": "Data Protection / GDPR Policy", "category": "Governance"},
+    {"name": "Recruitment Policy", "category": "HR"},
+    {"name": "Supervision & Appraisal Policy", "category": "HR"},
+]
+
+@api_router.post("/compliance/seed-policies")
+async def seed_org_policies(user: dict = Depends(require_admin)):
+    """Seed core organisation policies as placeholders"""
+    now = datetime.now(timezone.utc).isoformat()
+    created = 0
+    
+    for policy in CORE_POLICIES:
+        existing = await db.org_policies.find_one({"name": policy["name"]})
+        if not existing:
+            policy_doc = {
+                "id": str(uuid.uuid4()),
+                "name": policy["name"],
+                "category": policy["category"],
+                "version": "v1.0",
+                "status": "missing",
+                "file_url": None,
+                "original_filename": None,
+                "review_date": None,
+                "last_reviewed_at": None,
+                "reviewed_by": None,
+                "notes": None,
+                "created_at": now,
+                "updated_at": now,
+                "created_by": user['user_id']
+            }
+            await db.org_policies.insert_one(policy_doc)
+            created += 1
+    
+    return {"message": f"Created {created} policy placeholders", "total": len(CORE_POLICIES)}
+
+@api_router.get("/compliance/policies", response_model=List[OrgPolicyResponse])
+async def get_org_policies(
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get all organisation policies"""
+    query = {}
+    if category:
+        query["category"] = category
+    if status:
+        query["status"] = status
+    
+    policies = await db.org_policies.find(query, {"_id": 0}).sort("category", 1).to_list(100)
+    
+    # Check for expired policies based on review date
+    now = datetime.now(timezone.utc)
+    for policy in policies:
+        if policy.get("review_date"):
+            review_date = datetime.fromisoformat(policy["review_date"].replace('Z', '+00:00'))
+            if review_date < now and policy["status"] == "active":
+                policy["status"] = "expired"
+    
+    return policies
+
+@api_router.get("/compliance/policies/{policy_id}", response_model=OrgPolicyResponse)
+async def get_org_policy(policy_id: str, user: dict = Depends(get_current_user)):
+    """Get a specific organisation policy"""
+    policy = await db.org_policies.find_one({"id": policy_id}, {"_id": 0})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    return policy
+
+@api_router.post("/compliance/policies/{policy_id}/upload")
+async def upload_org_policy_document(
+    policy_id: str,
+    file: UploadFile = File(...),
+    version: Optional[str] = None,
+    review_date: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """Upload a document for an organisation policy"""
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Upload file
+    content = await file.read()
+    path = f"{APP_NAME}/policies/{policy_id}/{str(uuid.uuid4())}_{file.filename}"
+    content_type = file.content_type or "application/octet-stream"
+    result = put_object(path, content, content_type)
+    
+    update_data = {
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "status": "active",
+        "last_reviewed_at": now,
+        "reviewed_by": user['user_id'],
+        "updated_at": now
+    }
+    
+    if version:
+        update_data["version"] = version
+    if review_date:
+        update_data["review_date"] = review_date
+    
+    await db.org_policies.update_one({"id": policy_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "upload_org_policy", "org_policy", policy_id, {
+        "filename": file.filename,
+        "policy_name": policy["name"]
+    })
+    
+    updated_policy = await db.org_policies.find_one({"id": policy_id}, {"_id": 0})
+    return updated_policy
+
+@api_router.put("/compliance/policies/{policy_id}", response_model=OrgPolicyResponse)
+async def update_org_policy(
+    policy_id: str,
+    update: OrgPolicyUpdate,
+    user: dict = Depends(require_admin)
+):
+    """Update an organisation policy"""
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.org_policies.update_one({"id": policy_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "update_org_policy", "org_policy", policy_id, update_data)
+    
+    updated = await db.org_policies.find_one({"id": policy_id}, {"_id": 0})
+    return updated
+
+# ==================== COMPLIANCE CENTRE - INSURANCE ====================
+
+INSURANCE_TYPES = [
+    {"name": "Public Liability Insurance", "type": "public_liability"},
+    {"name": "Employer's Liability Insurance", "type": "employers_liability"},
+]
+
+@api_router.post("/compliance/seed-insurance")
+async def seed_insurance_docs(user: dict = Depends(require_admin)):
+    """Seed insurance document placeholders"""
+    now = datetime.now(timezone.utc).isoformat()
+    created = 0
+    
+    for ins in INSURANCE_TYPES:
+        existing = await db.insurance_docs.find_one({"insurance_type": ins["type"]})
+        if not existing:
+            doc = {
+                "id": str(uuid.uuid4()),
+                "name": ins["name"],
+                "insurance_type": ins["type"],
+                "status": "missing",
+                "file_url": None,
+                "original_filename": None,
+                "expiry_date": None,
+                "policy_number": None,
+                "provider": None,
+                "notes": None,
+                "created_at": now,
+                "updated_at": now
+            }
+            await db.insurance_docs.insert_one(doc)
+            created += 1
+    
+    return {"message": f"Created {created} insurance placeholders", "total": len(INSURANCE_TYPES)}
+
+@api_router.get("/compliance/insurance", response_model=List[InsuranceDocResponse])
+async def get_insurance_docs(user: dict = Depends(get_current_user)):
+    """Get all insurance documents"""
+    docs = await db.insurance_docs.find({}, {"_id": 0}).to_list(20)
+    
+    # Calculate status based on expiry date
+    now = datetime.now(timezone.utc)
+    thirty_days = now + timedelta(days=30)
+    
+    for doc in docs:
+        if not doc.get("file_url"):
+            doc["status"] = "missing"
+        elif doc.get("expiry_date"):
+            expiry = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
+            if expiry < now:
+                doc["status"] = "expired"
+            elif expiry < thirty_days:
+                doc["status"] = "expiring_soon"
+            else:
+                doc["status"] = "valid"
+        else:
+            doc["status"] = "valid"
+    
+    return docs
+
+@api_router.post("/compliance/insurance/{insurance_id}/upload")
+async def upload_insurance_doc(
+    insurance_id: str,
+    file: UploadFile = File(...),
+    expiry_date: str = Query(...),
+    policy_number: Optional[str] = None,
+    provider: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """Upload an insurance document"""
+    insurance = await db.insurance_docs.find_one({"id": insurance_id})
+    if not insurance:
+        raise HTTPException(status_code=404, detail="Insurance record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    content = await file.read()
+    path = f"{APP_NAME}/insurance/{insurance_id}/{str(uuid.uuid4())}_{file.filename}"
+    content_type = file.content_type or "application/octet-stream"
+    result = put_object(path, content, content_type)
+    
+    update_data = {
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "expiry_date": expiry_date,
+        "status": "valid",
+        "updated_at": now
+    }
+    
+    if policy_number:
+        update_data["policy_number"] = policy_number
+    if provider:
+        update_data["provider"] = provider
+    
+    await db.insurance_docs.update_one({"id": insurance_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "upload_insurance", "insurance", insurance_id, {
+        "filename": file.filename,
+        "expiry_date": expiry_date
+    })
+    
+    updated = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
+    return updated
+
+# ==================== COMPLIANCE CENTRE - INCIDENT LOGS ====================
+
+async def generate_incident_reference():
+    """Generate unique incident reference number"""
+    year = datetime.now().year
+    count = await db.incident_logs.count_documents({"reference_number": {"$regex": f"^INC-{year}"}})
+    return f"INC-{year}-{str(count + 1).zfill(4)}"
+
+@api_router.get("/compliance/incidents", response_model=List[IncidentLogResponse])
+async def get_incident_logs(
+    incident_type: Optional[str] = None,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get all incident/outbreak logs"""
+    query = {}
+    if incident_type:
+        query["incident_type"] = incident_type
+    if status:
+        query["status"] = status
+    
+    incidents = await db.incident_logs.find(query, {"_id": 0}).sort("reported_at", -1).to_list(500)
+    return incidents
+
+@api_router.post("/compliance/incidents", response_model=IncidentLogResponse)
+async def create_incident_log(
+    incident: IncidentLogCreate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Create a new incident/outbreak log"""
+    now = datetime.now(timezone.utc).isoformat()
+    ref_number = await generate_incident_reference()
+    
+    incident_doc = {
+        "id": str(uuid.uuid4()),
+        "reference_number": ref_number,
+        **incident.model_dump(),
+        "status": "open",
+        "reported_by": user['user_id'],
+        "reported_at": now,
+        "closed_at": None,
+        "closed_by": None,
+        "attachments": []
+    }
+    
+    await db.incident_logs.insert_one(incident_doc)
+    
+    await log_audit_action(user['user_id'], "create_incident", "incident_log", incident_doc["id"], {
+        "reference_number": ref_number,
+        "type": incident.incident_type
+    })
+    
+    return {**incident_doc, "_id": None}
+
+@api_router.put("/compliance/incidents/{incident_id}", response_model=IncidentLogResponse)
+async def update_incident_log(
+    incident_id: str,
+    update: IncidentLogUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Update an incident log"""
+    incident = await db.incident_logs.find_one({"id": incident_id})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    
+    if update.status == "closed" and incident["status"] != "closed":
+        update_data["closed_at"] = datetime.now(timezone.utc).isoformat()
+        update_data["closed_by"] = user['user_id']
+    
+    await db.incident_logs.update_one({"id": incident_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "update_incident", "incident_log", incident_id, update_data)
+    
+    updated = await db.incident_logs.find_one({"id": incident_id}, {"_id": 0})
+    return updated
+
+# ==================== COMPLIANCE CENTRE - REPORTS ====================
+
+@api_router.get("/compliance/reports/staff-dbs")
+async def get_staff_dbs_report(user: dict = Depends(get_current_user)):
+    """Get staff list with DBS dates"""
+    employees = await db.employees.find(
+        {"status": {"$in": ["active", "onboarding"]}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "role": 1, "assignment": 1}
+    ).to_list(500)
+    
+    report = []
+    for emp in employees:
+        # Get DBS document
+        dbs_doc = await db.employee_documents.find_one(
+            {"employee_id": emp["id"], "document_type_name": {"$regex": "DBS", "$options": "i"}},
+            {"_id": 0}
+        )
+        
+        report.append({
+            "employee_id": emp["id"],
+            "employee_code": emp["employee_code"],
+            "name": f"{emp['first_name']} {emp['last_name']}",
+            "role": emp.get("role"),
+            "assignment": emp.get("assignment", "Unassigned"),
+            "dbs_status": dbs_doc["status"] if dbs_doc else "missing",
+            "dbs_expiry": dbs_doc.get("expiry_date") if dbs_doc else None,
+            "dbs_number": dbs_doc.get("notes") if dbs_doc else None
+        })
+    
+    return {"report": report, "total": len(report), "generated_at": datetime.now(timezone.utc).isoformat()}
+
+@api_router.get("/compliance/reports/training")
+async def get_staff_training_report(
+    months: int = 12,
+    user: dict = Depends(get_current_user)
+):
+    """Get staff training report for last N months"""
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=months * 30)).isoformat()
+    
+    employees = await db.employees.find(
+        {"status": {"$in": ["active", "onboarding"]}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "role": 1}
+    ).to_list(500)
+    
+    report = []
+    for emp in employees:
+        training_records = await db.training_records.find(
+            {"employee_id": emp["id"]},
+            {"_id": 0}
+        ).to_list(100)
+        
+        completed = [t for t in training_records if t.get("status") == "completed"]
+        pending = [t for t in training_records if t.get("status") in ["scheduled", "in_progress"]]
+        
+        # Check for expiring training
+        now = datetime.now(timezone.utc)
+        thirty_days = now + timedelta(days=30)
+        expiring = []
+        for t in completed:
+            if t.get("expiry_date"):
+                try:
+                    exp = datetime.fromisoformat(t["expiry_date"].replace('Z', '+00:00'))
+                    if exp < thirty_days:
+                        expiring.append(t["training_name"])
+                except:
+                    pass
+        
+        report.append({
+            "employee_id": emp["id"],
+            "employee_code": emp["employee_code"],
+            "name": f"{emp['first_name']} {emp['last_name']}",
+            "role": emp.get("role"),
+            "completed_count": len(completed),
+            "pending_count": len(pending),
+            "expiring_soon": expiring,
+            "training_records": training_records
+        })
+    
+    return {
+        "report": report,
+        "total_employees": len(report),
+        "period_months": months,
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+
+@api_router.get("/compliance/dashboard")
+async def get_compliance_dashboard(user: dict = Depends(get_current_user)):
+    """Get compliance centre dashboard summary"""
+    
+    # Policies summary
+    policies = await db.org_policies.find({}, {"_id": 0}).to_list(50)
+    policies_active = len([p for p in policies if p.get("status") == "active"])
+    policies_missing = len([p for p in policies if p.get("status") == "missing"])
+    policies_expired = len([p for p in policies if p.get("status") == "expired"])
+    
+    # Insurance summary
+    insurance = await db.insurance_docs.find({}, {"_id": 0}).to_list(10)
+    now = datetime.now(timezone.utc)
+    insurance_valid = 0
+    insurance_expiring = 0
+    insurance_expired = 0
+    insurance_missing = 0
+    
+    for ins in insurance:
+        if not ins.get("file_url"):
+            insurance_missing += 1
+        elif ins.get("expiry_date"):
+            exp = datetime.fromisoformat(ins["expiry_date"].replace('Z', '+00:00'))
+            if exp < now:
+                insurance_expired += 1
+            elif exp < now + timedelta(days=30):
+                insurance_expiring += 1
+            else:
+                insurance_valid += 1
+        else:
+            insurance_valid += 1
+    
+    # Incidents summary
+    incidents_open = await db.incident_logs.count_documents({"status": {"$in": ["open", "investigating"]}})
+    incidents_total = await db.incident_logs.count_documents({})
+    
+    # Staff compliance
+    active_staff = await db.employees.count_documents({"status": {"$in": ["active", "onboarding"]}})
+    
+    return {
+        "policies": {
+            "total": len(policies),
+            "active": policies_active,
+            "missing": policies_missing,
+            "expired": policies_expired
+        },
+        "insurance": {
+            "total": len(insurance),
+            "valid": insurance_valid,
+            "expiring_soon": insurance_expiring,
+            "expired": insurance_expired,
+            "missing": insurance_missing
+        },
+        "incidents": {
+            "open": incidents_open,
+            "total": incidents_total
+        },
+        "staff": {
+            "active": active_staff
+        }
+    }
 
 @api_router.post("/contact")
 async def submit_contact_form(form: ContactForm):

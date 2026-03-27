@@ -78,7 +78,7 @@ export default function PortalLayout() {
               <span className="text-white font-heading font-bold text-xl">O</span>
             </div>
             <div>
-              <span className="font-heading font-semibold text-text-primary">Osabea Care</span>
+              <span className="font-heading font-semibold text-text-primary">Osabea Healthcare</span>
               <p className="text-xs text-text-muted">Compliance Portal</p>
             </div>
           </div>
@@ -118,7 +118,7 @@ export default function PortalLayout() {
                   <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
                     <span className="text-white font-heading font-bold text-xl">O</span>
                   </div>
-                  <span className="font-heading font-semibold text-text-primary">Osabea Care</span>
+                  <span className="font-heading font-semibold text-text-primary">Osabea Healthcare</span>
                 </div>
                 <NavLinks onClick={() => setSidebarOpen(false)} />
               </SheetContent>

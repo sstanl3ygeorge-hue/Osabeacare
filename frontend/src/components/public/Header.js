@@ -27,7 +27,7 @@ export default function Header() {
               <span className="text-white font-heading font-bold text-xl">O</span>
             </div>
             <span className="font-heading font-semibold text-xl text-text-primary hidden sm:block">
-              Osabea Care
+              Osabea Healthcare
             </span>
           </Link>
 

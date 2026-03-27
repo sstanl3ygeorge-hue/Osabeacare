@@ -700,8 +700,165 @@ COMPLIANCE_TEMPLATES = [
             {"name": "reviewed_by", "label": "Reviewed By", "type": "text", "required": True},
             {"name": "review_date", "label": "Review Date", "type": "date", "required": True}
         ]
+    },
+    
+    # ==================== 13. EMPLOYEE HANDBOOK ACKNOWLEDGEMENT ====================
+    {
+        "name": "Employee Handbook Acknowledgement",
+        "description": "Acknowledgement form confirming the employee has read and understood the Employee Handbook and company policies.",
+        "category": "Policies",
+        "section": "Policies",
+        "visibility": "normal",
+        "role_specific": None,
+        "requires_employee_signature": True,
+        "requires_admin_signature": True,
+        "form_fields": [
+            {"name": "section_welcome", "type": "section_header", "label": "1. Welcome"},
+            {"name": "welcome_text", "type": "info_box", "content": "Welcome to Osabea Healthcare Solutions. We are committed to providing safe, compassionate, and high-quality care services. This handbook outlines your responsibilities, expectations, and standards.", "variant": "info"},
+            
+            {"name": "section_values", "type": "section_header", "label": "2. Company Values"},
+            {"name": "values_text", "type": "info_box", "content": "Our core values are: Compassion, Respect, Dignity, Accountability, and Professionalism. These values guide everything we do.", "variant": "info"},
+            
+            {"name": "section_responsibilities", "type": "section_header", "label": "3. Roles & Responsibilities"},
+            {"name": "responsibilities_text", "type": "info_box", "content": "Your responsibilities include: Deliver safe and person-centred care, Follow care plans, Maintain confidentiality, Report incidents promptly.", "variant": "info"},
+            
+            {"name": "section_conduct", "type": "section_header", "label": "4. Code of Conduct"},
+            {"name": "conduct_text", "type": "info_box", "content": "You must: Treat service users with dignity, Maintain professional boundaries, No abuse, neglect, or discrimination is tolerated, Follow all safeguarding policies.", "variant": "warning"},
+            
+            {"name": "section_safeguarding", "type": "section_header", "label": "5. Safeguarding"},
+            {"name": "safeguarding_text", "type": "info_box", "content": "Safeguarding is everyone's responsibility. Report concerns immediately, Follow escalation procedures, Protect vulnerable individuals at all times.", "variant": "warning"},
+            
+            {"name": "section_health_safety", "type": "section_header", "label": "6. Health & Safety"},
+            {"name": "health_safety_text", "type": "info_box", "content": "You must: Follow infection control procedures, Use PPE correctly, Report all hazards immediately.", "variant": "info"},
+            
+            {"name": "section_medication", "type": "section_header", "label": "7. Medication (Role-Based)"},
+            {"name": "medication_hca", "type": "info_box", "content": "Healthcare Assistants: Only assist with medication if you have received appropriate training and competency assessment.", "variant": "info", "role_restriction": "hca_only"},
+            {"name": "medication_nurse", "type": "info_box", "content": "Nurses: Administer medication safely following all protocols. Document all administration accurately.", "variant": "info", "role_restriction": "nurse_only"},
+            
+            {"name": "section_training", "type": "section_header", "label": "8. Training Requirements"},
+            {"name": "training_text", "type": "info_box", "content": "All mandatory training must be completed before working with service users. Training must be renewed before expiry dates.", "variant": "info"},
+            
+            {"name": "section_attendance", "type": "section_header", "label": "9. Attendance & Conduct"},
+            {"name": "attendance_text", "type": "info_box", "content": "You must: Be punctual for all shifts, Notify absence as early as possible, Maintain professional conduct at all times.", "variant": "info"},
+            
+            {"name": "section_confidentiality", "type": "section_header", "label": "10. Confidentiality"},
+            {"name": "confidentiality_text", "type": "info_box", "content": "You must protect all personal data. Follow GDPR guidelines. Never share service user information without proper authorisation.", "variant": "warning"},
+            
+            {"name": "section_complaints", "type": "section_header", "label": "11. Complaints & Whistleblowing"},
+            {"name": "complaints_text", "type": "info_box", "content": "Raise concerns safely through proper channels. Whistleblowing is protected - there will be no retaliation for reporting genuine concerns.", "variant": "info"},
+            
+            {"name": "section_declaration", "type": "section_header", "label": "12. Declaration"},
+            {"name": "handbook_read", "label": "I confirm I have read and understood the Employee Handbook", "type": "checkbox", "required": True},
+            {"name": "values_understood", "label": "I understand and agree to uphold the company values", "type": "checkbox", "required": True},
+            {"name": "code_conduct_understood", "label": "I understand the Code of Conduct and will comply with all policies", "type": "checkbox", "required": True},
+            {"name": "safeguarding_understood", "label": "I understand my safeguarding responsibilities and reporting procedures", "type": "checkbox", "required": True},
+            {"name": "confidentiality_agreed", "label": "I agree to maintain confidentiality at all times", "type": "checkbox", "required": True},
+            {"name": "training_commitment", "label": "I commit to completing all mandatory training requirements", "type": "checkbox", "required": True}
+        ]
     }
 ]
+
+# Email templates for common communications
+EMAIL_TEMPLATES = {
+    "document_request": {
+        "subject": "Documents Required - Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+To complete your onboarding, please upload the following documents:
+
+{document_list}
+
+You can upload these directly via your portal at {portal_url}.
+
+If you need help, please let us know.
+
+Kind regards,
+Osabea Healthcare Solutions Team"""
+    },
+    
+    "right_to_work_request": {
+        "subject": "Right to Work Evidence Required - Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+Please provide your Right to Work evidence:
+
+If you have a share code, please send it along with your date of birth.
+
+Alternatively, upload a clear copy of your passport.
+
+Kind regards,
+Osabea Healthcare Solutions Team"""
+    },
+    
+    "form_completion_request": {
+        "subject": "Form to Complete - Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+You have a form to complete in your portal: {form_name}
+
+Please log in at {portal_url} and complete it as soon as possible.
+
+Thank you,
+Osabea Healthcare Solutions Team"""
+    },
+    
+    "onboarding_complete": {
+        "subject": "Onboarding Complete - Welcome to Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+Your onboarding is now complete!
+
+You are ready for placement. We will contact you regarding available shifts.
+
+Welcome to the team!
+
+Kind regards,
+Osabea Healthcare Solutions Team"""
+    },
+    
+    "missing_items_followup": {
+        "subject": "Missing Items - Action Required - Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+We are still missing the following items from your records:
+
+{missing_items}
+
+Please upload these as soon as possible to avoid delays in your onboarding.
+
+Thank you,
+Osabea Healthcare Solutions Team"""
+    },
+    
+    "expiry_reminder": {
+        "subject": "Document Expiring Soon - Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+The following document is expiring soon:
+
+{document_name} - Expires: {expiry_date}
+
+Please ensure you upload a renewed copy before the expiry date.
+
+Kind regards,
+Osabea Healthcare Solutions Team"""
+    },
+    
+    "form_signed_off": {
+        "subject": "Form Signed Off - Osabea Healthcare Solutions",
+        "body": """Hi {employee_name},
+
+The following form has been signed off by admin:
+
+{form_name}
+
+This form is now locked and part of your permanent record.
+
+Kind regards,
+Osabea Healthcare Solutions Team"""
+    }
+}
+
 
 # Categories for grouping templates
 TEMPLATE_CATEGORIES = {
@@ -712,5 +869,6 @@ TEMPLATE_CATEGORIES = {
     "Contract": ["Contract Acknowledgement Form"],
     "Personal": ["Personal Information Form"],
     "Equal Opportunities": ["Equal Opportunities Monitoring Form"],
-    "Supervision": ["Supervision Record", "Annual Appraisal Form"]
+    "Supervision": ["Supervision Record", "Annual Appraisal Form"],
+    "Policies": ["Employee Handbook Acknowledgement"]
 }

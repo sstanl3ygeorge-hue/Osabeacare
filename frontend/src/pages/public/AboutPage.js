@@ -23,10 +23,10 @@ export default function AboutPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="max-w-3xl">
             <h1 className="font-heading text-4xl sm:text-5xl font-bold text-text-primary mb-6">
-              About Osabea Care Solutions
+              About Osabea Healthcare Solutions
             </h1>
             <p className="text-lg text-text-muted leading-relaxed">
-              Osabea Care Solutions is committed to compassionate care, safer recruitment and organised workforce compliance. We support care delivery with a people-first approach backed by structured processes, clear documentation and professional standards.
+              Osabea Healthcare Solutions is committed to compassionate care, safer recruitment and organised workforce compliance. We support care delivery with a people-first approach backed by structured processes, clear documentation and professional standards.
             </p>
           </div>
         </div>

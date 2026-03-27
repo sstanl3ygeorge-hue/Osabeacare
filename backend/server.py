@@ -15,7 +15,7 @@ import jwt
 import bcrypt
 import requests
 import resend
-from templates_data import COMPLIANCE_TEMPLATES
+from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -85,7 +85,7 @@ def get_object(path: str) -> tuple:
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
-app = FastAPI(title="Osabea Care Solutions API")
+app = FastAPI(title="Osabea Healthcare Solutions API")
 api_router = APIRouter(prefix="/api")
 
 # ==================== MODELS ====================
@@ -1433,13 +1433,13 @@ async def send_form_to_employee(form_id: str, send_email: bool = True, user: dic
                 "to": [employee['email']],
                 "subject": f"Form to complete: {form['template_name']}",
                 "html": f"""
-                <h2>Form Request from Osabea Care Solutions</h2>
+                <h2>Form Request from Osabea Healthcare Solutions</h2>
                 <p>Dear {employee['first_name']},</p>
                 <p>Please complete the following form:</p>
                 <p><strong>{form['template_name']}</strong></p>
                 <p><a href="{access_link}" style="display: inline-block; padding: 12px 24px; background-color: #0F5C5E; color: white; text-decoration: none; border-radius: 8px;">Complete Form</a></p>
                 <p>Or copy this link: {access_link}</p>
-                <p>Thank you,<br>Osabea Care Solutions Team</p>
+                <p>Thank you,<br>Osabea Healthcare Solutions Team</p>
                 """
             })
         except Exception as e:
@@ -1860,6 +1860,74 @@ async def bulk_generate_forms(
         "errors": errors
     }
 
+# ==================== EMAIL TEMPLATES ====================
+
+@api_router.get("/email-templates")
+async def get_email_templates(user: dict = Depends(require_manager_or_admin)):
+    """Get all available email templates"""
+    return EMAIL_TEMPLATES
+
+@api_router.get("/email-templates/{template_key}")
+async def get_email_template(template_key: str, user: dict = Depends(require_manager_or_admin)):
+    """Get a specific email template by key"""
+    if template_key not in EMAIL_TEMPLATES:
+        raise HTTPException(status_code=404, detail="Email template not found")
+    return EMAIL_TEMPLATES[template_key]
+
+class SendEmailRequest(BaseModel):
+    template_key: str
+    employee_id: str
+    custom_data: Optional[Dict[str, str]] = None
+
+@api_router.post("/send-email")
+async def send_templated_email(request: SendEmailRequest, user: dict = Depends(require_manager_or_admin)):
+    """Send an email using a template"""
+    if not resend.api_key:
+        raise HTTPException(status_code=503, detail="Email service not configured")
+    
+    if request.template_key not in EMAIL_TEMPLATES:
+        raise HTTPException(status_code=404, detail="Email template not found")
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": request.employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    template = EMAIL_TEMPLATES[request.template_key]
+    
+    # Build template variables
+    variables = {
+        "employee_name": f"{employee['first_name']} {employee['last_name']}",
+        "employee_code": employee['employee_code'],
+        "portal_url": os.environ.get('PORTAL_URL', 'https://portal.osabea.care'),
+        **(request.custom_data or {})
+    }
+    
+    # Substitute variables in template
+    subject = template['subject']
+    body = template['body']
+    for key, value in variables.items():
+        body = body.replace(f"{{{key}}}", str(value))
+        subject = subject.replace(f"{{{key}}}", str(value))
+    
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [employee['email']],
+            "subject": subject,
+            "html": f"<div style='font-family: Arial, sans-serif; line-height: 1.6;'>{body.replace(chr(10), '<br>')}</div>"
+        })
+        
+        await log_audit_action(user['user_id'], "send_email", "email", request.template_key, {
+            "employee_id": request.employee_id,
+            "template": request.template_key
+        })
+        
+        return {"message": "Email sent successfully", "recipient": employee['email']}
+    except Exception as e:
+        logger.error(f"Failed to send email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
 @api_router.post("/contact")
 async def submit_contact_form(form: ContactForm):
     contact_id = str(uuid.uuid4())
@@ -2041,7 +2109,7 @@ async def request_document(
             await asyncio.to_thread(resend.Emails.send, {
                 "from": SENDER_EMAIL,
                 "to": [employee['email']],
-                "subject": "Document request from Osabea Care Solutions",
+                "subject": "Document request from Osabea Healthcare Solutions",
                 "html": f"""
                 <h2>Document Request</h2>
                 <p>Dear {employee['first_name']},</p>
@@ -2050,7 +2118,7 @@ async def request_document(
                 {f'<p>{message}</p>' if message else ''}
                 {f'<p>Due date: {due_date}</p>' if due_date else ''}
                 <p>Please log in to your portal and upload the requested document.</p>
-                <p>Thank you,<br>Osabea Care Solutions Team</p>
+                <p>Thank you,<br>Osabea Healthcare Solutions Team</p>
                 """
             })
         except Exception as e:
@@ -2168,7 +2236,7 @@ async def seed_data():
 # Health check
 @api_router.get("/")
 async def root():
-    return {"message": "Osabea Care Solutions API", "status": "healthy"}
+    return {"message": "Osabea Healthcare Solutions API", "status": "healthy"}
 
 @api_router.get("/health")
 async def health_check():

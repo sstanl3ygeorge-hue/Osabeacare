@@ -116,7 +116,7 @@ export default function ApplyPage() {
                 Application submitted
               </h2>
               <p className="text-text-muted mb-6">
-                Thank you for applying to Osabea Care Solutions. We'll review your application and be in touch.
+                Thank you for applying to Osabea Healthcare Solutions. We'll review your application and be in touch.
               </p>
               <div className="bg-[#F8FAFA] rounded-xl p-4 inline-block">
                 <p className="text-sm text-text-muted mb-1">Your reference number:</p>

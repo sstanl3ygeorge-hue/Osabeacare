@@ -12,7 +12,7 @@ export default function Footer() {
               <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center">
                 <span className="text-primary font-heading font-bold text-xl">O</span>
               </div>
-              <span className="font-heading font-semibold text-xl">Osabea Care</span>
+              <span className="font-heading font-semibold text-xl">Osabea Healthcare</span>
             </div>
             <p className="text-white/70 text-sm leading-relaxed mb-6">
               Recruiting compassionate care professionals with a safer, structured and people-first approach.
@@ -101,7 +101,7 @@ export default function Footer() {
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <p className="text-white/50 text-sm">
-            © {new Date().getFullYear()} Osabea Care Solutions. All rights reserved.
+            © {new Date().getFullYear()} Osabea Healthcare Solutions. All rights reserved.
           </p>
           <div className="flex items-center gap-6">
             <Link to="/privacy" className="text-white/50 hover:text-white/70 text-sm transition-colors">

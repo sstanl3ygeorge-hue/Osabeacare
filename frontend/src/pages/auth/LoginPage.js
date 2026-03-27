@@ -45,7 +45,7 @@ export default function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-[#17324D]/70 via-[#17324D]/40 to-transparent flex items-center">
           <div className="p-12 max-w-lg">
             <h1 className="font-heading text-4xl font-bold text-white mb-4">
-              Osabea Care Solutions
+              Osabea Healthcare Solutions
             </h1>
             <p className="text-white/90 text-lg leading-relaxed">
               Access your compliance portal to manage employee records, track documents, and ensure audit-readiness.

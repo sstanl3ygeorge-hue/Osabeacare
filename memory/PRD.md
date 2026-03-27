@@ -1,7 +1,10 @@
 # Care Recruitment Agency Compliance Portal - PRD
 
+## Company
+**Osabea Healthcare Solutions**
+
 ## Original Problem Statement
-Build a comprehensive compliance management portal for a UK care recruitment agency (Osabea Care Solutions) to:
+Build a comprehensive compliance management portal for a UK care recruitment agency to:
 - Manage employee onboarding and compliance documents
 - Track training and policy acknowledgements
 - Generate and manage compliance forms with digital signatures
@@ -30,12 +33,33 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] Responsive design with Shadcn/UI components
 
 #### Phase 2: Template Library & Document Control (Completed 2026-03-27)
-- [x] **12 Compliance Templates** (role-aware for HCA vs Nurse)
+- [x] **13 Compliance Templates** (role-aware for HCA vs Nurse):
+  - Application Form
+  - Interview Record Form
+  - Recruitment Compliance Checklist
+  - Health Screening Questionnaire (restricted)
+  - Induction & Competency Assessment
+  - Contract Acknowledgement Form
+  - Personal Information Form
+  - Equal Opportunities Monitoring Form (confidential)
+  - Supervision Record
+  - Annual Appraisal Form
+  - Reference Request & Verification Form
+  - DBS Review & Risk Assessment
+  - **Employee Handbook Acknowledgement** (NEW)
 - [x] **Form Generation System** with auto-fill, role-based fields, status workflow
 - [x] **Digital Signatures** (typed + canvas drawn)
 - [x] **Bulk Operations** (bulk upload, bulk form generation)
 - [x] **PDF Export** for forms
 - [x] **Visibility Controls** (normal/restricted/confidential)
+- [x] **Email Templates** for common communications:
+  - Document Request
+  - Right to Work Request
+  - Form Completion Request
+  - Onboarding Complete
+  - Missing Items Follow-up
+  - Expiry Reminder
+  - Form Signed Off
 
 #### Phase 2.5: Training & Compliance Overview (Completed 2026-03-27)
 - [x] **Compliance Overview Component** on employee profiles

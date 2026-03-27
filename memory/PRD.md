@@ -216,6 +216,16 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Checklist tab reflects actual uploaded/verified state
   - Compliance score updates correctly based on requirement completion
   - Verification status shows user name (not user ID)
+- [x] **Multi-File Document Support** (Completed 2026-03-27):
+  - API changed from `req.document` (single) to `req.documents[]` (array)
+  - `allow_multiple_files` flag on requirements (Identity/RTW, NMC, Clinical Competency)
+  - `min_files` field for minimum evidence required
+  - Single-file requirements: "Replace" button, deduplicates to show latest
+  - Multi-file requirements: "Add File" button, "Verify All", individual delete icons
+  - Upload modal shows "Multi" badge and optional "Document Label" field
+  - Checklist shows file count badges (e.g., "3 files")
+  - Compliance score based on requirement completion, not file count
+  - Delete endpoint blocks deletion for single-file requirements
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -358,4 +368,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - 1:1 Document-to-Requirement Mapping system completed
+2026-03-27 - Multi-File Document Support (Single vs Multi-file requirements)

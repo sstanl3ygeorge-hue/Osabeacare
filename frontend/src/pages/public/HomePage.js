@@ -79,7 +79,7 @@ export default function HomePage() {
                 </h1>
               </div>
               <p className="text-lg text-text-muted leading-relaxed max-w-xl">
-                Osabea Healthcare Solutions connects care providers with compassionate, compliant and carefully screened professionals through a structured recruitment, onboarding and compliance process.
+                Osabea Healthcare Solutions connects care providers with compassionate, compliant and fully vetted professionals through a structured recruitment and onboarding process.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
                 <Link to="/apply">

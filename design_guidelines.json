@@ -1,0 +1,129 @@
+{
+  "theme": "LIGHT",
+  "archetype": "1 (Organic & Earthy)",
+  "brand_tone": "Warm, Professional, Trustworthy, Caring, Organised, Modern but not flashy",
+  "colors": {
+    "primary": "#0F5C5E",
+    "primary_hover": "#0c4a4c",
+    "secondary": "#163A70",
+    "accent": "#D9F1F4",
+    "support_accent": "#D8E6D5",
+    "background": "#F8FAFA",
+    "surface": "#FFFFFF",
+    "border": "#E4E8EB",
+    "text": {
+      "primary": "#17324D",
+      "muted": "#5F6E7A"
+    },
+    "status": {
+      "success": "#1F8F5F",
+      "warning": "#C78A12",
+      "error": "#C54B4B",
+      "info": "#2F6FED"
+    }
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Outfit, sans-serif",
+      "weights": ["400", "500", "600", "700"],
+      "letter_spacing": "tracking-tight"
+    },
+    "body": {
+      "font_family": "Manrope, sans-serif",
+      "weights": ["400", "500", "600"],
+      "letter_spacing": "tracking-normal"
+    },
+    "scales": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-[#17324D]",
+      "h2": "text-3xl sm:text-4xl font-semibold tracking-tight text-[#17324D]",
+      "h3": "text-2xl sm:text-3xl font-medium tracking-tight text-[#17324D]",
+      "h4": "text-xl sm:text-2xl font-medium tracking-tight text-[#17324D]",
+      "body_lg": "text-lg text-[#5F6E7A] leading-relaxed",
+      "body": "text-base text-[#5F6E7A] leading-relaxed",
+      "small": "text-sm text-[#5F6E7A]"
+    }
+  },
+  "spacing_and_layout": {
+    "philosophy": "Generous spacing. Use p-8 to p-16 for containers. Prevent text collisions by maintaining large inner padding on cards.",
+    "container_radius": "rounded-2xl or rounded-3xl (16px - 24px)",
+    "input_radius": "rounded-xl (12px)",
+    "button_radius": "rounded-full (for public site CTAs) and rounded-xl (for internal portal)",
+    "borders": "1px solid #E4E8EB",
+    "shadows": {
+      "sm": "shadow-[0_2px_8px_rgba(23,50,77,0.04)]",
+      "md": "shadow-[0_8px_24px_rgba(23,50,77,0.06)]",
+      "lg": "shadow-[0_16px_48px_rgba(23,50,77,0.08)]"
+    }
+  },
+  "surface_strategies": {
+    "public_website_hero": {
+      "style": "Clean layout with generous whitespace, overlapping imagery with rounded edges, subtle background shapes using accent colors (#D9F1F4 and #D8E6D5). Not fully transparent nav overlay.",
+      "image_overlay": "bg-gradient-to-r from-[#17324D]/60 via-[#17324D]/30 to-transparent for legibility if using background images."
+    },
+    "public_cards": {
+      "style": "bg-white rounded-3xl border border-[#E4E8EB] p-8 shadow-sm transition-transform hover:-translate-y-1 hover:shadow-md"
+    },
+    "internal_dashboard": {
+      "style": "Dense but calm. Cards use bg-white rounded-2xl border border-[#E4E8EB] p-6. Status chips use icon + label with light background (e.g., bg-[#D8E6D5] text-[#1F8F5F])."
+    },
+    "headers": {
+      "style": "bg-white/80 backdrop-blur-xl border-b border-[#E4E8EB] sticky top-0 z-50"
+    }
+  },
+  "components": {
+    "icons": "lucide-react",
+    "buttons": {
+      "primary": "bg-[#0F5C5E] text-white hover:bg-[#0c4a4c] transition-colors",
+      "secondary": "bg-white text-[#17324D] border border-[#E4E8EB] hover:bg-[#F8FAFA] hover:border-[#163A70]/20",
+      "accent": "bg-[#D9F1F4] text-[#0F5C5E] hover:bg-[#c2e8ed]"
+    },
+    "forms": "Use Shadcn customized. Inputs should have bg-white border-[#E4E8EB] rounded-xl text-[#17324D] focus:ring-2 focus:ring-[#0F5C5E]/20 focus:border-[#0F5C5E].",
+    "status_chips": "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium gap-1.5"
+  },
+  "media": {
+    "public_hero": {
+      "url": "https://images.unsplash.com/photo-1765896387387-0538bc9f997e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwxfHxjYXJlZ2l2ZXIlMjBzbWlsaW5nJTIwcGF0aWVudHxlbnwwfHx8fDE3NzQ1NzQ2MzJ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Caregiver smiling with patient",
+      "description": "Hero section primary visual - warm, trustworthy caregiving moment."
+    },
+    "about_us_team": {
+      "url": "https://images.pexels.com/photos/6129442/pexels-photo-6129442.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Professional nurses talking",
+      "description": "Team collaboration image for About or Recruitment page."
+    },
+    "modern_facility": {
+      "url": "https://images.pexels.com/photos/7511751/pexels-photo-7511751.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Modern bright office interior",
+      "description": "Used for background context, Contact page, or facility highlights."
+    },
+    "patient_care_secondary": {
+      "url": "https://images.unsplash.com/photo-1752084794888-0b27a762b6fd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHw0fHxjYXJlZ2l2ZXIlMjBzbWlsaW5nJTIwcGF0aWVudHxlbnwwfHx8fDE3NzQ1NzQ2MzJ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Elderly patient smiling",
+      "description": "Secondary visual for Services or Testimonials section."
+    },
+    "professional_doctors": {
+      "url": "https://images.pexels.com/photos/6129589/pexels-photo-6129589.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Doctor and nurse engaged in conversation",
+      "description": "Internal portal login background or Compliance page banner."
+    }
+  },
+  "animation_and_motion": {
+    "hover_states": "Soft scaling (e.g., hover:-translate-y-1) for cards. Color transition on buttons.",
+    "page_transitions": "Subtle fade-in and slide-up (framer-motion).",
+    "dashboard_loading": "Use skeleton loaders matching the card radii (rounded-2xl) with a soft pulse using #F8FAFA to #E4E8EB."
+  },
+  "accessibility": {
+    "contrast": "Ensure all text against #F8FAFA and #FFFFFF meets WCAG AA standards. Use text-[#17324D] for primary readability.",
+    "focus_states": "All interactive elements must have a clear focus ring: focus:outline-none focus:ring-2 focus:ring-[#0F5C5E]/50 focus:ring-offset-2.",
+    "testing_attributes": "All interactive and key informational elements MUST include `data-testid` attribute (e.g., data-testid='apply-now-btn')."
+  },
+  "instructions_to_main_agent": [
+    "Always use the defined colors by extending Tailwind config. Do not use generic tailwind colors like 'blue-500' unless it maps exactly to the brand palette.",
+    "Use 'Outfit' for all headings and 'Manrope' for body text. Ensure fonts are imported via Google Fonts in index.css.",
+    "The public marketing pages MUST use generous padding (p-12 to p-24) and large border radii (rounded-3xl).",
+    "The internal SaaS portal MUST use tighter grids (gap-6) but still maintain soft radii (rounded-2xl) and no harsh shadows.",
+    "Do not use generic Shadcn components out of the box. Modify their radius and colors to match this guideline.",
+    "Use the provided image URLs exclusively for media. Do not use generic placeholders.",
+    "Add `data-testid` to all interactive elements for robust testing."
+  ]
+}

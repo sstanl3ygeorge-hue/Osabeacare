@@ -448,4 +448,29 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - CRITICAL: Compliance System Audit - Fixed requirement-based scoring, removed duplicates, linked forms/docs to requirements
+2026-03-27 - UX & Clarity Pass for Audit Presentation
+
+### UX & Clarity Pass (Completed 2026-03-27)
+- [x] **Fixed FormEditorPage Crash** (P0):
+  - Imported forms without templates now load gracefully
+  - Shows "Imported Document" info box with evidence explanation
+  - Form data displayed in read-only view
+- [x] **Forms Tab Renamed** to "Internal Forms (Admin)":
+  - Helper text: "Forms are internal workflows. Completed forms generate PDF evidence stored in the checklist."
+  - Clear separation between internal forms and compliance evidence
+- [x] **Standardized Status Language**:
+  - ONLY 3 statuses used: Missing (red), Evidence Uploaded (blue), Verified (green)
+  - Removed: "Complete", "In Progress", "Pending", "No Evidence", "Locked"
+- [x] **Checklist UI Cleanup**:
+  - Linear workflow: Upload → View → Download → Verify
+  - Verify button only shown when evidence exists (enforces workflow)
+  - Clean action order, no duplicate buttons
+  - Source badges only shown for Internal items (not Employee/Form)
+  - File count badges (e.g., "1 file", "3 files")
+- [x] **Dashboard Trust Fix**:
+  - Added "Fully Verified" metric (green) - shows audit-ready employees
+  - Replaced "Applicants" with more meaningful metric
+- [x] **Removed Clutter**:
+  - Hidden "locked" status from user view
+  - Simplified evidence file display (max 2 shown, "+N more" indicator)
+  - Removed unnecessary status badges

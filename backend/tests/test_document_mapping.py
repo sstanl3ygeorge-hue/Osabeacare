@@ -79,9 +79,9 @@ class TestDocumentMapping:
         assert ref1["name"] == "Reference 1"
         assert ref2["name"] == "Reference 2"
     
-    # Test: Document type requirements have correct structure
+    # Test: Document type requirements have correct structure (updated for multi-file support)
     def test_document_requirement_structure(self):
-        """Test that document requirements have correct structure"""
+        """Test that document requirements have correct structure with documents[] array"""
         response = self.session.get(f"{BASE_URL}/api/employees/{EMPLOYEE_ID}/compliance-requirements")
         assert response.status_code == 200
         data = response.json()
@@ -94,8 +94,10 @@ class TestDocumentMapping:
             assert "name" in req
             assert "category" in req
             assert "status" in req
-            assert "document" in req  # Can be None or document object
+            assert "documents" in req  # Now returns documents[] array instead of document object
             assert "verified" in req
+            assert "allow_multiple_files" in req
+            assert "document_count" in req
     
     # Test: Verification status shows correctly
     def test_verification_status_structure(self):

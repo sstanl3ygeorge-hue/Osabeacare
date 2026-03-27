@@ -135,19 +135,22 @@ class OnboardingStatus:
     ARCHIVED = "Archived"
 
 # Mandatory Compliance Items by Role
+# allow_multiple_files: True = can have many files (passport front/back, visa, etc.)
+# allow_multiple_files: False = single file only (CV, DBS cert)
+# min_files: minimum required for completion (default 1)
 MANDATORY_ITEMS = {
     "base": [  # Common to all roles
         {"id": "application_form", "name": "Application Form", "category": "A_Application_Form", "type": "form", "template_name": "Application Form"},
-        {"id": "cv", "name": "CV / Resume", "category": "A_Application_Form", "type": "document", "document_types": ["cv", "resume"]},
+        {"id": "cv", "name": "CV / Resume", "category": "A_Application_Form", "type": "document", "document_types": ["cv", "resume"], "allow_multiple_files": False},
         {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", "category": "B_Recruitment_Checklist", "type": "form", "template_name": "Recruitment Compliance Checklist"},
         {"id": "personal_info", "name": "Personal Information Form", "category": "C_Personal_Information", "type": "form", "template_name": "Personal Information Form"},
         {"id": "interview_record", "name": "Interview Record", "category": "D_Interview", "type": "form", "template_name": "Interview Record Form"},
         {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", "category": "E_Equal_Opportunities", "type": "form", "template_name": "Equal Opportunities Monitoring Form"},
         {"id": "health_screening", "name": "Health Screening Questionnaire", "category": "F_Health_Screening", "type": "form", "template_name": "Health Screening Questionnaire"},
-        {"id": "identity_rtw", "name": "Identity / Right to Work", "category": "G_Identity_RTW", "type": "document", "document_types": ["passport", "visa", "right_to_work", "driving_licence"]},
-        {"id": "reference_1", "name": "Reference 1", "category": "H_References", "type": "document", "document_types": ["reference"]},
-        {"id": "reference_2", "name": "Reference 2", "category": "H_References", "type": "document", "document_types": ["reference"]},
-        {"id": "dbs", "name": "DBS Certificate", "category": "I_DBS", "type": "document", "document_types": ["dbs"]},
+        {"id": "identity_rtw", "name": "Identity / Right to Work", "category": "G_Identity_RTW", "type": "document", "document_types": ["passport", "visa", "right_to_work", "driving_licence", "brp"], "allow_multiple_files": True, "min_files": 1},
+        {"id": "reference_1", "name": "Reference 1", "category": "H_References", "type": "document", "document_types": ["reference"], "allow_multiple_files": False},
+        {"id": "reference_2", "name": "Reference 2", "category": "H_References", "type": "document", "document_types": ["reference"], "allow_multiple_files": False},
+        {"id": "dbs", "name": "DBS Certificate", "category": "I_DBS", "type": "document", "document_types": ["dbs"], "allow_multiple_files": False},
         {"id": "induction", "name": "Induction & Competency Assessment", "category": "J_Induction_Shadowing_Observations", "type": "form", "template_name": "Induction & Competency Assessment"},
         {"id": "contract", "name": "Contract Acknowledgement", "category": "L_Contract", "type": "form", "template_name": "Contract Acknowledgement Form"},
         {"id": "handbook", "name": "Employee Handbook Acknowledgement", "category": "O_Other", "type": "form", "template_name": "Employee Handbook Acknowledgement"},
@@ -161,8 +164,8 @@ MANDATORY_ITEMS = {
         {"id": "health_safety", "name": "Health & Safety Training", "category": "N_Training", "type": "training", "training_name": "Health & Safety"},
     ],
     "nurse_specific": [  # Additional items for Nurses only
-        {"id": "nmc_registration", "name": "NMC Registration", "category": "O_Other", "type": "document", "document_types": ["nmc_registration", "professional_registration"]},
-        {"id": "clinical_competency", "name": "Clinical Competency Evidence", "category": "N_Training", "type": "document", "document_types": ["clinical_competency", "competency_assessment"]},
+        {"id": "nmc_registration", "name": "NMC Registration", "category": "O_Other", "type": "document", "document_types": ["nmc_registration", "professional_registration"], "allow_multiple_files": True, "min_files": 1},
+        {"id": "clinical_competency", "name": "Clinical Competency Evidence", "category": "N_Training", "type": "document", "document_types": ["clinical_competency", "competency_assessment"], "allow_multiple_files": True, "min_files": 1},
         {"id": "medication_competency", "name": "Medication Competency", "category": "N_Training", "type": "training", "training_name": "Medication"},
     ]
 }
@@ -517,6 +520,7 @@ class EmployeeDocumentCreate(BaseModel):
     expiry_date: Optional[str] = None
     notes: Optional[str] = None
     requirement_id: Optional[str] = None  # Links to MANDATORY_ITEMS id
+    document_label: Optional[str] = None  # e.g., "Passport Front", "Visa", for multi-file requirements
 
 class EmployeeDocumentUpdate(BaseModel):
     status: Optional[str] = None
@@ -527,6 +531,7 @@ class EmployeeDocumentUpdate(BaseModel):
     verified_by: Optional[str] = None
     verified_at: Optional[str] = None
     requirement_id: Optional[str] = None
+    document_label: Optional[str] = None
 
 class EmployeeDocumentResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -555,6 +560,7 @@ class EmployeeDocumentResponse(BaseModel):
     # Requirement linking
     requirement_id: Optional[str] = None  # Links to MANDATORY_ITEMS id
     requirement_name: Optional[str] = None
+    document_label: Optional[str] = None  # e.g., "Passport Front", "Visa"
 
 # Policy Models
 class PolicyCreate(BaseModel):
@@ -2090,7 +2096,7 @@ async def get_employee_document(doc_id: str, user: dict = Depends(get_current_us
 
 @api_router.get("/employees/{employee_id}/compliance-requirements")
 async def get_compliance_requirements(employee_id: str, user: dict = Depends(get_current_user)):
-    """Get all compliance requirements with their linked documents (deduplicated)"""
+    """Get all compliance requirements with their linked documents (supports multi-file requirements)"""
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -2114,49 +2120,81 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     
     for item in mandatory_items:
         req_id = item['id']
+        allow_multiple = item.get('allow_multiple_files', False)
+        min_files = item.get('min_files', 1)
+        
         req = {
             "id": req_id,
             "name": item['name'],
             "category": item['category'],
             "type": item['type'],
+            "allow_multiple_files": allow_multiple,
+            "min_files": min_files,
             "status": "missing",
-            "document": None,
+            "documents": [],  # Array of documents for this requirement
+            "document_count": 0,
             "form": None,
             "training": None,
             "verified": False,
             "verified_by": None,
-            "verified_at": None
+            "verified_at": None,
+            "all_verified": False  # True only if ALL documents are verified
         }
         
-        # Check for linked document
-        linked_doc = None
+        # Find ALL linked documents for this requirement
+        linked_docs = []
         for doc in all_docs:
             doc_req_id = doc.get('requirement_id')
             if doc_req_id == req_id:
-                linked_doc = doc
-                break
-            # Also match by document type name
-            if not doc_req_id and doc.get('document_type_name'):
+                linked_docs.append(doc)
+            # Also match by document type name if no explicit requirement_id
+            elif not doc_req_id and doc.get('document_type_name'):
                 auto_req_id = get_requirement_id_from_doctype(doc['document_type_name'])
                 if auto_req_id == req_id:
-                    linked_doc = doc
-                    break
+                    linked_docs.append(doc)
         
-        if linked_doc:
-            req['document'] = linked_doc
-            if linked_doc.get('file_url') and linked_doc.get('status') in ['uploaded', 'approved']:
+        # Sort by uploaded_at (newest first), handle None values
+        linked_docs.sort(key=lambda d: d.get('uploaded_at') or '', reverse=True)
+        
+        # For single-file requirements, only keep the most recent document with a file
+        if not allow_multiple and len(linked_docs) > 1:
+            # Prefer the one with highest version number and has a file
+            docs_with_files = [d for d in linked_docs if d.get('file_url')]
+            if docs_with_files:
+                # Sort by version (descending), then by uploaded_at (descending)
+                docs_with_files.sort(key=lambda d: (d.get('version_number', 0), d.get('uploaded_at') or ''), reverse=True)
+                linked_docs = [docs_with_files[0]]
+            else:
+                # No files, just keep the most recent record
+                linked_docs = [linked_docs[0]] if linked_docs else []
+        
+        req['documents'] = linked_docs
+        req['document_count'] = len(linked_docs)
+        
+        if linked_docs:
+            # Check if requirement is complete based on min_files
+            uploaded_docs = [d for d in linked_docs if d.get('file_url') and d.get('status') in ['uploaded', 'approved']]
+            verified_docs = [d for d in linked_docs if d.get('verified')]
+            
+            if len(uploaded_docs) >= min_files:
                 req['status'] = 'completed'
                 completed_count += 1
-            elif linked_doc.get('status') == 'requested':
+            elif any(d.get('status') == 'requested' for d in linked_docs):
                 req['status'] = 'pending'
             else:
                 req['status'] = 'in_progress'
             
-            if linked_doc.get('verified'):
+            # Verification: requirement is verified if ALL docs are verified (or at least min_files verified)
+            if len(verified_docs) >= min_files and len(verified_docs) == len(uploaded_docs):
                 req['verified'] = True
-                req['verified_by'] = linked_doc.get('verified_by_name') or linked_doc.get('verified_by')
-                req['verified_at'] = linked_doc.get('verified_at')
+                req['all_verified'] = True
+                req['verified_by'] = verified_docs[0].get('verified_by_name') or verified_docs[0].get('verified_by')
+                req['verified_at'] = verified_docs[0].get('verified_at')
                 verified_count += 1
+            elif verified_docs:
+                # Partial verification
+                req['verified'] = False
+                req['all_verified'] = False
         
         # Check for linked form (if type is form)
         if item['type'] == 'form':
@@ -2224,15 +2262,24 @@ async def upload_document_for_requirement(
     employee_id: str,
     requirement_id: str = Form(...),
     file: UploadFile = File(...),
+    document_label: Optional[str] = Form(None),  # e.g., "Passport Front", "Visa"
     notes: Optional[str] = Form(None),
     user: dict = Depends(require_manager_or_admin)
 ):
-    """Upload a document directly linked to a requirement, replacing any existing"""
+    """Upload a document linked to a requirement. 
+    - Single-file requirements: replaces existing document
+    - Multi-file requirements: adds new document to the requirement
+    """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Get requirement config
+    all_items = MANDATORY_ITEMS['base'] + MANDATORY_ITEMS['training'] + MANDATORY_ITEMS['nurse_specific']
+    req_config = next((item for item in all_items if item['id'] == requirement_id), None)
+    allow_multiple = req_config.get('allow_multiple_files', False) if req_config else False
     
     # Get requirement name
     req_name = get_requirement_name(requirement_id) or requirement_id.replace('_', ' ').title()
@@ -2248,52 +2295,28 @@ async def upload_document_for_requirement(
         if doc_type:
             break
     
-    # Check for existing document with this requirement
-    existing_doc = await db.employee_documents.find_one({
-        "employee_id": employee_id,
-        "requirement_id": requirement_id
-    }, {"_id": 0})
-    
     # Upload file
     ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
     employee_name = f"{employee['first_name']}{employee['last_name']}"
-    filename = f"{employee_name}_{requirement_id}_{datetime.now(timezone.utc).strftime('%d-%m-%Y')}.{ext}"
+    timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H%M%S')
+    filename = f"{employee_name}_{requirement_id}_{timestamp}.{ext}"
     path = f"{APP_NAME}/documents/{employee_id}/{requirement_id}/{filename}"
     
     data = await file.read()
     put_object(path, data, file.content_type or "application/octet-stream")
     
-    if existing_doc:
-        # Update existing document
-        update_data = {
-            "file_url": path,
-            "original_filename": file.filename,
-            "status": DocumentStatus.UPLOADED,
-            "uploaded_by": user['user_id'],
-            "uploaded_at": now,
-            "notes": notes or existing_doc.get('notes'),
-            "version_number": existing_doc.get('version_number', 1) + 1,
-            "updated_at": now
-        }
-        await db.employee_documents.update_one({"id": existing_doc['id']}, {"$set": update_data})
-        doc_id = existing_doc['id']
-        
-        await log_audit_action(user['user_id'], "replace_document", "employee_document", doc_id, {
-            "requirement_id": requirement_id,
-            "filename": file.filename,
-            "version": update_data['version_number']
-        })
-    else:
-        # Create new document
+    if allow_multiple:
+        # Multi-file requirement: always create new document
         doc_id = str(uuid.uuid4())
         doc_data = {
             "id": doc_id,
             "employee_id": employee_id,
             "document_type_id": doc_type['id'] if doc_type else str(uuid.uuid4()),
             "document_type_name": doc_type['name'] if doc_type else req_name,
-            "category": doc_type['category'] if doc_type else "O_Other",
+            "category": req_config.get('category', 'O_Other') if req_config else (doc_type['category'] if doc_type else "O_Other"),
             "requirement_id": requirement_id,
             "requirement_name": req_name,
+            "document_label": document_label or file.filename,  # Use provided label or filename
             "file_url": path,
             "original_filename": file.filename,
             "status": DocumentStatus.UPLOADED,
@@ -2311,10 +2334,83 @@ async def upload_document_for_requirement(
         }
         await db.employee_documents.insert_one(doc_data)
         
-        await log_audit_action(user['user_id'], "upload_document", "employee_document", doc_id, {
-            "requirement_id": requirement_id,
-            "filename": file.filename
+        # Count total files for this requirement
+        doc_count = await db.employee_documents.count_documents({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id
         })
+        
+        await log_audit_action(user['user_id'], "add_document", "employee_document", doc_id, {
+            "requirement_id": requirement_id,
+            "filename": file.filename,
+            "document_label": document_label,
+            "total_files": doc_count
+        })
+    else:
+        # Single-file requirement: replace existing
+        existing_doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id
+        }, {"_id": 0})
+        
+        if existing_doc:
+            # Update existing document
+            update_data = {
+                "file_url": path,
+                "original_filename": file.filename,
+                "document_label": document_label,
+                "status": DocumentStatus.UPLOADED,
+                "uploaded_by": user['user_id'],
+                "uploaded_at": now,
+                "notes": notes or existing_doc.get('notes'),
+                "version_number": existing_doc.get('version_number', 1) + 1,
+                "verified": False,  # Reset verification on re-upload
+                "verified_by": None,
+                "verified_at": None,
+                "verified_by_name": None,
+                "updated_at": now
+            }
+            await db.employee_documents.update_one({"id": existing_doc['id']}, {"$set": update_data})
+            doc_id = existing_doc['id']
+            
+            await log_audit_action(user['user_id'], "replace_document", "employee_document", doc_id, {
+                "requirement_id": requirement_id,
+                "filename": file.filename,
+                "version": update_data['version_number']
+            })
+        else:
+            # Create new document
+            doc_id = str(uuid.uuid4())
+            doc_data = {
+                "id": doc_id,
+                "employee_id": employee_id,
+                "document_type_id": doc_type['id'] if doc_type else str(uuid.uuid4()),
+                "document_type_name": doc_type['name'] if doc_type else req_name,
+                "category": req_config.get('category', 'O_Other') if req_config else (doc_type['category'] if doc_type else "O_Other"),
+                "requirement_id": requirement_id,
+                "requirement_name": req_name,
+                "document_label": document_label,
+                "file_url": path,
+                "original_filename": file.filename,
+                "status": DocumentStatus.UPLOADED,
+                "uploaded_by": user['user_id'],
+                "uploaded_at": now,
+                "reviewed_by": None,
+                "reviewed_at": None,
+                "expiry_date": None,
+                "notes": notes,
+                "version_number": 1,
+                "verified": False,
+                "source_type": "manual",
+                "created_at": now,
+                "updated_at": now
+            }
+            await db.employee_documents.insert_one(doc_data)
+            
+            await log_audit_action(user['user_id'], "upload_document", "employee_document", doc_id, {
+                "requirement_id": requirement_id,
+                "filename": file.filename
+            })
     
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**doc)
@@ -2422,7 +2518,7 @@ async def unverify_employee_document(doc_id: str, user: dict = Depends(require_m
     """Remove verification from a document"""
     result = await db.employee_documents.update_one(
         {"id": doc_id},
-        {"$set": {"verified": False, "verified_by": None, "verified_at": None}}
+        {"$set": {"verified": False, "verified_by": None, "verified_at": None, "verified_by_name": None}}
     )
     
     if result.matched_count == 0:
@@ -2432,6 +2528,62 @@ async def unverify_employee_document(doc_id: str, user: dict = Depends(require_m
     
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**doc)
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")
+async def verify_requirement(employee_id: str, requirement_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Verify all documents under a requirement"""
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get verifier name
+    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
+    verifier_name = verifier.get('name') if verifier else None
+    
+    # Find all documents for this requirement
+    result = await db.employee_documents.update_many(
+        {
+            "employee_id": employee_id,
+            "requirement_id": requirement_id,
+            "status": {"$in": ["uploaded", "approved"]}
+        },
+        {"$set": {
+            "verified": True,
+            "verified_by": user['user_id'],
+            "verified_by_name": verifier_name,
+            "verified_at": now,
+            "status": "approved"
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "verify_requirement", "requirement", requirement_id, {
+        "employee_id": employee_id,
+        "documents_verified": result.modified_count
+    })
+    
+    return {"message": f"Verified {result.modified_count} documents", "verified_count": result.modified_count}
+
+@api_router.delete("/employee-documents/{doc_id}")
+async def delete_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Delete a specific document (for multi-file requirements)"""
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Check if this is a multi-file requirement - if single-file, don't allow delete
+    requirement_id = doc.get('requirement_id')
+    if requirement_id:
+        all_items = MANDATORY_ITEMS['base'] + MANDATORY_ITEMS['training'] + MANDATORY_ITEMS['nurse_specific']
+        req_config = next((item for item in all_items if item['id'] == requirement_id), None)
+        if req_config and not req_config.get('allow_multiple_files', False):
+            raise HTTPException(status_code=400, detail="Cannot delete document from single-file requirement. Use replace instead.")
+    
+    await db.employee_documents.delete_one({"id": doc_id})
+    
+    await log_audit_action(user['user_id'], "delete_document", "employee_document", doc_id, {
+        "requirement_id": requirement_id,
+        "filename": doc.get('original_filename')
+    })
+    
+    return {"message": "Document deleted successfully"}
 
 @api_router.get("/employee-documents/{doc_id}/file")
 async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_current_user)):

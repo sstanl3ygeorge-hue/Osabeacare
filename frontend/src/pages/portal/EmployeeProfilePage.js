@@ -88,6 +88,7 @@ export default function EmployeeProfilePage() {
   const [isImporting, setIsImporting] = useState(false);
   const [complianceRequirements, setComplianceRequirements] = useState(null);
   const [selectedRequirement, setSelectedRequirement] = useState('');
+  const [documentLabel, setDocumentLabel] = useState('');
   const { token, isAuditor, user } = useAuth();
   
   // Document preview modal state
@@ -318,6 +319,9 @@ export default function EmployeeProfilePage() {
       const formData = new FormData();
       formData.append('requirement_id', selectedRequirement);
       formData.append('file', uploadFile);
+      if (documentLabel) {
+        formData.append('document_label', documentLabel);
+      }
       
       await axios.post(`${API}/employees/${employeeId}/upload-document`, formData, {
         headers: { 
@@ -330,6 +334,7 @@ export default function EmployeeProfilePage() {
       setUploadDialogOpen(false);
       setSelectedRequirement('');
       setSelectedDocType('');
+      setDocumentLabel('');
       setUploadFile(null);
       fetchData();
     } catch (error) {
@@ -388,6 +393,32 @@ export default function EmployeeProfilePage() {
     } catch (error) {
       toast.dismiss();
       toast.error(error.response?.data?.detail || 'Failed to save form as document');
+    }
+  };
+
+  // Verify all documents under a requirement
+  const handleVerifyRequirement = async (requirementId) => {
+    try {
+      await axios.post(`${API}/employees/${employeeId}/requirements/${requirementId}/verify-all`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Requirement verified');
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to verify requirement');
+    }
+  };
+
+  // Delete a specific document (for multi-file requirements)
+  const handleDeleteDocument = async (docId) => {
+    try {
+      await axios.delete(`${API}/employee-documents/${docId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Document deleted');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete document');
     }
   };
 
@@ -802,19 +833,50 @@ export default function EmployeeProfilePage() {
                                     req.status === 'in_progress' ? 'bg-warning' : 'bg-gray-300'
                                   }`} />
                                   {req.name}
-                                  {req.document && <span className="text-xs text-text-muted">(has file)</span>}
+                                  {req.allow_multiple_files && <span className="text-xs bg-info/20 text-info px-1 rounded">Multi</span>}
+                                  {req.document_count > 0 && <span className="text-xs text-text-muted">({req.document_count} file{req.document_count !== 1 ? 's' : ''})</span>}
                                 </div>
                               </SelectItem>
                             ))}
                         </SelectContent>
                       </Select>
-                      {selectedRequirement && complianceRequirements?.requirements?.find(r => r.id === selectedRequirement)?.document && (
-                        <p className="text-xs text-warning flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          This will replace the existing document
-                        </p>
-                      )}
+                      {selectedRequirement && (() => {
+                        const selectedReq = complianceRequirements?.requirements?.find(r => r.id === selectedRequirement);
+                        if (selectedReq?.document_count > 0 && !selectedReq?.allow_multiple_files) {
+                          return (
+                            <p className="text-xs text-warning flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              This will replace the existing document
+                            </p>
+                          );
+                        }
+                        if (selectedReq?.allow_multiple_files) {
+                          return (
+                            <p className="text-xs text-info flex items-center gap-1">
+                              This requirement accepts multiple files
+                            </p>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
+                    {/* Document Label for multi-file requirements */}
+                    {selectedRequirement && complianceRequirements?.requirements?.find(r => r.id === selectedRequirement)?.allow_multiple_files && (
+                      <div className="space-y-2">
+                        <Label>Document Label (optional)</Label>
+                        <Input
+                          type="text"
+                          placeholder="e.g., Passport Front, Visa, BRP Card"
+                          value={documentLabel || ''}
+                          onChange={(e) => setDocumentLabel(e.target.value)}
+                          className="rounded-xl"
+                          data-testid="doc-label-input"
+                        />
+                        <p className="text-xs text-text-muted">
+                          Give this file a descriptive name to help identify it.
+                        </p>
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <Label>File</Label>
                       <Input
@@ -828,7 +890,7 @@ export default function EmployeeProfilePage() {
                       </p>
                     </div>
                     <div className="flex justify-end gap-3 pt-4">
-                      <Button type="button" variant="outline" onClick={() => { setUploadDialogOpen(false); setSelectedRequirement(''); }} className="rounded-xl">
+                      <Button type="button" variant="outline" onClick={() => { setUploadDialogOpen(false); setSelectedRequirement(''); setDocumentLabel(''); }} className="rounded-xl">
                         Cancel
                       </Button>
                       <Button type="submit" disabled={isUploading || !selectedRequirement} className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="upload-submit">
@@ -1408,18 +1470,24 @@ export default function EmployeeProfilePage() {
                           </span>
                         </div>
                         <div className="space-y-2">
-                          {categoryItems.map((req) => (
+                          {categoryItems.map((req) => {
+                            const docs = req.documents || [];
+                            const hasFiles = docs.length > 0;
+                            const verifiedDocs = docs.filter(d => d.verified);
+                            const allVerified = hasFiles && verifiedDocs.length === docs.length;
+                            
+                            return (
                             <div 
                               key={req.id} 
                               className={`flex items-center justify-between p-3 rounded-xl border ${
-                                req.verified ? 'bg-success/5 border-success/20' :
+                                allVerified || req.verified ? 'bg-success/5 border-success/20' :
                                 req.status === 'completed' ? 'bg-info/5 border-info/20' :
                                 req.status === 'in_progress' || req.status === 'pending' ? 'bg-warning/5 border-warning/20' :
                                 'bg-error/5 border-error/20'
                               }`}
                             >
                               <div className="flex items-center gap-3">
-                                {req.verified ? (
+                                {allVerified || req.verified ? (
                                   <Shield className="h-5 w-5 text-success" />
                                 ) : req.status === 'completed' ? (
                                   <CheckCircle className="h-5 w-5 text-info" />
@@ -1429,15 +1497,27 @@ export default function EmployeeProfilePage() {
                                   <XCircle className="h-5 w-5 text-error" />
                                 )}
                                 <div>
-                                  <p className="font-medium text-text-primary">{req.name}</p>
-                                  {req.document && (
-                                    <p className="text-xs text-text-muted flex items-center gap-1">
-                                      <FileText className="h-3 w-3" />
-                                      {req.document.original_filename || 'Document uploaded'}
-                                      {req.document.version_number > 1 && (
-                                        <span className="text-primary"> (v{req.document.version_number})</span>
+                                  <p className="font-medium text-text-primary">
+                                    {req.name}
+                                    {req.allow_multiple_files && docs.length > 0 && (
+                                      <span className="ml-2 text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                                        {docs.length} file{docs.length !== 1 ? 's' : ''}
+                                      </span>
+                                    )}
+                                  </p>
+                                  {docs.length > 0 && (
+                                    <div className="text-xs text-text-muted space-y-0.5 mt-1">
+                                      {docs.slice(0, 3).map((doc, idx) => (
+                                        <p key={doc.id} className="flex items-center gap-1">
+                                          <FileText className="h-3 w-3" />
+                                          {doc.document_label || doc.original_filename || 'Document uploaded'}
+                                          {doc.verified && <CheckCircle className="h-3 w-3 text-success" />}
+                                        </p>
+                                      ))}
+                                      {docs.length > 3 && (
+                                        <p className="text-primary">+{docs.length - 3} more</p>
                                       )}
-                                    </p>
+                                    </div>
                                   )}
                                   {req.form && (
                                     <p className="text-xs text-text-muted flex items-center gap-1">
@@ -1455,18 +1535,18 @@ export default function EmployeeProfilePage() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                                  req.verified ? 'bg-success/10 text-success' :
+                                  allVerified || req.verified ? 'bg-success/10 text-success' :
                                   req.status === 'completed' ? 'bg-info/10 text-info' :
                                   req.status === 'in_progress' || req.status === 'pending' ? 'bg-warning/10 text-warning' :
                                   'bg-error/10 text-error'
                                 }`}>
-                                  {req.verified ? 'Verified' :
+                                  {allVerified || req.verified ? 'Verified' :
                                    req.status === 'completed' ? 'Complete' :
                                    req.status === 'pending' ? 'Pending' :
                                    req.status === 'in_progress' ? 'In Progress' :
                                    'Missing'}
                                 </span>
-                                {!req.document && req.type === 'document' && (
+                                {docs.length === 0 && req.type === 'document' && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
@@ -1477,20 +1557,20 @@ export default function EmployeeProfilePage() {
                                     Upload
                                   </Button>
                                 )}
-                                {req.document && !req.verified && req.status === 'completed' && (
+                                {docs.length > 0 && !allVerified && req.status === 'completed' && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
-                                    onClick={() => handleVerifyDocument(req.document.id)}
+                                    onClick={() => handleVerifyRequirement(req.id)}
                                     className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
                                   >
                                     <Shield className="h-3 w-3 mr-1" />
-                                    Verify
+                                    Verify All
                                   </Button>
                                 )}
                               </div>
                             </div>
-                          ))}
+                          )})}
                         </div>
                       </div>
                     );
@@ -1501,20 +1581,20 @@ export default function EmployeeProfilePage() {
           </Card>
         </TabsContent>
 
-        {/* Documents Tab - Requirement-based view (one row per requirement slot) */}
+        {/* Documents Tab - Requirement-based view (supports multi-file requirements) */}
         <TabsContent value="documents">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between border-b border-[#E4E8EB]">
               <div>
                 <CardTitle className="font-heading text-lg">Document Requirements</CardTitle>
                 <p className="text-sm text-text-muted mt-1">
-                  One document per requirement slot. Re-uploading replaces the existing file.
+                  Upload documents for each requirement. Multi-file requirements accept multiple files.
                 </p>
               </div>
               {complianceRequirements && (
                 <div className="flex items-center gap-3 text-sm">
                   <span className="text-text-muted">
-                    {complianceRequirements.requirements.filter(r => r.type === 'document' && r.document).length} / {complianceRequirements.requirements.filter(r => r.type === 'document').length} uploaded
+                    {complianceRequirements.requirements.filter(r => (r.type === 'document') && r.document_count > 0).length} / {complianceRequirements.requirements.filter(r => r.type === 'document').length} requirements with files
                   </span>
                 </div>
               )}
@@ -1525,186 +1605,244 @@ export default function EmployeeProfilePage() {
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Requirement</th>
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Category</th>
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Document</th>
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
-                        <th className="text-left p-4 font-medium text-text-muted text-sm">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {complianceRequirements.requirements
-                        .filter(req => req.type === 'document' || req.type === 'db_record')
-                        .map((req) => {
-                          const doc = req.document;
-                          return (
-                            <tr key={req.id} className={`border-b border-[#E4E8EB] ${
-                              !doc ? 'bg-error/5' : 
-                              req.verified ? 'bg-success/5' : ''
-                            }`}>
-                              <td className="p-4">
+                <div className="divide-y divide-[#E4E8EB]">
+                  {complianceRequirements.requirements
+                    .filter(req => req.type === 'document' || req.type === 'db_record')
+                    .map((req) => {
+                      const docs = req.documents || [];
+                      const hasFiles = docs.length > 0;
+                      const verifiedDocs = docs.filter(d => d.verified);
+                      const allVerified = hasFiles && verifiedDocs.length === docs.length && docs.length >= (req.min_files || 1);
+                      const isComplete = req.status === 'completed';
+                      
+                      return (
+                        <div key={req.id} className={`p-4 ${
+                          !hasFiles ? 'bg-error/5' : 
+                          allVerified ? 'bg-success/5' : ''
+                        }`}>
+                          {/* Requirement Header Row */}
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
                                 <p className="font-medium text-text-primary">{req.name}</p>
-                              </td>
-                              <td className="p-4 text-text-muted text-sm">
+                                {req.allow_multiple_files && (
+                                  <span className="text-xs bg-info/10 text-info px-1.5 py-0.5 rounded">
+                                    Multi-file
+                                  </span>
+                                )}
+                                {docs.length > 0 && (
+                                  <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                                    {docs.length} file{docs.length !== 1 ? 's' : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-text-muted mt-0.5">
                                 {req.category?.replace(/_/g, ' ').replace(/^[A-Z]_/, '')}
-                              </td>
-                              <td className="p-4">
-                                {doc ? (
-                                  <div>
-                                    <p className="text-sm text-text-primary">{doc.original_filename || 'File uploaded'}</p>
-                                    <div className="flex items-center gap-2 mt-1">
-                                      {doc.version_number > 1 && (
-                                        <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                                          v{doc.version_number}
-                                        </span>
-                                      )}
-                                      {doc.source_type && (
-                                        <span className="text-xs bg-[#F0F4F5] text-text-muted px-1.5 py-0.5 rounded">
-                                          {doc.source_type === 'form_submission' ? 'From Form' : 
-                                           doc.source_type === 'imported' ? 'Imported' : 'Manual'}
-                                        </span>
-                                      )}
-                                      <span className="text-xs text-text-muted">
-                                        {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : ''}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <span className="text-sm text-error">Not uploaded</span>
-                                )}
-                              </td>
-                              <td className="p-4">
-                                {doc ? (
-                                  <div className="flex flex-col gap-1">
-                                    <span className={`status-chip ${statusColors[doc.status]}`}>
-                                      {doc.status?.replace('_', ' ')}
-                                    </span>
-                                    {req.verified ? (
-                                      <span className="flex items-center gap-1 text-xs text-success">
-                                        <Shield className="h-3 w-3" />
-                                        Verified
-                                        {req.verified_by && <span className="text-text-muted">by {req.verified_by}</span>}
-                                      </span>
-                                    ) : doc.status === 'approved' ? (
-                                      <span className="text-xs text-warning">Awaiting verification</span>
-                                    ) : null}
-                                  </div>
-                                ) : (
-                                  <span className="text-xs bg-error/10 text-error px-2 py-1 rounded-lg">Missing</span>
-                                )}
-                              </td>
-                              <td className="p-4">
-                                <div className="flex gap-2 flex-wrap">
-                                  {doc?.file_url && (
-                                    <>
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        className="rounded-lg"
-                                        onClick={() => handlePreviewDocument(
-                                          `${API}/employee-documents/${doc.id}/file`,
-                                          doc.document_type,
-                                          doc.original_filename
-                                        )}
-                                        data-testid={`view-doc-${req.id}`}
-                                      >
-                                        <Eye className="h-4 w-4 mr-1" />
-                                        View
-                                      </Button>
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        className="rounded-lg"
-                                        onClick={async () => {
-                                          try {
-                                            const response = await axios.get(`${API}/employee-documents/${doc.id}/download`, {
-                                              headers: { Authorization: `Bearer ${token}` },
-                                              responseType: 'blob'
-                                            });
-                                            const blob = new Blob([response.data]);
-                                            const url = URL.createObjectURL(blob);
-                                            const link = document.createElement('a');
-                                            link.href = url;
-                                            link.download = doc.original_filename || 'document';
-                                            link.click();
-                                            URL.revokeObjectURL(url);
-                                            toast.success('Document downloaded');
-                                          } catch (error) {
-                                            toast.error('Failed to download');
-                                          }
-                                        }}
-                                        data-testid={`download-doc-${req.id}`}
-                                      >
-                                        <FileDown className="h-4 w-4 mr-1" />
-                                        Download
-                                      </Button>
-                                    </>
-                                  )}
-                                  {!isAuditor() && doc?.status === 'uploaded' && (
-                                    <>
-                                      <Button 
-                                        size="sm" 
-                                        onClick={() => handleUpdateDocumentStatus(doc.id, 'approved')}
-                                        className="bg-success hover:bg-success/90 text-white rounded-lg"
-                                      >
-                                        Approve
-                                      </Button>
-                                      <Button 
-                                        size="sm" 
-                                        variant="outline"
-                                        onClick={() => handleUpdateDocumentStatus(doc.id, 'rejected')}
-                                        className="text-error border-error hover:bg-error/10 rounded-lg"
-                                      >
-                                        Reject
-                                      </Button>
-                                    </>
-                                  )}
-                                  {!isAuditor() && doc?.status === 'approved' && !req.verified && (
+                                {req.min_files > 1 && ` • Min ${req.min_files} files required`}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {/* Status Badge */}
+                              <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                                allVerified ? 'bg-success/10 text-success' :
+                                isComplete ? 'bg-info/10 text-info' :
+                                hasFiles ? 'bg-warning/10 text-warning' :
+                                'bg-error/10 text-error'
+                              }`}>
+                                {allVerified ? 'Verified' :
+                                 isComplete ? 'Complete' :
+                                 hasFiles ? 'In Progress' :
+                                 'Missing'}
+                              </span>
+                              
+                              {/* Action Buttons */}
+                              {!isAuditor() && (
+                                <>
+                                  {hasFiles && !allVerified && isComplete && (
                                     <Button 
                                       size="sm" 
                                       variant="outline"
-                                      onClick={() => handleVerifyDocument(doc.id)}
-                                      className="text-success border-success hover:bg-success/10 rounded-lg"
-                                      data-testid={`verify-doc-${req.id}`}
+                                      onClick={() => handleVerifyRequirement(req.id)}
+                                      className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
+                                      data-testid={`verify-all-${req.id}`}
                                     >
                                       <Shield className="h-3 w-3 mr-1" />
-                                      Verify
+                                      Verify All
                                     </Button>
                                   )}
-                                  {!isAuditor() && req.verified && (
-                                    <Button 
-                                      size="sm" 
-                                      variant="ghost"
-                                      onClick={() => handleUnverifyDocument(doc.id)}
-                                      className="text-text-muted hover:text-error rounded-lg"
-                                      title="Remove verification"
-                                    >
-                                      <XCircle className="h-3 w-3" />
-                                    </Button>
-                                  )}
-                                  {!isAuditor() && (
-                                    <Button 
-                                      size="sm" 
-                                      variant={doc ? "ghost" : "default"}
-                                      className={doc ? "text-text-muted rounded-lg" : "bg-primary hover:bg-primary-hover text-white rounded-lg"}
-                                      onClick={() => { setSelectedRequirement(req.id); setUploadDialogOpen(true); }}
-                                      data-testid={`upload-btn-${req.id}`}
-                                    >
-                                      <Upload className="h-4 w-4 mr-1" />
-                                      {doc ? 'Replace' : 'Upload'}
-                                    </Button>
-                                  )}
+                                  <Button 
+                                    size="sm" 
+                                    variant={hasFiles && !req.allow_multiple_files ? "ghost" : "default"}
+                                    className={hasFiles && !req.allow_multiple_files ? "text-text-muted rounded-lg h-7 text-xs" : "bg-primary hover:bg-primary-hover text-white rounded-lg h-7 text-xs"}
+                                    onClick={() => { setSelectedRequirement(req.id); setUploadDialogOpen(true); }}
+                                    data-testid={`upload-btn-${req.id}`}
+                                  >
+                                    <Upload className="h-3 w-3 mr-1" />
+                                    {!hasFiles ? 'Upload' : req.allow_multiple_files ? 'Add File' : 'Replace'}
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Files List */}
+                          {docs.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              {docs.map((doc, idx) => (
+                                <div 
+                                  key={doc.id} 
+                                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                                    doc.verified ? 'border-success/30 bg-success/5' : 'border-[#E4E8EB] bg-white'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                                    <FileText className="h-5 w-5 text-text-muted flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium text-text-primary truncate">
+                                        {doc.document_label || doc.original_filename || 'Document'}
+                                      </p>
+                                      <div className="flex items-center gap-2 text-xs text-text-muted">
+                                        {doc.version_number > 1 && (
+                                          <span className="text-primary">v{doc.version_number}</span>
+                                        )}
+                                        {doc.source_type && (
+                                          <span>
+                                            {doc.source_type === 'form_submission' ? 'From Form' : 
+                                             doc.source_type === 'imported' ? 'Imported' : 'Manual'}
+                                          </span>
+                                        )}
+                                        {doc.uploaded_at && (
+                                          <span>{new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                                        )}
+                                        {doc.verified && (
+                                          <span className="flex items-center gap-1 text-success">
+                                            <Shield className="h-3 w-3" />
+                                            Verified
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  {/* File Actions */}
+                                  <div className="flex items-center gap-1">
+                                    {doc.file_url && (
+                                      <>
+                                        <Button 
+                                          size="sm" 
+                                          variant="ghost"
+                                          className="h-8 w-8 p-0 rounded-lg"
+                                          onClick={() => handlePreviewDocument(
+                                            `${API}/employee-documents/${doc.id}/file`,
+                                            doc.document_type,
+                                            doc.original_filename
+                                          )}
+                                          title="View"
+                                        >
+                                          <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button 
+                                          size="sm" 
+                                          variant="ghost"
+                                          className="h-8 w-8 p-0 rounded-lg"
+                                          onClick={async () => {
+                                            try {
+                                              const response = await axios.get(`${API}/employee-documents/${doc.id}/download`, {
+                                                headers: { Authorization: `Bearer ${token}` },
+                                                responseType: 'blob'
+                                              });
+                                              const blob = new Blob([response.data]);
+                                              const url = URL.createObjectURL(blob);
+                                              const link = document.createElement('a');
+                                              link.href = url;
+                                              link.download = doc.original_filename || 'document';
+                                              link.click();
+                                              URL.revokeObjectURL(url);
+                                              toast.success('Downloaded');
+                                            } catch (error) {
+                                              toast.error('Failed to download');
+                                            }
+                                          }}
+                                          title="Download"
+                                        >
+                                          <FileDown className="h-4 w-4" />
+                                        </Button>
+                                      </>
+                                    )}
+                                    {!isAuditor() && doc.status === 'uploaded' && (
+                                      <>
+                                        <Button 
+                                          size="sm" 
+                                          variant="ghost"
+                                          className="h-8 w-8 p-0 rounded-lg text-success hover:bg-success/10"
+                                          onClick={() => handleUpdateDocumentStatus(doc.id, 'approved')}
+                                          title="Approve"
+                                        >
+                                          <CheckCircle className="h-4 w-4" />
+                                        </Button>
+                                        <Button 
+                                          size="sm" 
+                                          variant="ghost"
+                                          className="h-8 w-8 p-0 rounded-lg text-error hover:bg-error/10"
+                                          onClick={() => handleUpdateDocumentStatus(doc.id, 'rejected')}
+                                          title="Reject"
+                                        >
+                                          <XCircle className="h-4 w-4" />
+                                        </Button>
+                                      </>
+                                    )}
+                                    {!isAuditor() && doc.status === 'approved' && !doc.verified && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0 rounded-lg text-success hover:bg-success/10"
+                                        onClick={() => handleVerifyDocument(doc.id)}
+                                        title="Verify"
+                                      >
+                                        <Shield className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    {!isAuditor() && doc.verified && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0 rounded-lg text-text-muted hover:text-error"
+                                        onClick={() => handleUnverifyDocument(doc.id)}
+                                        title="Remove verification"
+                                      >
+                                        <XCircle className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    {!isAuditor() && req.allow_multiple_files && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0 rounded-lg text-text-muted hover:text-error hover:bg-error/10"
+                                        onClick={() => {
+                                          if (window.confirm('Delete this file?')) {
+                                            handleDeleteDocument(doc.id);
+                                          }
+                                        }}
+                                        title="Delete file"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                  </div>
                                 </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Empty State for Missing Files */}
+                          {!hasFiles && (
+                            <div className="mt-2 p-3 rounded-lg border border-dashed border-error/30 bg-error/5 text-center">
+                              <p className="text-sm text-error">No files uploaded</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </CardContent>

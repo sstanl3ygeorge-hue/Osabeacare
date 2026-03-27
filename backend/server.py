@@ -2904,6 +2904,270 @@ async def upload_training_certificate(record_id: str, file: UploadFile = File(..
     updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
     return TrainingRecordResponse(**updated)
 
+
+async def update_employee_compliance(employee_id: str):
+    """Helper function to recalculate and update employee compliance percentage"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if employee:
+        compliance = await calculate_employee_compliance(employee_id, employee.get("role", ""))
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {"completion_percentage": compliance["completion_percentage"]}}
+        )
+
+
+class CompleteTrainingRequest(BaseModel):
+    """Request to complete a training requirement"""
+    requirement_id: str  # The requirement ID from MANDATORY_ITEMS (e.g., 'safeguarding', 'manual_handling')
+    completion_date: Optional[str] = None  # ISO date string, defaults to now
+    expiry_date: Optional[str] = None  # Optional expiry date
+    notes: Optional[str] = None
+    link_existing_id: Optional[str] = None  # If linking to existing training record
+
+
+@api_router.post("/employees/{employee_id}/complete-training")
+async def complete_training_requirement(
+    employee_id: str, 
+    request: CompleteTrainingRequest, 
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Complete a training requirement for an employee.
+    - If link_existing_id is provided, links that existing training record to this requirement
+    - Otherwise, creates a new completed training record
+    - PREVENTS DUPLICATES: Checks if requirement already has a training record
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get the requirement config from MANDATORY_ITEMS
+    all_items = MANDATORY_ITEMS['base'] + MANDATORY_ITEMS['training'] + MANDATORY_ITEMS['nurse_specific']
+    requirement = next((item for item in all_items if item['id'] == request.requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {request.requirement_id}")
+    
+    if requirement.get('type') != 'training':
+        raise HTTPException(status_code=400, detail=f"Requirement {request.requirement_id} is not a training requirement")
+    
+    training_name = requirement.get('training_name', requirement['name'])
+    now = datetime.now(timezone.utc).isoformat()
+    completion_date = request.completion_date or now
+    
+    # Check if there's already a completed training record for this requirement
+    # Use the same matching logic as check_item_completion
+    existing_training = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"training_name": {"$regex": training_name, "$options": "i"}},
+            {"training_name": {"$regex": training_name.replace(" ", ""), "$options": "i"}}
+        ],
+        "status": "completed"
+    }, {"_id": 0})
+    
+    if existing_training:
+        return {
+            "success": True,
+            "message": f"Training requirement '{requirement['name']}' is already completed",
+            "training_record": existing_training,
+            "action": "already_completed"
+        }
+    
+    # If linking to existing record
+    if request.link_existing_id:
+        existing_record = await db.training_records.find_one({"id": request.link_existing_id}, {"_id": 0})
+        if not existing_record:
+            raise HTTPException(status_code=404, detail="Existing training record not found")
+        
+        if existing_record['employee_id'] != employee_id:
+            raise HTTPException(status_code=400, detail="Training record belongs to a different employee")
+        
+        # Update the existing record to mark it completed and link to requirement
+        await db.training_records.update_one(
+            {"id": request.link_existing_id},
+            {"$set": {
+                "status": "completed",
+                "completion_date": completion_date,
+                "expiry_date": request.expiry_date,
+                "requirement_id": request.requirement_id,
+                "updated_at": now
+            }}
+        )
+        
+        updated_record = await db.training_records.find_one({"id": request.link_existing_id}, {"_id": 0})
+        
+        await log_audit_action(
+            user['user_id'], 
+            "link_training", 
+            "training_record", 
+            request.link_existing_id, 
+            {"requirement_id": request.requirement_id, "training_name": training_name}
+        )
+        
+        # Update employee compliance percentage
+        await update_employee_compliance(employee_id)
+        
+        return {
+            "success": True,
+            "message": f"Linked existing training to requirement '{requirement['name']}'",
+            "training_record": updated_record,
+            "action": "linked"
+        }
+    
+    # Create new completed training record
+    # First check for any existing record (even incomplete) for this training type
+    existing_incomplete = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"training_name": {"$regex": training_name, "$options": "i"}},
+            {"training_name": {"$regex": training_name.replace(" ", ""), "$options": "i"}}
+        ]
+    }, {"_id": 0})
+    
+    if existing_incomplete:
+        # Update the existing record instead of creating a new one
+        await db.training_records.update_one(
+            {"id": existing_incomplete['id']},
+            {"$set": {
+                "status": "completed",
+                "completion_date": completion_date,
+                "expiry_date": request.expiry_date,
+                "requirement_id": request.requirement_id,
+                "updated_at": now
+            }}
+        )
+        
+        updated_record = await db.training_records.find_one({"id": existing_incomplete['id']}, {"_id": 0})
+        
+        await log_audit_action(
+            user['user_id'], 
+            "complete_training", 
+            "training_record", 
+            existing_incomplete['id'], 
+            {"requirement_id": request.requirement_id, "training_name": training_name}
+        )
+        
+        # Update employee compliance percentage
+        await update_employee_compliance(employee_id)
+        
+        return {
+            "success": True,
+            "message": f"Training requirement '{requirement['name']}' marked as complete",
+            "training_record": updated_record,
+            "action": "updated"
+        }
+    
+    # Create brand new training record
+    record_id = str(uuid.uuid4())
+    new_record = {
+        "id": record_id,
+        "employee_id": employee_id,
+        "training_name": training_name,
+        "mandatory": True,
+        "status": "completed",
+        "completion_date": completion_date,
+        "expiry_date": request.expiry_date,
+        "certificate_url": None,
+        "requirement_id": request.requirement_id,
+        "created_at": now
+    }
+    
+    await db.training_records.insert_one(new_record)
+    
+    await log_audit_action(
+        user['user_id'], 
+        "complete_training", 
+        "training_record", 
+        record_id, 
+        {"requirement_id": request.requirement_id, "training_name": training_name}
+    )
+    
+    # Update employee compliance percentage
+    await update_employee_compliance(employee_id)
+    
+    # Return without _id
+    if '_id' in new_record:
+        del new_record['_id']
+    
+    return {
+        "success": True,
+        "message": f"Training requirement '{requirement['name']}' marked as complete",
+        "training_record": {k: v for k, v in new_record.items() if k != '_id'},
+        "action": "created"
+    }
+
+
+@api_router.get("/employees/{employee_id}/training-requirements")
+async def get_employee_training_requirements(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all training requirements for an employee with their current status.
+    Returns the requirement definition along with any linked training records.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get all training items for the employee's role
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    training_items = [item for item in all_items if item.get('type') == 'training']
+    
+    # Get all training records for the employee
+    training_records = await db.training_records.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).to_list(100)
+    
+    requirements = []
+    for item in training_items:
+        training_name = item.get('training_name', item['name'])
+        
+        # Find matching training record (same logic as check_item_completion)
+        linked_record = None
+        for record in training_records:
+            record_name = record.get('training_name', '')
+            if (training_name.lower() in record_name.lower() or 
+                record_name.lower() in training_name.lower()):
+                linked_record = record
+                break
+        
+        status = 'missing'
+        if linked_record:
+            if linked_record.get('status') == 'completed':
+                status = 'completed'
+            elif linked_record.get('status') in ['in_progress', 'scheduled']:
+                status = 'in_progress'
+            else:
+                status = 'pending'
+        
+        requirements.append({
+            "requirement_id": item['id'],
+            "name": item['name'],
+            "training_name": training_name,
+            "category": item.get('category', 'N_Training'),
+            "status": status,
+            "training_record": linked_record,
+            "is_complete": status == 'completed'
+        })
+    
+    completed_count = sum(1 for r in requirements if r['is_complete'])
+    
+    return {
+        "employee_id": employee_id,
+        "requirements": requirements,
+        "summary": {
+            "total": len(requirements),
+            "completed": completed_count,
+            "missing": len(requirements) - completed_count
+        }
+    }
+
+
 # ==================== DASHBOARD ROUTES ====================
 
 @api_router.get("/dashboard/stats", response_model=DashboardStats)

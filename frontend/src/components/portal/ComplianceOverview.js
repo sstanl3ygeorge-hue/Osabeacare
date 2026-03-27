@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Button } from '../ui/button';
 import { 
   Shield, ShieldCheck, ShieldAlert, ShieldX,
   GraduationCap, FileCheck, Fingerprint, BadgeCheck,
-  ClipboardCheck, Pill, Calendar, RefreshCw
+  ClipboardCheck, Pill, Calendar, RefreshCw, CheckCircle
 } from 'lucide-react';
 
 // Define the key compliance items
@@ -129,6 +130,8 @@ export default function ComplianceOverview({
   training, 
   policies,
   generatedForms,
+  onCompleteTraining,
+  isAuditor = false,
   className = "" 
 }) {
   // Calculate compliance status for each item
@@ -370,6 +373,20 @@ export default function ComplianceOverview({
                       </div>
                     )}
                   </div>
+                  
+                  {/* Action Button for training items */}
+                  {item.trainingType && item.status === 'missing' && !isAuditor && onCompleteTraining && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onCompleteTraining(item)}
+                      className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                      data-testid={`complete-training-overview-${item.id}`}
+                    >
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Complete
+                    </Button>
+                  )}
                   
                   {/* Status Badge */}
                   <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${config.bgColor} min-w-[85px] justify-center`}>

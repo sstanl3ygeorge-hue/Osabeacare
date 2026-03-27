@@ -94,6 +94,13 @@ export default function EmployeeProfilePage() {
   const [importDocType, setImportDocType] = useState('');
   const [importDocFile, setImportDocFile] = useState(null);
   const [importDocNotes, setImportDocNotes] = useState('');
+  
+  // Training completion dialog states
+  const [trainingDialogOpen, setTrainingDialogOpen] = useState(false);
+  const [selectedTrainingReq, setSelectedTrainingReq] = useState(null);
+  const [trainingExpiryDate, setTrainingExpiryDate] = useState('');
+  const [isCompletingTraining, setIsCompletingTraining] = useState(false);
+  
   const { token, isAuditor, user } = useAuth();
   
   // Document preview modal state
@@ -597,6 +604,45 @@ export default function EmployeeProfilePage() {
     } finally {
       setIsImporting(false);
     }
+  };
+
+  // Handle completing a training requirement
+  const handleCompleteTraining = async () => {
+    if (!selectedTrainingReq) {
+      toast.error('No training requirement selected');
+      return;
+    }
+    
+    setIsCompletingTraining(true);
+    
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/complete-training`,
+        {
+          requirement_id: selectedTrainingReq.id,
+          expiry_date: trainingExpiryDate || null
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(response.data.message || 'Training marked as complete');
+      setTrainingDialogOpen(false);
+      setSelectedTrainingReq(null);
+      setTrainingExpiryDate('');
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to complete training');
+    } finally {
+      setIsCompletingTraining(false);
+    }
+  };
+  
+  // Open training completion dialog
+  const openTrainingDialog = (requirement) => {
+    setSelectedTrainingReq(requirement);
+    setTrainingExpiryDate('');
+    setTrainingDialogOpen(true);
   };
 
   const toggleTemplateSelection = (templateId) => {
@@ -1290,6 +1336,30 @@ export default function EmployeeProfilePage() {
                           <SelectValue placeholder="Select document type" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="recruitment_checklist">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-primary" />
+                              Recruitment Compliance Checklist
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="personal_info">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-info" />
+                              Personal Information Form
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="interview_record">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-primary" />
+                              Interview Record Form
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="equal_opportunities">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-success" />
+                              Equal Opportunities Monitoring
+                            </div>
+                          </SelectItem>
                           <SelectItem value="reference_1">
                             <div className="flex items-center gap-2">
                               <span className="w-2 h-2 rounded-full bg-warning" />
@@ -1619,6 +1689,25 @@ export default function EmployeeProfilePage() {
             training={training}
             policies={policies}
             generatedForms={generatedForms}
+            isAuditor={isAuditor()}
+            onCompleteTraining={(item) => {
+              // Map the ComplianceOverview item format to requirement format
+              // The trainingType corresponds to the requirement_id in MANDATORY_ITEMS
+              const trainingReqMapping = {
+                'safeguarding': { id: 'safeguarding', name: 'Safeguarding Training', category: 'N_Training' },
+                'manual_handling': { id: 'manual_handling', name: 'Manual Handling Training', category: 'N_Training' },
+                'infection_control': { id: 'infection_control', name: 'Infection Control Training', category: 'N_Training' },
+                'basic_life_support': { id: 'bls', name: 'Basic Life Support (BLS)', category: 'N_Training' },
+                'medication': { id: 'medication_competency', name: 'Medication Competency', category: 'N_Training' },
+                'induction': { id: 'induction', name: 'Induction & Competency Assessment', category: 'J_Induction_Shadowing_Observations' }
+              };
+              const reqData = trainingReqMapping[item.trainingType] || {
+                id: item.trainingType || item.id,
+                name: item.name,
+                category: 'N_Training'
+              };
+              openTrainingDialog(reqData);
+            }}
           />
         </TabsContent>
 
@@ -1766,6 +1855,19 @@ export default function EmployeeProfilePage() {
                                   >
                                     <Shield className="h-3 w-3 mr-1" />
                                     Verify All
+                                  </Button>
+                                )}
+                                {/* Training completion button */}
+                                {req.type === 'training' && req.status !== 'completed' && !isAuditor() && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => openTrainingDialog(req)}
+                                    className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                                    data-testid={`complete-training-${req.id}`}
+                                  >
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    Mark Complete
                                   </Button>
                                 )}
                               </div>
@@ -2338,6 +2440,93 @@ export default function EmployeeProfilePage() {
             <Button onClick={handlePermanentDelete} className="bg-red-600 hover:bg-red-700 text-white rounded-xl">
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Training Completion Dialog */}
+      <Dialog open={trainingDialogOpen} onOpenChange={setTrainingDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-text-primary">
+              <GraduationCap className="h-5 w-5 text-primary" />
+              Mark Training Complete
+            </DialogTitle>
+            <DialogDescription className="text-text-muted">
+              Mark this training requirement as completed for the employee.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedTrainingReq && (
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-[#F8FAFA] rounded-xl">
+                <p className="font-medium text-text-primary">{selectedTrainingReq.name}</p>
+                <p className="text-sm text-text-muted mt-1">
+                  Category: {selectedTrainingReq.category?.replace(/_/g, ' ').replace(/^[A-Z]_/, '')}
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label className="text-text-primary">Expiry Date (Optional)</Label>
+                <Input
+                  type="date"
+                  value={trainingExpiryDate}
+                  onChange={(e) => setTrainingExpiryDate(e.target.value)}
+                  className="rounded-xl"
+                  placeholder="Leave empty if no expiry"
+                />
+                <p className="text-xs text-text-muted">
+                  Set an expiry date if this training needs to be renewed
+                </p>
+              </div>
+              
+              <div className="bg-info/10 border border-info/20 rounded-xl p-3">
+                <p className="text-sm text-info font-medium">What happens:</p>
+                <ul className="text-xs text-text-muted mt-1 space-y-1">
+                  <li className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-success" />
+                    Training record created or updated
+                  </li>
+                  <li className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-success" />
+                    Compliance requirement marked complete
+                  </li>
+                  <li className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-success" />
+                    Compliance score updates immediately
+                  </li>
+                </ul>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setTrainingDialogOpen(false);
+                setSelectedTrainingReq(null);
+                setTrainingExpiryDate('');
+              }} 
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleCompleteTraining}
+              disabled={isCompletingTraining}
+              className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+              data-testid="confirm-complete-training"
+            >
+              {isCompletingTraining ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Mark Complete
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

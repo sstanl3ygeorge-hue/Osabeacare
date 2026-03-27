@@ -205,6 +205,17 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Saves to correct employee folder based on form type (A_Application, H_References, etc.)
   - Structured filename: EmployeeName_FormType_Date.pdf
   - Creates employee document record linked to source form
+- [x] **1:1 Document-to-Requirement Mapping** (Completed 2026-03-27):
+  - One requirement = one document slot (no duplicates)
+  - Documents tab shows one row per requirement (not per uploaded file)
+  - Upload button for missing requirements, Replace button for existing documents
+  - Re-uploading increments version number instead of creating duplicate
+  - Added CV / Resume as mandatory requirement
+  - Split References into Reference 1 and Reference 2 (separate slots)
+  - Requirement-based upload modal with deduplication logic
+  - Checklist tab reflects actual uploaded/verified state
+  - Compliance score updates correctly based on requirement completion
+  - Verification status shows user name (not user ID)
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests
@@ -347,4 +358,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Document Verification System and Save Form as Document workflow
+2026-03-27 - 1:1 Document-to-Requirement Mapping system completed

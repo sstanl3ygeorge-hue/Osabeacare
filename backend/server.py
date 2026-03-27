@@ -326,14 +326,18 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
             result["details"] = f"Form ID: {form['id']}"
     
     elif item["type"] == "document":
-        # Check for documents - FIRST by requirement_id
+        # Check for documents - FIRST by requirement_id (exclude superseded/inactive)
         min_count = item.get("min_files", 1)
         
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
             "file_url": {"$exists": True, "$ne": None},
-            "status": {"$in": ["uploaded", "approved"]}
+            "status": {"$in": ["uploaded", "approved"]},
+            "$or": [
+                {"active": {"$exists": False}},
+                {"active": True}
+            ]
         }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
         
         # Fallback to document_type_name matching for legacy documents
@@ -344,7 +348,11 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
                 "requirement_id": {"$exists": False},
                 "document_type_name": {"$regex": f"({'|'.join(doc_types)})", "$options": "i"},
                 "file_url": {"$exists": True, "$ne": None},
-                "status": {"$in": ["uploaded", "approved"]}
+                "status": {"$in": ["uploaded", "approved"]},
+                "$or": [
+                    {"active": {"$exists": False}},
+                    {"active": True}
+                ]
             }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
             docs.extend(fallback_docs)
         
@@ -779,6 +787,9 @@ class GeneratedFormResponse(BaseModel):
     completed_at: Optional[str] = None
     reviewed_at: Optional[str] = None
     signed_off_at: Optional[str] = None
+    requirement_id: Optional[str] = None  # Link to compliance requirement
+    imported: bool = False
+    original_filename: Optional[str] = None
 
 class BulkUploadResult(BaseModel):
     employee_id: str
@@ -2127,8 +2138,15 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     role = employee.get('role', '')
     mandatory_items = get_mandatory_items_for_role(role)
     
-    # Get all documents for this employee
-    all_docs = await db.employee_documents.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
+    # Get all ACTIVE documents for this employee (exclude superseded/inactive)
+    all_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "$or": [
+            {"active": {"$exists": False}},
+            {"active": True}
+        ],
+        "status": {"$ne": "superseded"}
+    }, {"_id": 0}).to_list(500)
     
     # Get all forms for this employee
     all_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
@@ -5543,6 +5561,277 @@ async def cleanup_duplicates(user: dict = Depends(require_manager_or_admin)):
     return {
         "success": True,
         "message": "Cleanup completed",
+        **results
+    }
+
+# Phase 1 Cleanup for specific employee - comprehensive data cleanup
+@api_router.post("/admin/cleanup-employee/{employee_id}")
+async def cleanup_employee_data(employee_id: str, user: dict = Depends(require_manager_or_admin)):
+    """
+    Phase 1 Cleanup for a specific employee:
+    1. Delete orphan documents (no file_url)
+    2. Deduplicate and normalize training records
+    3. Add requirement_id to all forms
+    4. Deduplicate single-file documents (mark old ones inactive)
+    5. Link orphan documents to requirements
+    """
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    results = {
+        "orphan_docs_deleted": 0,
+        "training_normalized": 0,
+        "training_deleted": 0,
+        "forms_updated": 0,
+        "docs_deduped": 0,
+        "docs_linked": 0,
+        "details": []
+    }
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # ========================================
+    # STEP 1: Delete orphan documents (no file_url)
+    # ========================================
+    orphan_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "$or": [
+            {"file_url": {"$exists": False}},
+            {"file_url": None},
+            {"file_url": ""}
+        ]
+    }).to_list(100)
+    
+    for doc in orphan_docs:
+        await db.employee_documents.delete_one({"id": doc['id']})
+        results['orphan_docs_deleted'] += 1
+        results['details'].append(f"Deleted orphan doc: {doc.get('document_type_name', 'Unknown')} (no file)")
+    
+    # ========================================
+    # STEP 2: Deduplicate and normalize training
+    # ========================================
+    # Training name normalization map (training_record name -> MANDATORY_ITEMS training_name)
+    training_normalization = {
+        "moving & handling": "Manual Handling",
+        "moving and handling": "Manual Handling",
+        "manual handling": "Manual Handling",
+        "health & safety": "Health & Safety",
+        "health and safety": "Health & Safety",
+        "infection control": "Infection Control",
+        "infection control and hygiene": "Infection Control",
+        "safeguarding": "Safeguarding",
+        "basic life support": "Basic Life Support",
+        "bls": "Basic Life Support",
+        "fire safety": "Fire Safety",
+        "first aid": None,  # Not in mandatory items, will be deleted
+        "first aid awareness": None,  # Not in mandatory items, will be deleted
+    }
+    
+    # MANDATORY training names (from MANDATORY_ITEMS)
+    mandatory_training = {
+        "Safeguarding", "Manual Handling", "Infection Control", 
+        "Basic Life Support", "Fire Safety", "Health & Safety"
+    }
+    
+    all_training = await db.training_records.find({"employee_id": employee_id}).to_list(100)
+    
+    # Group by normalized name
+    training_by_normalized = {}
+    orphan_training = []
+    
+    for t in all_training:
+        name = t.get('training_name', '')
+        normalized = training_normalization.get(name.lower())
+        
+        if normalized is None:
+            # Not in mandatory items, mark for deletion
+            orphan_training.append(t)
+        else:
+            if normalized not in training_by_normalized:
+                training_by_normalized[normalized] = []
+            training_by_normalized[normalized].append(t)
+    
+    # Delete orphan training (not in mandatory items)
+    for t in orphan_training:
+        await db.training_records.delete_one({"id": t['id']})
+        results['training_deleted'] += 1
+        results['details'].append(f"Deleted non-mandatory training: {t.get('training_name')}")
+    
+    # For each mandatory training, keep only ONE record (prefer completed, then most recent)
+    for normalized_name, records in training_by_normalized.items():
+        if len(records) > 1:
+            # Sort: completed first, then by created_at
+            records.sort(key=lambda r: (
+                1 if r.get('status') == 'completed' else 0,
+                r.get('completed_at') or r.get('created_at') or ''
+            ), reverse=True)
+            
+            keep = records[0]
+            
+            # Update the kept record with normalized name
+            if keep.get('training_name') != normalized_name:
+                await db.training_records.update_one(
+                    {"id": keep['id']},
+                    {"$set": {"training_name": normalized_name, "updated_at": now}}
+                )
+                results['training_normalized'] += 1
+            
+            # Delete duplicates
+            for dup in records[1:]:
+                await db.training_records.delete_one({"id": dup['id']})
+                results['training_deleted'] += 1
+                results['details'].append(f"Deleted duplicate training: {dup.get('training_name')}")
+        elif len(records) == 1:
+            # Single record, just normalize the name
+            if records[0].get('training_name') != normalized_name:
+                await db.training_records.update_one(
+                    {"id": records[0]['id']},
+                    {"$set": {"training_name": normalized_name, "updated_at": now}}
+                )
+                results['training_normalized'] += 1
+    
+    # ========================================
+    # STEP 3: Add requirement_id to all forms
+    # ========================================
+    form_to_requirement = {
+        "Reference 1": "reference_1",
+        "Reference Request Form": "reference_1",
+        "Reference 2": "reference_2",
+        "Health Screening Questionnaire": "health_screening",
+        "Contract Acknowledgement Form": "contract",
+        "Contract Acknowledgement": "contract",
+        "Induction & Competency Assessment": "induction",
+        "Employee Handbook Acknowledgement": "handbook",
+        "Application Form": "application_form",
+        "Interview Record Form": "interview_record",
+        "Interview Record": "interview_record",
+        "Personal Information Form": "personal_info",
+        "Equal Opportunities Monitoring Form": "equal_opportunities",
+        "Recruitment Compliance Checklist": "recruitment_checklist",
+    }
+    
+    all_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    
+    for form in all_forms:
+        current_req_id = form.get('requirement_id')
+        if not current_req_id or current_req_id == '' or current_req_id is None:
+            template_name = form.get('template_name', '')
+            req_id = form_to_requirement.get(template_name)
+            
+            # Try partial matching if exact match fails
+            if not req_id:
+                for name, rid in form_to_requirement.items():
+                    if name.lower() in template_name.lower() or template_name.lower() in name.lower():
+                        req_id = rid
+                        break
+            
+            if req_id:
+                await db.generated_forms.update_one(
+                    {"id": form['id']},
+                    {"$set": {"requirement_id": req_id, "updated_at": now}}
+                )
+                results['forms_updated'] += 1
+                results['details'].append(f"Linked form '{template_name}' to requirement '{req_id}'")
+    
+    # ========================================
+    # STEP 4: Deduplicate single-file documents
+    # ========================================
+    single_file_reqs = ['cv', 'dbs', 'reference_1', 'reference_2', 'application_form', 
+                       'health_screening', 'contract', 'induction', 'handbook',
+                       'interview_record', 'personal_info', 'recruitment_checklist']
+    
+    all_docs = await db.employee_documents.find({"employee_id": employee_id, "file_url": {"$exists": True, "$ne": None}}).to_list(200)
+    
+    # Group by requirement_id
+    docs_by_req = {}
+    for doc in all_docs:
+        req_id = doc.get('requirement_id')
+        if req_id:
+            if req_id not in docs_by_req:
+                docs_by_req[req_id] = []
+            docs_by_req[req_id].append(doc)
+    
+    for req_id, docs in docs_by_req.items():
+        if req_id in single_file_reqs and len(docs) > 1:
+            # Sort: verified > approved > highest version > most recent
+            docs.sort(key=lambda d: (
+                1 if d.get('verified') else 0,
+                1 if d.get('status') == 'approved' else 0,
+                d.get('version_number', 0),
+                d.get('uploaded_at') or ''
+            ), reverse=True)
+            
+            keep = docs[0]
+            
+            # Mark duplicates as inactive (add inactive flag, don't delete for audit trail)
+            for dup in docs[1:]:
+                await db.employee_documents.update_one(
+                    {"id": dup['id']},
+                    {"$set": {
+                        "status": "superseded",
+                        "superseded_by": keep['id'],
+                        "superseded_at": now,
+                        "active": False
+                    }}
+                )
+                results['docs_deduped'] += 1
+                results['details'].append(f"Marked doc as superseded: {dup.get('document_type_name')} -> kept {keep.get('original_filename')}")
+    
+    # ========================================
+    # STEP 5: Link orphan documents to requirements
+    # ========================================
+    doc_to_requirement = {
+        "Application Form": "application_form",
+        "CV / Resume": "cv",
+        "CV": "cv",
+        "Resume": "cv",
+        "DBS Certificate": "dbs",
+        "DBS Form / Update Service": "dbs",
+        "Reference 1": "reference_1",
+        "Reference 2": "reference_2",
+        "Right to Work in UK": "identity_rtw",
+        "Passport": "identity_rtw",
+        "Health Screening Form": "health_screening",
+        "Health Screening Questionnaire": "health_screening",
+        "Contract of Employment": "contract",
+        "Contract Acknowledgement": "contract",
+        "Employee Handbook Receipt": "handbook",
+        "Employee Handbook Acknowledgement": "handbook",
+        "Interview Questions": "interview_record",
+        "Induction & Competency Assessment": "induction",
+        "New Starter Form": None,  # No matching requirement
+    }
+    
+    orphan_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$exists": False}
+    }).to_list(100)
+    
+    for doc in orphan_docs:
+        doc_type_name = doc.get('document_type_name', '')
+        req_id = doc_to_requirement.get(doc_type_name)
+        
+        if req_id:
+            await db.employee_documents.update_one(
+                {"id": doc['id']},
+                {"$set": {"requirement_id": req_id, "requirement_name": req_id.replace('_', ' ').title()}}
+            )
+            results['docs_linked'] += 1
+            results['details'].append(f"Linked doc '{doc_type_name}' to requirement '{req_id}'")
+        else:
+            # No matching requirement, mark as inactive
+            await db.employee_documents.update_one(
+                {"id": doc['id']},
+                {"$set": {"active": False, "notes": "No matching compliance requirement"}}
+            )
+            results['details'].append(f"Marked unlinked doc as inactive: {doc_type_name}")
+    
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "employee_name": f"{employee['first_name']} {employee['last_name']}",
         **results
     }
 

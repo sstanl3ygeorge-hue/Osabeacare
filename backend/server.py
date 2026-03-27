@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response, Form
 from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -3189,6 +3189,160 @@ async def bulk_generate_forms(
         "created": len(created_forms),
         "forms": created_forms,
         "errors": errors
+    }
+
+@api_router.post("/generated-forms/import-application")
+async def import_application_form(
+    employee_id: str = Form(...),
+    application_file: UploadFile = File(...),
+    cv_file: Optional[UploadFile] = File(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Import an existing completed application form and optionally a CV"""
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Find Application Form template
+    application_template = await db.templates.find_one(
+        {"name": {"$regex": "Application Form", "$options": "i"}},
+        {"_id": 0}
+    )
+    
+    if not application_template:
+        raise HTTPException(status_code=404, detail="Application Form template not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    form_id = str(uuid.uuid4())
+    access_token = str(uuid.uuid4())
+    
+    # Upload application file to storage
+    try:
+        app_file_content = await application_file.read()
+        app_file_path = f"osabea-care/forms/{employee_id}/{form_id}/{application_file.filename}"
+        put_object(app_file_path, app_file_content, application_file.content_type or "application/pdf")
+        app_file_url = app_file_path
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload application file: {str(e)}")
+    
+    # Upload CV if provided
+    cv_file_url = None
+    cv_doc_id = None
+    if cv_file:
+        try:
+            cv_content = await cv_file.read()
+            cv_path = f"osabea-care/documents/{employee_id}/{str(uuid.uuid4())}/{cv_file.filename}"
+            put_object(cv_path, cv_content, cv_file.content_type or "application/pdf")
+            cv_file_url = cv_path
+            
+            # Get or create CV document type
+            cv_doc_type = await db.document_types.find_one(
+                {"name": {"$regex": "CV|Resume", "$options": "i"}},
+                {"_id": 0}
+            )
+            
+            if cv_doc_type:
+                cv_doc_id = str(uuid.uuid4())
+                cv_doc = {
+                    "id": cv_doc_id,
+                    "employee_id": employee_id,
+                    "document_type_id": cv_doc_type['id'],
+                    "document_type_name": cv_doc_type['name'],
+                    "file_url": cv_file_url,
+                    "original_filename": cv_file.filename,
+                    "status": "uploaded",
+                    "notes": "Imported with application form",
+                    "uploaded_at": now,
+                    "uploaded_by": user['user_id'],
+                    "expiry_date": None,
+                    "created_at": now,
+                    "updated_at": now
+                }
+                await db.employee_documents.insert_one(cv_doc)
+        except Exception as e:
+            # Log but don't fail the whole import
+            print(f"Warning: Failed to upload CV: {str(e)}")
+    
+    # Auto-fill employee data
+    auto_filled = await auto_fill_employee_data(employee_id)
+    
+    # Create the generated form with imported status
+    form_doc = {
+        "id": form_id,
+        "template_id": application_template['id'],
+        "template_name": application_template['name'],
+        "template_category": application_template.get('category', 'Application'),
+        "employee_id": employee_id,
+        "employee_name": f"{employee['first_name']} {employee['last_name']}",
+        "employee_code": employee['employee_code'],
+        "form_data": auto_filled,
+        "status": "completed_imported",  # Special status for imported forms
+        "employee_signature": None,
+        "employee_signed_at": None,
+        "admin_signature": None,
+        "admin_signed_at": None,
+        "admin_signoff_by": None,
+        "pdf_url": app_file_url,  # Store the uploaded file as the PDF
+        "locked": True,  # Lock the form since it's imported
+        "notes": f"Imported from existing application. Original file: {application_file.filename}",
+        "version": 1,
+        "access_token": access_token,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user['user_id'],
+        "sent_at": None,
+        "viewed_at": now,
+        "completed_at": now,  # Mark as completed immediately
+        "reviewed_at": None,
+        "signed_off_at": None,
+        "imported": True,  # Flag to indicate this is an imported form
+        "original_filename": application_file.filename
+    }
+    
+    await db.generated_forms.insert_one(form_doc)
+    
+    # Also create an employee document record for the Application Form
+    app_doc_type = await db.document_types.find_one(
+        {"name": {"$regex": "Application Form", "$options": "i"}},
+        {"_id": 0}
+    )
+    
+    if app_doc_type:
+        app_doc_id = str(uuid.uuid4())
+        app_doc = {
+            "id": app_doc_id,
+            "employee_id": employee_id,
+            "document_type_id": app_doc_type['id'],
+            "document_type_name": "Application Form",
+            "file_url": app_file_url,
+            "original_filename": application_file.filename,
+            "status": "approved",  # Auto-approve imported applications
+            "notes": "Imported - existing completed application",
+            "uploaded_at": now,
+            "uploaded_by": user['user_id'],
+            "expiry_date": None,
+            "created_at": now,
+            "updated_at": now
+        }
+        await db.employee_documents.insert_one(app_doc)
+    
+    await log_audit_action(user['user_id'], "import_application", "generated_form", form_id, {
+        "template_name": application_template['name'],
+        "employee_id": employee_id,
+        "original_file": application_file.filename,
+        "cv_included": cv_file is not None
+    })
+    
+    return {
+        "success": True,
+        "form_id": form_id,
+        "form_status": "completed_imported",
+        "application_file": application_file.filename,
+        "cv_file": cv_file.filename if cv_file else None,
+        "cv_document_id": cv_doc_id,
+        "message": "Application form imported successfully"
     }
 
 # ==================== EMAIL TEMPLATES ====================

@@ -82,6 +82,10 @@ export default function EmployeeProfilePage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState({});
+  const [importAppOpen, setImportAppOpen] = useState(false);
+  const [importAppFile, setImportAppFile] = useState(null);
+  const [importCvFile, setImportCvFile] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
   const { token, isAuditor, user } = useAuth();
   
   // Document preview modal state
@@ -436,6 +440,45 @@ export default function EmployeeProfilePage() {
       toast.error(error.response?.data?.detail || 'Failed to generate forms');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleImportApplication = async () => {
+    if (!importAppFile) {
+      toast.error('Please select an application form to upload');
+      return;
+    }
+    
+    setIsImporting(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('employee_id', employeeId);
+      formData.append('application_file', importAppFile);
+      if (importCvFile) {
+        formData.append('cv_file', importCvFile);
+      }
+      
+      const response = await axios.post(
+        `${API}/generated-forms/import-application`,
+        formData,
+        {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      
+      toast.success(response.data.message || 'Application imported successfully');
+      setImportAppOpen(false);
+      setImportAppFile(null);
+      setImportCvFile(null);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to import application');
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -813,15 +856,29 @@ export default function EmployeeProfilePage() {
                 </DialogContent>
               </Dialog>
 
-              {/* Generate Forms Dialog */}
-              <Dialog open={generateFormsOpen} onOpenChange={setGenerateFormsOpen}>
-                <DialogTrigger asChild>
+              {/* Generate Forms Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button variant="outline" className="rounded-xl" data-testid="generate-forms-btn">
                     <ClipboardList className="mr-2 h-4 w-4" />
                     Generate Forms
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => setGenerateFormsOpen(true)} data-testid="generate-blank-forms">
+                    <ClipboardList className="mr-2 h-4 w-4" />
+                    Generate Blank Forms
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setImportAppOpen(true)} data-testid="import-application">
+                    <FolderUp className="mr-2 h-4 w-4" />
+                    Create from Existing Application
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {/* Generate Blank Forms Dialog */}
+              <Dialog open={generateFormsOpen} onOpenChange={setGenerateFormsOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col bg-white">
                   <DialogHeader>
                     <DialogTitle className="font-heading">Generate Compliance Forms</DialogTitle>
                   </DialogHeader>
@@ -925,6 +982,123 @@ export default function EmployeeProfilePage() {
                         {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : `Generate ${selectedTemplates.length} Forms`}
                       </Button>
                     </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Import Existing Application Dialog */}
+              <Dialog open={importAppOpen} onOpenChange={setImportAppOpen}>
+                <DialogContent className="max-w-lg bg-white">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading">Create from Existing Application</DialogTitle>
+                    <DialogDescription>
+                      Upload a completed application form and optionally a CV. The form will be marked as "Completed (Imported)" and linked to the employee's compliance checklist.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 mt-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">
+                        Application Form <span className="text-red-500">*</span>
+                      </Label>
+                      <div 
+                        className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                          importAppFile ? 'border-primary bg-primary/5' : 'border-[#E4E8EB] hover:border-primary/50'
+                        }`}
+                      >
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          onChange={(e) => setImportAppFile(e.target.files?.[0] || null)}
+                          className="hidden"
+                          id="import-app-file"
+                        />
+                        <label htmlFor="import-app-file" className="cursor-pointer">
+                          {importAppFile ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <FileText className="h-5 w-5 text-primary" />
+                              <span className="text-sm font-medium text-primary">{importAppFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="h-8 w-8 mx-auto mb-2 text-text-muted" />
+                              <p className="text-sm text-text-muted">Click to upload application form</p>
+                              <p className="text-xs text-text-muted mt-1">PDF, DOC, DOCX accepted</p>
+                            </div>
+                          )}
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">
+                        CV / Resume <span className="text-text-muted">(optional)</span>
+                      </Label>
+                      <div 
+                        className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${
+                          importCvFile ? 'border-primary bg-primary/5' : 'border-[#E4E8EB] hover:border-primary/50'
+                        }`}
+                      >
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx"
+                          onChange={(e) => setImportCvFile(e.target.files?.[0] || null)}
+                          className="hidden"
+                          id="import-cv-file"
+                        />
+                        <label htmlFor="import-cv-file" className="cursor-pointer">
+                          {importCvFile ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <FileText className="h-5 w-5 text-primary" />
+                              <span className="text-sm font-medium text-primary">{importCvFile.name}</span>
+                            </div>
+                          ) : (
+                            <div className="py-1">
+                              <p className="text-sm text-text-muted">Click to upload CV</p>
+                            </div>
+                          )}
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="bg-[#F8FAFA] rounded-xl p-4 space-y-2">
+                      <h4 className="text-sm font-medium text-text-primary">What happens next:</h4>
+                      <ul className="text-xs text-text-muted space-y-1">
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Application Form marked as "Completed (Imported)"
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Document stored in employee's A_Application folder
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Checklist item automatically marked as complete
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Form fields locked (read-only) unless manually edited
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t border-[#E4E8EB] mt-4">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => { setImportAppOpen(false); setImportAppFile(null); setImportCvFile(null); }} 
+                      className="rounded-xl"
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleImportApplication}
+                      disabled={isImporting || !importAppFile}
+                      className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                      data-testid="import-application-submit"
+                    >
+                      {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Import Application'}
+                    </Button>
                   </div>
                 </DialogContent>
               </Dialog>

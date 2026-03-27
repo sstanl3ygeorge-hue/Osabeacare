@@ -86,6 +86,8 @@ export default function EmployeeProfilePage() {
   const [importAppFile, setImportAppFile] = useState(null);
   const [importCvFile, setImportCvFile] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [complianceRequirements, setComplianceRequirements] = useState(null);
+  const [selectedRequirement, setSelectedRequirement] = useState('');
   const { token, isAuditor, user } = useAuth();
   
   // Document preview modal state
@@ -139,7 +141,7 @@ export default function EmployeeProfilePage() {
 
   const fetchData = async () => {
     try {
-      const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes] = await Promise.all([
+      const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes] = await Promise.all([
         axios.get(`${API}/employees/${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -147,7 +149,8 @@ export default function EmployeeProfilePage() {
         axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/audit-logs?entity_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       
       setEmployee(empRes.data);
@@ -158,6 +161,7 @@ export default function EmployeeProfilePage() {
       setAuditLogs(logsRes.data);
       setGeneratedForms(formsRes.data);
       setTemplates(templatesRes.data);
+      setComplianceRequirements(compReqRes.data);
     } catch (error) {
       console.error('Failed to fetch employee data:', error);
       toast.error('Failed to load employee data');
@@ -303,25 +307,19 @@ export default function EmployeeProfilePage() {
 
   const handleUploadDocument = async (e) => {
     e.preventDefault();
-    if (!selectedDocType || !uploadFile) {
-      toast.error('Please select a document type and file');
+    if (!selectedRequirement || !uploadFile) {
+      toast.error('Please select a requirement and file');
       return;
     }
     
     setIsUploading(true);
     
     try {
-      // First, create the document record
-      const createRes = await axios.post(`${API}/employee-documents`, {
-        employee_id: employeeId,
-        document_type_id: selectedDocType
-      }, { headers: { Authorization: `Bearer ${token}` } });
-      
-      // Then upload the file
       const formData = new FormData();
+      formData.append('requirement_id', selectedRequirement);
       formData.append('file', uploadFile);
       
-      await axios.post(`${API}/employee-documents/${createRes.data.id}/upload`, formData, {
+      await axios.post(`${API}/employees/${employeeId}/upload-document`, formData, {
         headers: { 
           Authorization: `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
@@ -330,6 +328,7 @@ export default function EmployeeProfilePage() {
       
       toast.success('Document uploaded successfully');
       setUploadDialogOpen(false);
+      setSelectedRequirement('');
       setSelectedDocType('');
       setUploadFile(null);
       fetchData();
@@ -787,19 +786,34 @@ export default function EmployeeProfilePage() {
                   </DialogHeader>
                   <form onSubmit={handleUploadDocument} className="space-y-4 mt-4">
                     <div className="space-y-2">
-                      <Label>Document Type</Label>
-                      <Select value={selectedDocType} onValueChange={setSelectedDocType}>
-                        <SelectTrigger className="rounded-xl" data-testid="doc-type-select">
-                          <SelectValue placeholder="Select document type" />
+                      <Label>Compliance Requirement</Label>
+                      <Select value={selectedRequirement} onValueChange={setSelectedRequirement}>
+                        <SelectTrigger className="rounded-xl" data-testid="requirement-select">
+                          <SelectValue placeholder="Select requirement to upload for" />
                         </SelectTrigger>
-                        <SelectContent>
-                          {documentTypes.map((type) => (
-                            <SelectItem key={type.id} value={type.id}>
-                              {type.name}
-                            </SelectItem>
-                          ))}
+                        <SelectContent className="max-h-[300px]">
+                          {complianceRequirements?.requirements
+                            ?.filter(req => req.type === 'document' || req.type === 'db_record')
+                            .map((req) => (
+                              <SelectItem key={req.id} value={req.id}>
+                                <div className="flex items-center gap-2">
+                                  <span className={`w-2 h-2 rounded-full ${
+                                    req.status === 'completed' ? 'bg-success' :
+                                    req.status === 'in_progress' ? 'bg-warning' : 'bg-gray-300'
+                                  }`} />
+                                  {req.name}
+                                  {req.document && <span className="text-xs text-text-muted">(has file)</span>}
+                                </div>
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
+                      {selectedRequirement && complianceRequirements?.requirements?.find(r => r.id === selectedRequirement)?.document && (
+                        <p className="text-xs text-warning flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          This will replace the existing document
+                        </p>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <Label>File</Label>
@@ -810,14 +824,14 @@ export default function EmployeeProfilePage() {
                         data-testid="doc-file-input"
                       />
                       <p className="text-xs text-text-muted">
-                        Upload a clear copy of the document.
+                        Upload a clear copy of the document. PDF, JPG, PNG accepted.
                       </p>
                     </div>
                     <div className="flex justify-end gap-3 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setUploadDialogOpen(false)} className="rounded-xl">
+                      <Button type="button" variant="outline" onClick={() => { setUploadDialogOpen(false); setSelectedRequirement(''); }} className="rounded-xl">
                         Cancel
                       </Button>
-                      <Button type="submit" disabled={isUploading} className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="upload-submit">
+                      <Button type="submit" disabled={isUploading || !selectedRequirement} className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="upload-submit">
                         {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Upload'}
                       </Button>
                     </div>
@@ -1352,85 +1366,129 @@ export default function EmployeeProfilePage() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="font-heading text-lg">Mandatory Compliance Items</CardTitle>
-                {compliance && (
+                {complianceRequirements && (
                   <p className="text-sm text-text-muted mt-1">
-                    {compliance.compliance.complete_count} of {compliance.compliance.total_items} items complete 
-                    ({compliance.compliance.verified_count} verified)
+                    {complianceRequirements.summary.completed} of {complianceRequirements.summary.total} items complete 
+                    ({complianceRequirements.summary.verified} verified)
                   </p>
                 )}
               </div>
-              {compliance && compliance.compliance.missing_count > 0 && (
+              {complianceRequirements && complianceRequirements.summary.missing > 0 && (
                 <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
                   <AlertTriangle className="h-4 w-4" />
-                  {compliance.compliance.missing_count} missing
+                  {complianceRequirements.summary.missing} missing
                 </div>
               )}
             </CardHeader>
             <CardContent>
-              {!compliance ? (
+              {!complianceRequirements ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* Group by category */}
+                  {/* Group requirements by category */}
                   {['A_Application_Form', 'B_Recruitment_Checklist', 'C_Personal_Information', 'D_Interview', 
                     'E_Equal_Opportunities', 'F_Health_Screening', 'G_Identity_RTW', 'H_References', 'I_DBS',
                     'J_Induction_Shadowing_Observations', 'L_Contract', 'N_Training', 'O_Other'].map((category) => {
-                    const categoryItems = compliance.compliance.items.filter(item => item.category === category);
+                    const categoryItems = complianceRequirements.requirements.filter(req => req.category === category);
                     if (categoryItems.length === 0) return null;
                     
                     const categoryLabel = category.replace(/_/g, ' ').replace(/^[A-Z]_/, '');
-                    const completedInCategory = categoryItems.filter(i => i.status === 'complete' || i.status === 'expiring').length;
+                    const completedInCategory = categoryItems.filter(i => i.status === 'completed').length;
+                    const verifiedInCategory = categoryItems.filter(i => i.verified).length;
                     
                     return (
                       <div key={category}>
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="font-semibold text-text-primary">{categoryLabel}</h3>
-                          <span className="text-xs text-text-muted">{completedInCategory}/{categoryItems.length}</span>
+                          <span className="text-xs text-text-muted">
+                            {completedInCategory}/{categoryItems.length} complete
+                            {verifiedInCategory > 0 && ` (${verifiedInCategory} verified)`}
+                          </span>
                         </div>
                         <div className="space-y-2">
-                          {categoryItems.map((item) => (
+                          {categoryItems.map((req) => (
                             <div 
-                              key={item.id} 
+                              key={req.id} 
                               className={`flex items-center justify-between p-3 rounded-xl border ${
-                                item.status === 'complete' && item.verified ? 'bg-success/5 border-success/20' :
-                                item.status === 'complete' ? 'bg-info/5 border-info/20' :
-                                item.status === 'expiring' ? 'bg-warning/5 border-warning/20' :
+                                req.verified ? 'bg-success/5 border-success/20' :
+                                req.status === 'completed' ? 'bg-info/5 border-info/20' :
+                                req.status === 'in_progress' || req.status === 'pending' ? 'bg-warning/5 border-warning/20' :
                                 'bg-error/5 border-error/20'
                               }`}
                             >
                               <div className="flex items-center gap-3">
-                                {item.status === 'complete' && item.verified ? (
-                                  <CheckCircle className="h-5 w-5 text-success" />
-                                ) : item.status === 'complete' ? (
-                                  <Clock className="h-5 w-5 text-info" />
-                                ) : item.status === 'expiring' ? (
-                                  <AlertTriangle className="h-5 w-5 text-warning" />
+                                {req.verified ? (
+                                  <Shield className="h-5 w-5 text-success" />
+                                ) : req.status === 'completed' ? (
+                                  <CheckCircle className="h-5 w-5 text-info" />
+                                ) : req.status === 'in_progress' || req.status === 'pending' ? (
+                                  <Clock className="h-5 w-5 text-warning" />
                                 ) : (
                                   <XCircle className="h-5 w-5 text-error" />
                                 )}
                                 <div>
-                                  <p className="font-medium text-text-primary">{item.name}</p>
-                                  {item.details && (
-                                    <p className="text-xs text-text-muted">{item.details}</p>
+                                  <p className="font-medium text-text-primary">{req.name}</p>
+                                  {req.document && (
+                                    <p className="text-xs text-text-muted flex items-center gap-1">
+                                      <FileText className="h-3 w-3" />
+                                      {req.document.original_filename || 'Document uploaded'}
+                                      {req.document.version_number > 1 && (
+                                        <span className="text-primary"> (v{req.document.version_number})</span>
+                                      )}
+                                    </p>
                                   )}
-                                  {item.expiry_date && (
-                                    <p className="text-xs text-warning">Expires: {new Date(item.expiry_date).toLocaleDateString()}</p>
+                                  {req.form && (
+                                    <p className="text-xs text-text-muted flex items-center gap-1">
+                                      <ClipboardList className="h-3 w-3" />
+                                      Form: {req.form.status.replace('_', ' ')}
+                                    </p>
+                                  )}
+                                  {req.training && (
+                                    <p className="text-xs text-text-muted flex items-center gap-1">
+                                      <GraduationCap className="h-3 w-3" />
+                                      Training: {req.training.status.replace('_', ' ')}
+                                    </p>
                                   )}
                                 </div>
                               </div>
-                              <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                                item.status === 'complete' && item.verified ? 'bg-success/10 text-success' :
-                                item.status === 'complete' ? 'bg-info/10 text-info' :
-                                item.status === 'expiring' ? 'bg-warning/10 text-warning' :
-                                'bg-error/10 text-error'
-                              }`}>
-                                {item.status === 'complete' && item.verified ? 'Verified' :
-                                 item.status === 'complete' ? 'Pending Verification' :
-                                 item.status === 'expiring' ? 'Expiring Soon' :
-                                 'Missing'}
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                                  req.verified ? 'bg-success/10 text-success' :
+                                  req.status === 'completed' ? 'bg-info/10 text-info' :
+                                  req.status === 'in_progress' || req.status === 'pending' ? 'bg-warning/10 text-warning' :
+                                  'bg-error/10 text-error'
+                                }`}>
+                                  {req.verified ? 'Verified' :
+                                   req.status === 'completed' ? 'Complete' :
+                                   req.status === 'pending' ? 'Pending' :
+                                   req.status === 'in_progress' ? 'In Progress' :
+                                   'Missing'}
+                                </span>
+                                {!req.document && req.type === 'document' && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => { setSelectedRequirement(req.id); setUploadDialogOpen(true); }}
+                                    className="text-xs h-7 rounded-lg"
+                                  >
+                                    <Upload className="h-3 w-3 mr-1" />
+                                    Upload
+                                  </Button>
+                                )}
+                                {req.document && !req.verified && req.status === 'completed' && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => handleVerifyDocument(req.document.id)}
+                                    className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
+                                  >
+                                    <Shield className="h-3 w-3 mr-1" />
+                                    Verify
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>

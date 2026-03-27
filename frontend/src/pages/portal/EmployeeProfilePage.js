@@ -89,6 +89,11 @@ export default function EmployeeProfilePage() {
   const [complianceRequirements, setComplianceRequirements] = useState(null);
   const [selectedRequirement, setSelectedRequirement] = useState('');
   const [documentLabel, setDocumentLabel] = useState('');
+  // Import document dialog states
+  const [importDocOpen, setImportDocOpen] = useState(false);
+  const [importDocType, setImportDocType] = useState('');
+  const [importDocFile, setImportDocFile] = useState(null);
+  const [importDocNotes, setImportDocNotes] = useState('');
   const { token, isAuditor, user } = useAuth();
   
   // Document preview modal state
@@ -552,6 +557,48 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  // Import document for Reference, Health Screening, Contract, etc.
+  const handleImportDocument = async () => {
+    if (!importDocFile || !importDocType) {
+      toast.error('Please select document type and file');
+      return;
+    }
+    
+    setIsImporting(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('employee_id', employeeId);
+      formData.append('form_type', importDocType);
+      formData.append('document_file', importDocFile);
+      if (importDocNotes) {
+        formData.append('notes', importDocNotes);
+      }
+      
+      const response = await axios.post(
+        `${API}/generated-forms/import-document`,
+        formData,
+        {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      
+      toast.success(response.data.message || 'Document imported successfully');
+      setImportDocOpen(false);
+      setImportDocType('');
+      setImportDocFile(null);
+      setImportDocNotes('');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to import document');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const toggleTemplateSelection = (templateId) => {
     setSelectedTemplates(prev => 
       prev.includes(templateId)
@@ -985,9 +1032,14 @@ export default function EmployeeProfilePage() {
                     <ClipboardList className="mr-2 h-4 w-4" />
                     Generate Blank Forms
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setImportAppOpen(true)} data-testid="import-application">
                     <FolderUp className="mr-2 h-4 w-4" />
-                    Create from Existing Application
+                    Import Application Form
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setImportDocOpen(true)} data-testid="import-document">
+                    <FileCheck className="mr-2 h-4 w-4" />
+                    Import Other Document
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1214,6 +1266,154 @@ export default function EmployeeProfilePage() {
                       data-testid="import-application-submit"
                     >
                       {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Import Application'}
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Import Other Document Dialog (Reference, Health Screening, Contract) */}
+              <Dialog open={importDocOpen} onOpenChange={setImportDocOpen}>
+                <DialogContent className="max-w-lg bg-white">
+                  <DialogHeader>
+                    <DialogTitle className="font-heading">Import Existing Document</DialogTitle>
+                    <DialogDescription>
+                      Upload an existing completed document (Reference letter, Health form, Contract, etc.) to mark the corresponding compliance requirement as complete.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 mt-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">
+                        Document Type <span className="text-red-500">*</span>
+                      </Label>
+                      <Select value={importDocType} onValueChange={setImportDocType}>
+                        <SelectTrigger className="rounded-xl" data-testid="import-doc-type-select">
+                          <SelectValue placeholder="Select document type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="reference_1">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-warning" />
+                              Reference 1
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="reference_2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-warning" />
+                              Reference 2
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="health_screening">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-info" />
+                              Health Screening Questionnaire
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="contract">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-success" />
+                              Contract / Offer Letter
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="induction">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-primary" />
+                              Induction & Competency
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="handbook">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-gray-400" />
+                              Employee Handbook Acknowledgement
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">
+                        Document File <span className="text-red-500">*</span>
+                      </Label>
+                      <div 
+                        className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
+                          importDocFile ? 'border-primary bg-primary/5' : 'border-[#E4E8EB] hover:border-primary/50'
+                        }`}
+                      >
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                          onChange={(e) => setImportDocFile(e.target.files?.[0] || null)}
+                          className="hidden"
+                          id="import-doc-file"
+                        />
+                        <label htmlFor="import-doc-file" className="cursor-pointer">
+                          {importDocFile ? (
+                            <div className="flex items-center justify-center gap-2">
+                              <FileText className="h-5 w-5 text-primary" />
+                              <span className="text-sm font-medium text-primary">{importDocFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="h-8 w-8 mx-auto mb-2 text-text-muted" />
+                              <p className="text-sm text-text-muted">Click to upload document</p>
+                              <p className="text-xs text-text-muted mt-1">PDF, DOC, DOCX, JPG, PNG accepted</p>
+                            </div>
+                          )}
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">
+                        Notes <span className="text-text-muted">(optional)</span>
+                      </Label>
+                      <Textarea 
+                        value={importDocNotes}
+                        onChange={(e) => setImportDocNotes(e.target.value)}
+                        placeholder="e.g., Reference from John Smith, previous employer at ABC Company"
+                        className="rounded-xl resize-none"
+                        rows={2}
+                      />
+                    </div>
+
+                    <div className="bg-[#F8FAFA] rounded-xl p-4 space-y-2">
+                      <h4 className="text-sm font-medium text-text-primary">What happens:</h4>
+                      <ul className="text-xs text-text-muted space-y-1">
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Form marked as "Completed (Imported)"
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Document stored in employee's compliance folder
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Checklist requirement marked complete
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
+                          Ready for verification
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t border-[#E4E8EB] mt-4">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => { setImportDocOpen(false); setImportDocType(''); setImportDocFile(null); setImportDocNotes(''); }} 
+                      className="rounded-xl"
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      onClick={handleImportDocument}
+                      disabled={isImporting || !importDocFile || !importDocType}
+                      className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                      data-testid="import-document-submit"
+                    >
+                      {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Import Document'}
                     </Button>
                   </div>
                 </DialogContent>

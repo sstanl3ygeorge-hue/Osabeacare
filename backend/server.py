@@ -4142,6 +4142,200 @@ async def import_application_form(
         "message": "Application form imported successfully"
     }
 
+# Form type to requirement mapping for imports
+FORM_TYPE_TO_REQUIREMENT = {
+    "reference": {"requirement_id": None, "category": "H_References"},  # Multiple references, handled specially
+    "reference_1": {"requirement_id": "reference_1", "category": "H_References"},
+    "reference_2": {"requirement_id": "reference_2", "category": "H_References"},
+    "health_screening": {"requirement_id": "health_screening", "category": "F_Health_Screening"},
+    "contract": {"requirement_id": "contract", "category": "L_Contract"},
+    "induction": {"requirement_id": "induction", "category": "J_Induction_Shadowing_Observations"},
+    "handbook": {"requirement_id": "handbook", "category": "O_Other"},
+}
+
+@api_router.post("/generated-forms/import-document")
+async def import_form_document(
+    employee_id: str = Form(...),
+    form_type: str = Form(...),  # reference_1, reference_2, health_screening, contract
+    document_file: UploadFile = File(...),
+    reference_number: Optional[int] = Form(None),  # For references: 1 or 2
+    notes: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Import an existing completed document for various form types:
+    - reference_1, reference_2: Reference letters
+    - health_screening: Health Screening Questionnaire
+    - contract: Contract/Offer Letter
+    - induction: Induction documents
+    """
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate form type
+    if form_type not in FORM_TYPE_TO_REQUIREMENT:
+        raise HTTPException(status_code=400, detail=f"Invalid form type. Valid types: {list(FORM_TYPE_TO_REQUIREMENT.keys())}")
+    
+    form_config = FORM_TYPE_TO_REQUIREMENT[form_type]
+    requirement_id = form_config['requirement_id']
+    category = form_config['category']
+    
+    # Map form type to template name
+    template_name_map = {
+        "reference_1": "Reference Request Form",
+        "reference_2": "Reference Request Form",
+        "health_screening": "Health Screening Questionnaire",
+        "contract": "Contract Acknowledgement Form",
+        "induction": "Induction & Competency Assessment",
+        "handbook": "Employee Handbook Acknowledgement",
+    }
+    
+    template_search_name = template_name_map.get(form_type, form_type.replace("_", " ").title())
+    
+    # Find matching template
+    template = await db.templates.find_one(
+        {"name": {"$regex": template_search_name, "$options": "i"}},
+        {"_id": 0}
+    )
+    
+    now = datetime.now(timezone.utc).isoformat()
+    form_id = str(uuid.uuid4())
+    access_token = str(uuid.uuid4())
+    
+    # Upload file to storage
+    try:
+        file_content = await document_file.read()
+        file_ext = document_file.filename.split('.')[-1] if '.' in document_file.filename else 'pdf'
+        employee_name = f"{employee['first_name']}{employee['last_name']}"
+        storage_filename = f"{employee_name}_{form_type}_{datetime.now(timezone.utc).strftime('%d-%m-%Y')}.{file_ext}"
+        file_path = f"osabea-care/forms/{employee_id}/{form_id}/{storage_filename}"
+        put_object(file_path, file_content, document_file.content_type or "application/pdf")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+    
+    # Auto-fill employee data
+    auto_filled = await auto_fill_employee_data(employee_id)
+    
+    # Create display name
+    display_names = {
+        "reference_1": "Reference 1",
+        "reference_2": "Reference 2",
+        "health_screening": "Health Screening Questionnaire",
+        "contract": "Contract Acknowledgement",
+        "induction": "Induction & Competency Assessment",
+        "handbook": "Employee Handbook Acknowledgement",
+    }
+    display_name = display_names.get(form_type, form_type.replace("_", " ").title())
+    
+    # Create the generated form with imported status
+    form_doc = {
+        "id": form_id,
+        "template_id": template['id'] if template else str(uuid.uuid4()),
+        "template_name": template['name'] if template else display_name,
+        "template_category": category,
+        "employee_id": employee_id,
+        "employee_name": f"{employee['first_name']} {employee['last_name']}",
+        "employee_code": employee['employee_code'],
+        "form_data": auto_filled,
+        "status": "completed_imported",
+        "employee_signature": None,
+        "employee_signed_at": None,
+        "admin_signature": None,
+        "admin_signed_at": None,
+        "admin_signoff_by": None,
+        "pdf_url": file_path,
+        "locked": True,
+        "notes": notes or f"Imported from existing document. Original file: {document_file.filename}",
+        "version": 1,
+        "access_token": access_token,
+        "created_at": now,
+        "updated_at": now,
+        "created_by": user['user_id'],
+        "sent_at": None,
+        "viewed_at": now,
+        "completed_at": now,
+        "reviewed_at": None,
+        "signed_off_at": None,
+        "imported": True,
+        "original_filename": document_file.filename,
+        "form_type": form_type  # Track the type for filtering
+    }
+    
+    await db.generated_forms.insert_one(form_doc)
+    
+    # Also create an employee document record linked to the requirement
+    doc_id = str(uuid.uuid4())
+    doc_record = {
+        "id": doc_id,
+        "employee_id": employee_id,
+        "document_type_id": str(uuid.uuid4()),
+        "document_type_name": display_name,
+        "requirement_id": requirement_id,
+        "requirement_name": display_name,
+        "category": category,
+        "file_url": file_path,
+        "original_filename": document_file.filename,
+        "status": "approved",
+        "source_type": "imported",
+        "source_form_id": form_id,
+        "notes": notes or "Imported document",
+        "uploaded_at": now,
+        "uploaded_by": user['user_id'],
+        "expiry_date": None,
+        "version_number": 1,
+        "verified": False,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    # For single-file requirements, check if document already exists and replace
+    if requirement_id:
+        existing_doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id
+        })
+        
+        if existing_doc:
+            doc_record["version_number"] = existing_doc.get("version_number", 1) + 1
+            await db.employee_documents.update_one(
+                {"id": existing_doc["id"]},
+                {"$set": {
+                    "file_url": file_path,
+                    "original_filename": document_file.filename,
+                    "version_number": doc_record["version_number"],
+                    "source_form_id": form_id,
+                    "status": "approved",
+                    "uploaded_at": now,
+                    "updated_at": now,
+                    "notes": notes or "Imported document (replaced)"
+                }}
+            )
+            doc_id = existing_doc["id"]
+        else:
+            await db.employee_documents.insert_one(doc_record)
+    else:
+        await db.employee_documents.insert_one(doc_record)
+    
+    await log_audit_action(user['user_id'], "import_document", "generated_form", form_id, {
+        "form_type": form_type,
+        "template_name": template['name'] if template else display_name,
+        "employee_id": employee_id,
+        "original_file": document_file.filename
+    })
+    
+    return {
+        "success": True,
+        "form_id": form_id,
+        "document_id": doc_id,
+        "form_type": form_type,
+        "form_status": "completed_imported",
+        "original_filename": document_file.filename,
+        "message": f"{display_name} imported successfully"
+    }
+
 # ==================== EMAIL TEMPLATES ====================
 
 @api_router.get("/email-templates")

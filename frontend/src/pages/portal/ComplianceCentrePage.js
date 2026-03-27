@@ -11,6 +11,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { toast } from 'sonner';
+import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
@@ -33,50 +34,35 @@ export default function ComplianceCentrePage() {
   const [dbsReport, setDbsReport] = useState(null);
   const [trainingReport, setTrainingReport] = useState(null);
   
+  // Document preview modal state
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
+  
   // Sync tab changes to URL
   const handleTabChange = (value) => {
     setActiveTab(value);
     setSearchParams({ tab: value }, { replace: true });
   };
   
-  // View document with authentication - opens in new tab
-  const handleViewDocument = async (type, id, title) => {
-    try {
-      toast.loading('Loading document...');
-      
-      const endpoint = type === 'policy' 
-        ? `${API}/compliance/policies/${id}/file`
-        : `${API}/compliance/insurance/${id}/file`;
-      
-      const response = await axios.get(endpoint, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: 'blob'
-      });
-      
-      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      
-      // Open in new window
-      const newWindow = window.open(url, '_blank');
-      if (newWindow) {
-        newWindow.document.title = title;
-      }
-      
-      toast.dismiss();
-      toast.success('Document opened in new tab');
-      
-      // Clean up blob URL after a delay (to allow the new tab to load)
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    } catch (error) {
-      console.error('Failed to load document:', error);
-      toast.dismiss();
-      toast.error('Failed to load document');
-    }
+  // Open document in preview modal
+  const handleViewDocument = (type, id, title, filename) => {
+    const endpoint = type === 'policy' 
+      ? `${API}/compliance/policies/${id}/file`
+      : `${API}/compliance/insurance/${id}/file`;
+    
+    setPreviewFile({
+      url: endpoint,
+      name: title || filename || 'Document',
+      filename: filename
+    });
+    setPreviewOpen(true);
   };
   
   // Download document with authentication
   const handleDownloadDocument = async (type, id, filename) => {
     try {
+      toast.loading('Downloading...');
+      
       const endpoint = type === 'policy' 
         ? `${API}/compliance/policies/${id}/download`
         : `${API}/compliance/insurance/${id}/download`;
@@ -96,9 +82,11 @@ export default function ComplianceCentrePage() {
       link.remove();
       URL.revokeObjectURL(url);
       
+      toast.dismiss();
       toast.success('Document downloaded');
     } catch (error) {
       console.error('Failed to download document:', error);
+      toast.dismiss();
       toast.error('Failed to download document');
     }
   };
@@ -540,7 +528,7 @@ export default function ComplianceCentrePage() {
                                       variant="outline" 
                                       size="sm"
                                       className="rounded-lg"
-                                      onClick={() => handleViewDocument('policy', policy.id, policy.name)}
+                                      onClick={() => handleViewDocument('policy', policy.id, policy.name, policy.original_filename)}
                                       data-testid={`view-policy-${policy.id}`}
                                     >
                                       <Eye className="h-4 w-4 mr-1" />
@@ -658,7 +646,7 @@ export default function ComplianceCentrePage() {
                               variant="outline" 
                               size="sm"
                               className="rounded-lg"
-                              onClick={() => handleViewDocument('insurance', ins.id, ins.name)}
+                              onClick={() => handleViewDocument('insurance', ins.id, ins.name, ins.original_filename)}
                               data-testid={`view-insurance-${ins.id}`}
                             >
                               <Eye className="h-4 w-4 mr-1" />
@@ -1078,6 +1066,23 @@ export default function ComplianceCentrePage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        fileUrl={previewFile?.url}
+        fileName={previewFile?.name}
+        token={token}
+        onDownload={previewFile ? () => {
+          // Determine type from URL
+          const isPolicy = previewFile.url?.includes('/policies/');
+          const id = previewFile.url?.split('/').slice(-2, -1)[0];
+          if (id) {
+            handleDownloadDocument(isPolicy ? 'policy' : 'insurance', id, previewFile.filename);
+          }
+        } : undefined}
+      />
     </div>
   );
 }

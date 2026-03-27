@@ -15,6 +15,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import ComplianceOverview from '../../components/portal/ComplianceOverview';
+import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -83,10 +84,20 @@ export default function EmployeeProfilePage() {
   const [editForm, setEditForm] = useState({});
   const { token, isAuditor, user } = useAuth();
   
+  // Document preview modal state
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewFile, setPreviewFile] = useState(null);
+  
   // Sync tab changes to URL
   const handleTabChange = (value) => {
     setActiveTab(value);
     setSearchParams({ tab: value }, { replace: true });
+  };
+  
+  // Open document in preview modal
+  const handlePreviewDocument = (url, name, filename) => {
+    setPreviewFile({ url, name, filename });
+    setPreviewOpen(true);
   };
 
   const roles = [
@@ -1247,7 +1258,12 @@ export default function EmployeeProfilePage() {
                                     size="sm" 
                                     variant="outline"
                                     className="rounded-lg"
-                                    onClick={() => window.open(`${API}/employee-documents/${doc.id}/file`, '_blank')}
+                                    onClick={() => handlePreviewDocument(
+                                      `${API}/employee-documents/${doc.id}/file`,
+                                      doc.document_type,
+                                      doc.original_filename
+                                    )}
+                                    data-testid={`view-doc-${doc.id}`}
                                   >
                                     <Eye className="h-4 w-4 mr-1" />
                                     View
@@ -1256,7 +1272,25 @@ export default function EmployeeProfilePage() {
                                     size="sm" 
                                     variant="outline"
                                     className="rounded-lg"
-                                    onClick={() => window.open(`${API}/employee-documents/${doc.id}/download`, '_blank')}
+                                    onClick={async () => {
+                                      try {
+                                        const response = await axios.get(`${API}/employee-documents/${doc.id}/download`, {
+                                          headers: { Authorization: `Bearer ${token}` },
+                                          responseType: 'blob'
+                                        });
+                                        const blob = new Blob([response.data]);
+                                        const url = URL.createObjectURL(blob);
+                                        const link = document.createElement('a');
+                                        link.href = url;
+                                        link.download = doc.original_filename || 'document';
+                                        link.click();
+                                        URL.revokeObjectURL(url);
+                                        toast.success('Document downloaded');
+                                      } catch (error) {
+                                        toast.error('Failed to download');
+                                      }
+                                    }}
+                                    data-testid={`download-doc-${doc.id}`}
                                   >
                                     <FileDown className="h-4 w-4 mr-1" />
                                     Download
@@ -1587,6 +1621,34 @@ export default function EmployeeProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        fileUrl={previewFile?.url}
+        fileName={previewFile?.name}
+        token={token}
+        onDownload={previewFile ? async () => {
+          try {
+            const downloadUrl = previewFile.url.replace('/file', '/download');
+            const response = await axios.get(downloadUrl, {
+              headers: { Authorization: `Bearer ${token}` },
+              responseType: 'blob'
+            });
+            const blob = new Blob([response.data]);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = previewFile.filename || 'document';
+            link.click();
+            URL.revokeObjectURL(url);
+            toast.success('Document downloaded');
+          } catch (error) {
+            toast.error('Failed to download');
+          }
+        } : undefined}
+      />
     </div>
   );
 }

@@ -254,6 +254,20 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Fixed: ComplianceOverview matching logic for training record names
   - Result: Single unified flow: Employee → Requirement → Complete → Compliance updates
   - Employee OCS-0001 now at 17/20 (85%) with all 6 training complete
+- [x] **Training Evidence & Verification System** (Completed 2026-03-27):
+  - CRITICAL: Training now requires evidence for audit compliance
+  - NEW: POST /api/employees/{id}/training/{requirement_id}/upload-certificate endpoint
+  - NEW: POST /api/training-records/{id}/verify endpoint (REQUIRES certificate)
+  - NEW: POST /api/training-records/{id}/unverify endpoint
+  - NEW: GET /api/training-records/{id}/certificate/file endpoint (view)
+  - NEW: GET /api/training-records/{id}/certificate/download endpoint
+  - Feature: Training records now store certificate_url, original_filename, uploaded_at
+  - Feature: Training records now store verified, verified_by, verified_at, completion_method
+  - Feature: Verification blocked until certificate is uploaded
+  - Frontend: "Upload Certificate" button on training without certificates
+  - Frontend: "View", "Download", "Verify", "Replace" buttons when certificate exists
+  - Frontend: Warning message "No certificate uploaded" for training without evidence
+  - Result: Training now follows same pattern as documents: Requirement → Evidence → Verified
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests

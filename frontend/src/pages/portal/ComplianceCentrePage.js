@@ -396,27 +396,32 @@ export default function ComplianceCentrePage() {
                 </div>
               ) : (
                 <div className="space-y-8">
-                  {['Core Policies', 'Operational Policies', 'Governance & Compliance'].map((category) => {
+                  {['Core', 'Clinical', 'Operational', 'Governance'].map((category) => {
                     const categoryPolicies = groupedPolicies[category] || [];
                     if (categoryPolicies.length === 0) return null;
                     
                     const activeCount = categoryPolicies.filter(p => p.status === 'active').length;
                     const missingCount = categoryPolicies.filter(p => p.status === 'missing').length;
+                    const expiringCount = categoryPolicies.filter(p => p.status === 'expired' || p.status === 'under_review').length;
+                    
+                    const categoryColors = {
+                      'Core': 'bg-primary',
+                      'Clinical': 'bg-info',
+                      'Operational': 'bg-warning',
+                      'Governance': 'bg-success'
+                    };
                     
                     return (
-                      <div key={category} data-testid={`policy-category-${category.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')}`}>
+                      <div key={category} data-testid={`policy-category-${category.toLowerCase()}`}>
                         <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-3">
-                            <div className={`w-1 h-8 rounded-full ${
-                              category === 'Core Policies' ? 'bg-primary' :
-                              category === 'Operational Policies' ? 'bg-info' :
-                              'bg-warning'
-                            }`}></div>
+                            <div className={`w-1 h-8 rounded-full ${categoryColors[category]}`}></div>
                             <div>
                               <h3 className="font-semibold text-text-primary">{category}</h3>
                               <p className="text-xs text-text-muted">
                                 {activeCount}/{categoryPolicies.length} uploaded
                                 {missingCount > 0 && <span className="text-error ml-2">• {missingCount} missing</span>}
+                                {expiringCount > 0 && <span className="text-warning ml-2">• {expiringCount} expiring</span>}
                               </p>
                             </div>
                           </div>

@@ -2038,41 +2038,45 @@ async def send_templated_email(request: SendEmailRequest, user: dict = Depends(r
 # Core policies that should exist as placeholders
 # Comprehensive Organisation Policies organised by category
 CORE_POLICIES = [
-    # Core Policies - Essential CQC Requirements
-    {"name": "Safeguarding Adults Policy", "category": "Core Policies"},
-    {"name": "Safeguarding Children Policy", "category": "Core Policies"},
-    {"name": "Mental Capacity Act & DoLS Policy", "category": "Core Policies"},
-    {"name": "Medication Policy", "category": "Core Policies"},
-    {"name": "Infection Prevention & Control Policy", "category": "Core Policies"},
-    {"name": "Health & Safety Policy", "category": "Core Policies"},
-    {"name": "Manual Handling Policy", "category": "Core Policies"},
-    {"name": "Fire Safety Policy", "category": "Core Policies"},
-    {"name": "First Aid Policy", "category": "Core Policies"},
-    {"name": "COSHH Policy", "category": "Core Policies"},
+    # Core Policies - Essential Safeguarding & Safety
+    {"name": "Safeguarding Adults Policy", "category": "Core"},
+    {"name": "Safeguarding Children Policy", "category": "Core"},
+    {"name": "Mental Capacity Act & DoLS Policy", "category": "Core"},
+    {"name": "Health & Safety Policy", "category": "Core"},
+    {"name": "Fire Safety Policy", "category": "Core"},
+    {"name": "First Aid Policy", "category": "Core"},
+    {"name": "Equality, Diversity & Inclusion Policy", "category": "Core"},
+    {"name": "Whistleblowing Policy", "category": "Core"},
+    
+    # Clinical Policies - Care & Medical
+    {"name": "Medication Policy", "category": "Clinical"},
+    {"name": "Infection Prevention & Control Policy", "category": "Clinical"},
+    {"name": "Manual Handling Policy", "category": "Clinical"},
+    {"name": "COSHH Policy", "category": "Clinical"},
+    {"name": "Care Planning Policy", "category": "Clinical"},
+    {"name": "End of Life Care Policy", "category": "Clinical"},
+    {"name": "Nutrition & Hydration Policy", "category": "Clinical"},
+    {"name": "Pressure Ulcer Prevention Policy", "category": "Clinical"},
     
     # Operational Policies - Day-to-Day Operations
-    {"name": "Lone Working Policy", "category": "Operational Policies"},
-    {"name": "Risk Assessment Policy", "category": "Operational Policies"},
-    {"name": "Care Planning Policy", "category": "Operational Policies"},
-    {"name": "Record Keeping Policy", "category": "Operational Policies"},
-    {"name": "Confidentiality Policy", "category": "Operational Policies"},
-    {"name": "Whistleblowing Policy", "category": "Operational Policies"},
-    {"name": "Complaints Policy", "category": "Operational Policies"},
-    {"name": "Incident Reporting Policy", "category": "Operational Policies"},
-    {"name": "Business Continuity Policy", "category": "Operational Policies"},
-    {"name": "Service User Feedback Policy", "category": "Operational Policies"},
+    {"name": "Lone Working Policy", "category": "Operational"},
+    {"name": "Risk Assessment Policy", "category": "Operational"},
+    {"name": "Record Keeping Policy", "category": "Operational"},
+    {"name": "Confidentiality Policy", "category": "Operational"},
+    {"name": "Complaints Policy", "category": "Operational"},
+    {"name": "Incident Reporting Policy", "category": "Operational"},
+    {"name": "Business Continuity Policy", "category": "Operational"},
+    {"name": "Service User Feedback Policy", "category": "Operational"},
     
-    # Governance & Compliance - HR & Regulatory
-    {"name": "Recruitment & Selection Policy", "category": "Governance & Compliance"},
-    {"name": "DBS & Vetting Policy", "category": "Governance & Compliance"},
-    {"name": "Induction & Probation Policy", "category": "Governance & Compliance"},
-    {"name": "Training & Development Policy", "category": "Governance & Compliance"},
-    {"name": "Supervision & Appraisal Policy", "category": "Governance & Compliance"},
-    {"name": "Disciplinary & Grievance Policy", "category": "Governance & Compliance"},
-    {"name": "Equality, Diversity & Inclusion Policy", "category": "Governance & Compliance"},
-    {"name": "Data Protection & GDPR Policy", "category": "Governance & Compliance"},
-    {"name": "Social Media Policy", "category": "Governance & Compliance"},
-    {"name": "Code of Conduct", "category": "Governance & Compliance"},
+    # Governance Policies - HR & Regulatory
+    {"name": "Recruitment & Selection Policy", "category": "Governance"},
+    {"name": "DBS & Vetting Policy", "category": "Governance"},
+    {"name": "Induction & Probation Policy", "category": "Governance"},
+    {"name": "Training & Development Policy", "category": "Governance"},
+    {"name": "Supervision & Appraisal Policy", "category": "Governance"},
+    {"name": "Disciplinary & Grievance Policy", "category": "Governance"},
+    {"name": "Data Protection & GDPR Policy", "category": "Governance"},
+    {"name": "Code of Conduct", "category": "Governance"},
 ]
 
 @api_router.post("/compliance/seed-policies")

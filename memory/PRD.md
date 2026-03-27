@@ -81,10 +81,11 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Overall Compliance Progress Bar** with color-coded segments
 
 #### Phase 3: Compliance Centre - Organisation Level (Completed 2026-03-27)
-- [x] **30 Organisation Policies** categorised into:
-  - **Core Policies** (10): Safeguarding Adults, Safeguarding Children, Mental Capacity Act & DoLS, Medication, Infection Prevention & Control, Health & Safety, Manual Handling, Fire Safety, First Aid, COSHH
-  - **Operational Policies** (10): Lone Working, Risk Assessment, Care Planning, Record Keeping, Confidentiality, Whistleblowing, Complaints, Incident Reporting, Business Continuity, Service User Feedback
-  - **Governance & Compliance** (10): Recruitment & Selection, DBS & Vetting, Induction & Probation, Training & Development, Supervision & Appraisal, Disciplinary & Grievance, Equality Diversity & Inclusion, Data Protection & GDPR, Social Media, Code of Conduct
+- [x] **32 Organisation Policies** categorised into 4 groups:
+  - **Core** (8): Safeguarding Adults, Safeguarding Children, Mental Capacity Act & DoLS, Health & Safety, Fire Safety, First Aid, Equality Diversity & Inclusion, Whistleblowing
+  - **Clinical** (8): Medication, Infection Prevention & Control, Manual Handling, COSHH, Care Planning, End of Life Care, Nutrition & Hydration, Pressure Ulcer Prevention
+  - **Operational** (8): Lone Working, Risk Assessment, Record Keeping, Confidentiality, Complaints, Incident Reporting, Business Continuity, Service User Feedback
+  - **Governance** (8): Recruitment & Selection, DBS & Vetting, Induction & Probation, Training & Development, Supervision & Appraisal, Disciplinary & Grievance, Data Protection & GDPR, Code of Conduct
 - [x] **6 Insurance & Certificates**:
   - Public Liability Insurance
   - Employer's Liability Insurance
@@ -93,8 +94,9 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - ICO Registration Certificate
   - Company Registration Certificate
 - [x] **Auto-seeding on startup** - All policies and insurance seeded as "Missing" placeholders
-- [x] **Policy Upload & Versioning** - Admin can upload documents with version numbers and review dates
-- [x] **Status Tracking**: missing, active, expired, under_review
+- [x] **Policy Upload & Versioning** - Admin can upload/replace documents with version numbers and review dates
+- [x] **Status Tracking**: Missing (red), Active (green), Expiring (amber)
+- [x] **View/Replace functionality** for existing documents
 - [x] **Dashboard Summary Cards** - Policy count, Insurance status, Open incidents, Active staff
 - [x] **Incident & Outbreak Logs** - Create/track incidents with reference numbers (INC-YYYY-NNNN)
 - [x] **Reports Tab** - Staff DBS Dates, Training Report (12 months)

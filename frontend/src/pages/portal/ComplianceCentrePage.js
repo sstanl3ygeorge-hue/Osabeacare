@@ -466,10 +466,19 @@ export default function ComplianceCentrePage() {
                                       variant="outline" 
                                       size="sm"
                                       className="rounded-lg"
-                                      onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${policy.file_url}`, '_blank')}
+                                      onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/policies/${policy.id}/file`, '_blank')}
                                     >
                                       <Eye className="h-4 w-4 mr-1" />
                                       View
+                                    </Button>
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      className="rounded-lg"
+                                      onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/policies/${policy.id}/download`, '_blank')}
+                                    >
+                                      <Download className="h-4 w-4 mr-1" />
+                                      Download
                                     </Button>
                                     {isAdmin() && (
                                       <Button 
@@ -573,10 +582,19 @@ export default function ComplianceCentrePage() {
                               variant="outline" 
                               size="sm"
                               className="rounded-lg"
-                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${ins.file_url}`, '_blank')}
+                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/insurance/${ins.id}/file`, '_blank')}
                             >
                               <Eye className="h-4 w-4 mr-1" />
                               View
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              className="rounded-lg"
+                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}/api/compliance/insurance/${ins.id}/download`, '_blank')}
+                            >
+                              <Download className="h-4 w-4 mr-1" />
+                              Download
                             </Button>
                             {isAdmin() && (
                               <Button 

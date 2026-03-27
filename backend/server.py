@@ -1077,7 +1077,61 @@ async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, 
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**doc)
 
-@api_router.get("/files/{path:path}")
+@api_router.get("/employee-documents/{doc_id}/file")
+async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_current_user)):
+    """Serve an employee document file"""
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    file_path = doc.get("file_url")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file uploaded for this document")
+    
+    try:
+        content, content_type = get_object(file_path)
+        filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
+        safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to retrieve employee document file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file")
+
+@api_router.get("/employee-documents/{doc_id}/download")
+async def download_employee_document_file(doc_id: str, user: dict = Depends(get_current_user)):
+    """Download an employee document file"""
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    file_path = doc.get("file_url")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file uploaded for this document")
+    
+    try:
+        content, content_type = get_object(file_path)
+        filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
+        safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to download employee document file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file")
 async def download_file(path: str, authorization: str = Header(None), auth: str = Query(None)):
     auth_header = authorization or (f"Bearer {auth}" if auth else None)
     if not auth_header:
@@ -2446,6 +2500,121 @@ async def upload_insurance_doc(
     
     updated = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
     return updated
+
+# ==================== FILE SERVING ENDPOINTS ====================
+
+@api_router.get("/compliance/policies/{policy_id}/file")
+async def serve_policy_file(policy_id: str, user: dict = Depends(get_current_user)):
+    """Serve a policy document file"""
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    file_path = policy.get("file_url")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file uploaded for this policy")
+    
+    try:
+        content, content_type = get_object(file_path)
+        filename = policy.get("original_filename", "policy.pdf")
+        # Sanitize filename for Content-Disposition header
+        safe_filename = filename.replace('"', '\\"')
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to retrieve policy file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file")
+
+@api_router.get("/compliance/policies/{policy_id}/download")
+async def download_policy_file(policy_id: str, user: dict = Depends(get_current_user)):
+    """Download a policy document file"""
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    file_path = policy.get("file_url")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file uploaded for this policy")
+    
+    try:
+        content, content_type = get_object(file_path)
+        filename = policy.get("original_filename", "policy.pdf")
+        safe_filename = filename.replace('"', '\\"')
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to download policy file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file")
+
+@api_router.get("/compliance/insurance/{insurance_id}/file")
+async def serve_insurance_file(insurance_id: str, user: dict = Depends(get_current_user)):
+    """Serve an insurance/certificate document file"""
+    doc = await db.insurance_docs.find_one({"id": insurance_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Insurance document not found")
+    
+    file_path = doc.get("file_url")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file uploaded for this document")
+    
+    try:
+        content, content_type = get_object(file_path)
+        filename = doc.get("original_filename", "document.pdf")
+        safe_filename = filename.replace('"', '\\"')
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to retrieve insurance file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file")
+
+@api_router.get("/compliance/insurance/{insurance_id}/download")
+async def download_insurance_file(insurance_id: str, user: dict = Depends(get_current_user)):
+    """Download an insurance/certificate document file"""
+    doc = await db.insurance_docs.find_one({"id": insurance_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Insurance document not found")
+    
+    file_path = doc.get("file_url")
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file uploaded for this document")
+    
+    try:
+        content, content_type = get_object(file_path)
+        filename = doc.get("original_filename", "document.pdf")
+        safe_filename = filename.replace('"', '\\"')
+        
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to download insurance file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve file")
 
 # ==================== COMPLIANCE CENTRE - INCIDENT LOGS ====================
 

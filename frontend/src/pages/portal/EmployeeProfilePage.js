@@ -980,7 +980,7 @@ export default function EmployeeProfilePage() {
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Category</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
                         <th className="text-left p-4 font-medium text-text-muted text-sm">Uploaded</th>
-                        {!isAuditor() && <th className="text-left p-4 font-medium text-text-muted text-sm">Actions</th>}
+                        <th className="text-left p-4 font-medium text-text-muted text-sm">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1001,10 +1001,32 @@ export default function EmployeeProfilePage() {
                           <td className="p-4 text-text-muted text-sm">
                             {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : '-'}
                           </td>
-                          {!isAuditor() && (
-                            <td className="p-4">
-                              {doc.status === 'uploaded' && (
-                                <div className="flex gap-2">
+                          <td className="p-4">
+                            <div className="flex gap-2">
+                              {doc.file_url && (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    className="rounded-lg"
+                                    onClick={() => window.open(`${API}/employee-documents/${doc.id}/file`, '_blank')}
+                                  >
+                                    <Eye className="h-4 w-4 mr-1" />
+                                    View
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    className="rounded-lg"
+                                    onClick={() => window.open(`${API}/employee-documents/${doc.id}/download`, '_blank')}
+                                  >
+                                    <FileDown className="h-4 w-4 mr-1" />
+                                    Download
+                                  </Button>
+                                </>
+                              )}
+                              {!isAuditor() && doc.status === 'uploaded' && (
+                                <>
                                   <Button 
                                     size="sm" 
                                     onClick={() => handleUpdateDocumentStatus(doc.id, 'approved')}
@@ -1020,10 +1042,10 @@ export default function EmployeeProfilePage() {
                                   >
                                     Reject
                                   </Button>
-                                </div>
+                                </>
                               )}
-                            </td>
-                          )}
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

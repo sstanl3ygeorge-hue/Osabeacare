@@ -117,13 +117,21 @@ class DocumentStatus:
     EXPIRED = "expired"
     NOT_APPLICABLE = "not_applicable"
 
+# Onboarding Status values
+class OnboardingStatus:
+    NEW = "New"
+    DOCUMENTS_PENDING = "Documents Pending"
+    UNDER_REVIEW = "Under Review"
+    READY_FOR_PLACEMENT = "Ready for Placement"
+    ACTIVE = "Active"
+    ARCHIVED = "Archived"
+
 # User Models
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
     name: str
     role: str = UserRole.EMPLOYEE
-    assignment: Optional[str] = "Unassigned"  # Current placement (client, care home, hospital, or Unassigned)
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -135,7 +143,6 @@ class UserResponse(BaseModel):
     email: str
     name: str
     role: str
-    assignment: Optional[str] = "Unassigned"  # Current placement (client, care home, hospital, or Unassigned)
     picture: Optional[str] = None
     created_at: str
 
@@ -146,7 +153,7 @@ class EmployeeCreate(BaseModel):
     email: EmailStr
     phone: Optional[str] = None
     role: str
-    assignment: str = "Unassigned"
+    onboarding_status: str = OnboardingStatus.NEW
     status: str = EmployeeStatus.NEW
     start_date: Optional[str] = None
     manager_name: Optional[str] = None
@@ -159,7 +166,7 @@ class EmployeeUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
     role: Optional[str] = None
-    assignment: Optional[str] = "Unassigned"  # Current placement (client, care home, hospital, or Unassigned)
+    onboarding_status: Optional[str] = None
     status: Optional[str] = None
     start_date: Optional[str] = None
     manager_name: Optional[str] = None
@@ -175,7 +182,7 @@ class EmployeeResponse(BaseModel):
     email: str
     phone: Optional[str] = None
     role: str
-    assignment: str = "Unassigned"
+    onboarding_status: str = OnboardingStatus.NEW
     status: str
     start_date: Optional[str] = None
     manager_name: Optional[str] = None
@@ -659,7 +666,6 @@ async def exchange_session(session_id: str = Header(None, alias="X-Session-ID"))
                 "name": session_data.get('name', ''),
                 "picture": session_data.get('picture'),
                 "role": UserRole.EMPLOYEE,
-                "assignment": "Unassigned",
                 "password": None,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
@@ -736,7 +742,7 @@ async def create_employee(employee: EmployeeCreate, user: dict = Depends(require
 
 @api_router.get("/employees", response_model=List[EmployeeResponse])
 async def get_employees(
-    assignment: Optional[str] = None,
+    onboarding_status: Optional[str] = None,
     status: Optional[str] = None,
     role: Optional[str] = None,
     search: Optional[str] = None,
@@ -750,11 +756,9 @@ async def get_employees(
 ):
     query = {}
     
-    # Assignment filter for branch managers (legacy role)
-    if user['role'] == UserRole.BRANCH_MANAGER:
-        query["assignment"] = user.get('assignment')
-    elif assignment:
-        query["assignment"] = assignment
+    # Onboarding status filter
+    if onboarding_status:
+        query["onboarding_status"] = onboarding_status
     
     if status:
         query["status"] = status
@@ -779,6 +783,18 @@ async def get_employees(
         emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
     
     return [EmployeeResponse(**emp) for emp in employees]
+
+@api_router.get("/onboarding-statuses")
+async def get_onboarding_statuses(user: dict = Depends(get_current_user)):
+    """Get list of available onboarding status options"""
+    return [
+        OnboardingStatus.NEW,
+        OnboardingStatus.DOCUMENTS_PENDING,
+        OnboardingStatus.UNDER_REVIEW,
+        OnboardingStatus.READY_FOR_PLACEMENT,
+        OnboardingStatus.ACTIVE,
+        OnboardingStatus.ARCHIVED
+    ]
 
 @api_router.get("/employees/{employee_id}", response_model=EmployeeResponse)
 async def get_employee(employee_id: str, user: dict = Depends(get_current_user)):

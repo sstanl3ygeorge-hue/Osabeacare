@@ -97,6 +97,15 @@ export default function EmployeeProfilePage() {
     { value: 'inactive', label: 'Inactive' }
   ];
 
+  const onboardingStatuses = [
+    'New',
+    'Documents Pending',
+    'Under Review',
+    'Ready for Placement',
+    'Active',
+    'Archived'
+  ];
+
   const isSuperAdmin = () => user?.role === 'super_admin';
 
   const fetchData = async () => {
@@ -290,7 +299,7 @@ export default function EmployeeProfilePage() {
       phone: employee?.phone || '',
       role: employee?.role || '',
       status: employee?.status || '',
-      assignment: employee?.assignment || 'Unassigned',
+      onboarding_status: employee?.onboarding_status || 'New',
       start_date: employee?.start_date || '',
       notes: employee?.notes || ''
     });
@@ -485,8 +494,8 @@ export default function EmployeeProfilePage() {
               </div>
             )}
             <div className="flex items-center gap-3">
-              <MapPin className="h-5 w-5 text-text-muted" />
-              <span className="text-sm text-text-primary">{employee.assignment || 'Unassigned'}</span>
+              <ClipboardList className="h-5 w-5 text-text-muted" />
+              <span className="text-sm text-text-primary">{employee.onboarding_status || 'New'}</span>
             </div>
             {employee.start_date && (
               <div className="flex items-center gap-3">
@@ -1237,13 +1246,17 @@ export default function EmployeeProfilePage() {
             
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-gray-700 font-medium">Current Placement</Label>
-                <Input
-                  value={editForm.assignment}
-                  onChange={(e) => setEditForm({...editForm, assignment: e.target.value})}
-                  placeholder="e.g., Sunrise Care Home"
-                  className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
-                />
+                <Label className="text-gray-700 font-medium">Onboarding Status</Label>
+                <Select value={editForm.onboarding_status} onValueChange={(value) => setEditForm({...editForm, onboarding_status: value})}>
+                  <SelectTrigger className="rounded-xl bg-gray-50 border-gray-300 text-gray-900 focus:ring-2 focus:ring-teal-600 focus:border-teal-600">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border-gray-200">
+                    {onboardingStatuses.map((s) => (
+                      <SelectItem key={s} value={s} className="text-gray-900">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label className="text-gray-700 font-medium">Start Date</Label>

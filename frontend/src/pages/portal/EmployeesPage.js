@@ -31,9 +31,9 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [assignmentFilter, setAssignmentFilter] = useState('');
+  const [onboardingStatusFilter, setOnboardingStatusFilter] = useState('');
   const [showArchived, setShowArchived] = useState(false);
-  const [assignments, setAssignments] = useState([]);
+  const [onboardingStatuses, setOnboardingStatuses] = useState([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
@@ -47,7 +47,7 @@ export default function EmployeesPage() {
     email: '',
     phone: '',
     role: 'Care Assistant',
-    assignment: 'Unassigned',
+    onboarding_status: 'New',
     status: 'new'
   });
 
@@ -56,7 +56,7 @@ export default function EmployeesPage() {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
       if (statusFilter && statusFilter !== 'archived') params.append('status', statusFilter);
-      if (assignmentFilter) params.append('assignment', assignmentFilter);
+      if (onboardingStatusFilter) params.append('onboarding_status', onboardingStatusFilter);
       if (showArchived || statusFilter === 'archived') params.append('include_archived', 'true');
       if (statusFilter === 'archived') params.append('status', 'archived');
       
@@ -71,21 +71,23 @@ export default function EmployeesPage() {
     }
   };
 
-  const fetchAssignments = async () => {
+  const fetchOnboardingStatuses = async () => {
     try {
-      const response = await axios.get(`${API}/assignments`, {
+      const response = await axios.get(`${API}/onboarding-statuses`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setAssignments(response.data);
+      setOnboardingStatuses(response.data);
     } catch (error) {
-      console.error('Failed to fetch assignments:', error);
+      console.error('Failed to fetch onboarding statuses:', error);
+      // Fallback to default values
+      setOnboardingStatuses(['New', 'Documents Pending', 'Under Review', 'Ready for Placement', 'Active', 'Archived']);
     }
   };
 
   useEffect(() => {
     fetchEmployees();
-    fetchAssignments();
-  }, [token, search, statusFilter, assignmentFilter, showArchived]);
+    fetchOnboardingStatuses();
+  }, [token, search, statusFilter, onboardingStatusFilter, showArchived]);
 
   const handleArchiveEmployee = async () => {
     if (!selectedEmployee) return;
@@ -149,7 +151,7 @@ export default function EmployeesPage() {
         email: '',
         phone: '',
         role: 'Care Assistant',
-        assignment: 'Unassigned',
+        onboarding_status: 'New',
         status: 'new'
       });
       fetchEmployees();
@@ -165,6 +167,7 @@ export default function EmployeesPage() {
     'Senior Care Assistant',
     'Support Worker',
     'Healthcare Assistant',
+    'Nurse',
     'Live-in Carer',
     'Night Carer',
     'Team Leader',
@@ -259,15 +262,20 @@ export default function EmployeesPage() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Assignment *</Label>
-                    <Input
-                      value={newEmployee.assignment}
-                      onChange={(e) => setNewEmployee({...newEmployee, assignment: e.target.value})}
-                      placeholder="e.g., Sunrise Care Home, Unassigned"
-                      required
-                      className="rounded-xl"
-                      data-testid="emp-assignment"
-                    />
+                    <Label>Onboarding Status</Label>
+                    <Select 
+                      value={newEmployee.onboarding_status} 
+                      onValueChange={(value) => setNewEmployee({...newEmployee, onboarding_status: value})}
+                    >
+                      <SelectTrigger className="rounded-xl" data-testid="emp-onboarding-status">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {onboardingStatuses.map((status) => (
+                          <SelectItem key={status} value={status}>{status}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 
@@ -315,16 +323,15 @@ export default function EmployeesPage() {
                 <SelectItem value="archived">Archived</SelectItem>
               </SelectContent>
             </Select>
-            {assignments.length > 0 && (
-              <Select value={assignmentFilter || "all"} onValueChange={(v) => setAssignmentFilter(v === "all" ? "" : v)}>
-                <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="assignment-filter">
-                  <SelectValue placeholder="Assignment" />
+            {onboardingStatuses.length > 0 && (
+              <Select value={onboardingStatusFilter || "all"} onValueChange={(v) => setOnboardingStatusFilter(v === "all" ? "" : v)}>
+                <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="onboarding-status-filter">
+                  <SelectValue placeholder="Onboarding Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Assignments</SelectItem>
-                  <SelectItem value="Unassigned">Unassigned</SelectItem>
-                  {assignments.map((assignment) => (
-                    <SelectItem key={assignment} value={assignment}>{assignment}</SelectItem>
+                  <SelectItem value="all">All Onboarding</SelectItem>
+                  {onboardingStatuses.map((status) => (
+                    <SelectItem key={status} value={status}>{status}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -353,7 +360,7 @@ export default function EmployeesPage() {
                   <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Employee</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Assignment</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Onboarding Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Compliance</th>
                     {!isAuditor() && <th className="text-left p-4 font-medium text-text-muted text-sm w-16">Actions</th>}
@@ -379,7 +386,7 @@ export default function EmployeesPage() {
                         <span className="text-text-primary">{emp.role}</span>
                       </td>
                       <td className="p-4 hidden lg:table-cell">
-                        <span className="text-text-muted">{emp.assignment || 'Unassigned'}</span>
+                        <span className="text-text-muted">{emp.onboarding_status || 'New'}</span>
                       </td>
                       <td className="p-4">
                         <span className={`status-chip ${statusColors[emp.status] || 'status-neutral'}`}>

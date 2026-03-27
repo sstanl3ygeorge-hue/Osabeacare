@@ -12,7 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import {
-  LayoutDashboard, Users, FolderOpen, FileCheck, GraduationCap,
+  LayoutDashboard, Users, FolderOpen, GraduationCap,
   History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2
 } from 'lucide-react';
 
@@ -22,7 +22,7 @@ const navigation = [
   { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
   { name: 'Documents', href: '/portal/documents', icon: FolderOpen },
-  { name: 'Policies', href: '/portal/policies', icon: FileCheck },
+  // Policies removed - all policy management is now in Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'Audit View', href: '/portal/audit', icon: History },
   { name: 'Settings', href: '/portal/settings', icon: Settings },

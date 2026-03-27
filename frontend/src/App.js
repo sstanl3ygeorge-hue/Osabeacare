@@ -20,7 +20,8 @@ import DashboardPage from "./pages/portal/DashboardPage";
 import EmployeesPage from "./pages/portal/EmployeesPage";
 import EmployeeProfilePage from "./pages/portal/EmployeeProfilePage";
 import DocumentsPage from "./pages/portal/DocumentsPage";
-import PoliciesPage from "./pages/portal/PoliciesPage";
+// PoliciesPage removed - all policy management is now in Compliance Centre
+// import PoliciesPage from "./pages/portal/PoliciesPage";
 import TrainingPage from "./pages/portal/TrainingPage";
 import AuditViewPage from "./pages/portal/AuditViewPage";
 import SettingsPage from "./pages/portal/SettingsPage";
@@ -67,7 +68,8 @@ function AppRouter() {
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
         <Route path="documents" element={<DocumentsPage />} />
-        <Route path="policies" element={<PoliciesPage />} />
+        {/* Policies route removed - all policy management is now in Compliance Centre */}
+        {/* <Route path="policies" element={<PoliciesPage />} /> */}
         <Route path="training" element={<TrainingPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="compliance-centre" element={<ComplianceCentrePage />} />

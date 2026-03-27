@@ -104,10 +104,10 @@ export default function DashboardPage() {
                 Review Documents
               </Button>
             </Link>
-            <Link to="/portal/policies" className="block">
-              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-policies">
+            <Link to="/portal/compliance-centre" className="block">
+              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-compliance">
                 <FileCheck className="mr-2 h-4 w-4" />
-                Assign Policies
+                Compliance Centre
               </Button>
             </Link>
           </CardContent>

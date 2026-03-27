@@ -160,10 +160,21 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Reports Tab** - Staff DBS Dates, Training Report (12 months)
 
 ### Upcoming Features (P0)
-- [ ] PDF generation backend (server-side PDF for compliance summary)
-- [ ] Email notifications via Resend for form requests
+- [x] **PDF Compliance Summary Export** (Completed 2026-03-27):
+  - Download Compliance PDF button in Actions dropdown
+  - Print Compliance PDF button (opens in new tab)
+  - Professional A4 PDF with employee info, compliance score, checklist, training summary
+  - Uses reportlab for server-side PDF generation
+- [x] **Navigation State Preservation** (Completed 2026-03-27):
+  - URL-based state persistence for filters/tabs using useSearchParams
+  - Back button uses navigate(-1) for browser history
+  - Employees page preserves search, status, and onboarding filters
+  - Employee profile preserves active tab
+  - Compliance Centre preserves active tab
+  - Templates page preserves search and category filter
 
 ### Backlog (P1-P2)
+- [ ] Email notifications via Resend for form requests
 - [ ] Bulk document requests
 - [ ] Bulk policy assignment
 - [ ] Employee self-service portal
@@ -303,4 +314,4 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - Compliance Centre completed with 30 policies, 6 insurance/certificates, incidents, and reports
+2026-03-27 - PDF Compliance Summary Export (Download + Print) and Navigation State Preservation completed

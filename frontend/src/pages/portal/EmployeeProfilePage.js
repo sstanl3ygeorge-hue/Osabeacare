@@ -101,6 +101,12 @@ export default function EmployeeProfilePage() {
   const [trainingExpiryDate, setTrainingExpiryDate] = useState('');
   const [isCompletingTraining, setIsCompletingTraining] = useState(false);
   
+  // Training certificate upload states
+  const [trainingCertDialogOpen, setTrainingCertDialogOpen] = useState(false);
+  const [trainingCertFile, setTrainingCertFile] = useState(null);
+  const [isUploadingCert, setIsUploadingCert] = useState(false);
+  const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
+  
   const { token, isAuditor, user } = useAuth();
   
   // Document preview modal state
@@ -643,6 +649,120 @@ export default function EmployeeProfilePage() {
     setSelectedTrainingReq(requirement);
     setTrainingExpiryDate('');
     setTrainingDialogOpen(true);
+  };
+  
+  // Open training certificate upload dialog
+  const openTrainingCertDialog = (requirement) => {
+    setSelectedTrainingReq(requirement);
+    setTrainingExpiryDate('');
+    setTrainingCertFile(null);
+    setTrainingCertDialogOpen(true);
+  };
+  
+  // Handle uploading training certificate
+  const handleUploadTrainingCertificate = async () => {
+    if (!selectedTrainingReq || !trainingCertFile) {
+      toast.error('Please select a certificate file');
+      return;
+    }
+    
+    setIsUploadingCert(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', trainingCertFile);
+      if (trainingExpiryDate) {
+        formData.append('expiry_date', trainingExpiryDate);
+      }
+      
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/training/${selectedTrainingReq.id}/upload-certificate`,
+        formData,
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          } 
+        }
+      );
+      
+      toast.success(response.data.message || 'Certificate uploaded successfully');
+      setTrainingCertDialogOpen(false);
+      setSelectedTrainingReq(null);
+      setTrainingCertFile(null);
+      setTrainingExpiryDate('');
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to upload certificate');
+    } finally {
+      setIsUploadingCert(false);
+    }
+  };
+  
+  // Handle verifying training
+  const handleVerifyTraining = async (trainingId) => {
+    setIsVerifyingTraining(true);
+    try {
+      await axios.post(
+        `${API}/training-records/${trainingId}/verify`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Training verified successfully');
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to verify training');
+    } finally {
+      setIsVerifyingTraining(false);
+    }
+  };
+  
+  // Handle unverifying training
+  const handleUnverifyTraining = async (trainingId) => {
+    try {
+      await axios.post(
+        `${API}/training-records/${trainingId}/unverify`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Training verification removed');
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to remove verification');
+    }
+  };
+  
+  // View training certificate
+  const handleViewTrainingCertificate = (trainingId, filename) => {
+    const url = `${API}/training-records/${trainingId}/certificate/file`;
+    setPreviewFile({ url, name: filename || 'Certificate', filename: filename });
+    setPreviewOpen(true);
+  };
+  
+  // Download training certificate
+  const handleDownloadTrainingCertificate = async (trainingId, filename) => {
+    try {
+      const response = await axios.get(
+        `${API}/training-records/${trainingId}/certificate/download`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+      const blob = new Blob([response.data]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || 'training_certificate';
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('Certificate downloaded');
+    } catch (error) {
+      toast.error('Failed to download certificate');
+    }
   };
 
   const toggleTemplateSelection = (templateId) => {
@@ -1815,14 +1935,29 @@ export default function EmployeeProfilePage() {
                                     </p>
                                   )}
                                   {req.training && (
-                                    <p className="text-xs text-text-muted flex items-center gap-1">
-                                      <GraduationCap className="h-3 w-3" />
-                                      Training: {req.training.status.replace('_', ' ')}
-                                    </p>
+                                    <div className="text-xs text-text-muted space-y-0.5 mt-1">
+                                      <p className="flex items-center gap-1">
+                                        <GraduationCap className="h-3 w-3" />
+                                        Training: {req.training.status.replace('_', ' ')}
+                                        {req.training.verified && <Shield className="h-3 w-3 text-success ml-1" />}
+                                      </p>
+                                      {req.training.certificate_url ? (
+                                        <p className="flex items-center gap-1 text-success">
+                                          <FileText className="h-3 w-3" />
+                                          {req.training.original_filename || 'Certificate uploaded'}
+                                          {req.training.verified && <span className="text-success">(Verified)</span>}
+                                        </p>
+                                      ) : req.training.status === 'completed' && (
+                                        <p className="flex items-center gap-1 text-warning">
+                                          <AlertTriangle className="h-3 w-3" />
+                                          No certificate uploaded
+                                        </p>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap justify-end">
                                 <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
                                   allVerified || req.verified ? 'bg-success/10 text-success' :
                                   req.status === 'completed' ? 'bg-info/10 text-info' :
@@ -1835,7 +1970,7 @@ export default function EmployeeProfilePage() {
                                    req.status === 'in_progress' ? 'In Progress' :
                                    'Missing'}
                                 </span>
-                                {docs.length === 0 && req.type === 'document' && (
+                                {docs.length === 0 && req.type === 'document' && !isAuditor() && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
@@ -1846,7 +1981,7 @@ export default function EmployeeProfilePage() {
                                     Upload
                                   </Button>
                                 )}
-                                {docs.length > 0 && !allVerified && req.status === 'completed' && (
+                                {docs.length > 0 && !allVerified && req.status === 'completed' && !isAuditor() && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
@@ -1857,18 +1992,86 @@ export default function EmployeeProfilePage() {
                                     Verify All
                                   </Button>
                                 )}
-                                {/* Training completion button */}
-                                {req.type === 'training' && req.status !== 'completed' && !isAuditor() && (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => openTrainingDialog(req)}
-                                    className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
-                                    data-testid={`complete-training-${req.id}`}
-                                  >
-                                    <CheckCircle className="h-3 w-3 mr-1" />
-                                    Mark Complete
-                                  </Button>
+                                {/* Training actions */}
+                                {req.type === 'training' && !isAuditor() && (
+                                  <>
+                                    {/* Upload Certificate button - always available for training */}
+                                    {!req.training?.certificate_url && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        onClick={() => openTrainingCertDialog(req)}
+                                        className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                                        data-testid={`upload-training-cert-${req.id}`}
+                                      >
+                                        <Upload className="h-3 w-3 mr-1" />
+                                        Upload Certificate
+                                      </Button>
+                                    )}
+                                    {/* View/Download buttons when certificate exists */}
+                                    {req.training?.certificate_url && (
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleViewTrainingCertificate(req.training.id, req.training.original_filename)}
+                                          className="text-xs h-7 rounded-lg"
+                                          data-testid={`view-training-cert-${req.id}`}
+                                        >
+                                          <Eye className="h-3 w-3 mr-1" />
+                                          View
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => handleDownloadTrainingCertificate(req.training.id, req.training.original_filename)}
+                                          className="text-xs h-7 rounded-lg"
+                                          data-testid={`download-training-cert-${req.id}`}
+                                        >
+                                          <Download className="h-3 w-3 mr-1" />
+                                          Download
+                                        </Button>
+                                        {/* Verify button - only when certificate exists */}
+                                        {!req.training.verified && req.training.status === 'completed' && (
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleVerifyTraining(req.training.id)}
+                                            disabled={isVerifyingTraining}
+                                            className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
+                                            data-testid={`verify-training-${req.id}`}
+                                          >
+                                            <Shield className="h-3 w-3 mr-1" />
+                                            Verify
+                                          </Button>
+                                        )}
+                                        {/* Unverify button */}
+                                        {req.training.verified && (
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => handleUnverifyTraining(req.training.id)}
+                                            className="text-xs h-7 text-warning border-warning hover:bg-warning/10 rounded-lg"
+                                            data-testid={`unverify-training-${req.id}`}
+                                          >
+                                            <Shield className="h-3 w-3 mr-1" />
+                                            Unverify
+                                          </Button>
+                                        )}
+                                        {/* Replace certificate */}
+                                        <Button 
+                                          size="sm" 
+                                          variant="outline"
+                                          onClick={() => openTrainingCertDialog(req)}
+                                          className="text-xs h-7 rounded-lg"
+                                          data-testid={`replace-training-cert-${req.id}`}
+                                        >
+                                          <Upload className="h-3 w-3 mr-1" />
+                                          Replace
+                                        </Button>
+                                      </>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             </div>
@@ -2525,6 +2728,111 @@ export default function EmployeeProfilePage() {
                 <>
                   <CheckCircle className="h-4 w-4 mr-2" />
                   Mark Complete
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Training Certificate Upload Dialog */}
+      <Dialog open={trainingCertDialogOpen} onOpenChange={setTrainingCertDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-text-primary">
+              <Upload className="h-5 w-5 text-primary" />
+              Upload Training Certificate
+            </DialogTitle>
+            <DialogDescription className="text-text-muted">
+              Upload a certificate as evidence for this training requirement.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedTrainingReq && (
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-[#F8FAFA] rounded-xl">
+                <p className="font-medium text-text-primary">{selectedTrainingReq.name}</p>
+                <p className="text-sm text-text-muted mt-1">
+                  Category: {selectedTrainingReq.category?.replace(/_/g, ' ').replace(/^[A-Z]_/, '')}
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label className="text-text-primary">Certificate File *</Label>
+                <Input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                  onChange={(e) => setTrainingCertFile(e.target.files?.[0] || null)}
+                  className="rounded-xl"
+                  data-testid="training-cert-file-input"
+                />
+                <p className="text-xs text-text-muted">
+                  Accepted formats: PDF, JPG, PNG, DOC, DOCX
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label className="text-text-primary">Certificate Expiry Date (Optional)</Label>
+                <Input
+                  type="date"
+                  value={trainingExpiryDate}
+                  onChange={(e) => setTrainingExpiryDate(e.target.value)}
+                  className="rounded-xl"
+                />
+                <p className="text-xs text-text-muted">
+                  Set an expiry date if this certificate needs to be renewed
+                </p>
+              </div>
+              
+              <div className="bg-success/10 border border-success/20 rounded-xl p-3">
+                <p className="text-sm text-success font-medium">Audit-Ready Evidence:</p>
+                <ul className="text-xs text-text-muted mt-1 space-y-1">
+                  <li className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-success" />
+                    Certificate stored with audit trail
+                  </li>
+                  <li className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-success" />
+                    Training marked as complete with evidence
+                  </li>
+                  <li className="flex items-center gap-1">
+                    <CheckCircle className="h-3 w-3 text-success" />
+                    Certificate can be viewed and downloaded
+                  </li>
+                  <li className="flex items-center gap-1">
+                    <Shield className="h-3 w-3 text-success" />
+                    Ready for verification
+                  </li>
+                </ul>
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setTrainingCertDialogOpen(false);
+                setSelectedTrainingReq(null);
+                setTrainingCertFile(null);
+                setTrainingExpiryDate('');
+              }} 
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleUploadTrainingCertificate}
+              disabled={isUploadingCert || !trainingCertFile}
+              className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+              data-testid="confirm-upload-training-cert"
+            >
+              {isUploadingCert ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload Certificate
                 </>
               )}
             </Button>

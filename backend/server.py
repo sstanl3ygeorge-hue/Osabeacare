@@ -656,6 +656,13 @@ class TrainingRecordResponse(BaseModel):
     completion_date: Optional[str] = None
     expiry_date: Optional[str] = None
     certificate_url: Optional[str] = None
+    original_filename: Optional[str] = None
+    uploaded_at: Optional[str] = None
+    verified: bool = False
+    verified_by: Optional[str] = None
+    verified_at: Optional[str] = None
+    completion_method: Optional[str] = None  # "certificate" or "manual" 
+    requirement_id: Optional[str] = None
     status: str
     created_at: str
 
@@ -2283,13 +2290,27 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                 req['training'] = {
                     "id": linked_training['id'],
                     "status": linked_training['status'],
-                    "completed_at": linked_training.get('completed_at'),
-                    "expiry_date": linked_training.get('expiry_date')
+                    "completed_at": linked_training.get('completed_at') or linked_training.get('completion_date'),
+                    "expiry_date": linked_training.get('expiry_date'),
+                    "certificate_url": linked_training.get('certificate_url'),
+                    "original_filename": linked_training.get('original_filename'),
+                    "uploaded_at": linked_training.get('uploaded_at'),
+                    "verified": linked_training.get('verified', False),
+                    "verified_by": linked_training.get('verified_by'),
+                    "verified_at": linked_training.get('verified_at'),
+                    "completion_method": linked_training.get('completion_method'),
+                    "has_evidence": bool(linked_training.get('certificate_url'))
                 }
                 if linked_training['status'] == 'completed':
                     if req['status'] == 'missing':
                         req['status'] = 'completed'
                         completed_count += 1
+                    # Training is verified if it has both certificate AND verified flag
+                    if linked_training.get('verified') and linked_training.get('certificate_url'):
+                        req['verified'] = True
+                        req['verified_by'] = linked_training.get('verified_by')
+                        req['verified_at'] = linked_training.get('verified_at')
+                        verified_count += 1
                 elif linked_training['status'] not in ['not_started']:
                     if req['status'] == 'missing':
                         req['status'] = 'in_progress'
@@ -2884,25 +2905,324 @@ async def update_training_record(record_id: str, update: TrainingRecordCreate, u
     return TrainingRecordResponse(**record)
 
 @api_router.post("/training-records/{record_id}/upload-certificate")
-async def upload_training_certificate(record_id: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+async def upload_training_certificate(
+    record_id: str, 
+    file: UploadFile = File(...), 
+    expiry_date: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Upload a certificate for a training record.
+    This is the proper way to complete training with evidence.
+    """
     record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found")
     
+    # Get employee for file path
+    employee = await db.employees.find_one({"id": record['employee_id']}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
     ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
-    path = f"{APP_NAME}/certificates/{record['employee_id']}/{uuid.uuid4()}.{ext}"
+    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    training_slug = record['training_name'].replace(' ', '_')
+    storage_filename = f"{employee_name}_{training_slug}_certificate_{datetime.now(timezone.utc).strftime('%d-%m-%Y')}.{ext}"
+    path = f"{APP_NAME}/certificates/{record['employee_id']}/{storage_filename}"
     
     data = await file.read()
     result = put_object(path, data, file.content_type or "application/pdf")
     
     now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "certificate_url": result["path"], 
+        "original_filename": file.filename,
+        "uploaded_at": now,
+        "status": "completed",
+        "completion_date": now,
+        "completion_method": "certificate",
+        "updated_at": now
+    }
+    
+    if expiry_date:
+        update_data["expiry_date"] = expiry_date
+    
     await db.training_records.update_one(
         {"id": record_id},
-        {"$set": {"certificate_url": result["path"], "status": "completed", "completion_date": now}}
+        {"$set": update_data}
+    )
+    
+    await log_audit_action(
+        user['user_id'], 
+        "upload_training_certificate", 
+        "training_record", 
+        record_id, 
+        {"training_name": record['training_name'], "filename": file.filename}
+    )
+    
+    # Update employee compliance
+    await update_employee_compliance(record['employee_id'])
+    
+    updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    return updated
+
+
+@api_router.post("/training-records/{record_id}/verify")
+async def verify_training_record(record_id: str, user: dict = Depends(require_manager_or_admin)):
+    """
+    Verify a training record. Requires certificate to be uploaded first.
+    """
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    # Check if certificate exists
+    if not record.get('certificate_url'):
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot verify training without uploaded certificate. Please upload a certificate first."
+        )
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get user name for verification
+    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    verified_by_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "verified": True,
+            "verified_by": verified_by_name,
+            "verified_at": now,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'], 
+        "verify_training", 
+        "training_record", 
+        record_id, 
+        {"training_name": record['training_name']}
+    )
+    
+    # Update employee compliance
+    await update_employee_compliance(record['employee_id'])
+    
+    updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    return {"success": True, "message": "Training verified successfully", "training_record": updated}
+
+
+@api_router.post("/training-records/{record_id}/unverify")
+async def unverify_training_record(record_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Remove verification from a training record."""
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "verified": False,
+            "verified_by": None,
+            "verified_at": None,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'], 
+        "unverify_training", 
+        "training_record", 
+        record_id, 
+        {"training_name": record['training_name']}
     )
     
     updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    return TrainingRecordResponse(**updated)
+    return {"success": True, "message": "Training verification removed", "training_record": updated}
+
+
+@api_router.get("/training-records/{record_id}/certificate/file")
+async def get_training_certificate_file(record_id: str, user: dict = Depends(get_current_user)):
+    """Get certificate file for viewing."""
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    if not record.get('certificate_url'):
+        raise HTTPException(status_code=404, detail="No certificate uploaded for this training")
+    
+    try:
+        file_bytes, stored_content_type = get_object(record['certificate_url'])
+        
+        # Determine content type from extension or use stored type
+        ext = record['certificate_url'].split('.')[-1].lower()
+        content_types = {
+            'pdf': 'application/pdf',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }
+        content_type = content_types.get(ext, stored_content_type)
+        
+        return Response(content=file_bytes, media_type=content_type)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve certificate: {str(e)}")
+
+
+@api_router.get("/training-records/{record_id}/certificate/download")
+async def download_training_certificate(record_id: str, user: dict = Depends(get_current_user)):
+    """Download certificate file."""
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    if not record.get('certificate_url'):
+        raise HTTPException(status_code=404, detail="No certificate uploaded for this training")
+    
+    try:
+        file_bytes, _ = get_object(record['certificate_url'])
+        
+        filename = record.get('original_filename', f"{record['training_name']}_certificate.pdf")
+        
+        return Response(
+            content=file_bytes, 
+            media_type='application/octet-stream',
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to download certificate: {str(e)}")
+
+
+@api_router.post("/employees/{employee_id}/training/{requirement_id}/upload-certificate")
+async def upload_training_certificate_for_requirement(
+    employee_id: str,
+    requirement_id: str,
+    file: UploadFile = File(...),
+    expiry_date: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Upload a certificate for a training requirement.
+    Creates training record if not exists, or updates existing one.
+    This is the PROPER way to complete training with evidence.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get the requirement config from MANDATORY_ITEMS
+    all_items = MANDATORY_ITEMS['base'] + MANDATORY_ITEMS['training'] + MANDATORY_ITEMS['nurse_specific']
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    if requirement.get('type') != 'training':
+        raise HTTPException(status_code=400, detail=f"Requirement {requirement_id} is not a training requirement")
+    
+    training_name = requirement.get('training_name', requirement['name'])
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Upload file
+    ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
+    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    training_slug = training_name.replace(' ', '_')
+    storage_filename = f"{employee_name}_{training_slug}_certificate_{datetime.now(timezone.utc).strftime('%d-%m-%Y')}.{ext}"
+    path = f"{APP_NAME}/certificates/{employee_id}/{storage_filename}"
+    
+    data = await file.read()
+    result = put_object(path, data, file.content_type or "application/pdf")
+    
+    # Check for existing training record
+    existing_record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"training_name": {"$regex": training_name, "$options": "i"}},
+            {"requirement_id": requirement_id}
+        ]
+    }, {"_id": 0})
+    
+    if existing_record:
+        # Update existing record
+        update_data = {
+            "certificate_url": result["path"],
+            "original_filename": file.filename,
+            "uploaded_at": now,
+            "status": "completed",
+            "completion_date": now,
+            "completion_method": "certificate",
+            "requirement_id": requirement_id,
+            "updated_at": now
+        }
+        if expiry_date:
+            update_data["expiry_date"] = expiry_date
+            
+        await db.training_records.update_one(
+            {"id": existing_record['id']},
+            {"$set": update_data}
+        )
+        
+        await log_audit_action(
+            user['user_id'], 
+            "upload_training_certificate", 
+            "training_record", 
+            existing_record['id'], 
+            {"requirement_id": requirement_id, "training_name": training_name, "filename": file.filename}
+        )
+        
+        updated_record = await db.training_records.find_one({"id": existing_record['id']}, {"_id": 0})
+        action = "updated"
+    else:
+        # Create new training record with certificate
+        record_id = str(uuid.uuid4())
+        new_record = {
+            "id": record_id,
+            "employee_id": employee_id,
+            "training_name": training_name,
+            "mandatory": True,
+            "status": "completed",
+            "completion_date": now,
+            "expiry_date": expiry_date,
+            "certificate_url": result["path"],
+            "original_filename": file.filename,
+            "uploaded_at": now,
+            "verified": False,
+            "verified_by": None,
+            "verified_at": None,
+            "completion_method": "certificate",
+            "requirement_id": requirement_id,
+            "created_at": now
+        }
+        
+        await db.training_records.insert_one(new_record)
+        
+        await log_audit_action(
+            user['user_id'], 
+            "upload_training_certificate", 
+            "training_record", 
+            record_id, 
+            {"requirement_id": requirement_id, "training_name": training_name, "filename": file.filename}
+        )
+        
+        updated_record = {k: v for k, v in new_record.items() if k != '_id'}
+        action = "created"
+    
+    # Update employee compliance
+    await update_employee_compliance(employee_id)
+    
+    return {
+        "success": True,
+        "message": f"Certificate uploaded for '{requirement['name']}'",
+        "training_record": updated_record,
+        "action": action
+    }
 
 
 async def update_employee_compliance(employee_id: str):

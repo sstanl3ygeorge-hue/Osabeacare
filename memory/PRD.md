@@ -242,6 +242,18 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Cleaned up: 9 duplicate forms removed for employee Olakunle Alonge
   - Result: Employee shows 10/20 requirements complete (55%), 4 verified
   - System now operates as a proper NHS/CQC-ready compliance engine
+- [x] **Unified Training Completion Flow** (Completed 2026-03-27):
+  - NEW: "Mark Complete" button on training requirements in Checklist tab
+  - NEW: "Complete" button in Training & Compliance Overview for missing training
+  - NEW: Training completion dialog with optional expiry date
+  - NEW: POST /api/employees/{id}/complete-training endpoint
+  - NEW: GET /api/employees/{id}/training-requirements endpoint
+  - Feature: Prevents duplicates - updates existing records or creates new
+  - Feature: Compliance score updates immediately after completion
+  - Feature: Works from both Overview and Checklist tabs
+  - Fixed: ComplianceOverview matching logic for training record names
+  - Result: Single unified flow: Employee → Requirement → Complete → Compliance updates
+  - Employee OCS-0001 now at 17/20 (85%) with all 6 training complete
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests

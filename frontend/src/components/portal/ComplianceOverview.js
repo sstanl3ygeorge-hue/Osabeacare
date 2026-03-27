@@ -158,10 +158,25 @@ export default function ComplianceOverview({
       
       // Check training records
       if (item.trainingType) {
-        const trainingRecord = training.find(t => 
-          t.training_name?.toLowerCase().includes(item.trainingType.replace('_', ' ')) ||
-          t.training_type?.toLowerCase().includes(item.trainingType.replace('_', ' '))
-        );
+        // Improved matching logic - matches various training name formats
+        const searchTerms = [
+          item.trainingType.replace(/_/g, ' '),  // basic_life_support -> "basic life support"
+          item.trainingType.replace(/_/g, ''),   // basic_life_support -> "basiclifesupport"
+          item.name.toLowerCase()                 // "Basic Life Support (BLS)" -> "basic life support (bls)"
+        ];
+        
+        const trainingRecord = training.find(t => {
+          const trainingName = (t.training_name || '').toLowerCase();
+          const trainingType = (t.training_type || '').toLowerCase();
+          
+          return searchTerms.some(term => {
+            const normalizedTerm = term.toLowerCase();
+            return trainingName.includes(normalizedTerm) || 
+                   normalizedTerm.includes(trainingName) ||
+                   trainingType.includes(normalizedTerm) ||
+                   normalizedTerm.includes(trainingType);
+          });
+        });
         
         if (trainingRecord) {
           if (trainingRecord.status === 'completed') {

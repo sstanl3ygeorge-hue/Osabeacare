@@ -4809,6 +4809,236 @@ async def auto_fill_employee_data(employee_id: str) -> dict:
         "date_generated_formatted": datetime.now(timezone.utc).strftime("%d %B %Y")
     }
 
+
+async def auto_generate_form_pdf(form_id: str, user: dict):
+    """
+    Auto-generate PDF for a completed form and store as evidence document.
+    Called automatically when form status changes to 'completed' or 'signed_off'.
+    """
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        return
+    
+    # Skip if already has PDF
+    if form.get('pdf_url'):
+        return
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": form['employee_id']}, {"_id": 0})
+    if not employee:
+        return
+    
+    # Get template
+    template = await db.templates.find_one({"id": form['template_id']}, {"_id": 0})
+    template_name = form.get('template_name') or (template['name'] if template else 'Form')
+    
+    # Determine folder
+    folder = get_folder_for_form(template_name)
+    
+    # Generate filename
+    employee_name = f"{employee['first_name']} {employee['last_name']}"
+    filename = generate_document_filename(employee_name, template_name)
+    
+    # Generate PDF
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=40, bottomMargin=40, leftMargin=40, rightMargin=40)
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Title
+    title_style = ParagraphStyle('FormTitle', parent=styles['Heading1'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    elements.append(Paragraph(template_name, title_style))
+    
+    # Employee info
+    info_style = ParagraphStyle('InfoStyle', parent=styles['Normal'], fontSize=10, spaceAfter=5)
+    elements.append(Paragraph(f"<b>Employee:</b> {employee_name} ({employee.get('employee_code', 'N/A')})", info_style))
+    elements.append(Paragraph(f"<b>Role:</b> {employee.get('role', 'N/A')}", info_style))
+    elements.append(Paragraph(f"<b>Date:</b> {datetime.now(timezone.utc).strftime('%d/%m/%Y')}", info_style))
+    elements.append(Spacer(1, 20))
+    
+    # Form data
+    form_data = form.get('form_data', {})
+    if form_data:
+        elements.append(Paragraph("<b>Form Data</b>", styles['Heading2']))
+        elements.append(Spacer(1, 10))
+        
+        # Create table for form data
+        table_data = [['Field', 'Value']]
+        for key, value in form_data.items():
+            if value:
+                display_key = key.replace('_', ' ').title()
+                display_value = str(value)[:100]
+                table_data.append([display_key, display_value])
+        
+        if len(table_data) > 1:
+            table = Table(table_data, colWidths=[200, 300])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#004D4D')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFA')]),
+            ]))
+            elements.append(table)
+    
+    elements.append(Spacer(1, 30))
+    
+    # Signatures section
+    if form.get('employee_signature') or form.get('admin_signature'):
+        elements.append(Paragraph("<b>Signatures</b>", styles['Heading2']))
+        elements.append(Spacer(1, 10))
+        
+        if form.get('employee_signature'):
+            elements.append(Paragraph(f"Employee Signature: {form['employee_signature']}", info_style))
+            if form.get('employee_signed_at'):
+                elements.append(Paragraph(f"Signed: {form['employee_signed_at'][:10]}", info_style))
+        
+        if form.get('admin_signature'):
+            elements.append(Paragraph(f"Admin Signature: {form['admin_signature']}", info_style))
+            if form.get('admin_signed_at'):
+                elements.append(Paragraph(f"Signed: {form['admin_signed_at'][:10]}", info_style))
+    
+    # Status footer
+    elements.append(Spacer(1, 30))
+    status_text = f"Status: {form.get('status', 'Unknown').upper()}"
+    if form.get('locked'):
+        status_text += " (LOCKED)"
+    elements.append(Paragraph(f"<i>{status_text}</i>", info_style))
+    elements.append(Paragraph(f"<i>Generated: {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')}</i>", info_style))
+    
+    doc.build(elements)
+    pdf_content = buffer.getvalue()
+    buffer.close()
+    
+    # Upload PDF to storage
+    now = datetime.now(timezone.utc).isoformat()
+    file_path = f"osabea-care/documents/{employee['id']}/{folder}/{filename}"
+    put_object(file_path, pdf_content, "application/pdf")
+    
+    # Determine requirement_id from form template
+    req_id = form.get('requirement_id')
+    if not req_id:
+        # Map template name to requirement_id
+        template_to_req = {
+            "application form": "application_form",
+            "recruitment compliance checklist": "recruitment_checklist",
+            "personal information form": "personal_info",
+            "interview record": "interview_record",
+            "equal opportunities monitoring": "equal_opportunities",
+            "health screening questionnaire": "health_screening",
+            "induction": "induction",
+            "contract acknowledgement": "contract",
+            "employee handbook acknowledgement": "handbook",
+        }
+        for key, value in template_to_req.items():
+            if key in template_name.lower():
+                req_id = value
+                break
+    
+    # Find or create document type
+    doc_type = await db.document_types.find_one(
+        {"name": {"$regex": template_name, "$options": "i"}},
+        {"_id": 0}
+    )
+    
+    doc_type_id = doc_type['id'] if doc_type else str(uuid.uuid4())
+    doc_type_name = doc_type['name'] if doc_type else template_name
+    
+    # Create employee document record with proper requirement_id
+    doc_id = str(uuid.uuid4())
+    evidence_file = {
+        "file_id": doc_id,
+        "file_url": file_path,
+        "original_filename": filename,
+        "uploaded_at": now,
+        "uploaded_by": user['user_id'],
+        "source_type": "form_submission",
+        "file_label": f"Completed {template_name}"
+    }
+    
+    emp_doc = {
+        "id": doc_id,
+        "employee_id": employee['id'],
+        "document_type_id": doc_type_id,
+        "document_type_name": doc_type_name,
+        "category": folder,
+        "file_url": file_path,
+        "original_filename": filename,
+        "status": DocumentStatus.APPROVED,
+        "uploaded_by": user['user_id'],
+        "uploaded_at": now,
+        "reviewed_by": user['user_id'],
+        "reviewed_at": now,
+        "expiry_date": None,
+        "notes": f"Auto-generated from form completion. Form ID: {form_id}",
+        "version_number": 1,
+        "verified": False,
+        "source_type": "form_submission",
+        "source_form_id": form_id,
+        "requirement_id": req_id,
+        "requirement_name": template_name,
+        "document_label": f"Completed {template_name}",
+        "evidence_files": [evidence_file],
+        "created_at": now
+    }
+    
+    await db.employee_documents.insert_one(emp_doc)
+    
+    # Update form with PDF URL and requirement_id
+    await db.generated_forms.update_one(
+        {"id": form_id},
+        {"$set": {
+            "pdf_url": file_path, 
+            "saved_as_document_id": doc_id,
+            "requirement_id": req_id
+        }}
+    )
+    
+    # Update employee compliance
+    await update_employee_compliance(employee['id'])
+    
+    logger.info(f"Auto-generated PDF for form {form_id} -> document {doc_id}")
+
+
+@api_router.post("/generated-forms/{form_id}/regenerate-pdf")
+async def regenerate_form_pdf(form_id: str, user: dict = Depends(require_manager_or_admin)):
+    """
+    Force regenerate PDF for a completed form.
+    Use this when a form is completed but has no PDF evidence.
+    """
+    form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    if form['status'] not in ['completed', 'completed_imported', 'signed_off', 'reviewed']:
+        raise HTTPException(status_code=400, detail="Form must be in completed status to generate PDF")
+    
+    # Clear existing pdf_url to force regeneration
+    await db.generated_forms.update_one(
+        {"id": form_id},
+        {"$unset": {"pdf_url": ""}}
+    )
+    
+    await auto_generate_form_pdf(form_id, user)
+    
+    updated_form = await db.generated_forms.find_one({"id": form_id}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "message": "PDF regenerated successfully",
+        "pdf_url": updated_form.get('pdf_url'),
+        "document_id": updated_form.get('saved_as_document_id')
+    }
+
+
 @api_router.post("/generated-forms", response_model=GeneratedFormResponse)
 async def create_generated_form(form: GeneratedFormCreate, user: dict = Depends(require_manager_or_admin)):
     form_id = str(uuid.uuid4())
@@ -4962,19 +5192,31 @@ async def update_generated_form(form_id: str, update: GeneratedFormUpdate, user:
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = now
     
+    # Track if we're completing the form (need to auto-generate PDF)
+    should_generate_pdf = False
+    
     # Track status changes
     if update.status:
         if update.status == FormStatus.SENT and not form.get('sent_at'):
             update_data['sent_at'] = now
         elif update.status == FormStatus.COMPLETED and not form.get('completed_at'):
             update_data['completed_at'] = now
+            should_generate_pdf = True  # Auto-generate PDF on completion
         elif update.status == FormStatus.REVIEWED and not form.get('reviewed_at'):
             update_data['reviewed_at'] = now
         elif update.status == FormStatus.SIGNED_OFF and not form.get('signed_off_at'):
             update_data['signed_off_at'] = now
             update_data['admin_signoff_by'] = user['user_id']
+            should_generate_pdf = True  # Also generate on signoff if not already
     
     await db.generated_forms.update_one({"id": form_id}, {"$set": update_data})
+    
+    # Auto-generate PDF evidence on completion (if not already exists)
+    if should_generate_pdf and not form.get('pdf_url'):
+        try:
+            await auto_generate_form_pdf(form_id, user)
+        except Exception as e:
+            logger.error(f"Failed to auto-generate PDF for form {form_id}: {e}")
     
     await log_audit_action(user['user_id'], "update_form", "generated_form", form_id, {"status": update.status})
     

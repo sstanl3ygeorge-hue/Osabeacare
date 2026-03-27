@@ -2034,12 +2034,20 @@ export default function EmployeeProfilePage() {
                                     </p>
                                   )}
                                   
-                                  {/* Form status */}
+                                  {/* Form status - show clear message based on PDF status */}
                                   {req.form && !hasEvidence && (
-                                    <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
-                                      <ClipboardList className="h-3 w-3" />
-                                      Form: {req.form.status.replace('_', ' ')}
-                                    </p>
+                                    <div className="text-xs mt-1">
+                                      <p className="flex items-center gap-1 text-text-muted">
+                                        <ClipboardList className="h-3 w-3" />
+                                        Form: {req.form.status.replace('_', ' ')}
+                                      </p>
+                                      {!req.form.pdf_url && ['completed', 'completed_imported', 'signed_off'].includes(req.form.status) && (
+                                        <p className="flex items-center gap-1 text-warning mt-0.5">
+                                          <AlertTriangle className="h-3 w-3" />
+                                          No PDF document generated - click Generate PDF
+                                        </p>
+                                      )}
+                                    </div>
                                   )}
                                   
                                   {/* Training status (when no evidence) */}
@@ -2061,23 +2069,53 @@ export default function EmployeeProfilePage() {
                                 
                                 {/* Upload Evidence button - for any requirement without evidence */}
                                 {!hasEvidence && !isAuditor() && (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => {
-                                      if (req.type === 'training') {
-                                        openTrainingCertDialog(req);
-                                      } else {
-                                        setSelectedRequirement(req.id);
-                                        setUploadDialogOpen(true);
-                                      }
-                                    }}
-                                    className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
-                                    data-testid={`upload-evidence-${req.id}`}
-                                  >
-                                    <Upload className="h-3 w-3 mr-1" />
-                                    Upload
-                                  </Button>
+                                  <>
+                                    {/* For form-generated items with completed form but no PDF, show Generate button */}
+                                    {req.type === 'form-generated' && req.form && req.form.status && 
+                                     ['completed', 'completed_imported', 'signed_off'].includes(req.form.status) && 
+                                     !req.form.pdf_url ? (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        onClick={async () => {
+                                          try {
+                                            await axios.post(
+                                              `${API}/generated-forms/${req.form.id}/regenerate-pdf`,
+                                              {},
+                                              { headers: { Authorization: `Bearer ${token}` } }
+                                            );
+                                            toast.success('PDF generated successfully');
+                                            fetchCompliance();
+                                          } catch (e) {
+                                            toast.error(e.response?.data?.detail || 'Failed to generate PDF');
+                                          }
+                                        }}
+                                        className="text-xs h-7 text-warning border-warning hover:bg-warning/10 rounded-lg"
+                                        data-testid={`generate-pdf-${req.id}`}
+                                      >
+                                        <FileText className="h-3 w-3 mr-1" />
+                                        Generate PDF
+                                      </Button>
+                                    ) : (
+                                      <Button 
+                                        size="sm" 
+                                        variant="outline"
+                                        onClick={() => {
+                                          if (req.type === 'training') {
+                                            openTrainingCertDialog(req);
+                                          } else {
+                                            setSelectedRequirement(req.id);
+                                            setUploadDialogOpen(true);
+                                          }
+                                        }}
+                                        className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                                        data-testid={`upload-evidence-${req.id}`}
+                                      >
+                                        <Upload className="h-3 w-3 mr-1" />
+                                        Upload
+                                      </Button>
+                                    )}
+                                  </>
                                 )}
                                 
                                 {/* Add File button - when has evidence and allows multiple */}

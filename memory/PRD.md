@@ -297,6 +297,15 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - FIXED: Unified evidence endpoint handles all requirement types
   - RESULT: OCS-0001 at 100% completion (23/23 with evidence), 5 verified
   - AUDIT STATUS: Evidence-based, traceable, audit-ready
+- [x] **Forms → Automatic PDF Evidence** (Completed 2026-03-27):
+  - NEW: Forms auto-generate PDF when marked complete
+  - NEW: PDF stored as evidence document with proper requirement_id
+  - NEW: `POST /generated-forms/{id}/regenerate-pdf` endpoint to force regeneration
+  - Feature: Checklist only shows forms as complete if PDF exists
+  - Feature: "Generate PDF" button for completed forms without PDF
+  - Feature: Clear warning message "No PDF document generated"
+  - RESULT: All 8 forms for OCS-0001 now have PDF evidence
+  - AUDIT STATUS: Forms = internal workflow, PDFs = audit evidence
 
 ### Backlog (P1-P2)
 - [ ] Email notifications via Resend for form requests

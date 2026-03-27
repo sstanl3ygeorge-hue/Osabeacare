@@ -245,7 +245,7 @@ export default function FormEditorPage() {
     );
   }
 
-  if (!form || !template) {
+  if (!form) {
     return (
       <div className="text-center py-12">
         <p className="text-text-muted">Form not found</p>
@@ -255,6 +255,9 @@ export default function FormEditorPage() {
       </div>
     );
   }
+  
+  // For imported forms without templates, show a simplified view
+  const isImportedWithoutTemplate = !template && form.status === 'completed_imported';
 
   const statusColors = {
     draft: 'bg-gray-100 text-text-muted',
@@ -266,12 +269,12 @@ export default function FormEditorPage() {
     archived: 'bg-gray-100 text-text-muted'
   };
 
-  const visibilityBadge = template.visibility === 'restricted' ? (
+  const visibilityBadge = template?.visibility === 'restricted' ? (
     <span className="flex items-center gap-1 text-warning text-xs bg-warning/10 px-2 py-1 rounded-full">
       <Shield className="h-3 w-3" />
       Restricted
     </span>
-  ) : template.visibility === 'confidential' ? (
+  ) : template?.visibility === 'confidential' ? (
     <span className="flex items-center gap-1 text-error text-xs bg-error/10 px-2 py-1 rounded-full">
       <AlertTriangle className="h-3 w-3" />
       Confidential

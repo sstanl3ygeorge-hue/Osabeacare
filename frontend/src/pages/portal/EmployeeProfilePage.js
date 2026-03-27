@@ -228,6 +228,54 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const handleExportCompliancePDF = async () => {
+    setIsExporting(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/export-compliance-pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      const filename = response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') 
+        || `${employee?.employee_code}_Compliance_Summary.pdf`;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Compliance PDF exported successfully');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to export PDF');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handlePrintCompliancePDF = async () => {
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/export-compliance-pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      // Open in new tab for printing
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const printWindow = window.open(url, '_blank');
+      if (printWindow) {
+        printWindow.onload = () => {
+          printWindow.print();
+        };
+      }
+    } catch (error) {
+      toast.error('Failed to open PDF for printing');
+    }
+  };
+
   const handleUploadDocument = async (e) => {
     e.preventDefault();
     if (!selectedDocType || !uploadFile) {

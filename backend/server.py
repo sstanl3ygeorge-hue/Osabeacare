@@ -17,6 +17,12 @@ import jwt
 import bcrypt
 import requests
 import resend
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm, inch
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
 
 ROOT_DIR = Path(__file__).parent
@@ -1515,6 +1521,328 @@ async def export_compliance_summary(employee_id: str, user: dict = Depends(get_c
     await log_audit_action(user['user_id'], "export_compliance_summary", "employee", employee_id, {})
     
     return summary
+
+@api_router.get("/employees/{employee_id}/export-compliance-pdf")
+async def export_compliance_pdf(employee_id: str, user: dict = Depends(get_current_user)):
+    """Export compliance summary as professional A4 PDF suitable for audits"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    compliance = await calculate_employee_compliance(employee_id, employee.get("role", ""))
+    
+    # Get training records
+    training = await db.training_records.find(
+        {"employee_id": employee_id},
+        {"_id": 0, "training_name": 1, "status": 1, "completed_at": 1, "expiry_date": 1}
+    ).to_list(100)
+    
+    # Get last audit/review info
+    last_audit = await db.audit_logs.find_one(
+        {"entity_type": "employee", "entity_id": employee_id, "action": {"$in": ["approve_document", "sign_off_form"]}},
+        {"_id": 0},
+        sort=[("created_at", -1)]
+    )
+    
+    # Create PDF buffer
+    pdf_buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        pdf_buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
+    )
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(
+        name='CompanyHeader',
+        fontName='Helvetica-Bold',
+        fontSize=16,
+        textColor=colors.HexColor('#0D9488'),
+        alignment=TA_CENTER,
+        spaceAfter=5*mm
+    ))
+    styles.add(ParagraphStyle(
+        name='DocumentTitle',
+        fontName='Helvetica-Bold',
+        fontSize=14,
+        textColor=colors.HexColor('#1F2937'),
+        alignment=TA_CENTER,
+        spaceAfter=10*mm
+    ))
+    styles.add(ParagraphStyle(
+        name='SectionHeader',
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        textColor=colors.HexColor('#1F2937'),
+        spaceBefore=8*mm,
+        spaceAfter=4*mm
+    ))
+    styles.add(ParagraphStyle(
+        name='BodyText',
+        fontName='Helvetica',
+        fontSize=9,
+        textColor=colors.HexColor('#374151'),
+        spaceAfter=2*mm
+    ))
+    styles.add(ParagraphStyle(
+        name='SmallText',
+        fontName='Helvetica',
+        fontSize=8,
+        textColor=colors.HexColor('#6B7280'),
+    ))
+    styles.add(ParagraphStyle(
+        name='ComplianceScore',
+        fontName='Helvetica-Bold',
+        fontSize=28,
+        textColor=colors.HexColor('#0D9488'),
+        alignment=TA_CENTER,
+    ))
+    
+    elements = []
+    
+    # Header
+    elements.append(Paragraph("Osabea Healthcare Solutions", styles['CompanyHeader']))
+    elements.append(Paragraph("Employee Compliance Summary", styles['DocumentTitle']))
+    elements.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#E5E7EB')))
+    elements.append(Spacer(1, 5*mm))
+    
+    # Employee Info Table
+    emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}"
+    emp_code = employee.get('employee_code', 'N/A')
+    emp_role = employee.get('role', 'N/A')
+    emp_status = employee.get('onboarding_status', 'New')
+    
+    info_data = [
+        ['Employee Name:', emp_name, 'Employee ID:', emp_code],
+        ['Role:', emp_role, 'Onboarding Status:', emp_status],
+        ['Email:', employee.get('email', 'N/A'), 'Start Date:', employee.get('start_date', 'N/A') or 'Not Set'],
+    ]
+    
+    info_table = Table(info_data, colWidths=[35*mm, 55*mm, 35*mm, 45*mm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+        ('FONTNAME', (3, 0), (3, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#374151')),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4*mm),
+        ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 5*mm))
+    
+    # Compliance Score Box
+    score = compliance['completion_percentage']
+    verified = compliance['verification_percentage']
+    
+    score_color = '#10B981' if score >= 80 else '#F59E0B' if score >= 50 else '#EF4444'
+    
+    score_data = [
+        [Paragraph(f"<font color='{score_color}'>{score}%</font>", styles['ComplianceScore'])],
+        [Paragraph("Compliance Score", ParagraphStyle('ScoreLabel', fontName='Helvetica', fontSize=10, alignment=TA_CENTER, textColor=colors.HexColor('#6B7280')))],
+    ]
+    
+    score_table = Table(score_data, colWidths=[50*mm])
+    score_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#E5E7EB')),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
+        ('TOPPADDING', (0, 0), (-1, -1), 5*mm),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5*mm),
+    ]))
+    
+    stats_data = [
+        ['Total Items:', str(compliance['total_items'])],
+        ['Complete:', str(compliance['complete_count'])],
+        ['Verified:', str(compliance['verified_count'])],
+        ['Missing:', str(compliance['missing_count'])],
+        ['Expiring:', str(compliance['expiring_count'])],
+    ]
+    
+    stats_table = Table(stats_data, colWidths=[25*mm, 20*mm])
+    stats_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#374151')),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+    ]))
+    
+    overview_layout = Table([[score_table, stats_table]], colWidths=[60*mm, 50*mm])
+    overview_layout.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    elements.append(overview_layout)
+    elements.append(Spacer(1, 8*mm))
+    
+    # Section 1: Mandatory Items Checklist
+    elements.append(Paragraph("1. Mandatory Items Checklist", styles['SectionHeader']))
+    
+    checklist_data = [['Item', 'Category', 'Status']]
+    for item in compliance['items']:
+        status_symbol = '✔' if item['status'] == 'complete' and item['verified'] else '⏳' if item['status'] == 'complete' else '✖'
+        status_text = 'Complete & Verified' if item['status'] == 'complete' and item['verified'] else 'Pending Verification' if item['status'] == 'complete' else 'Expiring' if item['status'] == 'expiring' else 'Missing'
+        status_display = f"{status_symbol} {status_text}"
+        
+        category_short = item['category'].replace('_', ' ').split(' ', 1)[-1] if '_' in item['category'] else item['category']
+        checklist_data.append([item['name'], category_short[:20], status_display])
+    
+    checklist_table = Table(checklist_data, colWidths=[75*mm, 45*mm, 50*mm])
+    checklist_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#374151')),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F3F4F6')),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
+        ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+        ('LEFTPADDING', (0, 0), (-1, -1), 2*mm),
+        ('ALIGN', (2, 0), (2, -1), 'LEFT'),
+    ]))
+    elements.append(checklist_table)
+    elements.append(Spacer(1, 5*mm))
+    
+    # Section 2: Training Summary
+    elements.append(Paragraph("2. Training Summary", styles['SectionHeader']))
+    
+    completed_training = [t for t in training if t.get('status') == 'completed']
+    pending_training = [t for t in training if t.get('status') != 'completed']
+    
+    # Get required training items from compliance
+    required_training = [item for item in compliance['items'] if item['type'] == 'training']
+    missing_training = [item['name'] for item in required_training if item['status'] == 'missing']
+    
+    if completed_training:
+        training_data = [['Training', 'Completed', 'Expires']]
+        for t in completed_training:
+            completed_date = t.get('completed_at', 'N/A')
+            if completed_date and completed_date != 'N/A':
+                try:
+                    completed_date = datetime.fromisoformat(completed_date.replace('Z', '+00:00')).strftime('%d/%m/%Y')
+                except:
+                    pass
+            expiry_date = t.get('expiry_date', 'N/A')
+            if expiry_date and expiry_date != 'N/A':
+                try:
+                    expiry_date = datetime.fromisoformat(expiry_date.replace('Z', '+00:00')).strftime('%d/%m/%Y')
+                except:
+                    pass
+            training_data.append([t.get('training_name', 'Unknown'), completed_date, expiry_date])
+        
+        training_table = Table(training_data, colWidths=[85*mm, 40*mm, 40*mm])
+        training_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F3F4F6')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
+            ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+        ]))
+        elements.append(training_table)
+    else:
+        elements.append(Paragraph("No completed training records found.", styles['BodyText']))
+    
+    if missing_training:
+        elements.append(Spacer(1, 3*mm))
+        elements.append(Paragraph(f"<b>Missing Training:</b> {', '.join(missing_training)}", styles['BodyText']))
+    
+    elements.append(Spacer(1, 5*mm))
+    
+    # Section 3: Missing Items (Clear Action List)
+    missing_items = [item['name'] for item in compliance['items'] if item['status'] == 'missing']
+    if missing_items:
+        elements.append(Paragraph("3. Missing Items - Action Required", styles['SectionHeader']))
+        
+        missing_data = [['#', 'Item', 'Category']]
+        for idx, item in enumerate([i for i in compliance['items'] if i['status'] == 'missing'], 1):
+            category_short = item['category'].replace('_', ' ').split(' ', 1)[-1]
+            missing_data.append([str(idx), item['name'], category_short])
+        
+        missing_table = Table(missing_data, colWidths=[10*mm, 100*mm, 55*mm])
+        missing_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#FEF2F2')),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#FFF7ED')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#991B1B')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#FECACA')),
+            ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+        ]))
+        elements.append(missing_table)
+        elements.append(Spacer(1, 5*mm))
+    
+    # Section 4: Verification
+    elements.append(Paragraph("4. Verification", styles['SectionHeader']))
+    
+    verified_by = user.get('name', user.get('email', 'System'))
+    last_review = last_audit.get('created_at', None) if last_audit else None
+    if last_review:
+        try:
+            last_review = datetime.fromisoformat(last_review.replace('Z', '+00:00')).strftime('%d/%m/%Y %H:%M')
+        except:
+            last_review = 'N/A'
+    else:
+        last_review = 'N/A'
+    
+    export_date = datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M')
+    
+    verification_data = [
+        ['Generated By:', verified_by],
+        ['Export Date:', export_date],
+        ['Last Review Activity:', last_review],
+        ['Verification Rate:', f"{verified}/{compliance['total_items']} items ({compliance['verification_percentage']}%)"],
+    ]
+    
+    verification_table = Table(verification_data, colWidths=[45*mm, 120*mm])
+    verification_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#374151')),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+    ]))
+    elements.append(verification_table)
+    
+    # Footer
+    elements.append(Spacer(1, 10*mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#E5E7EB')))
+    elements.append(Spacer(1, 3*mm))
+    elements.append(Paragraph(
+        f"This document was generated by Osabea Healthcare Solutions Compliance Portal on {export_date}. "
+        "For audit and compliance purposes only.",
+        styles['SmallText']
+    ))
+    
+    # Build PDF
+    doc.build(elements)
+    pdf_buffer.seek(0)
+    
+    # Generate filename
+    emp_name_safe = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(" ", "_")
+    filename = f"{employee.get('employee_code', 'EMP')}_Compliance_Summary_{datetime.now().strftime('%Y%m%d')}.pdf"
+    
+    await log_audit_action(user['user_id'], "export_compliance_pdf", "employee", employee_id, {
+        "filename": filename
+    })
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "application/pdf"
+        }
+    )
 
 # ==================== DOCUMENT TYPE ROUTES ====================
 

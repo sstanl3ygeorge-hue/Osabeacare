@@ -38,12 +38,14 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Full name, email, phone
   - Role selector (9 roles)
   - Status selector (new, screening, interview, compliance_review, onboarding, active, inactive)
-  - Current placement (assignment)
+  - Onboarding Status selector
   - Start date
   - Internal notes
 - [x] **Actions Menu** on employees list and profile:
   - Edit Details
-  - Export Employee File
+  - Refresh Status (auto-update onboarding status)
+  - Export Employee File (ZIP)
+  - Export Compliance Summary
   - Archive Employee
   - Delete Permanently (Super Admin only)
 - [x] **Archive Employee (Soft Delete)**:
@@ -57,6 +59,37 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Deletes employee + all related records
   - For duplicate/test/incorrect entries only
   - Action logged in audit trail
+
+#### Phase 4: Smart Compliance System (Completed 2026-03-27)
+- [x] **Role-Based Mandatory Items Checklist**:
+  - Healthcare Assistant: 18 mandatory items
+  - Nurse: 21 mandatory items (HCA items + NMC, Clinical Competency, Medication)
+  - Categories: Application, Recruitment, Personal Info, Interview, Equal Opportunities, Health Screening, Identity/RTW, References, DBS, Induction, Contract, Training, Other
+- [x] **Auto-Derive Onboarding Status**:
+  - New: No meaningful activity
+  - Documents Pending: Required items still missing
+  - Under Review: Items present but not all verified
+  - Ready for Placement: All mandatory items complete and verified
+  - Active: Compliant and working
+  - Archived: Inactive with records retained
+- [x] **Refresh Status Button**: Triggers auto-calculation and updates status
+- [x] **Super Admin Override**: Manual status override with audit log
+- [x] **Export Employee File (ZIP)**:
+  - Organized folder structure (A-O categories)
+  - Includes: forms, documents, training records
+  - Employee summary JSON
+- [x] **Export Compliance Summary**:
+  - Employee details
+  - Compliance percentage
+  - Mandatory items checklist with status
+  - Missing items list
+  - Training summary
+  - Verified documents
+- [x] **Audit Readiness Dashboard** (`/api/dashboard/audit-readiness`):
+  - Staff compliance breakdown (Ready, Under Review, Documents Pending, New, Active)
+  - Critical alerts (missing items, expiring DBS, expiring training)
+  - Organisation compliance (policies, insurance)
+  - Audit readiness score with status indicator
 
 #### Phase 2: Template Library & Document Control (Completed 2026-03-27)
 - [x] **13 Compliance Templates** (role-aware for HCA vs Nurse):
@@ -127,16 +160,14 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Reports Tab** - Staff DBS Dates, Training Report (12 months)
 
 ### Upcoming Features (P0)
-- [ ] PDF generation backend (server-side PDF for archival)
+- [ ] PDF generation backend (server-side PDF for compliance summary)
 - [ ] Email notifications via Resend for form requests
-- [ ] Document expiry reminders
 
 ### Backlog (P1-P2)
 - [ ] Bulk document requests
 - [ ] Bulk policy assignment
 - [ ] Employee self-service portal
 - [ ] Mobile app consideration
-- [ ] Advanced reporting dashboard
 
 ## Technical Architecture
 

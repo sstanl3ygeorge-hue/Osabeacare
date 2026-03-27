@@ -16,10 +16,11 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import {
-  ArrowLeft, Upload, FileText, Mail, Phone, MapPin, Calendar,
+  ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
-  MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save
+  MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
+  Download, RefreshCw, FileArchive, FileSpreadsheet
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -57,6 +58,7 @@ export default function EmployeeProfilePage() {
   const [auditLogs, setAuditLogs] = useState([]);
   const [generatedForms, setGeneratedForms] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [compliance, setCompliance] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -64,6 +66,8 @@ export default function EmployeeProfilePage() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [selectedDocType, setSelectedDocType] = useState('');
   const [uploadFile, setUploadFile] = useState(null);
   const [bulkFiles, setBulkFiles] = useState([]);
@@ -137,9 +141,92 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const fetchCompliance = async () => {
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/compliance`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCompliance(response.data);
+    } catch (error) {
+      console.error('Failed to fetch compliance:', error);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchCompliance();
   }, [employeeId, token]);
+
+  const handleRefreshStatus = async () => {
+    setIsRefreshingStatus(true);
+    try {
+      const response = await axios.post(`${API}/employees/${employeeId}/refresh-status`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (response.data.status_changed) {
+        toast.success(`Status updated to: ${response.data.new_status}`);
+      } else {
+        toast.info('Status is already up to date');
+      }
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to refresh status');
+    } finally {
+      setIsRefreshingStatus(false);
+    }
+  };
+
+  const handleExportFile = async () => {
+    setIsExporting(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/export-file`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      const filename = response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') 
+        || `${employee?.employee_code}_File.zip`;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Employee file exported successfully');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to export file');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportComplianceSummary = async () => {
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/export-compliance-summary`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      // Convert JSON to downloadable file
+      const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${employee?.employee_code}_Compliance_Summary.json`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Compliance summary exported');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to export compliance summary');
+    }
+  };
 
   const handleUploadDocument = async (e) => {
     e.preventDefault();
@@ -415,13 +502,24 @@ export default function EmployeeProfilePage() {
                   {employee.first_name} {employee.last_name}
                 </h1>
                 <p className="text-text-muted">{employee.employee_code} · {employee.role}</p>
-                <span className={`status-chip mt-2 ${
-                  employee.status === 'active' ? 'status-success' :
-                  employee.status === 'onboarding' ? 'status-info' :
-                  'status-neutral'
-                }`}>
-                  {employee.status?.replace('_', ' ')}
-                </span>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className={`status-chip ${
+                    employee.status === 'active' ? 'status-success' :
+                    employee.status === 'onboarding' ? 'status-info' :
+                    'status-neutral'
+                  }`}>
+                    {employee.status?.replace('_', ' ')}
+                  </span>
+                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                    employee.onboarding_status === 'Ready for Placement' ? 'bg-success/10 text-success' :
+                    employee.onboarding_status === 'Under Review' ? 'bg-info/10 text-info' :
+                    employee.onboarding_status === 'Documents Pending' ? 'bg-warning/10 text-warning' :
+                    employee.onboarding_status === 'Active' ? 'bg-success/10 text-success' :
+                    'bg-gray-100 text-gray-600'
+                  }`}>
+                    {employee.onboarding_status || 'New'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -438,14 +536,23 @@ export default function EmployeeProfilePage() {
                         <MoreHorizontal className="h-5 w-5" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuContent align="end" className="w-56">
                       <DropdownMenuItem onClick={openEditDialog}>
                         <Edit className="h-4 w-4 mr-2" />
                         Edit Details
                       </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <FileDown className="h-4 w-4 mr-2" />
-                        Export Employee File
+                      <DropdownMenuItem onClick={handleRefreshStatus} disabled={isRefreshingStatus}>
+                        <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
+                        Refresh Status
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleExportFile} disabled={isExporting}>
+                        <FileArchive className="h-4 w-4 mr-2" />
+                        Export Employee File (ZIP)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleExportComplianceSummary}>
+                        <FileSpreadsheet className="h-4 w-4 mr-2" />
+                        Export Compliance Summary
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {employee.status === 'archived' ? (
@@ -870,8 +977,8 @@ export default function EmployeeProfilePage() {
                     <p className="font-medium text-text-primary">{employee.role}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-text-muted">Assignment</p>
-                    <p className="font-medium text-text-primary">{employee.assignment || 'Unassigned'}</p>
+                    <p className="text-sm text-text-muted">Onboarding Status</p>
+                    <p className="font-medium text-text-primary">{employee.onboarding_status || 'New'}</p>
                   </div>
                   <div>
                     <p className="text-sm text-text-muted">Email</p>
@@ -930,43 +1037,99 @@ export default function EmployeeProfilePage() {
           />
         </TabsContent>
 
-        {/* Checklist Tab */}
+        {/* Checklist Tab - Mandatory Items */}
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">
-            <CardContent className="p-6">
-              <div className="space-y-6">
-                {Object.entries(groupedDocs).map(([category, items]) => (
-                  <div key={category} className="space-y-3">
-                    <h3 className="font-heading font-semibold text-text-primary">{category}</h3>
-                    <div className="space-y-2">
-                      {items.map((item) => {
-                        const StatusIcon = statusIcons[item.document?.status || 'not_started'];
-                        return (
-                          <div key={item.id} className="flex items-center justify-between p-3 bg-[#F8FAFA] rounded-xl">
-                            <div className="flex items-center gap-3">
-                              <StatusIcon className={`h-5 w-5 ${
-                                item.document?.status === 'approved' ? 'text-success' :
-                                item.document?.status === 'rejected' || item.document?.status === 'expired' ? 'text-error' :
-                                item.document?.status === 'uploaded' || item.document?.status === 'under_review' ? 'text-warning' :
-                                'text-text-muted'
-                              }`} />
-                              <div>
-                                <p className="font-medium text-text-primary">{item.name}</p>
-                                {item.required_before_active && (
-                                  <span className="text-xs text-error">Required</span>
-                                )}
-                              </div>
-                            </div>
-                            <span className={`status-chip ${statusColors[item.document?.status || 'not_started']}`}>
-                              {(item.document?.status || 'not_started').replace('_', ' ')}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="font-heading text-lg">Mandatory Compliance Items</CardTitle>
+                {compliance && (
+                  <p className="text-sm text-text-muted mt-1">
+                    {compliance.compliance.complete_count} of {compliance.compliance.total_items} items complete 
+                    ({compliance.compliance.verified_count} verified)
+                  </p>
+                )}
               </div>
+              {compliance && compliance.compliance.missing_count > 0 && (
+                <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
+                  <AlertTriangle className="h-4 w-4" />
+                  {compliance.compliance.missing_count} missing
+                </div>
+              )}
+            </CardHeader>
+            <CardContent>
+              {!compliance ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Group by category */}
+                  {['A_Application_Form', 'B_Recruitment_Checklist', 'C_Personal_Information', 'D_Interview', 
+                    'E_Equal_Opportunities', 'F_Health_Screening', 'G_Identity_RTW', 'H_References', 'I_DBS',
+                    'J_Induction_Shadowing_Observations', 'L_Contract', 'N_Training', 'O_Other'].map((category) => {
+                    const categoryItems = compliance.compliance.items.filter(item => item.category === category);
+                    if (categoryItems.length === 0) return null;
+                    
+                    const categoryLabel = category.replace(/_/g, ' ').replace(/^[A-Z]_/, '');
+                    const completedInCategory = categoryItems.filter(i => i.status === 'complete' || i.status === 'expiring').length;
+                    
+                    return (
+                      <div key={category}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="font-semibold text-text-primary">{categoryLabel}</h3>
+                          <span className="text-xs text-text-muted">{completedInCategory}/{categoryItems.length}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {categoryItems.map((item) => (
+                            <div 
+                              key={item.id} 
+                              className={`flex items-center justify-between p-3 rounded-xl border ${
+                                item.status === 'complete' && item.verified ? 'bg-success/5 border-success/20' :
+                                item.status === 'complete' ? 'bg-info/5 border-info/20' :
+                                item.status === 'expiring' ? 'bg-warning/5 border-warning/20' :
+                                'bg-error/5 border-error/20'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                {item.status === 'complete' && item.verified ? (
+                                  <CheckCircle className="h-5 w-5 text-success" />
+                                ) : item.status === 'complete' ? (
+                                  <Clock className="h-5 w-5 text-info" />
+                                ) : item.status === 'expiring' ? (
+                                  <AlertTriangle className="h-5 w-5 text-warning" />
+                                ) : (
+                                  <XCircle className="h-5 w-5 text-error" />
+                                )}
+                                <div>
+                                  <p className="font-medium text-text-primary">{item.name}</p>
+                                  {item.details && (
+                                    <p className="text-xs text-text-muted">{item.details}</p>
+                                  )}
+                                  {item.expiry_date && (
+                                    <p className="text-xs text-warning">Expires: {new Date(item.expiry_date).toLocaleDateString()}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                                item.status === 'complete' && item.verified ? 'bg-success/10 text-success' :
+                                item.status === 'complete' ? 'bg-info/10 text-info' :
+                                item.status === 'expiring' ? 'bg-warning/10 text-warning' :
+                                'bg-error/10 text-error'
+                              }`}>
+                                {item.status === 'complete' && item.verified ? 'Verified' :
+                                 item.status === 'complete' ? 'Pending Verification' :
+                                 item.status === 'expiring' ? 'Expiring Soon' :
+                                 'Missing'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

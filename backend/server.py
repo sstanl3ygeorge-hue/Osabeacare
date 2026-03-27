@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -7,6 +7,8 @@ import os
 import logging
 import uuid
 import asyncio
+import io
+import zipfile
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional, Dict, Any
@@ -125,6 +127,186 @@ class OnboardingStatus:
     READY_FOR_PLACEMENT = "Ready for Placement"
     ACTIVE = "Active"
     ARCHIVED = "Archived"
+
+# Mandatory Compliance Items by Role
+MANDATORY_ITEMS = {
+    "base": [  # Common to all roles
+        {"id": "application_form", "name": "Application Form", "category": "A_Application_Form", "type": "form", "template_name": "Application Form"},
+        {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", "category": "B_Recruitment_Checklist", "type": "form", "template_name": "Recruitment Compliance Checklist"},
+        {"id": "personal_info", "name": "Personal Information Form", "category": "C_Personal_Information", "type": "form", "template_name": "Personal Information Form"},
+        {"id": "interview_record", "name": "Interview Record", "category": "D_Interview", "type": "form", "template_name": "Interview Record Form"},
+        {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", "category": "E_Equal_Opportunities", "type": "form", "template_name": "Equal Opportunities Monitoring Form"},
+        {"id": "health_screening", "name": "Health Screening Questionnaire", "category": "F_Health_Screening", "type": "form", "template_name": "Health Screening Questionnaire"},
+        {"id": "identity_rtw", "name": "Identity / Right to Work", "category": "G_Identity_RTW", "type": "document", "document_types": ["passport", "visa", "right_to_work", "driving_licence"]},
+        {"id": "references", "name": "References (2 required)", "category": "H_References", "type": "document", "document_types": ["reference"], "min_count": 2},
+        {"id": "dbs", "name": "DBS Certificate", "category": "I_DBS", "type": "document", "document_types": ["dbs"]},
+        {"id": "induction", "name": "Induction & Competency Assessment", "category": "J_Induction_Shadowing_Observations", "type": "form", "template_name": "Induction & Competency Assessment"},
+        {"id": "contract", "name": "Contract Acknowledgement", "category": "L_Contract", "type": "form", "template_name": "Contract Acknowledgement Form"},
+        {"id": "handbook", "name": "Employee Handbook Acknowledgement", "category": "O_Other", "type": "form", "template_name": "Employee Handbook Acknowledgement"},
+    ],
+    "training": [  # Training requirements for all
+        {"id": "safeguarding", "name": "Safeguarding Training", "category": "N_Training", "type": "training", "training_name": "Safeguarding"},
+        {"id": "manual_handling", "name": "Manual Handling Training", "category": "N_Training", "type": "training", "training_name": "Manual Handling"},
+        {"id": "infection_control", "name": "Infection Control Training", "category": "N_Training", "type": "training", "training_name": "Infection Control"},
+        {"id": "bls", "name": "Basic Life Support (BLS)", "category": "N_Training", "type": "training", "training_name": "Basic Life Support"},
+        {"id": "fire_safety", "name": "Fire Safety Training", "category": "N_Training", "type": "training", "training_name": "Fire Safety"},
+        {"id": "health_safety", "name": "Health & Safety Training", "category": "N_Training", "type": "training", "training_name": "Health & Safety"},
+    ],
+    "nurse_specific": [  # Additional items for Nurses only
+        {"id": "nmc_registration", "name": "NMC Registration", "category": "O_Other", "type": "document", "document_types": ["nmc_registration", "professional_registration"]},
+        {"id": "clinical_competency", "name": "Clinical Competency Evidence", "category": "N_Training", "type": "document", "document_types": ["clinical_competency", "competency_assessment"]},
+        {"id": "medication_competency", "name": "Medication Competency", "category": "N_Training", "type": "training", "training_name": "Medication"},
+    ]
+}
+
+def get_mandatory_items_for_role(role: str) -> List[dict]:
+    """Get all mandatory items for a specific role"""
+    items = MANDATORY_ITEMS["base"].copy() + MANDATORY_ITEMS["training"].copy()
+    
+    # Add nurse-specific items
+    if role and "nurse" in role.lower():
+        items.extend(MANDATORY_ITEMS["nurse_specific"])
+    
+    return items
+
+async def check_item_completion(employee_id: str, item: dict) -> dict:
+    """Check if a specific mandatory item is complete for an employee"""
+    result = {
+        "id": item["id"],
+        "name": item["name"],
+        "category": item["category"],
+        "type": item["type"],
+        "status": "missing",
+        "verified": False,
+        "details": None,
+        "expiry_date": None
+    }
+    
+    if item["type"] == "form":
+        # Check for completed form from template
+        form = await db.generated_forms.find_one({
+            "employee_id": employee_id,
+            "template_name": item.get("template_name"),
+            "status": {"$in": ["completed", "reviewed", "signed_off"]}
+        }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "signed_off_at": 1})
+        
+        if form:
+            result["status"] = "complete"
+            result["verified"] = form.get("status") == "signed_off"
+            result["details"] = f"Form ID: {form['id']}"
+    
+    elif item["type"] == "document":
+        # Check for uploaded documents of required types
+        doc_types = item.get("document_types", [])
+        min_count = item.get("min_count", 1)
+        
+        docs = await db.employee_documents.find({
+            "employee_id": employee_id,
+            "document_type": {"$in": doc_types},
+            "status": {"$in": ["uploaded", "approved"]}
+        }, {"_id": 0, "id": 1, "status": 1, "document_type": 1, "expiry_date": 1}).to_list(10)
+        
+        if len(docs) >= min_count:
+            result["status"] = "complete"
+            result["verified"] = all(d.get("status") == "approved" for d in docs)
+            result["details"] = f"{len(docs)} document(s) uploaded"
+            # Check for expiring documents
+            for doc in docs:
+                if doc.get("expiry_date"):
+                    exp_date = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
+                    if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
+                        result["status"] = "expiring"
+                        result["expiry_date"] = doc["expiry_date"]
+    
+    elif item["type"] == "training":
+        # Check for completed training
+        training = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "training_name": {"$regex": item.get("training_name", ""), "$options": "i"},
+            "status": "completed"
+        }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "expiry_date": 1})
+        
+        if training:
+            result["status"] = "complete"
+            result["verified"] = True
+            result["details"] = f"Completed: {training.get('completed_at', 'N/A')}"
+            if training.get("expiry_date"):
+                exp_date = datetime.fromisoformat(training["expiry_date"].replace('Z', '+00:00'))
+                if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
+                    result["status"] = "expiring"
+                    result["expiry_date"] = training["expiry_date"]
+    
+    return result
+
+async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
+    """Calculate full compliance status for an employee"""
+    mandatory_items = get_mandatory_items_for_role(role)
+    
+    results = []
+    complete_count = 0
+    verified_count = 0
+    expiring_count = 0
+    missing_count = 0
+    
+    for item in mandatory_items:
+        check = await check_item_completion(employee_id, item)
+        results.append(check)
+        
+        if check["status"] == "complete":
+            complete_count += 1
+            if check["verified"]:
+                verified_count += 1
+        elif check["status"] == "expiring":
+            complete_count += 1
+            expiring_count += 1
+        else:
+            missing_count += 1
+    
+    total_items = len(mandatory_items)
+    completion_percentage = int((complete_count / total_items) * 100) if total_items > 0 else 0
+    verification_percentage = int((verified_count / total_items) * 100) if total_items > 0 else 0
+    
+    return {
+        "items": results,
+        "total_items": total_items,
+        "complete_count": complete_count,
+        "verified_count": verified_count,
+        "expiring_count": expiring_count,
+        "missing_count": missing_count,
+        "completion_percentage": completion_percentage,
+        "verification_percentage": verification_percentage
+    }
+
+async def derive_onboarding_status(employee_id: str, role: str, current_status: str = None) -> str:
+    """Auto-derive onboarding status based on compliance progress"""
+    # Don't change archived status
+    if current_status == OnboardingStatus.ARCHIVED:
+        return OnboardingStatus.ARCHIVED
+    
+    compliance = await calculate_employee_compliance(employee_id, role)
+    
+    # Check for any activity
+    forms_count = await db.generated_forms.count_documents({"employee_id": employee_id})
+    docs_count = await db.employee_documents.count_documents({"employee_id": employee_id})
+    training_count = await db.training_records.count_documents({"employee_id": employee_id})
+    
+    total_activity = forms_count + docs_count + training_count
+    
+    if total_activity == 0:
+        return OnboardingStatus.NEW
+    
+    # All mandatory items complete and verified
+    if compliance["complete_count"] == compliance["total_items"]:
+        if compliance["verified_count"] == compliance["total_items"]:
+            # Check if they are actively working (has current assignment or marked active)
+            if current_status == OnboardingStatus.ACTIVE:
+                return OnboardingStatus.ACTIVE
+            return OnboardingStatus.READY_FOR_PLACEMENT
+        else:
+            return OnboardingStatus.UNDER_REVIEW
+    
+    # Has activity but items still missing
+    return OnboardingStatus.DOCUMENTS_PENDING
 
 # User Models
 class UserCreate(BaseModel):
@@ -954,6 +1136,386 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
         }
     }
 
+# ==================== EMPLOYEE COMPLIANCE ROUTES ====================
+
+@api_router.get("/employees/{employee_id}/compliance")
+async def get_employee_compliance(employee_id: str, user: dict = Depends(get_current_user)):
+    """Get full compliance status for an employee including all mandatory items"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    compliance = await calculate_employee_compliance(employee_id, employee.get("role", ""))
+    derived_status = await derive_onboarding_status(employee_id, employee.get("role", ""), employee.get("onboarding_status"))
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+        "role": employee.get("role"),
+        "current_onboarding_status": employee.get("onboarding_status", "New"),
+        "derived_onboarding_status": derived_status,
+        "compliance": compliance
+    }
+
+@api_router.post("/employees/{employee_id}/refresh-status")
+async def refresh_employee_onboarding_status(employee_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Refresh and auto-update employee's onboarding status based on compliance"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    current_status = employee.get("onboarding_status", "New")
+    derived_status = await derive_onboarding_status(employee_id, employee.get("role", ""), current_status)
+    
+    if derived_status != current_status:
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "onboarding_status": derived_status,
+                "onboarding_status_updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        await log_audit_action(
+            user['user_id'],
+            "auto_update_onboarding_status",
+            "employee",
+            employee_id,
+            {
+                "previous_status": current_status,
+                "new_status": derived_status,
+                "reason": "Auto-derived from compliance progress"
+            }
+        )
+    
+    # Calculate new completion percentage
+    compliance = await calculate_employee_compliance(employee_id, employee.get("role", ""))
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {"completion_percentage": compliance["completion_percentage"]}}
+    )
+    
+    return {
+        "employee_id": employee_id,
+        "previous_status": current_status,
+        "new_status": derived_status,
+        "completion_percentage": compliance["completion_percentage"],
+        "status_changed": derived_status != current_status
+    }
+
+@api_router.post("/employees/{employee_id}/override-status")
+async def override_employee_status(
+    employee_id: str, 
+    new_status: str = Query(..., description="New onboarding status"),
+    reason: str = Query(None, description="Reason for override"),
+    user: dict = Depends(require_admin)
+):
+    """Manually override onboarding status (Super Admin only)"""
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can override onboarding status")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    valid_statuses = [OnboardingStatus.NEW, OnboardingStatus.DOCUMENTS_PENDING, 
+                     OnboardingStatus.UNDER_REVIEW, OnboardingStatus.READY_FOR_PLACEMENT,
+                     OnboardingStatus.ACTIVE, OnboardingStatus.ARCHIVED]
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+    
+    previous_status = employee.get("onboarding_status", "New")
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "onboarding_status": new_status,
+            "onboarding_status_override": True,
+            "onboarding_status_override_by": user['user_id'],
+            "onboarding_status_override_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "manual_override_onboarding_status",
+        "employee",
+        employee_id,
+        {
+            "previous_status": previous_status,
+            "new_status": new_status,
+            "reason": reason or "Manual override by Super Admin"
+        }
+    )
+    
+    return {
+        "employee_id": employee_id,
+        "previous_status": previous_status,
+        "new_status": new_status,
+        "override": True
+    }
+
+# ==================== EMPLOYEE EXPORT ROUTES ====================
+
+@api_router.get("/employees/{employee_id}/export-file")
+async def export_employee_file(employee_id: str, user: dict = Depends(get_current_user)):
+    """Export employee file as ZIP with organized folder structure"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    
+    # Define folder structure
+    folders = [
+        "A_Application_Form",
+        "B_Recruitment_Checklist", 
+        "C_Personal_Information",
+        "D_Interview",
+        "E_Equal_Opportunities",
+        "F_Health_Screening",
+        "G_Identity_RTW",
+        "H_References",
+        "I_DBS",
+        "J_Induction_Shadowing_Observations",
+        "K_HMRC",
+        "L_Contract",
+        "M_Supervision_Appraisals",
+        "N_Training",
+        "O_Other"
+    ]
+    
+    # Map form templates to folders
+    form_folder_map = {
+        "Application Form": "A_Application_Form",
+        "Recruitment Compliance Checklist": "B_Recruitment_Checklist",
+        "Personal Information Form": "C_Personal_Information",
+        "Interview Record Form": "D_Interview",
+        "Equal Opportunities Monitoring Form": "E_Equal_Opportunities",
+        "Health Screening Questionnaire": "F_Health_Screening",
+        "Induction & Competency Assessment": "J_Induction_Shadowing_Observations",
+        "Contract Acknowledgement Form": "L_Contract",
+        "Supervision Record": "M_Supervision_Appraisals",
+        "Annual Appraisal Form": "M_Supervision_Appraisals",
+        "Reference Request & Verification Form": "H_References",
+        "DBS Review & Risk Assessment": "I_DBS",
+        "Employee Handbook Acknowledgement": "O_Other"
+    }
+    
+    # Map document types to folders
+    doc_folder_map = {
+        "passport": "G_Identity_RTW",
+        "visa": "G_Identity_RTW",
+        "right_to_work": "G_Identity_RTW",
+        "driving_licence": "G_Identity_RTW",
+        "birth_certificate": "G_Identity_RTW",
+        "dbs": "I_DBS",
+        "reference": "H_References",
+        "contract": "L_Contract",
+        "training_certificate": "N_Training",
+        "professional_registration": "O_Other",
+        "nmc_registration": "O_Other",
+        "clinical_competency": "N_Training",
+        "competency_assessment": "N_Training",
+        "hmrc": "K_HMRC",
+        "p45": "K_HMRC",
+        "ni_number": "K_HMRC"
+    }
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Create empty folders
+        for folder in folders:
+            zf.writestr(f"{folder}/.gitkeep", "")
+        
+        # Add generated forms
+        forms = await db.generated_forms.find(
+            {"employee_id": employee_id, "status": {"$in": ["completed", "reviewed", "signed_off"]}},
+            {"_id": 0}
+        ).to_list(100)
+        
+        for form in forms:
+            folder = form_folder_map.get(form.get("template_name"), "O_Other")
+            filename = f"{form.get('template_name', 'Form')}_{form.get('id', 'unknown')[:8]}.json"
+            # Save form data as JSON (in production, this would be a PDF)
+            form_content = {
+                "template_name": form.get("template_name"),
+                "employee_name": form.get("employee_name"),
+                "status": form.get("status"),
+                "form_data": form.get("form_data"),
+                "completed_at": form.get("completed_at"),
+                "signed_off_at": form.get("signed_off_at")
+            }
+            import json
+            zf.writestr(f"{folder}/{filename}", json.dumps(form_content, indent=2))
+        
+        # Add uploaded documents
+        documents = await db.employee_documents.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).to_list(100)
+        
+        for doc in documents:
+            folder = doc_folder_map.get(doc.get("document_type"), "O_Other")
+            file_url = doc.get("file_url")
+            if file_url:
+                try:
+                    content, content_type = get_object(file_url)
+                    ext = ".pdf" if "pdf" in content_type else ".file"
+                    filename = doc.get("original_filename") or f"{doc.get('document_type', 'document')}_{doc.get('id', 'unknown')[:8]}{ext}"
+                    zf.writestr(f"{folder}/{filename}", content)
+                except Exception as e:
+                    logger.error(f"Failed to add document to ZIP: {e}")
+        
+        # Add training records summary
+        training = await db.training_records.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).to_list(100)
+        
+        if training:
+            import json
+            training_summary = []
+            for t in training:
+                training_summary.append({
+                    "training_name": t.get("training_name"),
+                    "status": t.get("status"),
+                    "completed_at": t.get("completed_at"),
+                    "expiry_date": t.get("expiry_date"),
+                    "provider": t.get("provider")
+                })
+            zf.writestr("N_Training/_training_summary.json", json.dumps(training_summary, indent=2))
+        
+        # Add employee summary file
+        summary = {
+            "employee_code": employee.get("employee_code"),
+            "name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "email": employee.get("email"),
+            "role": employee.get("role"),
+            "onboarding_status": employee.get("onboarding_status"),
+            "status": employee.get("status"),
+            "start_date": employee.get("start_date"),
+            "export_date": datetime.now(timezone.utc).isoformat(),
+            "total_forms": len(forms),
+            "total_documents": len(documents),
+            "total_training": len(training)
+        }
+        import json
+        zf.writestr("_EMPLOYEE_SUMMARY.json", json.dumps(summary, indent=2))
+    
+    zip_buffer.seek(0)
+    
+    # Generate filename
+    emp_name = f"{employee.get('first_name')}_{employee.get('last_name')}".replace(" ", "_")
+    emp_code = employee.get("employee_code", "unknown")
+    filename = f"{emp_code}_{emp_name}_File.zip"
+    
+    await log_audit_action(user['user_id'], "export_employee_file", "employee", employee_id, {
+        "filename": filename
+    })
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+@api_router.get("/employees/{employee_id}/export-compliance-summary")
+async def export_compliance_summary(employee_id: str, user: dict = Depends(get_current_user)):
+    """Export compliance summary as JSON (can be converted to PDF by frontend)"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    compliance = await calculate_employee_compliance(employee_id, employee.get("role", ""))
+    
+    # Get training records
+    training = await db.training_records.find(
+        {"employee_id": employee_id, "status": "completed"},
+        {"_id": 0, "training_name": 1, "completed_at": 1, "expiry_date": 1}
+    ).to_list(100)
+    
+    # Get policy acknowledgements
+    policies = await db.policy_assignments.find(
+        {"employee_id": employee_id, "status": "acknowledged"},
+        {"_id": 0, "policy_name": 1, "acknowledged_at": 1}
+    ).to_list(100)
+    
+    # Get verified documents
+    verified_docs = await db.employee_documents.find(
+        {"employee_id": employee_id, "status": "approved"},
+        {"_id": 0, "document_type_name": 1, "uploaded_at": 1, "verified_at": 1}
+    ).to_list(100)
+    
+    # Build compliance summary
+    summary = {
+        "employee": {
+            "name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "employee_id": employee.get("employee_code"),
+            "role": employee.get("role"),
+            "email": employee.get("email"),
+            "onboarding_status": employee.get("onboarding_status"),
+            "start_date": employee.get("start_date")
+        },
+        "compliance_overview": {
+            "completion_percentage": compliance["completion_percentage"],
+            "verification_percentage": compliance["verification_percentage"],
+            "total_mandatory_items": compliance["total_items"],
+            "complete_items": compliance["complete_count"],
+            "verified_items": compliance["verified_count"],
+            "missing_items": compliance["missing_count"],
+            "expiring_items": compliance["expiring_count"]
+        },
+        "mandatory_items_checklist": [
+            {
+                "item": item["name"],
+                "category": item["category"],
+                "status": item["status"],
+                "verified": item["verified"],
+                "expiry_date": item.get("expiry_date")
+            }
+            for item in compliance["items"]
+        ],
+        "missing_items": [
+            item["name"] for item in compliance["items"] if item["status"] == "missing"
+        ],
+        "expiring_items": [
+            {"item": item["name"], "expiry_date": item.get("expiry_date")}
+            for item in compliance["items"] if item["status"] == "expiring"
+        ],
+        "training_summary": [
+            {
+                "training": t.get("training_name"),
+                "completed": t.get("completed_at"),
+                "expires": t.get("expiry_date")
+            }
+            for t in training
+        ],
+        "verified_documents": [
+            {
+                "document": d.get("document_type_name"),
+                "uploaded": d.get("uploaded_at"),
+                "verified": d.get("verified_at")
+            }
+            for d in verified_docs
+        ],
+        "policy_acknowledgements": [
+            {
+                "policy": p.get("policy_name"),
+                "acknowledged": p.get("acknowledged_at")
+            }
+            for p in policies
+        ],
+        "export_date": datetime.now(timezone.utc).isoformat(),
+        "generated_by": user.get("name", user.get("email"))
+    }
+    
+    await log_audit_action(user['user_id'], "export_compliance_summary", "employee", employee_id, {})
+    
+    return summary
+
 # ==================== DOCUMENT TYPE ROUTES ====================
 
 @api_router.post("/document-types", response_model=DocumentTypeResponse)
@@ -1404,6 +1966,142 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
         expiring_60_days=expiring_60,
         expiring_90_days=expiring_90
     )
+
+@api_router.get("/dashboard/audit-readiness")
+async def get_audit_readiness_dashboard(user: dict = Depends(require_manager_or_admin)):
+    """Get audit readiness dashboard with smart compliance metrics"""
+    
+    # Get all active/onboarding employees
+    employees = await db.employees.find(
+        {"status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING, EmployeeStatus.NEW, 
+                           EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, EmployeeStatus.COMPLIANCE_REVIEW]}},
+        {"_id": 0, "id": 1, "role": 1, "onboarding_status": 1, "status": 1}
+    ).to_list(500)
+    
+    # Initialize counters
+    ready_for_placement = 0
+    under_review = 0
+    documents_pending = 0
+    new_employees = 0
+    active_employees = 0
+    
+    missing_critical = 0
+    employees_with_missing_items = []
+    
+    # Onboarding status counts
+    for emp in employees:
+        status = emp.get("onboarding_status", "New")
+        if status == OnboardingStatus.READY_FOR_PLACEMENT:
+            ready_for_placement += 1
+        elif status == OnboardingStatus.UNDER_REVIEW:
+            under_review += 1
+        elif status == OnboardingStatus.DOCUMENTS_PENDING:
+            documents_pending += 1
+        elif status == OnboardingStatus.NEW:
+            new_employees += 1
+        elif status == OnboardingStatus.ACTIVE:
+            active_employees += 1
+    
+    # Check for critical missing items (sample first 50 employees)
+    sample_employees = employees[:50]
+    for emp in sample_employees:
+        compliance = await calculate_employee_compliance(emp["id"], emp.get("role", ""))
+        if compliance["missing_count"] > 0:
+            critical_missing = [
+                item["name"] for item in compliance["items"] 
+                if item["status"] == "missing" and item["id"] in ["dbs", "identity_rtw", "references", "safeguarding"]
+            ]
+            if critical_missing:
+                missing_critical += 1
+                if len(employees_with_missing_items) < 10:
+                    employees_with_missing_items.append({
+                        "employee_id": emp["id"],
+                        "missing_items": critical_missing
+                    })
+    
+    # Expiring documents
+    now = datetime.now(timezone.utc)
+    exp_30 = (now + timedelta(days=30)).isoformat()
+    
+    expiring_dbs = await db.employee_documents.count_documents({
+        "document_type": "dbs",
+        "expiry_date": {"$lte": exp_30, "$gt": now.isoformat()}
+    })
+    
+    expiring_training = await db.training_records.count_documents({
+        "expiry_date": {"$lte": exp_30, "$gt": now.isoformat()}
+    })
+    
+    # Organisation compliance
+    policies_missing = await db.org_policies.count_documents({"status": "missing"})
+    policies_total = await db.org_policies.count_documents({})
+    
+    insurance_missing = await db.insurance_docs.count_documents({"status": "missing"})
+    insurance_expiring = await db.insurance_docs.count_documents({
+        "expiry_date": {"$lte": exp_30, "$gt": now.isoformat()}
+    })
+    insurance_total = await db.insurance_docs.count_documents({})
+    
+    return {
+        "staff_compliance": {
+            "total_staff": len(employees),
+            "ready_for_placement": ready_for_placement,
+            "under_review": under_review,
+            "documents_pending": documents_pending,
+            "new_employees": new_employees,
+            "active_employees": active_employees
+        },
+        "critical_alerts": {
+            "missing_critical_items": missing_critical,
+            "expiring_dbs": expiring_dbs,
+            "expiring_training": expiring_training,
+            "employees_with_issues": employees_with_missing_items
+        },
+        "organisation_compliance": {
+            "policies_uploaded": policies_total - policies_missing,
+            "policies_missing": policies_missing,
+            "policies_total": policies_total,
+            "insurance_valid": insurance_total - insurance_missing - insurance_expiring,
+            "insurance_missing": insurance_missing,
+            "insurance_expiring": insurance_expiring,
+            "insurance_total": insurance_total
+        },
+        "audit_readiness_score": calculate_audit_score(
+            ready_for_placement, under_review, documents_pending,
+            policies_missing, insurance_missing, missing_critical
+        )
+    }
+
+def calculate_audit_score(ready: int, review: int, pending: int, 
+                         policies_missing: int, insurance_missing: int, 
+                         critical_missing: int) -> dict:
+    """Calculate overall audit readiness score"""
+    total_staff = ready + review + pending
+    if total_staff == 0:
+        staff_score = 100
+    else:
+        staff_score = int((ready / total_staff) * 100)
+    
+    # Deduct points for missing items
+    penalty = min(50, (policies_missing * 2) + (insurance_missing * 5) + (critical_missing * 3))
+    overall = max(0, min(100, staff_score - penalty))
+    
+    if overall >= 80:
+        status = "Audit Ready"
+        color = "success"
+    elif overall >= 60:
+        status = "Needs Attention"
+        color = "warning"
+    else:
+        status = "Critical Issues"
+        color = "error"
+    
+    return {
+        "score": overall,
+        "status": status,
+        "color": color,
+        "staff_readiness": staff_score
+    }
 
 # ==================== AUDIT LOG ROUTES ====================
 

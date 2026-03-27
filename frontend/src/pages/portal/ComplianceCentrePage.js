@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -20,7 +21,10 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function ComplianceCentrePage() {
   const { token, isAdmin } = useAuth();
-  const [activeTab, setActiveTab] = useState('policies');
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Initialize tab from URL for navigation state persistence
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'policies');
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState(null);
   const [policies, setPolicies] = useState([]);
@@ -28,6 +32,12 @@ export default function ComplianceCentrePage() {
   const [incidents, setIncidents] = useState([]);
   const [dbsReport, setDbsReport] = useState(null);
   const [trainingReport, setTrainingReport] = useState(null);
+  
+  // Sync tab changes to URL
+  const handleTabChange = (value) => {
+    setActiveTab(value);
+    setSearchParams({ tab: value }, { replace: true });
+  };
   
   // Upload states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -341,7 +351,7 @@ export default function ComplianceCentrePage() {
       )}
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
           <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-policies">
             <FileText className="h-4 w-4 mr-2" />

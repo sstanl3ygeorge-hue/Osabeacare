@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -20,7 +20,7 @@ import {
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
-  Download, RefreshCw, FileArchive, FileSpreadsheet
+  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -50,6 +50,10 @@ const statusColors = {
 export default function EmployeeProfilePage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Initialize active tab from URL for navigation state persistence
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
   const [employee, setEmployee] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);
@@ -78,6 +82,12 @@ export default function EmployeeProfilePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [editForm, setEditForm] = useState({});
   const { token, isAuditor, user } = useAuth();
+  
+  // Sync tab changes to URL
+  const handleTabChange = (value) => {
+    setActiveTab(value);
+    setSearchParams({ tab: value }, { replace: true });
+  };
 
   const roles = [
     'Care Assistant',
@@ -529,11 +539,15 @@ export default function EmployeeProfilePage() {
 
   return (
     <div className="space-y-6" data-testid="employee-profile">
-      {/* Back Link */}
-      <Link to="/portal/employees" className="inline-flex items-center gap-2 text-text-muted hover:text-primary transition-colors" data-testid="back-link">
+      {/* Back Link - Uses browser history to preserve filter/tab state */}
+      <button 
+        onClick={() => navigate(-1)} 
+        className="inline-flex items-center gap-2 text-text-muted hover:text-primary transition-colors"
+        data-testid="back-link"
+      >
         <ArrowLeft className="h-4 w-4" />
-        Back to Employees
-      </Link>
+        Back
+      </button>
 
       {/* Header Card */}
       <Card className="border-[#E4E8EB] shadow-sm">
@@ -598,9 +612,13 @@ export default function EmployeeProfilePage() {
                         <FileArchive className="h-4 w-4 mr-2" />
                         Export Employee File (ZIP)
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={handleExportComplianceSummary}>
-                        <FileSpreadsheet className="h-4 w-4 mr-2" />
-                        Export Compliance Summary
+                      <DropdownMenuItem onClick={handleExportCompliancePDF} disabled={isExporting} data-testid="download-compliance-pdf-btn">
+                        <FileDown className="h-4 w-4 mr-2" />
+                        Download Compliance PDF
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handlePrintCompliancePDF} data-testid="print-compliance-pdf-btn">
+                        <Printer className="h-4 w-4 mr-2" />
+                        Print Compliance PDF
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {employee.status === 'archived' ? (
@@ -905,7 +923,7 @@ export default function EmployeeProfilePage() {
       </Card>
 
       {/* Tabs */}
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
           <TabsTrigger value="overview" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <User className="h-4 w-4 mr-2" />

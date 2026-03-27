@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/button';
@@ -27,12 +27,15 @@ const statusColors = {
 
 export default function EmployeesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [onboardingStatusFilter, setOnboardingStatusFilter] = useState('');
-  const [showArchived, setShowArchived] = useState(false);
+  
+  // Initialize state from URL params for navigation state persistence
+  const [search, setSearch] = useState(searchParams.get('q') || '');
+  const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
+  const [onboardingStatusFilter, setOnboardingStatusFilter] = useState(searchParams.get('onboarding') || '');
+  const [showArchived, setShowArchived] = useState(searchParams.get('archived') === 'true');
   const [onboardingStatuses, setOnboardingStatuses] = useState([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,6 +43,22 @@ export default function EmployeesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const { token, isAuditor, user } = useAuth();
+
+  // Sync state to URL params for navigation preservation
+  useEffect(() => {
+    const newParams = new URLSearchParams();
+    if (search) newParams.set('q', search);
+    if (statusFilter) newParams.set('status', statusFilter);
+    if (onboardingStatusFilter) newParams.set('onboarding', onboardingStatusFilter);
+    if (showArchived) newParams.set('archived', 'true');
+    
+    // Only update URL if params changed (avoid infinite loop)
+    const currentString = searchParams.toString();
+    const newString = newParams.toString();
+    if (currentString !== newString) {
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [search, statusFilter, onboardingStatusFilter, showArchived]);
 
   const [newEmployee, setNewEmployee] = useState({
     first_name: '',

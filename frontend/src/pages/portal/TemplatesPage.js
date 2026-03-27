@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -19,6 +19,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { token, isAdmin } = useAuth();
   
   const [templates, setTemplates] = useState([]);
@@ -26,12 +27,27 @@ export default function TemplatesPage() {
   const [generatedForms, setGeneratedForms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isSeeding, setIsSeeding] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('all');
+  
+  // Initialize filters from URL for navigation state persistence
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
+  const [categoryFilter, setCategoryFilter] = useState(searchParams.get('category') || 'all');
   const [generateDialogOpen, setGenerateDialogOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Sync state to URL params for navigation preservation
+  useEffect(() => {
+    const newParams = new URLSearchParams();
+    if (searchQuery) newParams.set('q', searchQuery);
+    if (categoryFilter && categoryFilter !== 'all') newParams.set('category', categoryFilter);
+    
+    const currentString = searchParams.toString();
+    const newString = newParams.toString();
+    if (currentString !== newString) {
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [searchQuery, categoryFilter]);
 
   useEffect(() => {
     fetchData();

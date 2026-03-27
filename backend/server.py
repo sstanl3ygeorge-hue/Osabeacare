@@ -1582,7 +1582,7 @@ async def export_compliance_pdf(employee_id: str, user: dict = Depends(get_curre
         spaceAfter=4*mm
     ))
     styles.add(ParagraphStyle(
-        name='BodyText',
+        name='ComplianceBodyText',
         fontName='Helvetica',
         fontSize=9,
         textColor=colors.HexColor('#374151'),
@@ -1748,11 +1748,11 @@ async def export_compliance_pdf(employee_id: str, user: dict = Depends(get_curre
         ]))
         elements.append(training_table)
     else:
-        elements.append(Paragraph("No completed training records found.", styles['BodyText']))
+        elements.append(Paragraph("No completed training records found.", styles['ComplianceBodyText']))
     
     if missing_training:
         elements.append(Spacer(1, 3*mm))
-        elements.append(Paragraph(f"<b>Missing Training:</b> {', '.join(missing_training)}", styles['BodyText']))
+        elements.append(Paragraph(f"<b>Missing Training:</b> {', '.join(missing_training)}", styles['ComplianceBodyText']))
     
     elements.append(Spacer(1, 5*mm))
     

@@ -282,13 +282,13 @@ export default function FormEditorPage() {
     <div className="space-y-6 print:space-y-4" data-testid="form-editor">
       {/* Back Link - hide on print */}
       <div className="print:hidden">
-        <Link 
-          to="/portal/templates" 
+        <button 
+          onClick={() => navigate(-1)} 
           className="inline-flex items-center gap-2 text-text-muted hover:text-primary transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Templates
-        </Link>
+          Back
+        </button>
       </div>
 
       {/* Form Content - for PDF export */}

@@ -451,6 +451,77 @@ LEGACY_REQUIREMENT_MAPPING = {
     "dbs": "dbs_certificate",  # Renamed
 }
 
+# ============================================================================
+# EXPIRY TRACKING CONFIGURATION
+# ============================================================================
+# Items that should track expiry dates
+EXPIRABLE_REQUIREMENTS = {
+    # Documents with expiry
+    "dbs_certificate",
+    "right_to_work_documents",
+    "nmc_registration",
+    
+    # Training with expiry
+    "safeguarding",
+    "manual_handling", 
+    "infection_control",
+    "bls",
+    "fire_safety",
+    "health_safety",
+}
+
+# Expiry thresholds (in days)
+EXPIRY_WARNING_DAYS = 30  # Show "Expiring Soon" when within 30 days
+
+def calculate_expiry_status(expiry_date_str: str) -> dict:
+    """Calculate expiry status from date string"""
+    if not expiry_date_str:
+        return None
+    
+    try:
+        from datetime import datetime, timezone
+        
+        # Parse expiry date
+        if isinstance(expiry_date_str, str):
+            # Handle ISO format
+            if 'T' in expiry_date_str:
+                expiry_date = datetime.fromisoformat(expiry_date_str.replace('Z', '+00:00'))
+            else:
+                expiry_date = datetime.strptime(expiry_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        else:
+            expiry_date = expiry_date_str
+        
+        now = datetime.now(timezone.utc)
+        days_until_expiry = (expiry_date - now).days
+        
+        if days_until_expiry < 0:
+            return {
+                "status": "expired",
+                "label": f"Expired on {expiry_date.strftime('%d %b %Y')}",
+                "color": "error",
+                "days_until_expiry": days_until_expiry,
+                "expiry_date": expiry_date.strftime('%Y-%m-%d')
+            }
+        elif days_until_expiry <= EXPIRY_WARNING_DAYS:
+            return {
+                "status": "expiring_soon",
+                "label": f"Expires soon ({expiry_date.strftime('%d %b %Y')})",
+                "color": "warning",
+                "days_until_expiry": days_until_expiry,
+                "expiry_date": expiry_date.strftime('%Y-%m-%d')
+            }
+        else:
+            return {
+                "status": "valid",
+                "label": f"Valid until {expiry_date.strftime('%d %b %Y')}",
+                "color": "success",
+                "days_until_expiry": days_until_expiry,
+                "expiry_date": expiry_date.strftime('%Y-%m-%d')
+            }
+    except Exception as e:
+        print(f"Error calculating expiry status: {e}")
+        return None
+
 def get_mandatory_items_for_role(role: str) -> List[dict]:
     """Get all mandatory items for a specific role, sorted by priority"""
     items = MANDATORY_ITEMS["base"].copy() + MANDATORY_ITEMS["training"].copy()
@@ -578,6 +649,48 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
         },
         "is_work_ready": all_mandatory_verified,
         "is_fully_compliant": all_verified and all_complete
+    }
+
+async def calculate_expiry_alerts_quick(employee_id: str) -> dict:
+    """Quick expiry alerts calculation for list views"""
+    expired_count = 0
+    expiring_soon_count = 0
+    
+    # Check documents with expiry dates
+    docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "expiry_date": {"$exists": True, "$ne": None}
+    }, {"_id": 0, "expiry_date": 1}).to_list(100)
+    
+    for doc in docs:
+        status = calculate_expiry_status(doc.get('expiry_date'))
+        if status:
+            if status['status'] == 'expired':
+                expired_count += 1
+            elif status['status'] == 'expiring_soon':
+                expiring_soon_count += 1
+    
+    # Check training records with expiry dates
+    training = await db.training_records.find({
+        "employee_id": employee_id,
+        "expiry_date": {"$exists": True, "$ne": None}
+    }, {"_id": 0, "expiry_date": 1}).to_list(100)
+    
+    for t in training:
+        status = calculate_expiry_status(t.get('expiry_date'))
+        if status:
+            if status['status'] == 'expired':
+                expired_count += 1
+            elif status['status'] == 'expiring_soon':
+                expiring_soon_count += 1
+    
+    has_alerts = expired_count > 0 or expiring_soon_count > 0
+    
+    return {
+        "expired_count": expired_count,
+        "expiring_soon_count": expiring_soon_count,
+        "has_alerts": has_alerts,
+        "severity": "error" if expired_count > 0 else ("warning" if expiring_soon_count > 0 else None)
     }
 
 # Folder mapping for form types to document folders
@@ -931,6 +1044,7 @@ class EmployeeResponse(BaseModel):
     completion_percentage: int = 0
     profile_photo_url: Optional[str] = None
     work_readiness: Optional[dict] = None  # Work readiness status for list view
+    expiry_alerts: Optional[dict] = None  # Expiry alerts count for list view
     created_at: str
     updated_at: str
 
@@ -1577,10 +1691,11 @@ async def get_employees(
     
     employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
     
-    # Calculate completion percentages and work readiness
+    # Calculate completion percentages, work readiness, and expiry alerts
     for emp in employees:
         emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
         emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
+        emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
     
     return [EmployeeResponse(**emp) for emp in employees]
 
@@ -4257,9 +4372,13 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             
             # Extract evidence files from documents
             for doc in linked_docs:
+                # Get expiry date from document record
+                doc_expiry_date = doc.get('expiry_date')
+                
                 # Check for evidence_files array (new format)
                 if doc.get('evidence_files'):
                     for ef in doc['evidence_files']:
+                        file_expiry = ef.get('expiry_date') or doc_expiry_date
                         evidence_files.append({
                             "file_id": ef.get('file_id', doc['id']),
                             "file_url": ef.get('file_url'),
@@ -4269,7 +4388,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                             "file_label": ef.get('file_label') or doc.get('document_label'),
                             "source_type": ef.get('source_type', 'manual_upload'),
                             "doc_id": doc['id'],
-                            "verified": doc.get('verified', False)
+                            "verified": doc.get('verified', False),
+                            "expiry_date": file_expiry,
+                            "expiry_status": calculate_expiry_status(file_expiry) if file_expiry else None
                         })
                 # Fallback to file_url (legacy format)
                 elif doc.get('file_url'):
@@ -4282,7 +4403,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                         "file_label": doc.get('document_label'),
                         "source_type": doc.get('source_type', 'manual_upload'),
                         "doc_id": doc['id'],
-                        "verified": doc.get('verified', False)
+                        "verified": doc.get('verified', False),
+                        "expiry_date": doc_expiry_date,
+                        "expiry_status": calculate_expiry_status(doc_expiry_date) if doc_expiry_date else None
                     })
             
             req['documents'] = linked_docs
@@ -4354,9 +4477,13 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                         break
             
             if linked_training:
+                # Get expiry date from training record
+                training_expiry_date = linked_training.get('expiry_date')
+                
                 # Extract evidence files from training
                 if linked_training.get('evidence_files'):
                     for ef in linked_training['evidence_files']:
+                        file_expiry = ef.get('expiry_date') or training_expiry_date
                         evidence_files.append({
                             "file_id": ef.get('file_id', linked_training['id']),
                             "file_url": ef.get('file_url'),
@@ -4364,7 +4491,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                             "uploaded_at": ef.get('uploaded_at'),
                             "source_type": ef.get('source_type', 'certificate'),
                             "file_label": ef.get('file_label', 'Training Certificate'),
-                            "verified": linked_training.get('verified', False)
+                            "verified": linked_training.get('verified', False),
+                            "expiry_date": file_expiry,
+                            "expiry_status": calculate_expiry_status(file_expiry) if file_expiry else None
                         })
                 elif linked_training.get('certificate_url'):
                     evidence_files.append({
@@ -4374,7 +4503,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                         "uploaded_at": linked_training.get('uploaded_at', linked_training.get('completion_date')),
                         "source_type": "certificate",
                         "file_label": "Training Certificate",
-                        "verified": linked_training.get('verified', False)
+                        "verified": linked_training.get('verified', False),
+                        "expiry_date": training_expiry_date,
+                        "expiry_status": calculate_expiry_status(training_expiry_date) if training_expiry_date else None
                     })
                 
                 req['training'] = {
@@ -4435,7 +4566,53 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         else:
             req['status'] = 'missing'
         
+        # ======== Calculate Expiry Status for Requirement ========
+        # Check if this requirement should track expiry
+        req['tracks_expiry'] = req_id in EXPIRABLE_REQUIREMENTS
+        req['expiry_status'] = None
+        req['expiry_date'] = None
+        
+        if req['tracks_expiry'] and evidence_files:
+            # Find the most relevant expiry status from evidence files
+            expiry_statuses = [ef.get('expiry_status') for ef in evidence_files if ef.get('expiry_status')]
+            if expiry_statuses:
+                # Prioritize: expired > expiring_soon > valid
+                expired = [s for s in expiry_statuses if s['status'] == 'expired']
+                expiring = [s for s in expiry_statuses if s['status'] == 'expiring_soon']
+                valid = [s for s in expiry_statuses if s['status'] == 'valid']
+                
+                if expired:
+                    req['expiry_status'] = expired[0]
+                elif expiring:
+                    req['expiry_status'] = expiring[0]
+                elif valid:
+                    req['expiry_status'] = valid[0]
+                
+                if req['expiry_status']:
+                    req['expiry_date'] = req['expiry_status'].get('expiry_date')
+        
         requirements.append(req)
+    
+    # ======== Calculate Expiry Alerts ========
+    expiring_soon_items = []
+    expired_items = []
+    
+    for req in requirements:
+        if req.get('expiry_status'):
+            if req['expiry_status']['status'] == 'expired':
+                expired_items.append({
+                    "id": req['id'],
+                    "name": req['name'],
+                    "expiry_date": req['expiry_status'].get('expiry_date'),
+                    "days_overdue": abs(req['expiry_status'].get('days_until_expiry', 0))
+                })
+            elif req['expiry_status']['status'] == 'expiring_soon':
+                expiring_soon_items.append({
+                    "id": req['id'],
+                    "name": req['name'],
+                    "expiry_date": req['expiry_status'].get('expiry_date'),
+                    "days_until_expiry": req['expiry_status'].get('days_until_expiry', 0)
+                })
     
     total_count = len(requirements)
     # EVIDENCE-BASED SCORING: Only evidence-backed completions count
@@ -4460,7 +4637,14 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "verification_percentage": verification_percentage,
             "audit_ready": verified_count == evidence_backed_count and evidence_backed_count == total_count
         },
-        "work_readiness": work_readiness
+        "work_readiness": work_readiness,
+        "expiry_alerts": {
+            "expiring_soon": expiring_soon_items,
+            "expired": expired_items,
+            "expiring_soon_count": len(expiring_soon_items),
+            "expired_count": len(expired_items),
+            "has_alerts": len(expiring_soon_items) > 0 or len(expired_items) > 0
+        }
     }
 
 @api_router.post("/employees/{employee_id}/upload-document")
@@ -5829,6 +6013,108 @@ def calculate_audit_score(ready: int, review: int, pending: int,
         "status": status,
         "color": color,
         "staff_readiness": staff_score
+    }
+
+@api_router.get("/dashboard/expiry-alerts")
+async def get_expiry_alerts_dashboard(user: dict = Depends(get_current_user)):
+    """
+    Get dashboard view of all expiring and expired compliance items across all employees.
+    Returns employees grouped by alert severity.
+    """
+    now = datetime.now(timezone.utc)
+    warning_threshold = now + timedelta(days=EXPIRY_WARNING_DAYS)
+    
+    # Get all non-archived employees
+    employees = await db.employees.find(
+        {"status": {"$ne": "archived"}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1}
+    ).to_list(1000)
+    
+    employees_with_expired = []
+    employees_expiring_soon = []
+    
+    for emp in employees:
+        emp_id = emp['id']
+        emp_name = f"{emp['first_name']} {emp['last_name']}"
+        role = emp.get('role', '')
+        
+        expired_items = []
+        expiring_items = []
+        
+        # Check documents
+        docs = await db.employee_documents.find({
+            "employee_id": emp_id,
+            "expiry_date": {"$exists": True, "$ne": None}
+        }, {"_id": 0, "requirement_id": 1, "document_label": 1, "expiry_date": 1}).to_list(100)
+        
+        for doc in docs:
+            expiry_status = calculate_expiry_status(doc.get('expiry_date'))
+            if expiry_status:
+                item_info = {
+                    "requirement_id": doc.get('requirement_id'),
+                    "name": doc.get('document_label', 'Document'),
+                    "expiry_date": expiry_status.get('expiry_date'),
+                    "days": expiry_status.get('days_until_expiry')
+                }
+                if expiry_status['status'] == 'expired':
+                    expired_items.append(item_info)
+                elif expiry_status['status'] == 'expiring_soon':
+                    expiring_items.append(item_info)
+        
+        # Check training records
+        training = await db.training_records.find({
+            "employee_id": emp_id,
+            "expiry_date": {"$exists": True, "$ne": None}
+        }, {"_id": 0, "requirement_id": 1, "training_name": 1, "expiry_date": 1}).to_list(100)
+        
+        for t in training:
+            expiry_status = calculate_expiry_status(t.get('expiry_date'))
+            if expiry_status:
+                item_info = {
+                    "requirement_id": t.get('requirement_id'),
+                    "name": t.get('training_name', 'Training'),
+                    "expiry_date": expiry_status.get('expiry_date'),
+                    "days": expiry_status.get('days_until_expiry')
+                }
+                if expiry_status['status'] == 'expired':
+                    expired_items.append(item_info)
+                elif expiry_status['status'] == 'expiring_soon':
+                    expiring_items.append(item_info)
+        
+        if expired_items:
+            employees_with_expired.append({
+                "employee_id": emp_id,
+                "employee_name": emp_name,
+                "role": role,
+                "expired_items": expired_items,
+                "expired_count": len(expired_items)
+            })
+        
+        if expiring_items:
+            employees_expiring_soon.append({
+                "employee_id": emp_id,
+                "employee_name": emp_name,
+                "role": role,
+                "expiring_items": expiring_items,
+                "expiring_count": len(expiring_items)
+            })
+    
+    # Sort by count (most urgent first)
+    employees_with_expired.sort(key=lambda x: x['expired_count'], reverse=True)
+    employees_expiring_soon.sort(key=lambda x: x['expiring_count'], reverse=True)
+    
+    return {
+        "expired": {
+            "employees": employees_with_expired,
+            "total_employees": len(employees_with_expired),
+            "total_items": sum(e['expired_count'] for e in employees_with_expired)
+        },
+        "expiring_soon": {
+            "employees": employees_expiring_soon,
+            "total_employees": len(employees_expiring_soon),
+            "total_items": sum(e['expiring_count'] for e in employees_expiring_soon)
+        },
+        "has_alerts": len(employees_with_expired) > 0 or len(employees_expiring_soon) > 0
     }
 
 # ==================== AUDIT LOG ROUTES ====================

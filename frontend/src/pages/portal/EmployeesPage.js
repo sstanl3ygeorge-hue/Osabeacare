@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from '../../components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle, Shield, CheckCircle } from 'lucide-react';
+import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle, Shield, CheckCircle, Clock } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -36,6 +36,7 @@ export default function EmployeesPage() {
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [onboardingStatusFilter, setOnboardingStatusFilter] = useState(searchParams.get('onboarding') || '');
+  const [workReadinessFilter, setWorkReadinessFilter] = useState(searchParams.get('work_readiness') || '');
   const [showArchived, setShowArchived] = useState(searchParams.get('archived') === 'true');
   const [onboardingStatuses, setOnboardingStatuses] = useState([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -51,6 +52,7 @@ export default function EmployeesPage() {
     if (search) newParams.set('q', search);
     if (statusFilter) newParams.set('status', statusFilter);
     if (onboardingStatusFilter) newParams.set('onboarding', onboardingStatusFilter);
+    if (workReadinessFilter) newParams.set('work_readiness', workReadinessFilter);
     if (showArchived) newParams.set('archived', 'true');
     
     // Only update URL if params changed (avoid infinite loop)
@@ -59,7 +61,7 @@ export default function EmployeesPage() {
     if (currentString !== newString) {
       setSearchParams(newParams, { replace: true });
     }
-  }, [search, statusFilter, onboardingStatusFilter, showArchived]);
+  }, [search, statusFilter, onboardingStatusFilter, workReadinessFilter, showArchived]);
 
   const [newEmployee, setNewEmployee] = useState({
     first_name: '',
@@ -316,6 +318,10 @@ export default function EmployeesPage() {
       {/* Filters */}
       <Card className="border-[#E4E8EB] shadow-sm">
         <CardContent className="p-4">
+          {/* Helper text */}
+          <p className="text-sm text-text-muted mb-3">
+            Filter employees by work readiness to quickly see who can start work.
+          </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -327,6 +333,34 @@ export default function EmployeesPage() {
                 data-testid="employees-search"
               />
             </div>
+            {/* Work Readiness Filter */}
+            <Select value={workReadinessFilter || "all"} onValueChange={(v) => setWorkReadinessFilter(v === "all" ? "" : v)}>
+              <SelectTrigger className="w-full sm:w-44 rounded-xl" data-testid="work-readiness-filter">
+                <Shield className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Work Readiness" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Readiness</SelectItem>
+                <SelectItem value="work_ready">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-success"></span>
+                    Work Ready
+                  </span>
+                </SelectItem>
+                <SelectItem value="almost_ready">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-warning"></span>
+                    Almost Ready
+                  </span>
+                </SelectItem>
+                <SelectItem value="not_ready">
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-error"></span>
+                    Not Ready
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={statusFilter || "all"} onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}>
               <SelectTrigger className="w-full sm:w-40 rounded-xl" data-testid="status-filter">
                 <Filter className="h-4 w-4 mr-2" />
@@ -375,6 +409,33 @@ export default function EmployeesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
+              {/* Filter employees by work readiness */}
+              {(() => {
+                const filteredEmployees = workReadinessFilter 
+                  ? employees.filter(emp => {
+                      const status = emp.work_readiness?.status;
+                      if (workReadinessFilter === 'work_ready') {
+                        return status === 'work_ready' || status === 'fully_compliant';
+                      } else if (workReadinessFilter === 'almost_ready') {
+                        return status === 'almost_ready';
+                      } else if (workReadinessFilter === 'not_ready') {
+                        return status === 'not_started' || status === 'in_progress' || !status;
+                      }
+                      return true;
+                    })
+                  : employees;
+                
+                if (filteredEmployees.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-text-muted">
+                      <Shield className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>No employees match this work readiness filter</p>
+                      <p className="text-sm mt-1">Try selecting a different filter</p>
+                    </div>
+                  );
+                }
+                
+                return (
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
@@ -388,7 +449,7 @@ export default function EmployeesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {employees.map((emp) => (
+                  {filteredEmployees.map((emp) => (
                     <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
                       <td className="p-4">
                         <Link to={`/portal/employees/${emp.id}`} className="flex items-center gap-3" data-testid={`emp-link-${emp.id}`}>
@@ -450,6 +511,22 @@ export default function EmployeesPage() {
                             ></div>
                           </div>
                           <span className="text-sm text-text-muted">{emp.completion_percentage}%</span>
+                          {/* Expiry Alert Indicator */}
+                          {emp.expiry_alerts?.has_alerts && (
+                            <span 
+                              className={`ml-1 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                emp.expiry_alerts.expired_count > 0 
+                                  ? 'bg-red-100 text-red-700' 
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}
+                              title={`${emp.expiry_alerts.expired_count} expired, ${emp.expiry_alerts.expiring_soon_count} expiring soon`}
+                            >
+                              <Clock className="h-3 w-3" />
+                              {emp.expiry_alerts.expired_count > 0 
+                                ? `${emp.expiry_alerts.expired_count} expired` 
+                                : `${emp.expiry_alerts.expiring_soon_count} expiring`}
+                            </span>
+                          )}
                         </div>
                       </td>
                       {!isAuditor() && (
@@ -510,6 +587,8 @@ export default function EmployeesPage() {
                   ))}
                 </tbody>
               </table>
+                );
+              })()}
             </div>
           )}
         </CardContent>

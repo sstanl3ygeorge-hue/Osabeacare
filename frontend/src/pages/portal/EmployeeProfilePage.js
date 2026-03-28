@@ -2505,6 +2505,73 @@ export default function EmployeeProfilePage() {
                 Use "What's Needed" to complete compliance. Other tabs show records and history.
               </p>
 
+              {/* COMPLIANCE ALERTS - Expiry Warnings */}
+              {complianceRequirements?.expiry_alerts?.has_alerts && (
+                <div className={`mb-6 p-4 rounded-xl border ${
+                  complianceRequirements.expiry_alerts.expired_count > 0 
+                    ? 'bg-red-50 border-red-200' 
+                    : 'bg-amber-50 border-amber-200'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      complianceRequirements.expiry_alerts.expired_count > 0 ? 'bg-red-100' : 'bg-amber-100'
+                    }`}>
+                      <Clock className={`h-5 w-5 ${
+                        complianceRequirements.expiry_alerts.expired_count > 0 ? 'text-red-600' : 'text-amber-600'
+                      }`} />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className={`font-semibold ${
+                        complianceRequirements.expiry_alerts.expired_count > 0 ? 'text-red-900' : 'text-amber-900'
+                      }`}>
+                        Compliance Alerts
+                      </h4>
+                      <p className={`text-sm mt-1 ${
+                        complianceRequirements.expiry_alerts.expired_count > 0 ? 'text-red-800' : 'text-amber-800'
+                      }`}>
+                        {complianceRequirements.expiry_alerts.expired_count > 0 && (
+                          <span className="font-medium">{complianceRequirements.expiry_alerts.expired_count} item{complianceRequirements.expiry_alerts.expired_count !== 1 ? 's' : ''} expired</span>
+                        )}
+                        {complianceRequirements.expiry_alerts.expired_count > 0 && complianceRequirements.expiry_alerts.expiring_soon_count > 0 && ' · '}
+                        {complianceRequirements.expiry_alerts.expiring_soon_count > 0 && (
+                          <span>{complianceRequirements.expiry_alerts.expiring_soon_count} item{complianceRequirements.expiry_alerts.expiring_soon_count !== 1 ? 's' : ''} expiring soon</span>
+                        )}
+                      </p>
+                      
+                      {/* Expired Items */}
+                      {complianceRequirements.expiry_alerts.expired?.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs font-medium text-red-900">Expired:</p>
+                          <ul className="mt-1 space-y-0.5">
+                            {complianceRequirements.expiry_alerts.expired.map((item, idx) => (
+                              <li key={idx} className="text-xs text-red-800 flex items-center gap-1">
+                                <span className="w-1 h-1 rounded-full bg-red-500"></span>
+                                {item.name} — expired {item.days_overdue} day{item.days_overdue !== 1 ? 's' : ''} ago
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {/* Expiring Soon Items */}
+                      {complianceRequirements.expiry_alerts.expiring_soon?.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-xs font-medium text-amber-900">Expiring Soon:</p>
+                          <ul className="mt-1 space-y-0.5">
+                            {complianceRequirements.expiry_alerts.expiring_soon.map((item, idx) => (
+                              <li key={idx} className="text-xs text-amber-800 flex items-center gap-1">
+                                <span className="w-1 h-1 rounded-full bg-amber-500"></span>
+                                {item.name} — expires in {item.days_until_expiry} day{item.days_until_expiry !== 1 ? 's' : ''}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {!complianceRequirements ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -2677,10 +2744,24 @@ export default function EmployeeProfilePage() {
                                       {evidenceFiles.map((file, idx) => (
                                         <div key={file.file_id || idx} className="flex items-center gap-1.5 py-0.5">
                                           <FileText className="h-3 w-3 flex-shrink-0 text-primary/70" />
-                                          <span className="truncate max-w-[200px]">
+                                          <span className="truncate max-w-[180px]">
                                             {file.file_label || file.original_filename || 'Document'}
                                           </span>
                                           {file.verified && <Shield className="h-3 w-3 text-success flex-shrink-0" />}
+                                          {/* Expiry Status Badge */}
+                                          {file.expiry_status && (
+                                            <span className={`text-[9px] px-1 py-0.5 rounded flex-shrink-0 ${
+                                              file.expiry_status.status === 'expired' 
+                                                ? 'bg-red-100 text-red-700' 
+                                                : file.expiry_status.status === 'expiring_soon'
+                                                ? 'bg-amber-100 text-amber-700'
+                                                : 'bg-green-100 text-green-700'
+                                            }`} title={file.expiry_status.label}>
+                                              {file.expiry_status.status === 'expired' ? 'Expired' : 
+                                               file.expiry_status.status === 'expiring_soon' ? 'Expiring' : 
+                                               'Valid'}
+                                            </span>
+                                          )}
                                         </div>
                                       ))}
                                     </div>
@@ -2709,6 +2790,24 @@ export default function EmployeeProfilePage() {
                               
                               {/* Actions - Clean Linear: Upload/Add → View → Download → Verify */}
                               <div className="flex items-center gap-2 flex-wrap justify-end">
+                                {/* Expiry Status Badge - shown when requirement tracks expiry */}
+                                {req.tracks_expiry && req.expiry_status && (
+                                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                                    req.expiry_status.status === 'expired' 
+                                      ? 'bg-red-100 text-red-700' 
+                                      : req.expiry_status.status === 'expiring_soon'
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : 'bg-green-100 text-green-700'
+                                  }`} title={req.expiry_status.label}>
+                                    <Clock className="h-3 w-3 inline mr-1" />
+                                    {req.expiry_status.status === 'expired' 
+                                      ? `Expired ${req.expiry_status.expiry_date}` 
+                                      : req.expiry_status.status === 'expiring_soon'
+                                      ? `Expires ${req.expiry_status.expiry_date}`
+                                      : `Valid until ${req.expiry_status.expiry_date}`}
+                                  </span>
+                                )}
+                                
                                 {/* Status badge */}
                                 <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusBadge.style}`}>
                                   {statusBadge.text}

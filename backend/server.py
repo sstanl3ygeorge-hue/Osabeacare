@@ -10258,6 +10258,427 @@ async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
 
 
 
+# ==================== CQC EVIDENCE MAPPING ====================
+# Read-only mapping layer for CQC inspection readiness
+# Maps existing system evidence to CQC 5 Key Questions
+# Does NOT change any compliance calculations or employee readiness
+
+CQC_EVIDENCE_MAPPING = {
+    "safe": {
+        "title": "Safe",
+        "description": "People are protected from abuse and avoidable harm",
+        "items": [
+            # Policies
+            {"name": "Safeguarding Adults Policy", "source_type": "policy", "source_id": "Safeguarding Adults Policy"},
+            {"name": "Safeguarding Children Policy", "source_type": "policy", "source_id": "Safeguarding Children Policy"},
+            {"name": "Health & Safety Policy", "source_type": "policy", "source_id": "Health & Safety Policy"},
+            {"name": "Fire Safety Policy", "source_type": "policy", "source_id": "Fire Safety Policy"},
+            {"name": "Infection Prevention & Control Policy", "source_type": "policy", "source_id": "Infection Prevention & Control Policy"},
+            {"name": "Medication Policy", "source_type": "policy", "source_id": "Medication Policy"},
+            {"name": "Lone Working Policy", "source_type": "policy", "source_id": "Lone Working Policy"},
+            {"name": "Risk Assessment Policy", "source_type": "policy", "source_id": "Risk Assessment Policy"},
+            {"name": "Manual Handling Policy", "source_type": "policy", "source_id": "Manual Handling Policy"},
+            {"name": "COSHH Policy", "source_type": "policy", "source_id": "COSHH Policy"},
+            {"name": "First Aid Policy", "source_type": "policy", "source_id": "First Aid Policy"},
+            # Registers & Summaries
+            {"name": "DBS Register", "source_type": "register", "source_id": "dbs_register"},
+            {"name": "Right to Work Summary", "source_type": "register", "source_id": "rtw_register"},
+            # Certificates
+            {"name": "Fire Safety Certificate", "source_type": "certificate", "source_id": "fire_safety"},
+            {"name": "Gas Safety Certificate", "source_type": "certificate", "source_id": "gas_safety"},
+            {"name": "PAT Testing Certificate", "source_type": "certificate", "source_id": "pat_testing"},
+            {"name": "Electrical Inspection (EICR)", "source_type": "certificate", "source_id": "electrical_inspection"},
+            # Forms
+            {"name": "Health Screening Forms", "source_type": "form", "source_id": "health_screening"},
+            # Reports/Logs
+            {"name": "Incident Logs", "source_type": "report", "source_id": "incidents"},
+        ]
+    },
+    "effective": {
+        "title": "Effective",
+        "description": "Care, treatment and support achieves good outcomes",
+        "items": [
+            # Policies
+            {"name": "Training & Development Policy", "source_type": "policy", "source_id": "Training & Development Policy"},
+            {"name": "Induction & Probation Policy", "source_type": "policy", "source_id": "Induction & Probation Policy"},
+            {"name": "Supervision & Appraisal Policy", "source_type": "policy", "source_id": "Supervision & Appraisal Policy"},
+            {"name": "Care Planning Policy", "source_type": "policy", "source_id": "Care Planning Policy"},
+            {"name": "Nutrition & Hydration Policy", "source_type": "policy", "source_id": "Nutrition & Hydration Policy"},
+            {"name": "Mental Capacity Act & DoLS Policy", "source_type": "policy", "source_id": "Mental Capacity Act & DoLS Policy"},
+            # Registers & Summaries
+            {"name": "Training Matrix", "source_type": "register", "source_id": "training_matrix"},
+            {"name": "Staff Training Records", "source_type": "register", "source_id": "training_records"},
+            # Forms
+            {"name": "Induction & Competency Assessments", "source_type": "form", "source_id": "induction"},
+            {"name": "Recruitment Checklists", "source_type": "form", "source_id": "recruitment_checklist"},
+            {"name": "Interview Records", "source_type": "form", "source_id": "interview_record"},
+        ]
+    },
+    "caring": {
+        "title": "Caring",
+        "description": "Staff involve and treat people with compassion, kindness, dignity and respect",
+        "items": [
+            # Policies
+            {"name": "Equality, Diversity & Inclusion Policy", "source_type": "policy", "source_id": "Equality, Diversity & Inclusion Policy"},
+            {"name": "Confidentiality Policy", "source_type": "policy", "source_id": "Confidentiality Policy"},
+            {"name": "Pressure Ulcer Prevention Policy", "source_type": "policy", "source_id": "Pressure Ulcer Prevention Policy"},
+            {"name": "End of Life Care Policy", "source_type": "policy", "source_id": "End of Life Care Policy"},
+            {"name": "Code of Conduct", "source_type": "policy", "source_id": "Code of Conduct"},
+            # Forms
+            {"name": "Equal Opportunities Monitoring", "source_type": "form", "source_id": "equal_opportunities"},
+            # Training
+            {"name": "Person-Centred Care Training", "source_type": "training", "source_id": "person_centred_care"},
+            {"name": "Dignity in Care Training", "source_type": "training", "source_id": "dignity_care"},
+        ]
+    },
+    "responsive": {
+        "title": "Responsive",
+        "description": "Services are organised to meet people's needs",
+        "items": [
+            # Policies
+            {"name": "Complaints Policy", "source_type": "policy", "source_id": "Complaints Policy"},
+            {"name": "Business Continuity Policy", "source_type": "policy", "source_id": "Business Continuity Policy"},
+            {"name": "Incident Reporting Policy", "source_type": "policy", "source_id": "Incident Reporting Policy"},
+            {"name": "Service User Feedback Policy", "source_type": "policy", "source_id": "Service User Feedback Policy"},
+            {"name": "Record Keeping Policy", "source_type": "policy", "source_id": "Record Keeping Policy"},
+            # Reports/Logs
+            {"name": "Complaints Log", "source_type": "report", "source_id": "complaints"},
+            {"name": "Incident Reports", "source_type": "report", "source_id": "incidents"},
+            # Certificates (Conditional)
+            {"name": "Food Hygiene Rating", "source_type": "certificate", "source_id": "food_hygiene", "conditional": True},
+        ]
+    },
+    "well_led": {
+        "title": "Well-led",
+        "description": "Leadership, management and governance assure high-quality, person-centred care",
+        "items": [
+            # Policies
+            {"name": "Recruitment & Selection Policy", "source_type": "policy", "source_id": "Recruitment & Selection Policy"},
+            {"name": "DBS & Vetting Policy", "source_type": "policy", "source_id": "DBS & Vetting Policy"},
+            {"name": "Disciplinary & Grievance Policy", "source_type": "policy", "source_id": "Disciplinary & Grievance Policy"},
+            {"name": "Data Protection & GDPR Policy", "source_type": "policy", "source_id": "Data Protection & GDPR Policy"},
+            {"name": "Whistleblowing Policy", "source_type": "policy", "source_id": "Whistleblowing Policy"},
+            # Certificates
+            {"name": "CQC Registration Certificate", "source_type": "certificate", "source_id": "cqc_registration"},
+            {"name": "ICO Registration Certificate", "source_type": "certificate", "source_id": "ico_registration"},
+            {"name": "Public Liability Insurance", "source_type": "certificate", "source_id": "public_liability"},
+            {"name": "Employer's Liability Insurance", "source_type": "certificate", "source_id": "employers_liability"},
+            {"name": "Professional Indemnity Insurance", "source_type": "certificate", "source_id": "professional_indemnity"},
+            {"name": "Company Registration Certificate", "source_type": "certificate", "source_id": "company_registration"},
+            # Reports/Audits
+            {"name": "Audit Trail / Amendment History", "source_type": "report", "source_id": "audit_trail"},
+            {"name": "Policy Review Schedule", "source_type": "report", "source_id": "policy_reviews"},
+        ]
+    }
+}
+
+
+@api_router.get("/compliance/cqc-evidence-map")
+async def get_cqc_evidence_map(user: dict = Depends(get_current_user)):
+    """
+    CQC Evidence Mapping - Read-only view of existing evidence mapped to CQC 5 Key Questions.
+    
+    This is a VISIBILITY LAYER ONLY:
+    - Does NOT change employee compliance calculations
+    - Does NOT change progress %
+    - Does NOT change Ready to Work status
+    - Does NOT create a second compliance engine
+    
+    Maps existing system data (policies, certificates, forms, registers, reports) to:
+    - Safe
+    - Effective
+    - Caring
+    - Responsive
+    - Well-led
+    """
+    now = datetime.now(timezone.utc)
+    thirty_days = timedelta(days=30)
+    
+    # Fetch all source data
+    policies = await db.org_policies.find({}, {"_id": 0}).to_list(200)
+    policies_map = {p["name"]: p for p in policies}
+    
+    certificates = await db.insurance_docs.find({}, {"_id": 0}).to_list(100)
+    certs_map = {c["insurance_type"]: c for c in certificates}
+    
+    # Get form submission counts
+    form_counts = {}
+    for form_type in ["health_screening", "induction", "recruitment_checklist", "interview_record", "equal_opportunities"]:
+        count = await db.form_submissions.count_documents({"requirement_id": form_type})
+        form_counts[form_type] = count
+    
+    # Get incident counts
+    incident_count = await db.incident_logs.count_documents({})
+    open_incidents = await db.incident_logs.count_documents({"status": {"$in": ["open", "under_investigation"]}})
+    
+    # Get staff counts
+    total_staff = await db.employees.count_documents({"status": {"$ne": "archived"}})
+    
+    # Get DBS summary
+    dbs_valid = 0
+    dbs_missing = 0
+    employees = await db.employees.find({"status": {"$ne": "archived"}}, {"_id": 0, "id": 1}).to_list(1000)
+    for emp in employees:
+        dbs_doc = await db.employee_documents.find_one({
+            "employee_id": emp["id"],
+            "requirement_id": {"$in": ["dbs_certificate", "dbs_check"]}
+        })
+        if dbs_doc:
+            dbs_valid += 1
+        else:
+            dbs_missing += 1
+    
+    # Get RTW summary
+    rtw_approved = 0
+    for emp in employees:
+        rtw_docs = await db.employee_documents.count_documents({
+            "employee_id": emp["id"],
+            "requirement_id": {"$in": ["right_to_work_documents", "right_to_work_check"]}
+        })
+        if rtw_docs > 0:
+            rtw_approved += 1
+    
+    # Get training summary
+    training_count = await db.training_records.count_documents({})
+    twelve_months_ago = (now - timedelta(days=365)).isoformat()
+    recent_training = await db.training_records.count_documents({"completion_date": {"$gte": twelve_months_ago}})
+    
+    # Get policy review stats
+    policies_due_review = 0
+    policies_overdue = 0
+    for p in policies:
+        if p.get("review_date"):
+            try:
+                review_str = p["review_date"]
+                if 'T' in str(review_str):
+                    review_date = datetime.fromisoformat(review_str.replace('Z', '+00:00'))
+                else:
+                    review_date = datetime.fromisoformat(f"{review_str}T00:00:00+00:00")
+                
+                if review_date < now:
+                    policies_overdue += 1
+                elif review_date < now + thirty_days:
+                    policies_due_review += 1
+            except Exception:
+                pass
+    
+    # Get audit trail count
+    audit_count = await db.audit_log.count_documents({})
+    
+    # Helper to determine item status
+    def get_item_status(item):
+        source_type = item["source_type"]
+        source_id = item["source_id"]
+        status = "missing"
+        details = None
+        link = None
+        review_date = None
+        expiry_date = None
+        
+        if source_type == "policy":
+            policy = policies_map.get(source_id)
+            if policy:
+                if policy.get("status") == "active":
+                    status = "present"
+                    if policy.get("review_date"):
+                        try:
+                            review_str = policy["review_date"]
+                            if 'T' in str(review_str):
+                                rev_date = datetime.fromisoformat(review_str.replace('Z', '+00:00'))
+                            else:
+                                rev_date = datetime.fromisoformat(f"{review_str}T00:00:00+00:00")
+                            review_date = policy["review_date"]
+                            if rev_date < now:
+                                status = "overdue"
+                            elif rev_date < now + thirty_days:
+                                status = "due_review"
+                        except Exception:
+                            pass
+                elif policy.get("status") == "expired":
+                    status = "expired"
+                link = f"/portal/compliance-centre?tab=policies&policy={policy.get('id')}"
+                details = f"Version {policy.get('version', 'N/A')}"
+            else:
+                status = "missing"
+        
+        elif source_type == "certificate":
+            cert = certs_map.get(source_id)
+            if cert:
+                if cert.get("file_url"):
+                    if cert.get("expiry_date"):
+                        try:
+                            exp_str = cert["expiry_date"]
+                            if 'T' in str(exp_str):
+                                exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                            else:
+                                exp_date = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
+                            expiry_date = cert["expiry_date"]
+                            if exp_date < now:
+                                status = "expired"
+                            elif exp_date < now + thirty_days:
+                                status = "expiring"
+                            else:
+                                status = "present"
+                        except Exception:
+                            status = "present"
+                    else:
+                        status = "present"
+                    details = cert.get("provider")
+                else:
+                    status = "missing"
+                link = f"/portal/compliance-centre?tab=certificates&cert={cert.get('id')}"
+            elif item.get("conditional"):
+                status = "n/a"
+                details = "Conditional - may not apply"
+            else:
+                status = "missing"
+        
+        elif source_type == "form":
+            count = form_counts.get(source_id, 0)
+            if count > 0:
+                status = "present"
+                details = f"{count} submissions"
+            else:
+                status = "missing"
+            link = "/portal/employees"
+        
+        elif source_type == "register":
+            if source_id == "dbs_register":
+                if dbs_valid > 0:
+                    status = "present"
+                    details = f"{dbs_valid}/{total_staff} staff with valid DBS"
+                    if dbs_missing > 0:
+                        status = "partial"
+                else:
+                    status = "missing"
+                link = "/portal/compliance-centre?tab=staff"
+            elif source_id == "rtw_register":
+                if rtw_approved > 0:
+                    status = "present"
+                    details = f"{rtw_approved}/{total_staff} staff with RTW verified"
+                else:
+                    status = "missing"
+                link = "/portal/employees"
+            elif source_id == "training_matrix":
+                if training_count > 0:
+                    status = "present"
+                    details = f"{training_count} training records"
+                else:
+                    status = "missing"
+                link = "/portal/compliance-centre?tab=reports"
+            elif source_id == "training_records":
+                if recent_training > 0:
+                    status = "present"
+                    details = f"{recent_training} in last 12 months"
+                else:
+                    status = "missing"
+                link = "/portal/compliance-centre?tab=reports"
+        
+        elif source_type == "report":
+            if source_id == "incidents":
+                if incident_count > 0:
+                    status = "present"
+                    details = f"{incident_count} logged, {open_incidents} open"
+                else:
+                    status = "n/a"
+                    details = "No incidents logged"
+                link = "/portal/compliance-centre?tab=incidents"
+            elif source_id == "complaints":
+                # Complaints tracked via incidents with type
+                complaint_count = 0  # Would need specific query
+                status = "n/a"
+                details = "Track via Incident Logs"
+                link = "/portal/compliance-centre?tab=incidents"
+            elif source_id == "audit_trail":
+                if audit_count > 0:
+                    status = "present"
+                    details = f"{audit_count} audit entries"
+                else:
+                    status = "present"
+                    details = "Audit trail active"
+                link = "/portal/compliance-centre"
+            elif source_id == "policy_reviews":
+                status = "present"
+                details = f"{policies_due_review} due soon, {policies_overdue} overdue"
+                link = "/portal/compliance-centre?tab=policies"
+        
+        elif source_type == "training":
+            # Training types - check if any staff have this training
+            status = "n/a"
+            details = "Check training records"
+            link = "/portal/compliance-centre?tab=reports"
+        
+        return {
+            "name": item["name"],
+            "source_type": source_type,
+            "status": status,
+            "details": details,
+            "link": link,
+            "review_date": review_date,
+            "expiry_date": expiry_date,
+            "conditional": item.get("conditional", False)
+        }
+    
+    # Build response
+    result = {}
+    summary = {
+        "total_items": 0,
+        "present": 0,
+        "missing": 0,
+        "due_review": 0,
+        "expired": 0,
+        "partial": 0,
+        "n_a": 0
+    }
+    
+    for key, category in CQC_EVIDENCE_MAPPING.items():
+        items = []
+        category_summary = {"present": 0, "missing": 0, "due_review": 0, "expired": 0, "partial": 0, "n_a": 0}
+        
+        for item in category["items"]:
+            item_status = get_item_status(item)
+            items.append(item_status)
+            
+            # Update counts
+            status = item_status["status"]
+            if status in category_summary:
+                category_summary[status] += 1
+            elif status == "expiring":
+                category_summary["due_review"] += 1
+            elif status == "overdue":
+                category_summary["expired"] += 1
+            
+            summary["total_items"] += 1
+            if status == "present":
+                summary["present"] += 1
+            elif status == "missing":
+                summary["missing"] += 1
+            elif status in ["due_review", "expiring"]:
+                summary["due_review"] += 1
+            elif status in ["expired", "overdue"]:
+                summary["expired"] += 1
+            elif status == "partial":
+                summary["partial"] += 1
+            elif status == "n/a":
+                summary["n_a"] += 1
+        
+        result[key] = {
+            "title": category["title"],
+            "description": category["description"],
+            "items": items,
+            "summary": category_summary
+        }
+    
+    return {
+        "cqc_mapping": result,
+        "summary": summary,
+        "generated_at": now.isoformat(),
+        "note": "This is a read-only evidence mapping view. It does NOT affect employee compliance calculations, progress %, or Ready to Work status."
+    }
+
+
+
+
 @api_router.get("/dashboard/expiry-alerts")
 async def get_expiry_alerts_dashboard(user: dict = Depends(get_current_user)):
     """

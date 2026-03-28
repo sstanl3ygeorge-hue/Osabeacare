@@ -141,6 +141,10 @@ export default function ComplianceCentrePage() {
   const [historyRecordId, setHistoryRecordId] = useState(null);
   const [historyData, setHistoryData] = useState([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  
+  // CQC Evidence Mapping state
+  const [cqcEvidenceMap, setCqcEvidenceMap] = useState(null);
+  const [cqcLoading, setCqcLoading] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -170,6 +174,23 @@ export default function ComplianceCentrePage() {
       console.error('Failed to fetch compliance data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+  
+  // Fetch CQC Evidence Map (only when tab is clicked)
+  const fetchCqcEvidenceMap = async () => {
+    if (cqcEvidenceMap) return; // Already loaded
+    setCqcLoading(true);
+    try {
+      const response = await axios.get(`${API}/compliance/cqc-evidence-map`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCqcEvidenceMap(response.data);
+    } catch (error) {
+      console.error('Failed to fetch CQC evidence map:', error);
+      toast.error('Failed to load CQC evidence mapping');
+    } finally {
+      setCqcLoading(false);
     }
   };
 
@@ -753,6 +774,15 @@ export default function ComplianceCentrePage() {
           >
             <ClipboardList className="h-4 w-4 mr-2" />
             Reports
+          </TabsTrigger>
+          <TabsTrigger 
+            value="cqc-view" 
+            className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white"
+            onClick={() => fetchCqcEvidenceMap()}
+            data-testid="tab-cqc-view"
+          >
+            <Eye className="h-4 w-4 mr-2" />
+            CQC View
           </TabsTrigger>
         </TabsList>
 
@@ -1690,6 +1720,225 @@ export default function ComplianceCentrePage() {
                 )}
               </CardContent>
             </Card>
+          </div>
+        </TabsContent>
+        
+        {/* CQC View Tab - Inspection Readiness Evidence Mapping */}
+        <TabsContent value="cqc-view">
+          <div className="space-y-6">
+            {/* CQC View Header */}
+            <Card className="border-[#E4E8EB] shadow-sm bg-gradient-to-r from-primary/5 to-info/5">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="font-heading text-lg font-bold flex items-center gap-2">
+                      <Eye className="h-5 w-5 text-primary" />
+                      CQC Inspection View
+                    </h2>
+                    <p className="text-sm text-text-muted mt-1">
+                      Evidence mapped to CQC 5 Key Questions for inspection readiness
+                    </p>
+                    <p className="text-xs text-text-muted mt-2 bg-white/50 px-2 py-1 rounded inline-block">
+                      Read-only view — does not affect compliance calculations or employee readiness status
+                    </p>
+                  </div>
+                  {cqcEvidenceMap && (
+                    <div className="text-right">
+                      <p className="text-2xl font-bold text-text-primary">
+                        {cqcEvidenceMap.summary.present}/{cqcEvidenceMap.summary.total_items - cqcEvidenceMap.summary.n_a}
+                      </p>
+                      <p className="text-xs text-text-muted">Evidence Items Present</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+            
+            {cqcLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <span className="ml-3 text-text-muted">Loading CQC evidence mapping...</span>
+              </div>
+            ) : cqcEvidenceMap ? (
+              <div className="space-y-6">
+                {/* Summary Badges */}
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-3 py-1 bg-success/10 text-success rounded-full text-sm font-medium">
+                    {cqcEvidenceMap.summary.present} Present
+                  </span>
+                  <span className="px-3 py-1 bg-error/10 text-error rounded-full text-sm font-medium">
+                    {cqcEvidenceMap.summary.missing} Missing
+                  </span>
+                  {cqcEvidenceMap.summary.due_review > 0 && (
+                    <span className="px-3 py-1 bg-warning/10 text-warning rounded-full text-sm font-medium">
+                      {cqcEvidenceMap.summary.due_review} Due Review
+                    </span>
+                  )}
+                  {cqcEvidenceMap.summary.expired > 0 && (
+                    <span className="px-3 py-1 bg-error/10 text-error rounded-full text-sm font-medium">
+                      {cqcEvidenceMap.summary.expired} Expired
+                    </span>
+                  )}
+                  {cqcEvidenceMap.summary.partial > 0 && (
+                    <span className="px-3 py-1 bg-info/10 text-info rounded-full text-sm font-medium">
+                      {cqcEvidenceMap.summary.partial} Partial
+                    </span>
+                  )}
+                  <span className="px-3 py-1 bg-gray-100 text-text-muted rounded-full text-sm">
+                    {cqcEvidenceMap.summary.n_a} N/A
+                  </span>
+                </div>
+                
+                {/* CQC Key Questions Sections */}
+                {['safe', 'effective', 'caring', 'responsive', 'well_led'].map((key) => {
+                  const section = cqcEvidenceMap.cqc_mapping[key];
+                  if (!section) return null;
+                  
+                  const presentCount = section.items.filter(i => i.status === 'present' || i.status === 'partial').length;
+                  const totalCount = section.items.filter(i => i.status !== 'n/a').length;
+                  const hasIssues = section.items.some(i => ['missing', 'expired', 'overdue'].includes(i.status));
+                  
+                  // Color schemes for each key question
+                  const colors = {
+                    safe: { bg: 'bg-green-500', light: 'bg-green-50', border: 'border-green-200', text: 'text-green-700' },
+                    effective: { bg: 'bg-blue-500', light: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700' },
+                    caring: { bg: 'bg-purple-500', light: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700' },
+                    responsive: { bg: 'bg-orange-500', light: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700' },
+                    well_led: { bg: 'bg-indigo-500', light: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700' }
+                  };
+                  const color = colors[key];
+                  
+                  return (
+                    <Card key={key} className={`border shadow-sm ${hasIssues ? 'border-warning/30' : 'border-[#E4E8EB]'}`}>
+                      <CardHeader className={`pb-3 ${color.light} rounded-t-lg`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-1.5 h-12 rounded-full ${color.bg}`}></div>
+                            <div>
+                              <CardTitle className={`font-heading text-lg ${color.text}`}>
+                                {section.title}
+                              </CardTitle>
+                              <p className="text-sm text-text-muted">{section.description}</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-xl font-bold ${presentCount === totalCount ? 'text-success' : hasIssues ? 'text-warning' : 'text-text-primary'}`}>
+                              {presentCount}/{totalCount}
+                            </p>
+                            <p className="text-xs text-text-muted">items present</p>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-4">
+                        <div className="space-y-2">
+                          {section.items.map((item, idx) => (
+                            <div 
+                              key={idx}
+                              className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                                item.status === 'present' ? 'bg-success/5 border-success/20' :
+                                item.status === 'partial' ? 'bg-info/5 border-info/20' :
+                                item.status === 'missing' ? 'bg-error/5 border-error/20' :
+                                item.status === 'expired' || item.status === 'overdue' ? 'bg-error/5 border-error/20' :
+                                item.status === 'due_review' || item.status === 'expiring' ? 'bg-warning/5 border-warning/20' :
+                                'bg-gray-50 border-gray-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                {/* Status Icon */}
+                                {item.status === 'present' && <CheckCircle className="h-4 w-4 text-success flex-shrink-0" />}
+                                {item.status === 'partial' && <AlertCircle className="h-4 w-4 text-info flex-shrink-0" />}
+                                {item.status === 'missing' && <XCircle className="h-4 w-4 text-error flex-shrink-0" />}
+                                {(item.status === 'expired' || item.status === 'overdue') && <XCircle className="h-4 w-4 text-error flex-shrink-0" />}
+                                {(item.status === 'due_review' || item.status === 'expiring') && <Clock className="h-4 w-4 text-warning flex-shrink-0" />}
+                                {item.status === 'n/a' && <span className="h-4 w-4 text-text-muted flex-shrink-0 text-center">—</span>}
+                                
+                                <div>
+                                  <p className="font-medium text-sm text-text-primary">{item.name}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[10px] px-1.5 py-0.5 bg-gray-100 text-text-muted rounded capitalize">
+                                      {item.source_type}
+                                    </span>
+                                    {item.details && (
+                                      <span className="text-xs text-text-muted">{item.details}</span>
+                                    )}
+                                    {item.conditional && (
+                                      <span className="text-[10px] px-1.5 py-0.5 bg-warning/20 text-warning rounded">
+                                        CONDITIONAL
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-3">
+                                {/* Review/Expiry Date */}
+                                {(item.review_date || item.expiry_date) && (
+                                  <span className={`text-xs flex items-center gap-1 ${
+                                    item.status === 'overdue' || item.status === 'expired' ? 'text-error' :
+                                    item.status === 'due_review' || item.status === 'expiring' ? 'text-warning' :
+                                    'text-text-muted'
+                                  }`}>
+                                    <Calendar className="h-3 w-3" />
+                                    {item.review_date ? `Review: ${new Date(item.review_date).toLocaleDateString()}` :
+                                     item.expiry_date ? `Expires: ${new Date(item.expiry_date).toLocaleDateString()}` : ''}
+                                  </span>
+                                )}
+                                
+                                {/* Status Badge */}
+                                <span className={`text-[10px] px-2 py-1 rounded-full font-medium ${
+                                  item.status === 'present' ? 'bg-success/20 text-success' :
+                                  item.status === 'partial' ? 'bg-info/20 text-info' :
+                                  item.status === 'missing' ? 'bg-error/20 text-error' :
+                                  item.status === 'expired' || item.status === 'overdue' ? 'bg-error/20 text-error' :
+                                  item.status === 'due_review' || item.status === 'expiring' ? 'bg-warning/20 text-warning' :
+                                  'bg-gray-200 text-text-muted'
+                                }`}>
+                                  {item.status === 'present' ? 'Present' :
+                                   item.status === 'partial' ? 'Partial' :
+                                   item.status === 'missing' ? 'Missing' :
+                                   item.status === 'expired' ? 'Expired' :
+                                   item.status === 'overdue' ? 'Overdue' :
+                                   item.status === 'due_review' ? 'Due Review' :
+                                   item.status === 'expiring' ? 'Expiring' :
+                                   'N/A'}
+                                </span>
+                                
+                                {/* Link to source */}
+                                {item.link && item.status !== 'n/a' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => window.location.href = item.link}
+                                  >
+                                    View
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+                
+                {/* Footer Note */}
+                <div className="p-4 bg-gray-50 rounded-xl border border-gray-200">
+                  <p className="text-xs text-text-muted text-center">
+                    <span className="font-medium">Note:</span> This view maps existing system evidence to CQC Key Questions for inspection preparation. 
+                    It does not change employee compliance calculations, progress percentages, or Ready to Work status.
+                    <br />
+                    Generated: {new Date(cqcEvidenceMap.generated_at).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <Eye className="h-12 w-12 mx-auto text-text-muted/50 mb-3" />
+                <p className="text-text-muted">Click on the CQC View tab to load evidence mapping</p>
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>

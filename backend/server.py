@@ -319,21 +319,21 @@ MANDATORY_ITEMS = {
         
         # ======== CATEGORY 5: AGREEMENTS ========
         {"id": "contract", "name": "Contract Acknowledgement", 
-         "category": "5_Agreements", "type": "form-generated",
-         "template_name": "Contract Acknowledgement Form",
-         "allow_multiple_files": True, "source": "form",
+         "category": "5_Agreements", "type": "acknowledgement",
+         "allow_multiple_files": False, "source": "internal",
          "priority": "secondary", "priority_order": 40,
          "status_group": "other",
-         "description": "Signed contract/offer letter and appendices",
+         "description": "Employee confirms they have received and understood their contract",
+         "acknowledgement_text": "I confirm I have received, read, and understood my employment contract and its terms.",
          "work_ready_hint": "Complete after employee starts"},
         
         {"id": "handbook", "name": "Employee Handbook Acknowledgement", 
-         "category": "5_Agreements", "type": "form-generated",
-         "template_name": "Employee Handbook Acknowledgement",
-         "allow_multiple_files": False, "source": "form",
+         "category": "5_Agreements", "type": "acknowledgement",
+         "allow_multiple_files": False, "source": "internal",
          "priority": "secondary", "priority_order": 41,
          "status_group": "other",
-         "description": "Signed handbook acknowledgement",
+         "description": "Employee confirms they have received and understood the employee handbook",
+         "acknowledgement_text": "I confirm I have received, read, and understood the Employee Handbook and company policies.",
          "work_ready_hint": "Complete after employee starts"},
         
         # ======== CATEGORY 6: ADMIN / OTHER ========
@@ -350,10 +350,11 @@ MANDATORY_ITEMS = {
          "category": "6_Admin", "type": "form-generated",
          "template_name": "Equal Opportunities Monitoring Form",
          "allow_multiple_files": False, "source": "form",
-         "priority": "secondary", "priority_order": 43,
+         "priority": "optional", "priority_order": 43,
          "status_group": "other",
-         "description": "Diversity monitoring form",
-         "work_ready_hint": "Complete after employee starts"},
+         "optional": True,
+         "description": "Diversity monitoring form (optional - does not affect compliance)",
+         "work_ready_hint": "Optional - employee may decline"},
     ],
     
     "training": [  # Training items with priority
@@ -4855,6 +4856,87 @@ async def verify_requirement(
     return {"success": True, "message": f"'{requirement['name']}' verified", "verified": True}
 
 
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/acknowledge")
+async def acknowledge_requirement(
+    employee_id: str,
+    requirement_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Submit an acknowledgement for a requirement (Contract, Handbook, etc.)
+    Does not require file upload - just confirmation that employee has read/understood.
+    Automatically marks the requirement as completed AND verified.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    if requirement.get('type') != 'acknowledgement':
+        raise HTTPException(status_code=400, detail="This requirement does not support acknowledgement. Use upload instead.")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Check if already acknowledged
+    existing = await db.requirement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id
+    })
+    
+    if existing and existing.get('acknowledged'):
+        return {"success": True, "message": f"'{requirement['name']}' already acknowledged", "acknowledged": True}
+    
+    # Create or update acknowledgement record
+    ack_id = existing['id'] if existing else str(uuid.uuid4())
+    ack_record = {
+        "id": ack_id,
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "requirement_name": requirement['name'],
+        "acknowledged": True,
+        "acknowledged_at": now,
+        "acknowledged_by": user['user_id'],
+        "acknowledged_by_name": user['name'],
+        "acknowledgement_text": requirement.get('acknowledgement_text', ''),
+        "created_at": existing.get('created_at', now) if existing else now,
+        "updated_at": now
+    }
+    
+    await db.requirement_acknowledgements.update_one(
+        {"employee_id": employee_id, "requirement_id": requirement_id},
+        {"$set": ack_record},
+        upsert=True
+    )
+    
+    # Log audit action
+    await log_audit_action(
+        user['user_id'], 
+        "acknowledgement_completed", 
+        "requirement", 
+        requirement_id,
+        {
+            "employee_id": employee_id,
+            "employee_name": f"{employee['first_name']} {employee['last_name']}",
+            "requirement_name": requirement['name'],
+            "acknowledged_by": user['name'],
+            "acknowledged_at": now
+        }
+    )
+    
+    return {
+        "success": True, 
+        "message": f"'{requirement['name']}' acknowledged and completed",
+        "acknowledged": True,
+        "acknowledged_at": now,
+        "acknowledged_by": user['name']
+    }
+
+
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/unverify")
 async def unverify_requirement(
     employee_id: str,
@@ -5016,10 +5098,16 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     # Get all training records
     all_training = await db.training_records.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
     
+    # Get all acknowledgements for this employee
+    all_acknowledgements = await db.requirement_acknowledgements.find({
+        "employee_id": employee_id
+    }, {"_id": 0}).to_list(100)
+    
     requirements = []
     completed_count = 0
     verified_count = 0
     evidence_backed_count = 0
+    optional_count = 0  # Track optional items to exclude from total
     
     for item in mandatory_items:
         req_id = item['id']
@@ -5030,6 +5118,11 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         priority = item.get('priority', 'secondary')
         priority_order = item.get('priority_order', 99)
         work_ready_hint = item.get('work_ready_hint', '')
+        is_optional = item.get('optional', False)
+        
+        # Track optional items
+        if is_optional:
+            optional_count += 1
         
         req = {
             "id": req_id,
@@ -5053,14 +5146,21 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "verified_at": None,
             "all_verified": False,
             "can_verify": False,  # NEW: True only when evidence exists
-            "completion_method": None,  # NEW: "evidence" or "manual" or "form"
+            "completion_method": None,  # NEW: "evidence" or "manual" or "form" or "acknowledgement"
             # Work Readiness fields
             "priority": priority,
             "priority_order": priority_order,
             "priority_label": PRIORITY_CONFIG.get(priority, {}).get('label', 'Complete After Start'),
             "priority_color": PRIORITY_CONFIG.get(priority, {}).get('color', 'yellow'),
             "work_ready_hint": work_ready_hint,
-            "is_mandatory_for_work": req_id in WORK_READY_REQUIREMENTS or priority == 'mandatory'
+            "is_mandatory_for_work": req_id in WORK_READY_REQUIREMENTS or priority == 'mandatory',
+            # Optional flag
+            "optional": is_optional,
+            # Acknowledgement fields
+            "acknowledgement_text": item.get('acknowledgement_text', ''),
+            "acknowledged": False,
+            "acknowledged_at": None,
+            "acknowledged_by": None
         }
         
         evidence_files = []
@@ -5251,20 +5351,50 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     req['verified_by'] = linked_training.get('verified_by')
                     req['verified_at'] = linked_training.get('verified_at')
         
+        # ======== Handle Acknowledgements ========
+        if req_type == 'acknowledgement':
+            # Find acknowledgement for this requirement
+            linked_ack = None
+            for ack in all_acknowledgements:
+                if ack.get('requirement_id') == req_id:
+                    linked_ack = ack
+                    break
+            
+            if linked_ack and linked_ack.get('acknowledged'):
+                req['acknowledged'] = True
+                req['acknowledged_at'] = linked_ack.get('acknowledged_at')
+                req['acknowledged_by'] = linked_ack.get('acknowledged_by_name')
+                req['has_evidence'] = True  # Acknowledgement counts as evidence
+                req['verified'] = True  # Acknowledgements are auto-verified
+                req['verified_at'] = linked_ack.get('acknowledged_at')
+                req['verified_by'] = linked_ack.get('acknowledged_by_name')
+        
         # ======== Calculate Status (EVIDENCE-BASED) ========
         req['evidence_files'] = evidence_files
         req['evidence_count'] = len(evidence_files)
-        req['has_evidence'] = len(evidence_files) > 0
+        req['has_evidence'] = len(evidence_files) > 0 or req.get('acknowledged', False)
         req['can_verify'] = req['has_evidence'] and not req['verified']
         
-        if evidence_files:
+        # Skip optional items from compliance counts
+        is_optional = req.get('optional', False)
+        
+        if req.get('acknowledged'):
+            # Acknowledgement type - marked complete and verified when acknowledged
+            req['status'] = 'completed'
+            req['completion_method'] = 'acknowledgement'
+            if not is_optional:
+                completed_count += 1
+                evidence_backed_count += 1
+                verified_count += 1  # Acknowledgements auto-verify
+        elif evidence_files:
             # Has evidence = complete
             req['status'] = 'completed'
             req['completion_method'] = 'evidence'
-            completed_count += 1
-            evidence_backed_count += 1
+            if not is_optional:
+                completed_count += 1
+                evidence_backed_count += 1
             
-            if req['verified']:
+            if req['verified'] and not is_optional:
                 verified_count += 1
         elif req.get('form') and req['form']['status'] in ['completed', 'completed_imported']:
             # Form completed but no PDF/evidence - mark as "completed_no_evidence"
@@ -5275,8 +5405,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             else:
                 req['status'] = 'completed'
                 req['completion_method'] = 'form'
-                completed_count += 1
-                evidence_backed_count += 1
+                if not is_optional:
+                    completed_count += 1
+                    evidence_backed_count += 1
         elif req.get('training') and req['training']['status'] == 'completed':
             # Training completed but no certificate
             req['status'] = 'completed_no_evidence'
@@ -5337,7 +5468,7 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     "days_until_expiry": req['expiry_status'].get('days_until_expiry', 0)
                 })
     
-    total_count = len(requirements)
+    total_count = len(requirements) - optional_count  # Exclude optional items from total
     # EVIDENCE-BASED SCORING: Only evidence-backed completions count
     completion_percentage = int((evidence_backed_count / total_count) * 100) if total_count > 0 else 0
     verification_percentage = int((verified_count / evidence_backed_count) * 100) if evidence_backed_count > 0 else 0

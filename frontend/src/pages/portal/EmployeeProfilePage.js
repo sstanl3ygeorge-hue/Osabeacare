@@ -122,6 +122,12 @@ export default function EmployeeProfilePage() {
   const [deleteTrainingReason, setDeleteTrainingReason] = useState('');
   const [isDeletingTraining, setIsDeletingTraining] = useState(false);
   
+  // Acknowledgement states (for Contract/Handbook acknowledgement flow)
+  const [acknowledgementDialogOpen, setAcknowledgementDialogOpen] = useState(false);
+  const [acknowledgingRequirement, setAcknowledgingRequirement] = useState(null);
+  const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [acknowledgementConfirmed, setAcknowledgementConfirmed] = useState(false);
+  
   // Profile photo upload state
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [profilePhotoBlob, setProfilePhotoBlob] = useState(null);
@@ -1084,6 +1090,30 @@ export default function EmployeeProfilePage() {
     setDeletingTrainingRecord(trainingRecord);
     setDeleteTrainingReason('');
     setDeleteTrainingDialogOpen(true);
+  };
+
+  // Handle requirement acknowledgement (Contract/Handbook)
+  const handleAcknowledgeRequirement = async () => {
+    if (!acknowledgingRequirement) return;
+    
+    setIsAcknowledging(true);
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/requirements/${acknowledgingRequirement.id}/acknowledge`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${acknowledgingRequirement.name} acknowledged and completed`);
+      setAcknowledgementDialogOpen(false);
+      setAcknowledgingRequirement(null);
+      setAcknowledgementConfirmed(false);
+      await fetchData();
+      await fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to submit acknowledgement');
+    } finally {
+      setIsAcknowledging(false);
+    }
   };
 
   // Profile photo upload handler
@@ -3008,6 +3038,30 @@ export default function EmployeeProfilePage() {
                                     </p>
                                   )}
                                   
+                                  {/* ACKNOWLEDGEMENT STATUS INFO */}
+                                  {req.type === 'acknowledgement' && req.acknowledged && (
+                                    <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-[#E4E8EB]/50">
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
+                                        <CheckCircle className="h-2.5 w-2.5" />
+                                        Acknowledged{req.acknowledged_by ? ` by ${req.acknowledged_by}` : ''}
+                                      </span>
+                                      {req.acknowledged_at && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-1">
+                                          <Calendar className="h-2.5 w-2.5" />
+                                          {new Date(req.acknowledged_at).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {/* OPTIONAL ITEM INDICATOR */}
+                                  {req.optional && (
+                                    <p className="text-xs text-text-muted flex items-center gap-1 mt-1">
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Optional</span>
+                                      Does not affect compliance score
+                                    </p>
+                                  )}
+                                  
                                   {/* TRAINING STATUS INFO - Shows completion/verification status from training record */}
                                   {req.type === 'training' && req.training && (
                                     <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-[#E4E8EB]/50">
@@ -3073,11 +3127,34 @@ export default function EmployeeProfilePage() {
                                   {statusBadge.text}
                                 </span>
                                 
-                                {/* ACTION 1: Upload / Add File */}
+                                {/* ACTION 1: Upload / Add File / Acknowledge */}
                                 {!isAuditor() && (
                                   <>
+                                    {/* ACKNOWLEDGEMENT TYPE - Confirm & Complete */}
+                                    {req.type === 'acknowledgement' && !req.acknowledged && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="default"
+                                        onClick={() => {
+                                          setAcknowledgingRequirement(req);
+                                          setAcknowledgementDialogOpen(true);
+                                        }}
+                                        className="text-xs h-7 bg-green-600 hover:bg-green-700 text-white rounded-lg"
+                                        data-testid={`acknowledge-${req.id}`}
+                                      >
+                                        <CheckCircle className="h-3 w-3 mr-1" />
+                                        Confirm & Complete
+                                      </Button>
+                                    )}
+                                    {req.type === 'acknowledgement' && req.acknowledged && (
+                                      <span className="text-xs text-green-600 flex items-center gap-1 px-2">
+                                        <Shield className="h-3 w-3" />
+                                        Acknowledged
+                                      </span>
+                                    )}
+                                    
                                     {/* Generate PDF for forms without evidence */}
-                                    {req.type === 'form-generated' && req.form && req.form.status && 
+                                    {req.type !== 'acknowledgement' && req.type === 'form-generated' && req.form && req.form.status && 
                                      ['completed', 'completed_imported', 'signed_off'].includes(req.form.status) && 
                                      !req.form.pdf_url ? (
                                       <Button 
@@ -3102,7 +3179,7 @@ export default function EmployeeProfilePage() {
                                         <FileText className="h-3 w-3 mr-1" />
                                         Generate PDF
                                       </Button>
-                                    ) : !hasEvidence ? (
+                                    ) : req.type !== 'acknowledgement' && !hasEvidence ? (
                                       <Button 
                                         size="sm" 
                                         variant="default"
@@ -3120,7 +3197,7 @@ export default function EmployeeProfilePage() {
                                         <Upload className="h-3 w-3 mr-1" />
                                         Upload Document
                                       </Button>
-                                    ) : req.allow_multiple_files ? (
+                                    ) : req.type !== 'acknowledgement' && req.allow_multiple_files ? (
                                       <Button 
                                         size="sm" 
                                         variant="outline"
@@ -5307,6 +5384,77 @@ export default function EmployeeProfilePage() {
             >
               {isDeletingTraining ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
               Delete Record
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Acknowledgement Dialog - For Contract/Handbook acknowledgements */}
+      <Dialog open={acknowledgementDialogOpen} onOpenChange={(open) => {
+        setAcknowledgementDialogOpen(open);
+        if (!open) {
+          setAcknowledgementConfirmed(false);
+          setAcknowledgingRequirement(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-green-600">
+              <CheckCircle className="h-5 w-5" />
+              Confirm & Complete
+            </DialogTitle>
+            <DialogDescription>
+              Please confirm that this employee has received and understood the document.
+            </DialogDescription>
+          </DialogHeader>
+          {acknowledgingRequirement && (
+            <div className="space-y-4 py-4">
+              <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                <p className="font-semibold text-green-800">{acknowledgingRequirement.name}</p>
+                <p className="text-sm text-green-600 mt-2">
+                  {acknowledgingRequirement.description}
+                </p>
+              </div>
+              
+              <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg border">
+                <Checkbox 
+                  id="acknowledgement-confirm"
+                  checked={acknowledgementConfirmed}
+                  onCheckedChange={setAcknowledgementConfirmed}
+                  className="mt-0.5"
+                  data-testid="acknowledgement-checkbox"
+                />
+                <label htmlFor="acknowledgement-confirm" className="text-sm cursor-pointer">
+                  {acknowledgingRequirement.acknowledgement_text || 
+                    `I confirm that this employee has received, read, and understood the ${acknowledgingRequirement.name.replace(' Acknowledgement', '')}.`}
+                </label>
+              </div>
+              
+              <p className="text-xs text-text-muted">
+                This acknowledgement will be logged with your name and timestamp for audit purposes.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setAcknowledgementDialogOpen(false)} 
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAcknowledgeRequirement}
+              disabled={!acknowledgementConfirmed || isAcknowledging}
+              className="rounded-xl bg-green-600 hover:bg-green-700"
+              data-testid="submit-acknowledgement-btn"
+            >
+              {isAcknowledging ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              )}
+              Confirm & Complete
             </Button>
           </DialogFooter>
         </DialogContent>

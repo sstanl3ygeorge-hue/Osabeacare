@@ -10,12 +10,13 @@ import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
 import FormFieldRenderer from '../../components/portal/FormFieldRenderer';
 import SignaturePad, { SignatureDisplay } from '../../components/portal/SignaturePad';
+import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { 
   ArrowLeft, Save, Send, CheckCircle, Lock, Loader2, 
   FileText, User, Calendar, Building, Download, Printer,
-  AlertTriangle, Shield, Eye
+  AlertTriangle, Shield, Eye, ExternalLink
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -36,6 +37,8 @@ export default function FormEditorPage() {
   const [adminSignature, setAdminSignature] = useState(null);
   const [employeeSignature, setEmployeeSignature] = useState(null);
   const [signoffNotes, setSignoffNotes] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -65,20 +68,23 @@ export default function FormEditorPage() {
         }
       }
 
-      // Get template for form fields (optional - imported forms may not have templates)
-      try {
-        const templateRes = await axios.get(`${API}/templates/${formRes.data.template_id}`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setTemplate(templateRes.data);
-      } catch (templateError) {
-        // Template not found - this is expected for imported forms
-        console.log('Template not found - showing imported document view');
-        setTemplate(null);
+      // Only load template for non-imported forms
+      const isImported = formRes.data.status === 'completed_imported' || formRes.data.source === 'imported';
+      if (!isImported && formRes.data.template_id) {
+        try {
+          const templateRes = await axios.get(`${API}/templates/${formRes.data.template_id}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          setTemplate(templateRes.data);
+        } catch (templateError) {
+          // Template not found - treat as imported
+          console.log('Template not found');
+          setTemplate(null);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch form:', error);
-      toast.error('Failed to load form');
+      toast.error('Form not found');
     } finally {
       setLoading(false);
     }
@@ -94,7 +100,6 @@ export default function FormEditorPage() {
       const updateData = { form_data: formData };
       if (newStatus) updateData.status = newStatus;
       
-      // Include signatures if changed
       if (employeeSignature?.hasSignature) {
         updateData.employee_signature = JSON.stringify(employeeSignature);
         updateData.employee_signed_at = employeeSignature.date || new Date().toISOString();
@@ -187,7 +192,6 @@ export default function FormEditorPage() {
     
     setIsExporting(true);
     try {
-      // Hide buttons and action elements
       const actionElements = formRef.current.querySelectorAll('[data-no-print]');
       actionElements.forEach(el => el.style.display = 'none');
       
@@ -198,7 +202,6 @@ export default function FormEditorPage() {
         backgroundColor: '#ffffff'
       });
       
-      // Restore hidden elements
       actionElements.forEach(el => el.style.display = '');
       
       const imgData = canvas.toDataURL('image/png');
@@ -208,8 +211,8 @@ export default function FormEditorPage() {
         format: 'a4'
       });
       
-      const imgWidth = 210; // A4 width in mm
-      const pageHeight = 297; // A4 height in mm
+      const imgWidth = 210;
+      const pageHeight = 297;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       let heightLeft = imgHeight;
       let position = 0;
@@ -240,6 +243,44 @@ export default function FormEditorPage() {
     window.print();
   };
 
+  const handleDownloadEvidence = async () => {
+    if (!form?.pdf_url) {
+      toast.error('No evidence file available');
+      return;
+    }
+    try {
+      const response = await axios.get(`${API}/generated-forms/${formId}/pdf/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      const blob = new Blob([response.data]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = form.pdf_filename || `${form.template_name}_${form.employee_code}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success('Document downloaded');
+    } catch (error) {
+      toast.error('Failed to download document');
+    }
+  };
+
+  const handleVerifyForm = async () => {
+    setIsVerifying(true);
+    try {
+      await axios.post(`${API}/generated-forms/${formId}/verify`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Form verified');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to verify');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   // Get employee role for role-specific field filtering
   const employeeRole = formData.employee_role || form?.employee_role || '';
 
@@ -255,22 +296,190 @@ export default function FormEditorPage() {
     return (
       <div className="text-center py-12">
         <p className="text-text-muted">Form not found</p>
-        <Link to="/portal/templates">
-          <Button className="mt-4">Back to Templates</Button>
-        </Link>
+        <button onClick={() => navigate(-1)}>
+          <Button className="mt-4">Go Back</Button>
+        </button>
       </div>
     );
   }
   
-  // For imported forms without templates, show a simplified view
-  const isImportedWithoutTemplate = !template;
+  // Check if this is an imported document (document-first view)
+  const isImported = form.status === 'completed_imported' || form.source === 'imported' || !template;
+  const hasEvidence = !!form.pdf_url;
+  const isVerified = form.verified;
 
+  // ============ IMPORTED DOCUMENT VIEW ============
+  if (isImported) {
+    return (
+      <div className="space-y-6" data-testid="imported-document-view">
+        {/* Back Link */}
+        <button 
+          onClick={() => navigate(-1)} 
+          className="inline-flex items-center gap-2 text-text-muted hover:text-primary transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </button>
+
+        {/* Document Card */}
+        <Card className="border-[#E4E8EB] shadow-sm">
+          <CardContent className="p-6">
+            {/* Header */}
+            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-6">
+              <div>
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <h1 className="font-heading text-2xl font-bold text-text-primary">
+                    {form.template_name || 'Imported Document'}
+                  </h1>
+                  <span className="px-3 py-1 rounded-full text-sm font-medium bg-info/10 text-info">
+                    Uploaded Evidence
+                  </span>
+                  {isVerified && (
+                    <span className="flex items-center gap-1 text-success text-sm bg-success/10 px-2 py-1 rounded-full">
+                      <Shield className="h-4 w-4" />
+                      Verified
+                    </span>
+                  )}
+                </div>
+                <p className="text-text-muted">
+                  {form.employee_name} ({form.employee_code})
+                </p>
+              </div>
+            </div>
+
+            {/* Banner */}
+            <div className="bg-info/5 border border-info/20 rounded-xl p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <FileText className="h-5 w-5 text-info flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-info">Uploaded Evidence Document</p>
+                  <p className="text-xs text-text-muted mt-1">
+                    This document was uploaded as compliance evidence. The original file is available below.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Evidence Actions */}
+            {hasEvidence ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={() => setPreviewOpen(true)}
+                    className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                    data-testid="view-evidence-btn"
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    View Document
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={handleDownloadEvidence}
+                    className="rounded-xl"
+                    data-testid="download-evidence-btn"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download
+                  </Button>
+                  {!isVerified && isAdmin() && (
+                    <Button
+                      variant="outline"
+                      onClick={handleVerifyForm}
+                      disabled={isVerifying}
+                      className="text-success border-success hover:bg-success/10 rounded-xl"
+                      data-testid="verify-evidence-btn"
+                    >
+                      {isVerifying ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Shield className="h-4 w-4 mr-2" />
+                      )}
+                      Verify
+                    </Button>
+                  )}
+                </div>
+
+                {/* File Info */}
+                <div className="p-4 bg-[#F8FAFA] rounded-xl">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-8 w-8 text-primary" />
+                    <div>
+                      <p className="font-medium text-text-primary">
+                        {form.pdf_filename || `${form.template_name}.pdf`}
+                      </p>
+                      <p className="text-xs text-text-muted">
+                        Uploaded {new Date(form.created_at).toLocaleDateString()}
+                        {form.verified && ` • Verified by ${form.verified_by_name || 'Admin'}`}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-8 bg-error/5 border border-error/20 rounded-xl">
+                <AlertTriangle className="h-10 w-10 text-error mx-auto mb-3" />
+                <p className="text-error font-medium">No Evidence Uploaded</p>
+                <p className="text-sm text-text-muted mt-1">
+                  This requirement does not have an evidence file attached.
+                </p>
+              </div>
+            )}
+
+            {/* Metadata */}
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-[#E4E8EB]">
+              <div className="flex items-center gap-3">
+                <User className="h-5 w-5 text-text-muted" />
+                <div>
+                  <p className="text-xs text-text-muted">Employee</p>
+                  <p className="font-medium text-text-primary">{form.employee_name}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <FileText className="h-5 w-5 text-text-muted" />
+                <div>
+                  <p className="text-xs text-text-muted">Employee ID</p>
+                  <p className="font-medium text-text-primary">{form.employee_code}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Building className="h-5 w-5 text-text-muted" />
+                <div>
+                  <p className="text-xs text-text-muted">Category</p>
+                  <p className="font-medium text-text-primary">{form.template_category || '-'}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Calendar className="h-5 w-5 text-text-muted" />
+                <div>
+                  <p className="text-xs text-text-muted">Date</p>
+                  <p className="font-medium text-text-primary">
+                    {new Date(form.created_at).toLocaleDateString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Document Preview Modal */}
+        <DocumentPreviewModal
+          isOpen={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          fileUrl={`${API}/generated-forms/${formId}/pdf/file`}
+          fileName={form.pdf_filename || form.template_name}
+          token={token}
+          onDownload={handleDownloadEvidence}
+        />
+      </div>
+    );
+  }
+
+  // ============ REGULAR FORM EDITOR VIEW ============
   const statusColors = {
     draft: 'bg-gray-100 text-text-muted',
     sent: 'bg-info/10 text-info',
     in_progress: 'bg-warning/10 text-warning',
     completed: 'bg-info/10 text-info',
-    completed_imported: 'bg-info/10 text-info',
     reviewed: 'bg-warning/10 text-warning',
     signed_off: 'bg-success/10 text-success',
     archived: 'bg-gray-100 text-text-muted'
@@ -287,10 +496,6 @@ export default function FormEditorPage() {
       Confidential
     </span>
   ) : null;
-  
-  // Safe form name - fallback for imported forms
-  const formName = template?.name || form.template_name || 'Imported Document';
-  const formDescription = template?.description || '';
 
   return (
     <div className="space-y-6 print:space-y-4" data-testid="form-editor">
@@ -314,10 +519,10 @@ export default function FormEditorPage() {
               <div>
                 <div className="flex items-center gap-3 mb-2 flex-wrap">
                   <h1 className="font-heading text-2xl font-bold text-text-primary">
-                    {formName}
+                    {template?.name || form.template_name}
                   </h1>
                   <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusColors[form.status] || 'bg-gray-100 text-text-muted'}`}>
-                    {form.status === 'completed_imported' ? 'Imported' : form.status?.replace('_', ' ')}
+                    {form.status?.replace('_', ' ')}
                   </span>
                   {form.locked && (
                     <span className="flex items-center gap-1 text-success text-sm bg-success/10 px-2 py-1 rounded-full">
@@ -327,7 +532,7 @@ export default function FormEditorPage() {
                   )}
                   {visibilityBadge}
                 </div>
-                {formDescription && <p className="text-text-muted">{formDescription}</p>}
+                {template?.description && <p className="text-text-muted">{template.description}</p>}
               </div>
 
               {/* Actions - hide on print */}
@@ -482,97 +687,52 @@ export default function FormEditorPage() {
         {/* Form Fields */}
         <Card className="border-[#E4E8EB] shadow-sm print:shadow-none print:border-0">
           <CardContent className="p-6 space-y-6">
-            {/* For imported forms without template, show read-only view */}
-            {isImportedWithoutTemplate ? (
-              <div className="space-y-4">
-                <div className="bg-info/5 border border-info/20 rounded-xl p-4">
-                  <p className="text-sm text-info font-medium mb-2">Imported Document</p>
-                  <p className="text-xs text-text-muted">
-                    This document was imported from an existing file. The original document is stored as evidence.
-                  </p>
-                </div>
-                
-                {/* Show form data if any */}
-                {Object.keys(formData).length > 0 && (
-                  <div className="space-y-3">
-                    <h4 className="font-medium text-text-primary">Form Data</h4>
-                    {Object.entries(formData).map(([key, value]) => (
-                      <div key={key} className="flex justify-between items-start p-3 bg-[#F8FAFA] rounded-lg">
-                        <span className="text-sm text-text-muted capitalize">{key.replace(/_/g, ' ')}</span>
-                        <span className="text-sm text-text-primary font-medium text-right max-w-[60%]">
-                          {typeof value === 'object' ? JSON.stringify(value) : String(value || '-')}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Show PDF link if available */}
-                {form.pdf_url && (
-                  <div className="border-t border-[#E4E8EB] pt-4 mt-4">
-                    <h4 className="font-medium text-text-primary mb-3">Evidence Document</h4>
-                    <a 
-                      href={form.pdf_url} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-primary hover:underline"
-                    >
-                      <FileText className="h-4 w-4" />
-                      View Original Document
-                    </a>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <>
-                {template?.form_fields?.map((field, index) => (
-                  <FormFieldRenderer
-                    key={field.name || index}
-                    field={field}
-                    value={formData[field.name]}
-                    onChange={handleFieldChange}
-                    disabled={form.locked}
-                    employeeRole={employeeRole}
-                  />
-                ))}
+            {template?.form_fields?.map((field, index) => (
+              <FormFieldRenderer
+                key={field.name || index}
+                field={field}
+                value={formData[field.name]}
+                onChange={handleFieldChange}
+                disabled={form.locked}
+                employeeRole={employeeRole}
+              />
+            ))}
 
-                {/* Signatures Section */}
-                {(template?.requires_employee_signature || template?.requires_admin_signature) && (
-                  <div className="border-t border-[#E4E8EB] pt-6 mt-6">
-                    <h3 className="font-heading font-semibold text-text-primary mb-6">Signatures</h3>
-                    
-                    <div className="grid sm:grid-cols-2 gap-6">
-                      {template?.requires_employee_signature && (
-                        <div>
-                          {form.locked || form.employee_signature ? (
-                            <SignatureDisplay 
-                              signature={employeeSignature}
-                              label="Employee Signature"
-                            />
-                          ) : (
-                            <SignaturePad
-                              label="Employee Signature"
-                              value={employeeSignature}
-                              onChange={setEmployeeSignature}
-                              disabled={form.locked}
-                              required={template?.requires_employee_signature}
-                            />
-                          )}
-                        </div>
-                      )}
-
-                      {template?.requires_admin_signature && (
-                        <div>
-                          <SignatureDisplay 
-                            signature={adminSignature}
-                            label="Admin Signature"
-                          />
-                        </div>
+            {/* Signatures Section */}
+            {(template?.requires_employee_signature || template?.requires_admin_signature) && (
+              <div className="border-t border-[#E4E8EB] pt-6 mt-6">
+                <h3 className="font-heading font-semibold text-text-primary mb-6">Signatures</h3>
+                
+                <div className="grid sm:grid-cols-2 gap-6">
+                  {template?.requires_employee_signature && (
+                    <div>
+                      {form.locked || form.employee_signature ? (
+                        <SignatureDisplay 
+                          signature={employeeSignature}
+                          label="Employee Signature"
+                        />
+                      ) : (
+                        <SignaturePad
+                          label="Employee Signature"
+                          value={employeeSignature}
+                          onChange={setEmployeeSignature}
+                          disabled={form.locked}
+                          required={template?.requires_employee_signature}
+                        />
                       )}
                     </div>
-                  </div>
-                )}
-              </>
+                  )}
+
+                  {template?.requires_admin_signature && (
+                    <div>
+                      <SignatureDisplay 
+                        signature={adminSignature}
+                        label="Admin Signature"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>

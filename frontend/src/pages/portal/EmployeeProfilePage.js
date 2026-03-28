@@ -1723,20 +1723,106 @@ export default function EmployeeProfilePage() {
               ) : (
                 <div className="space-y-3">
                   {generatedForms.map((form) => {
+                    const isImported = form.status === 'completed_imported' || form.source === 'imported';
+                    const hasPdfEvidence = !!form.pdf_url;
+                    
                     const statusConfig = {
                       draft: { color: 'bg-gray-100 text-text-muted', label: 'Draft', icon: Clock },
                       sent: { color: 'bg-info/10 text-info', label: 'Sent', icon: Mail },
                       in_progress: { color: 'bg-warning/10 text-warning', label: 'In Progress', icon: Clock },
                       completed: { color: 'bg-info/10 text-info', label: 'Completed', icon: CheckCircle },
-                      completed_imported: { color: 'bg-info/10 text-info', label: 'Imported', icon: FileText },
+                      completed_imported: { color: 'bg-primary/10 text-primary', label: 'Uploaded Evidence', icon: FileText },
                       reviewed: { color: 'bg-warning/10 text-warning', label: 'Reviewed', icon: Eye },
                       signed_off: { color: 'bg-success/10 text-success', label: 'Signed Off', icon: CheckCircle },
                       archived: { color: 'bg-gray-100 text-text-muted', label: 'Archived', icon: FileText }
                     };
                     const config = statusConfig[form.status] || statusConfig.draft;
                     const StatusIcon = config.icon;
-                    const hasPdfEvidence = !!form.pdf_url;
                     
+                    // For imported forms, show document-first actions instead of navigating to form editor
+                    if (isImported) {
+                      return (
+                        <div 
+                          key={form.id} 
+                          className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl"
+                          data-testid={`form-${form.id}`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="p-2 rounded-lg bg-primary/10">
+                              <FileText className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-text-primary">{form.template_name}</p>
+                              <div className="flex items-center gap-2 text-sm text-text-muted">
+                                <span>{form.template_category}</span>
+                                <span>•</span>
+                                <span>{new Date(form.created_at).toLocaleDateString()}</span>
+                                <span>•</span>
+                                <span className="text-primary">Uploaded Evidence</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {hasPdfEvidence ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    const viewUrl = `${API}/generated-forms/${form.id}/pdf/file`;
+                                    setPreviewFile({ 
+                                      url: viewUrl, 
+                                      name: form.pdf_filename || form.template_name,
+                                      filename: form.pdf_filename 
+                                    });
+                                    setPreviewOpen(true);
+                                  }}
+                                  className="text-xs h-8 rounded-lg"
+                                  data-testid={`view-form-evidence-${form.id}`}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={async () => {
+                                    try {
+                                      const response = await axios.get(
+                                        `${API}/generated-forms/${form.id}/pdf/download`,
+                                        { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
+                                      );
+                                      const blob = new Blob([response.data]);
+                                      const url = URL.createObjectURL(blob);
+                                      const link = document.createElement('a');
+                                      link.href = url;
+                                      link.download = form.pdf_filename || `${form.template_name}.pdf`;
+                                      link.click();
+                                      URL.revokeObjectURL(url);
+                                      toast.success('Downloaded');
+                                    } catch (e) {
+                                      toast.error('Download failed');
+                                    }
+                                  }}
+                                  className="text-xs h-8 rounded-lg"
+                                  data-testid={`download-form-evidence-${form.id}`}
+                                >
+                                  <Download className="h-3 w-3 mr-1" />
+                                  Download
+                                </Button>
+                              </>
+                            ) : (
+                              <span className="text-xs text-warning flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3" />
+                                No file
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    
+                    // Regular forms - show clickable card
                     return (
                       <div 
                         key={form.id} 
@@ -1771,7 +1857,7 @@ export default function EmployeeProfilePage() {
                             {config.label}
                           </span>
                           {/* Warning if no PDF but form is complete */}
-                          {['completed', 'completed_imported', 'signed_off'].includes(form.status) && !hasPdfEvidence && (
+                          {['completed', 'signed_off'].includes(form.status) && !hasPdfEvidence && (
                             <span className="flex items-center gap-1 text-warning text-xs">
                               <AlertTriangle className="h-3 w-3" />
                               No PDF

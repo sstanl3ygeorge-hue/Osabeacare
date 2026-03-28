@@ -1011,6 +1011,7 @@ export default function EmployeeProfilePage() {
       setTrainingCorrectionDialogOpen(false);
       setEditingTrainingRecord(null);
       await fetchData();
+      await fetchCompliance();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to correct training record');
     }
@@ -1032,11 +1033,57 @@ export default function EmployeeProfilePage() {
       setDeletingTrainingRecord(null);
       setDeleteTrainingReason('');
       await fetchData();
+      await fetchCompliance();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete training record');
     } finally {
       setIsDeletingTraining(false);
     }
+  };
+
+  // Open training correction dialog from What's Needed tab
+  // This reuses the same dialog as the Training tab for consistency
+  const openTrainingCorrectionFromWhatsNeeded = (requirement) => {
+    if (!requirement.training?.id) {
+      toast.error('No training record found for this requirement');
+      return;
+    }
+    
+    // Build a training record object compatible with the correction dialog
+    const trainingRecord = {
+      id: requirement.training.id,
+      training_name: requirement.name,
+      status: requirement.training.status,
+      expiry_date: requirement.training.expiry_date,
+      completion_date: requirement.training.completed_at,
+      verified: requirement.training.verified
+    };
+    
+    setEditingTrainingRecord(trainingRecord);
+    setTrainingCorrectionField('expiry_date');
+    setTrainingCorrectionValue(trainingRecord.expiry_date?.split('T')[0] || '');
+    setTrainingCorrectionReason('');
+    setTrainingCorrectionDialogOpen(true);
+  };
+
+  // Open delete training dialog from What's Needed tab
+  const openDeleteTrainingFromWhatsNeeded = (requirement) => {
+    if (!requirement.training?.id) {
+      toast.error('No training record found for this requirement');
+      return;
+    }
+    
+    // Build a training record object compatible with the delete dialog
+    const trainingRecord = {
+      id: requirement.training.id,
+      training_name: requirement.name,
+      status: requirement.training.status,
+      verified: requirement.training.verified
+    };
+    
+    setDeletingTrainingRecord(trainingRecord);
+    setDeleteTrainingReason('');
+    setDeleteTrainingDialogOpen(true);
   };
 
   // Profile photo upload handler
@@ -2767,6 +2814,44 @@ export default function EmployeeProfilePage() {
                                       No PDF evidence - click Generate PDF
                                     </p>
                                   )}
+                                  
+                                  {/* TRAINING STATUS INFO - Shows completion/verification status from training record */}
+                                  {req.type === 'training' && req.training && (
+                                    <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-[#E4E8EB]/50">
+                                      {/* Completion Date */}
+                                      {req.training.completed_at && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-1">
+                                          <Calendar className="h-2.5 w-2.5" />
+                                          Completed: {new Date(req.training.completed_at).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                      {/* Expiry Date */}
+                                      {req.training.expiry_date && (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                                          new Date(req.training.expiry_date) < new Date() 
+                                            ? 'bg-red-50 text-red-700' 
+                                            : 'bg-green-50 text-green-700'
+                                        }`}>
+                                          <Clock className="h-2.5 w-2.5" />
+                                          Expires: {new Date(req.training.expiry_date).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                      {/* Verification Status */}
+                                      {req.training.verified && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
+                                          <Shield className="h-2.5 w-2.5" />
+                                          Verified{req.training.verified_by ? ` by ${req.training.verified_by}` : ''}
+                                        </span>
+                                      )}
+                                      {/* No Evidence Warning */}
+                                      {!req.training.has_evidence && req.training.status === 'completed' && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 flex items-center gap-1">
+                                          <AlertTriangle className="h-2.5 w-2.5" />
+                                          No certificate uploaded
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                               
@@ -2911,20 +2996,27 @@ export default function EmployeeProfilePage() {
                                 )}
                                 
                                 {/* ACTION 4: Approve (only when evidence exists and not yet verified) */}
+                                {/* For training requirements, use training-specific endpoint */}
                                 {hasEvidence && !isVerified && !isAuditor() && (
                                   <Button 
                                     size="sm" 
                                     variant="outline"
                                     onClick={async () => {
                                       try {
-                                        await axios.post(
-                                          `${API}/employees/${employeeId}/requirements/${req.id}/verify`,
-                                          {},
-                                          { headers: { Authorization: `Bearer ${token}` } }
-                                        );
-                                        toast.success(`${req.name} marked as Checked & Approved`);
-                                        fetchData();
-                                        fetchCompliance();
+                                        if (req.type === 'training' && req.training?.id) {
+                                          // Use training-specific verify endpoint
+                                          await handleVerifyTraining(req.training.id);
+                                        } else {
+                                          // Use standard requirement verify endpoint
+                                          await axios.post(
+                                            `${API}/employees/${employeeId}/requirements/${req.id}/verify`,
+                                            {},
+                                            { headers: { Authorization: `Bearer ${token}` } }
+                                          );
+                                          toast.success(`${req.name} marked as Checked & Approved`);
+                                          await fetchData();
+                                          await fetchCompliance();
+                                        }
                                       } catch (e) {
                                         toast.error(e.response?.data?.detail || 'Could not approve - please try again');
                                       }
@@ -2951,63 +3043,205 @@ export default function EmployeeProfilePage() {
                                         <MoreHorizontal className="h-3 w-3" />
                                       </Button>
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" className="w-48">
-                                      {/* Edit Details */}
-                                      {!isAuditor() && (
-                                        <DropdownMenuItem 
-                                          onClick={() => openEditEvidence(req.id, evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0])}
-                                          data-testid={`edit-details-${req.id}`}
-                                        >
-                                          <Edit className="h-4 w-4 mr-2" />
-                                          Edit Details
-                                        </DropdownMenuItem>
-                                      )}
-                                      
-                                      {/* Replace File */}
-                                      {!isAuditor() && (
-                                        <DropdownMenuItem 
-                                          onClick={() => openReplaceDialog(
-                                            evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
-                                            req.id
+                                    <DropdownMenuContent align="end" className="w-56">
+                                      {/* TRAINING-SPECIFIC ACTIONS - Uses unified training record system */}
+                                      {req.type === 'training' && req.training?.id ? (
+                                        <>
+                                          {/* Verify Training */}
+                                          {!isAuditor() && !req.training.verified && (
+                                            <DropdownMenuItem 
+                                              onClick={() => handleVerifyTraining(req.training.id)}
+                                              data-testid={`verify-training-${req.id}`}
+                                            >
+                                              <Shield className="h-4 w-4 mr-2 text-green-600" />
+                                              Verify Training
+                                            </DropdownMenuItem>
                                           )}
-                                          data-testid={`replace-file-${req.id}`}
-                                        >
-                                          <RefreshCw className="h-4 w-4 mr-2" />
-                                          Replace File
-                                        </DropdownMenuItem>
-                                      )}
-                                      
-                                      {/* Remove File */}
-                                      {!isAuditor() && (
-                                        <DropdownMenuItem 
-                                          onClick={() => openRemoveDialog(
-                                            evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
-                                            req.id
+                                          {!isAuditor() && req.training.verified && (
+                                            <DropdownMenuItem 
+                                              onClick={() => handleUnverifyTraining(req.training.id)}
+                                              data-testid={`unverify-training-${req.id}`}
+                                            >
+                                              <Shield className="h-4 w-4 mr-2 text-red-600" />
+                                              Remove Verification
+                                            </DropdownMenuItem>
                                           )}
-                                          className="text-red-600"
-                                          data-testid={`remove-file-${req.id}`}
-                                        >
-                                          <Trash2 className="h-4 w-4 mr-2" />
-                                          Delete File
-                                        </DropdownMenuItem>
+                                          
+                                          {/* Edit Training Record - Opens correction dialog */}
+                                          {!isAuditor() && (
+                                            <DropdownMenuItem 
+                                              onClick={() => openTrainingCorrectionFromWhatsNeeded(req)}
+                                              data-testid={`edit-training-${req.id}`}
+                                            >
+                                              <Edit className="h-4 w-4 mr-2" />
+                                              Edit Training Record
+                                            </DropdownMenuItem>
+                                          )}
+                                          
+                                          {/* Replace Certificate - upload new evidence */}
+                                          {!isAuditor() && (
+                                            <DropdownMenuItem 
+                                              onClick={() => openTrainingCertDialog(req)}
+                                              data-testid={`replace-training-cert-${req.id}`}
+                                            >
+                                              <RefreshCw className="h-4 w-4 mr-2" />
+                                              Replace Certificate
+                                            </DropdownMenuItem>
+                                          )}
+                                          
+                                          <DropdownMenuSeparator />
+                                          
+                                          {/* View Training History */}
+                                          <DropdownMenuItem 
+                                            onClick={async () => {
+                                              try {
+                                                const res = await axios.get(`${API}/training-records/${req.training.id}/history`, {
+                                                  headers: { Authorization: `Bearer ${token}` }
+                                                });
+                                                setTrainingHistory(res.data.history || []);
+                                                setTrainingHistoryDialogOpen(true);
+                                              } catch (error) {
+                                                toast.error('Failed to load history');
+                                              }
+                                            }}
+                                            data-testid={`training-history-${req.id}`}
+                                          >
+                                            <History className="h-4 w-4 mr-2" />
+                                            View History
+                                          </DropdownMenuItem>
+                                          
+                                          {/* Delete Training Record */}
+                                          {!isAuditor() && (
+                                            <DropdownMenuItem 
+                                              onClick={() => openDeleteTrainingFromWhatsNeeded(req)}
+                                              className="text-red-600"
+                                              data-testid={`delete-training-${req.id}`}
+                                            >
+                                              <Trash2 className="h-4 w-4 mr-2" />
+                                              Delete Training Record
+                                            </DropdownMenuItem>
+                                          )}
+                                        </>
+                                      ) : (
+                                        <>
+                                          {/* DOCUMENT ACTIONS - For non-training requirements */}
+                                          {/* Edit Details */}
+                                          {!isAuditor() && (
+                                            <DropdownMenuItem 
+                                              onClick={() => openEditEvidence(req.id, evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0])}
+                                              data-testid={`edit-details-${req.id}`}
+                                            >
+                                              <Edit className="h-4 w-4 mr-2" />
+                                              Edit Details
+                                            </DropdownMenuItem>
+                                          )}
+                                          
+                                          {/* Replace File */}
+                                          {!isAuditor() && (
+                                            <DropdownMenuItem 
+                                              onClick={() => openReplaceDialog(
+                                                evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
+                                                req.id
+                                              )}
+                                              data-testid={`replace-file-${req.id}`}
+                                            >
+                                              <RefreshCw className="h-4 w-4 mr-2" />
+                                              Replace File
+                                            </DropdownMenuItem>
+                                          )}
+                                          
+                                          {/* Remove File */}
+                                          {!isAuditor() && (
+                                            <DropdownMenuItem 
+                                              onClick={() => openRemoveDialog(
+                                                evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
+                                                req.id
+                                              )}
+                                              className="text-red-600"
+                                              data-testid={`remove-file-${req.id}`}
+                                            >
+                                              <Trash2 className="h-4 w-4 mr-2" />
+                                              Delete File
+                                            </DropdownMenuItem>
+                                          )}
+                                          
+                                          <DropdownMenuSeparator />
+                                          
+                                          {/* View History - available to all */}
+                                          <DropdownMenuItem 
+                                            onClick={() => openHistoryDialog(req.id)}
+                                            data-testid={`view-history-${req.id}`}
+                                          >
+                                            <History className="h-4 w-4 mr-2" />
+                                            View History
+                                          </DropdownMenuItem>
+                                        </>
                                       )}
-                                      
-                                      <DropdownMenuSeparator />
-                                      
-                                      {/* View History - available to all */}
-                                      <DropdownMenuItem 
-                                        onClick={() => openHistoryDialog(req.id)}
-                                        data-testid={`view-history-${req.id}`}
-                                      >
-                                        <History className="h-4 w-4 mr-2" />
-                                        View History
-                                      </DropdownMenuItem>
                                     </DropdownMenuContent>
                                   </DropdownMenu>
                                 )}
                                 
-                                {/* Unverify option */}
-                                {isVerified && !isAuditor() && (
+                                {/* TRAINING: Show action menu even without evidence files */}
+                                {req.type === 'training' && req.training?.id && evidenceFiles.length === 0 && (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="text-xs h-7 px-2 rounded-lg"
+                                        data-testid={`training-actions-${req.id}`}
+                                      >
+                                        <MoreHorizontal className="h-3 w-3" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-56">
+                                      {/* Edit Training Record */}
+                                      {!isAuditor() && (
+                                        <DropdownMenuItem 
+                                          onClick={() => openTrainingCorrectionFromWhatsNeeded(req)}
+                                          data-testid={`edit-training-noevidence-${req.id}`}
+                                        >
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          Edit Training Record
+                                        </DropdownMenuItem>
+                                      )}
+                                      
+                                      {/* View Training History */}
+                                      <DropdownMenuItem 
+                                        onClick={async () => {
+                                          try {
+                                            const res = await axios.get(`${API}/training-records/${req.training.id}/history`, {
+                                              headers: { Authorization: `Bearer ${token}` }
+                                            });
+                                            setTrainingHistory(res.data.history || []);
+                                            setTrainingHistoryDialogOpen(true);
+                                          } catch (error) {
+                                            toast.error('Failed to load history');
+                                          }
+                                        }}
+                                        data-testid={`training-history-noevidence-${req.id}`}
+                                      >
+                                        <History className="h-4 w-4 mr-2" />
+                                        View History
+                                      </DropdownMenuItem>
+                                      
+                                      {/* Delete Training Record */}
+                                      {!isAuditor() && (
+                                        <DropdownMenuItem 
+                                          onClick={() => openDeleteTrainingFromWhatsNeeded(req)}
+                                          className="text-red-600"
+                                          data-testid={`delete-training-noevidence-${req.id}`}
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Delete Training Record
+                                        </DropdownMenuItem>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )}
+                                
+                                {/* Unverify option - Use training endpoint for training requirements */}
+                                {isVerified && !isAuditor() && !(req.type === 'training' && req.training?.id) && (
                                   <Button 
                                     size="sm" 
                                     variant="ghost"
@@ -3019,7 +3253,8 @@ export default function EmployeeProfilePage() {
                                           { headers: { Authorization: `Bearer ${token}` } }
                                         );
                                         toast.success('Approval removed');
-                                        fetchData();
+                                        await fetchData();
+                                        await fetchCompliance();
                                       } catch (e) {
                                         toast.error('Failed to remove approval');
                                       }
@@ -3031,6 +3266,7 @@ export default function EmployeeProfilePage() {
                                     <XCircle className="h-3 w-3" />
                                   </Button>
                                 )}
+                                {/* Training unverify - handled via dropdown for consistency */}
                               </div>
                             </div>
                           );

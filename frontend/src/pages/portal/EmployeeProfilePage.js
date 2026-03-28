@@ -2791,12 +2791,12 @@ export default function EmployeeProfilePage() {
                   {/* Group requirements by category */}
                   {/* Care-focused category order - highest risk first */}
                   {(() => {
-                    // Category display names (care-focused)
+                    // Category display names (care-focused) - MUST match backend MANDATORY_ITEMS
                     const CATEGORY_DISPLAY = {
                       "1_Legal_Safety": "Legal & Safety",
                       "2_Core_Training": "Core Training",
-                      "3_Role_Readiness": "Role Readiness",
-                      "4_Employment": "Employment",
+                      "3_Competency_Health": "Supervised Start / Health",
+                      "4_Recruitment_Record": "Recruitment File",
                       "5_Agreements": "Agreements",
                       "6_Admin": "Admin / Other"
                     };
@@ -2824,12 +2824,12 @@ export default function EmployeeProfilePage() {
                       "policies_signed": "Upload signed policy acknowledgement forms"
                     };
                     
-                    // Priority order
+                    // Priority order - MUST match backend MANDATORY_ITEMS categories
                     const categoryOrder = [
                       "1_Legal_Safety",
                       "2_Core_Training",
-                      "3_Role_Readiness",
-                      "4_Employment",
+                      "3_Competency_Health",
+                      "4_Recruitment_Record",
                       "5_Agreements",
                       "6_Admin"
                     ];

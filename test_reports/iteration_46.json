@@ -1,0 +1,71 @@
+{
+  "summary": "Category mismatch bug fix verified successfully. All 6 categories now display correctly in What's Needed tab with proper category names matching backend MANDATORY_ITEMS. All 4 previously hidden items (Health Screening Questionnaire, Induction & Competency Assessment, Interview Record, Recruitment Compliance Checklist) are now visible with 'Still Needed' labels. Progress shows 81% (18/22 completed) which matches visible item counts.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ All 6 categories visible: Legal & Safety, Core Training, Supervised Start / Health, Recruitment File, Agreements, Admin / Other",
+    "✅ Category names match backend MANDATORY_ITEMS (3_Competency_Health -> 'Supervised Start / Health', 4_Recruitment_Record -> 'Recruitment File')",
+    "✅ Health Screening Questionnaire visible under 'Supervised Start / Health' with 'Still Needed' label",
+    "✅ Induction & Competency Assessment visible under 'Supervised Start / Health' with 'Still Needed' label",
+    "✅ Interview Record visible under 'Recruitment File' with 'Still Needed' label",
+    "✅ Recruitment Compliance Checklist visible under 'Recruitment File' with 'Still Needed' label",
+    "✅ Progress shows 81% Complete (matches 18 completed / 22 total)",
+    "✅ Shows '18 approved · 0 ready for review · 4 still needed'",
+    "✅ Contract Acknowledgement shows as 'Checked & Approved' with 'Acknowledged' status",
+    "✅ Employee Handbook Acknowledgement shows as 'Checked & Approved' with 'Acknowledged' status",
+    "✅ Equal Opportunities Monitoring shows 'Does not affect compliance score' (optional item)",
+    "✅ Category counts correct: Legal & Safety (5/5), Core Training (6/6), Supervised Start / Health (0/2), Recruitment File (4/6), Agreements (2/2), Admin / Other (2/2)"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/frontend/src/pages/portal/EmployeeProfilePage.js"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "CATEGORY_DISPLAY mapping at lines 2795-2802 correctly maps backend category IDs to user-friendly display names",
+    "categoryOrder at lines 2828-2835 correctly matches backend MANDATORY_ITEMS category order",
+    "Fix properly addresses the category mismatch that was hiding 4 items (3_Role_Readiness -> 3_Competency_Health, 4_Employment -> 4_Recruitment_Record)"
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "N/A (frontend-only test)",
+    "frontend": "100% (all features verified)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123",
+    "test_employee_id": "d88335f6-1b18-435a-8086-28af4a583f77"
+  },
+
+  "seed_data_creation": "",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Category mismatch bug fix verified. The What's Needed tab now correctly displays all 22 required items (plus 1 optional) across 6 categories. The fix was in CATEGORY_DISPLAY and categoryOrder mappings in EmployeeProfilePage.js lines 2795-2835. Previously 4 items were hidden because frontend used category names (3_Role_Readiness, 4_Employment) that didn't match backend (3_Competency_Health, 4_Recruitment_Record).",
+
+  "bug_fix_verification": {
+    "original_issue": "Employee showed 81% progress but all visible items appeared complete - 4 items were hidden due to category mismatch",
+    "root_cause": "Frontend CATEGORY_DISPLAY and categoryOrder used different category names than backend MANDATORY_ITEMS",
+    "fix_applied": "Updated CATEGORY_DISPLAY to map 3_Competency_Health -> 'Supervised Start / Health' and 4_Recruitment_Record -> 'Recruitment File'",
+    "verification_result": "All 22 items now visible, 4 'Still Needed' items correctly displayed, progress percentage matches visible counts"
+  }
+}

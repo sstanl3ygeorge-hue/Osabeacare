@@ -448,7 +448,25 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Imported Form Document-First UX Fix
+2026-03-28 - Compliance Centre Datetime Bug Fix
+
+### Compliance Centre Datetime Bug Fix (Completed 2026-03-28)
+- [x] **Root Cause Identified**: Datetime comparison errors (offset-naive vs offset-aware) causing API failures
+- [x] **Fixed Endpoints**:
+  - `/api/compliance/dashboard` - was returning 500, now returns correct policy/insurance counts
+  - `/api/compliance/policies` - was failing on review date comparison
+  - `/api/compliance/insurance` - was failing on expiry date comparison
+- [x] **Date Format Handling**: Now properly handles:
+  - `datetime` objects (with and without tzinfo)
+  - ISO strings with `T` separator
+  - Simple `YYYY-MM-DD` format
+- [x] **Data Integrity Verified**:
+  - 32 policies (3 active: Safeguarding Adults, Medication, Lone Working)
+  - 6 insurance documents (1 valid: Public Liability Insurance)
+  - All uploaded files remain viewable and downloadable
+- [x] **Existing Safeguards Confirmed**:
+  - Seed endpoints check by name before inserting (no data overwrite)
+  - Initialize Compliance Items does NOT delete existing uploads
 
 ### Imported Form Document-First UX (Completed 2026-03-28)
 - [x] **Document-First View for Imported Forms**:

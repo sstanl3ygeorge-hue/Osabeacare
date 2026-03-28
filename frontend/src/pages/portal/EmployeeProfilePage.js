@@ -109,6 +109,7 @@ export default function EmployeeProfilePage() {
   
   // Profile photo upload state
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [profilePhotoBlob, setProfilePhotoBlob] = useState(null);
   const photoInputRef = useRef(null);
   
   // Evidence edit state
@@ -222,6 +223,34 @@ export default function EmployeeProfilePage() {
     fetchData();
     fetchCompliance();
   }, [employeeId, token]);
+
+  // Fetch profile photo when employee has one
+  useEffect(() => {
+    const fetchProfilePhoto = async () => {
+      if (!employee?.profile_photo_url || !token) {
+        setProfilePhotoBlob(null);
+        return;
+      }
+      try {
+        const response = await axios.get(
+          `${API}/employees/${employeeId}/profile-photo/view`,
+          { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
+        );
+        const blobUrl = URL.createObjectURL(response.data);
+        setProfilePhotoBlob(blobUrl);
+      } catch (error) {
+        console.error('Failed to fetch profile photo:', error);
+        setProfilePhotoBlob(null);
+      }
+    };
+    fetchProfilePhoto();
+    // Cleanup blob URL on unmount or when employee changes
+    return () => {
+      if (profilePhotoBlob) {
+        URL.revokeObjectURL(profilePhotoBlob);
+      }
+    };
+  }, [employee?.profile_photo_url, employeeId, token]);
 
   const handleRefreshStatus = async () => {
     setIsRefreshingStatus(true);
@@ -393,12 +422,26 @@ export default function EmployeeProfilePage() {
     }
   };
 
-  const handleVerifyDocument = async (docId) => {
+  const handleVerifyDocument = async (docId, fileUrl) => {
     try {
+      // First check if file is accessible
+      if (fileUrl) {
+        try {
+          // Try to fetch with HEAD request to verify file exists
+          await axios.head(fileUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000
+          });
+        } catch (fileError) {
+          toast.error('Cannot verify - file is not accessible. Please re-upload the document.');
+          return;
+        }
+      }
+      
       await axios.post(`${API}/employee-documents/${docId}/verify`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      toast.success('Document verified');
+      toast.success('Document approved');
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to verify document');
@@ -435,14 +478,46 @@ export default function EmployeeProfilePage() {
 
   // Verify all documents under a requirement
   const handleVerifyRequirement = async (requirementId) => {
+    // First, check if the file is accessible before allowing verification
     try {
+      // Get the requirement data to find file URL
+      const req = complianceRequirements?.requirements?.find(r => r.id === requirementId);
+      if (!req) {
+        toast.error('Requirement not found');
+        return;
+      }
+      
+      // Get evidence files
+      const evidenceFiles = req.evidence_files || [];
+      if (evidenceFiles.length === 0) {
+        toast.error('Cannot verify - no evidence file uploaded');
+        return;
+      }
+      
+      // Check if at least one file is accessible
+      const fileToCheck = evidenceFiles[0];
+      if (fileToCheck?.file_id) {
+        try {
+          const checkUrl = `${API}/employees/${employeeId}/requirements/${requirementId}/evidence/${fileToCheck.file_id}/view`;
+          const checkResponse = await axios.head(checkUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000
+          });
+          // If we get here, file is accessible
+        } catch (fileError) {
+          toast.error('Cannot verify - file is not accessible. Please re-upload the document.');
+          return;
+        }
+      }
+      
+      // File is accessible, proceed with verification
       await axios.post(`${API}/employees/${employeeId}/requirements/${requirementId}/verify-all`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      toast.success('Requirement verified');
+      toast.success('Requirement approved');
       fetchData();
     } catch (error) {
-      toast.error('Failed to verify requirement');
+      toast.error(error.response?.data?.detail || 'Failed to verify requirement');
     }
   };
 
@@ -1029,9 +1104,9 @@ export default function EmployeeProfilePage() {
             <div className="flex items-start gap-4 flex-1">
               {/* Profile Photo with Upload */}
               <div className="relative group">
-                {employee.profile_photo_url ? (
+                {profilePhotoBlob ? (
                   <img 
-                    src={employee.profile_photo_url} 
+                    src={profilePhotoBlob} 
                     alt={`${employee.first_name} ${employee.last_name}`}
                     className="w-16 h-16 rounded-2xl object-cover border-2 border-[#E4E8EB]"
                     data-testid="profile-photo"
@@ -2725,7 +2800,7 @@ export default function EmployeeProfilePage() {
                                         size="sm" 
                                         variant="ghost"
                                         className="h-8 w-8 p-0 rounded-lg text-success hover:bg-success/10"
-                                        onClick={() => handleVerifyDocument(doc.id)}
+                                        onClick={() => handleVerifyDocument(doc.id, doc.file_url)}
                                         title="Verify"
                                       >
                                         <Shield className="h-4 w-4" />

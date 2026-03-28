@@ -11,6 +11,7 @@ import { Label } from '../../components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle } from 'lucide-react';
+import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -390,19 +391,15 @@ export default function EmployeesPage() {
                     <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
                       <td className="p-4">
                         <Link to={`/portal/employees/${emp.id}`} className="flex items-center gap-3" data-testid={`emp-link-${emp.id}`}>
-                          {emp.profile_photo_url ? (
-                            <img 
-                              src={emp.profile_photo_url} 
-                              alt={`${emp.first_name} ${emp.last_name}`}
-                              className={`w-10 h-10 rounded-xl object-cover border ${emp.status === 'archived' ? 'border-gray-300 grayscale' : 'border-[#E4E8EB]'}`}
-                            />
-                          ) : (
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${emp.status === 'archived' ? 'bg-gray-200' : 'bg-accent'}`}>
-                              <span className={`font-medium text-sm ${emp.status === 'archived' ? 'text-gray-500' : 'text-primary'}`}>
-                                {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
-                              </span>
-                            </div>
-                          )}
+                          <EmployeeAvatar
+                            employeeId={emp.id}
+                            firstName={emp.first_name}
+                            lastName={emp.last_name}
+                            hasPhoto={!!emp.profile_photo_url}
+                            token={token}
+                            size="md"
+                            className={emp.status === 'archived' ? 'grayscale opacity-60' : ''}
+                          />
                           <div>
                             <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
                             <p className="text-sm text-text-muted">{emp.employee_code}</p>

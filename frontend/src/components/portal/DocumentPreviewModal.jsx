@@ -263,9 +263,26 @@ export default function DocumentPreviewModal({
             </div>
           }
           error={
-            <div className="flex flex-col items-center justify-center h-full text-red-500">
-              <AlertCircle className="h-12 w-12 mb-2" />
-              <p>Failed to load PDF</p>
+            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+              <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center mb-4">
+                <AlertCircle className="h-8 w-8 text-amber-500" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Preview unavailable
+              </h3>
+              <p className="text-gray-500 mb-6 max-w-md">
+                This PDF cannot be displayed in the embedded viewer. You can still access the file using the options below.
+              </p>
+              <div className="flex gap-3">
+                <Button onClick={handleOpenInNewTab} className="bg-primary hover:bg-primary-hover text-white">
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Open File
+                </Button>
+                <Button variant="outline" onClick={handleDownload}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Download File
+                </Button>
+              </div>
             </div>
           }
         >
@@ -366,21 +383,38 @@ export default function DocumentPreviewModal({
     </div>
   );
 
-  // Render error state
+  // Render error state - with fallback options to still access the file
   const renderError = () => (
     <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-      <div className="w-20 h-20 rounded-full bg-red-50 flex items-center justify-center mb-4">
-        <AlertCircle className="h-10 w-10 text-red-500" />
+      <div className="w-20 h-20 rounded-full bg-amber-50 flex items-center justify-center mb-4">
+        <AlertCircle className="h-10 w-10 text-amber-500" />
       </div>
       <h3 className="text-lg font-semibold text-gray-900 mb-2">
-        Failed to load file
+        Preview unavailable
       </h3>
-      <p className="text-gray-500 mb-6">
-        {error || 'An error occurred while loading the file.'}
+      <p className="text-gray-500 mb-2">
+        {error || 'Unable to display this file in the browser.'}
       </p>
-      <Button variant="outline" onClick={onClose}>
-        Close
-      </Button>
+      <p className="text-sm text-gray-400 mb-6">
+        Try opening or downloading the file directly.
+      </p>
+      <div className="flex gap-3">
+        <Button 
+          onClick={() => {
+            // Try to open the original URL in a new tab
+            if (fileUrl) {
+              window.open(fileUrl, '_blank');
+            }
+          }}
+          className="bg-primary hover:bg-primary-hover text-white"
+        >
+          <ExternalLink className="h-4 w-4 mr-2" />
+          Open File
+        </Button>
+        <Button variant="outline" onClick={onClose}>
+          Close
+        </Button>
+      </div>
     </div>
   );
 

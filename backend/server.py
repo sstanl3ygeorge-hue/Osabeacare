@@ -1560,6 +1560,31 @@ async def remove_profile_photo(employee_id: str, user: dict = Depends(require_ma
     
     return {"message": "Profile photo removed"}
 
+@api_router.get("/employees/{employee_id}/profile-photo/view")
+async def view_profile_photo(employee_id: str, user: dict = Depends(get_current_user)):
+    """View/stream profile photo for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "profile_photo_url": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    photo_url = employee.get("profile_photo_url")
+    if not photo_url:
+        raise HTTPException(status_code=404, detail="No profile photo")
+    
+    try:
+        file_bytes, stored_content_type = get_object(photo_url)
+        # Determine content type from extension if not provided
+        ext = photo_url.split('.')[-1].lower() if '.' in photo_url else 'jpg'
+        content_types = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'png': 'image/png', 'webp': 'image/webp'
+        }
+        content_type = stored_content_type or content_types.get(ext, 'image/jpeg')
+        return Response(content=file_bytes, media_type=content_type)
+    except Exception as e:
+        logger.error(f"Failed to retrieve profile photo: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve photo")
+
 @api_router.get("/employees/{employee_id}/compliance")
 async def get_employee_compliance(employee_id: str, user: dict = Depends(get_current_user)):
     """Get full compliance status for an employee including all mandatory items"""

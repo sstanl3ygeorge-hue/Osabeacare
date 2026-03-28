@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import {
   Users, UserPlus, Clock, AlertTriangle, FileX, ShieldAlert,
   FileCheck, CalendarClock, ArrowRight, Loader2
@@ -143,19 +144,14 @@ export default function DashboardPage() {
                     data-testid={`employee-row-${emp.id}`}
                   >
                     <div className="flex items-center gap-3">
-                      {emp.profile_photo_url ? (
-                        <img 
-                          src={emp.profile_photo_url} 
-                          alt={`${emp.first_name} ${emp.last_name}`}
-                          className="w-10 h-10 rounded-xl object-cover border border-[#E4E8EB]"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center">
-                          <span className="text-primary font-medium">
-                            {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
-                          </span>
-                        </div>
-                      )}
+                      <EmployeeAvatar
+                        employeeId={emp.id}
+                        firstName={emp.first_name}
+                        lastName={emp.last_name}
+                        hasPhoto={!!emp.profile_photo_url}
+                        token={token}
+                        size="md"
+                      />
                       <div>
                         <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
                         <p className="text-sm text-text-muted">{emp.employee_code} · {emp.role}</p>

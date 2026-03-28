@@ -1,0 +1,87 @@
+{
+  "summary": "Bug fix verified: Compliance Centre datetime comparison errors fixed. All 3 endpoints (/api/compliance/dashboard, /api/compliance/policies, /api/compliance/insurance) now return 200 instead of 500. Dashboard shows correct counts: 32 policies (3 active), 6 insurance docs (1 valid). UI displays all data correctly with proper status badges and action buttons.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "Login successful with admin@osabea.care credentials",
+    "Compliance Centre dashboard loads without errors",
+    "/api/compliance/dashboard returns 200 (was 500 before fix)",
+    "/api/compliance/policies returns 200 (was 500 before fix)",
+    "/api/compliance/insurance returns 200 (was 500 before fix)",
+    "Dashboard shows 3/32 Policies Active",
+    "Dashboard shows 1/6 Insurance Valid",
+    "Policies tab shows 32 policies total",
+    "Policies tab shows 3 active policies: Safeguarding Adults, Medication, Lone Working",
+    "Active policies show 'active' status badge",
+    "Active policies have View/Download/Replace buttons",
+    "Missing policies show 'missing' status badge",
+    "Missing policies have Upload button",
+    "Insurance tab shows 6 insurance documents",
+    "Public Liability Insurance shows 'valid' status",
+    "Public Liability Insurance shows expiry date (3/27/2027)",
+    "Public Liability Insurance has View/Download/Replace buttons",
+    "Missing insurance docs show 'missing' status with Upload button",
+    "Datetime comparison handles various formats (datetime objects, ISO strings with T, YYYY-MM-DD)"
+  ],
+
+  "test_report_links": [
+    "/app/backend/tests/test_compliance_centre.py",
+    "/app/test_reports/pytest/compliance_centre_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [],
+
+  "updated_files": [
+    "/app/backend/tests/test_compliance_centre.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100% (all features verified)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123",
+    "role": "super_admin"
+  },
+
+  "seed_data_creation": "Used existing data - 32 policies (3 active: Safeguarding Adults, Medication, Lone Working), 6 insurance docs (1 valid: Public Liability)",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Compliance Centre datetime bug is fixed. The fix properly handles various date formats in get_insurance_docs, get_org_policies, and get_compliance_dashboard endpoints. Key fix: datetime comparison now handles offset-naive vs offset-aware dates by checking if date is datetime object, ISO string with T, or simple YYYY-MM-DD format.",
+
+  "features_verified": {
+    "compliance_dashboard_loads": true,
+    "policies_tab_shows_32_policies": true,
+    "policies_tab_shows_3_active": true,
+    "insurance_tab_shows_6_docs": true,
+    "insurance_tab_shows_1_valid": true,
+    "active_policies_have_view_download_replace": true,
+    "valid_insurance_has_view_download_replace": true,
+    "missing_items_have_upload_button": true,
+    "datetime_comparison_fixed": true
+  },
+
+  "rca_of_the_issue": {
+    "root_cause": "Datetime comparison errors (offset-naive vs offset-aware) in backend endpoints caused 500 errors when comparing dates stored in different formats",
+    "affected_endpoints": ["/api/compliance/dashboard", "/api/compliance/policies", "/api/compliance/insurance"],
+    "fix_applied": "Added proper date format handling in get_insurance_docs, get_org_policies, get_compliance_dashboard - checks for datetime objects, ISO strings with T, and simple YYYY-MM-DD format before comparison",
+    "verification": "All 3 endpoints now return 200 with correct data"
+  }
+}

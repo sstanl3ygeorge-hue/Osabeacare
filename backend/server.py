@@ -6417,9 +6417,19 @@ async def get_org_policies(
     now = datetime.now(timezone.utc)
     for policy in policies:
         if policy.get("review_date"):
-            review_date = datetime.fromisoformat(policy["review_date"].replace('Z', '+00:00'))
-            if review_date < now and policy["status"] == "active":
-                policy["status"] = "expired"
+            try:
+                review_str = policy["review_date"]
+                if isinstance(review_str, datetime):
+                    review_date = review_str if review_str.tzinfo else review_str.replace(tzinfo=timezone.utc)
+                elif 'T' in str(review_str):
+                    review_date = datetime.fromisoformat(review_str.replace('Z', '+00:00'))
+                else:
+                    review_date = datetime.fromisoformat(f"{review_str}T00:00:00+00:00")
+                    
+                if review_date < now and policy["status"] == "active":
+                    policy["status"] = "expired"
+            except Exception:
+                pass  # Keep current status if date parsing fails
     
     return policies
 
@@ -6550,12 +6560,24 @@ async def get_insurance_docs(user: dict = Depends(get_current_user)):
         if not doc.get("file_url"):
             doc["status"] = "missing"
         elif doc.get("expiry_date"):
-            expiry = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
-            if expiry < now:
-                doc["status"] = "expired"
-            elif expiry < thirty_days:
-                doc["status"] = "expiring_soon"
-            else:
+            try:
+                expiry_str = doc["expiry_date"]
+                # Handle various date formats
+                if isinstance(expiry_str, datetime):
+                    expiry = expiry_str if expiry_str.tzinfo else expiry_str.replace(tzinfo=timezone.utc)
+                elif 'T' in str(expiry_str):
+                    expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                else:
+                    # Simple date format YYYY-MM-DD
+                    expiry = datetime.fromisoformat(f"{expiry_str}T00:00:00+00:00")
+                
+                if expiry < now:
+                    doc["status"] = "expired"
+                elif expiry < thirty_days:
+                    doc["status"] = "expiring_soon"
+                else:
+                    doc["status"] = "valid"
+            except Exception:
                 doc["status"] = "valid"
         else:
             doc["status"] = "valid"
@@ -6858,7 +6880,13 @@ async def get_staff_training_report(
         for t in completed:
             if t.get("expiry_date"):
                 try:
-                    exp = datetime.fromisoformat(t["expiry_date"].replace('Z', '+00:00'))
+                    expiry_str = t["expiry_date"]
+                    if isinstance(expiry_str, datetime):
+                        exp = expiry_str if expiry_str.tzinfo else expiry_str.replace(tzinfo=timezone.utc)
+                    elif 'T' in str(expiry_str):
+                        exp = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                    else:
+                        exp = datetime.fromisoformat(f"{expiry_str}T00:00:00+00:00")
                     if exp < thirty_days:
                         expiring.append(t["training_name"])
                 except (ValueError, TypeError):
@@ -6904,12 +6932,24 @@ async def get_compliance_dashboard(user: dict = Depends(get_current_user)):
         if not ins.get("file_url"):
             insurance_missing += 1
         elif ins.get("expiry_date"):
-            exp = datetime.fromisoformat(ins["expiry_date"].replace('Z', '+00:00'))
-            if exp < now:
-                insurance_expired += 1
-            elif exp < now + timedelta(days=30):
-                insurance_expiring += 1
-            else:
+            try:
+                expiry_str = ins["expiry_date"]
+                # Handle various date formats
+                if isinstance(expiry_str, datetime):
+                    exp = expiry_str if expiry_str.tzinfo else expiry_str.replace(tzinfo=timezone.utc)
+                elif 'T' in str(expiry_str):
+                    exp = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                else:
+                    # Simple date format YYYY-MM-DD
+                    exp = datetime.fromisoformat(f"{expiry_str}T00:00:00+00:00")
+                
+                if exp < now:
+                    insurance_expired += 1
+                elif exp < now + timedelta(days=30):
+                    insurance_expiring += 1
+                else:
+                    insurance_valid += 1
+            except Exception:
                 insurance_valid += 1
         else:
             insurance_valid += 1

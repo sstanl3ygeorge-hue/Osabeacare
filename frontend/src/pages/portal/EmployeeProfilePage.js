@@ -1517,10 +1517,8 @@ export default function EmployeeProfilePage() {
             // Extract key compliance data for audit visibility
             const reqs = complianceRequirements?.requirements || [];
             
-            // RTW Status
-            const rtwReq = reqs.find(r => r.id === 'right_to_work_documents' || r.id === 'right_to_work_check');
-            const rtwHasEvidence = rtwReq?.has_evidence || false;
-            const rtwVerified = rtwReq?.is_verified || false;
+            // RTW Summary - USE COMPUTED DATA FROM API (single source of truth)
+            const rtwSummary = complianceRequirements?.rtw_summary || {};
             
             // DBS Summary - USE COMPUTED DATA FROM API (single source of truth)
             const dbsSummary = complianceRequirements?.dbs_summary || {};
@@ -1534,9 +1532,9 @@ export default function EmployeeProfilePage() {
             }).length;
             const totalMandatory = training.filter(t => t.mandatory).length;
             
-            // Documents pending
+            // Documents pending - use correct field name 'verified' not 'is_verified'
             const pendingDocs = reqs.filter(r => r.type === 'document' && !r.has_evidence).length;
-            const unverifiedDocs = reqs.filter(r => r.type === 'document' && r.has_evidence && !r.is_verified).length;
+            const unverifiedDocs = reqs.filter(r => r.type === 'document' && r.has_evidence && !r.verified).length;
             
             return (
               <div className="mt-6 pt-6 border-t border-[#E4E8EB]">
@@ -1576,23 +1574,26 @@ export default function EmployeeProfilePage() {
                     )}
                   </div>
                   
-                  {/* RTW Status */}
+                  {/* RTW Status - Uses computed rtw_summary from API */}
                   <div className={`p-3 rounded-xl border ${
-                    !rtwHasEvidence ? 'border-red-200 bg-red-50' :
-                    rtwVerified ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
+                    rtwSummary.rtw_status_color === 'red' ? 'border-red-200 bg-red-50' :
+                    rtwSummary.rtw_status_color === 'amber' ? 'border-amber-200 bg-amber-50' :
+                    rtwSummary.rtw_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
                   }`} data-testid="rtw-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${
-                        !rtwHasEvidence ? 'text-red-600' :
-                        rtwVerified ? 'text-green-600' : 'text-blue-600'
+                        rtwSummary.rtw_status_color === 'red' ? 'text-red-600' :
+                        rtwSummary.rtw_status_color === 'amber' ? 'text-amber-600' :
+                        rtwSummary.rtw_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
                     </div>
                     <p className={`text-sm font-medium ${
-                      !rtwHasEvidence ? 'text-red-700' :
-                      rtwVerified ? 'text-green-700' : 'text-blue-700'
+                      rtwSummary.rtw_status_color === 'red' ? 'text-red-700' :
+                      rtwSummary.rtw_status_color === 'amber' ? 'text-amber-700' :
+                      rtwSummary.rtw_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
                     }`}>
-                      {!rtwHasEvidence ? 'Missing' : rtwVerified ? 'Verified' : 'Pending Review'}
+                      {rtwSummary.rtw_status_label || 'Unknown'}
                     </p>
                   </div>
                   

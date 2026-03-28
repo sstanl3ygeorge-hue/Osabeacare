@@ -1515,6 +1515,99 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     return summary
 
 
+async def get_employee_rtw_summary(employee_id: str) -> dict:
+    """
+    SINGLE SOURCE OF TRUTH for Right to Work status across all views.
+    
+    Derives RTW summary from existing evidence:
+    - Right to Work Documents (requirement_id: right_to_work_documents)
+    - Right to Work Verification (requirement_id: right_to_work_check)
+    
+    Both must be present and verified for full RTW approval.
+    """
+    summary = {
+        "rtw_status": "missing",
+        "rtw_status_label": "Missing",
+        "rtw_status_color": "red",
+        "documents_on_file": False,
+        "documents_verified": False,
+        "verification_on_file": False,
+        "verification_verified": False,
+        "expiry_date": None,
+        "needs_attention": False
+    }
+    
+    # Get Right to Work Documents (passport, visa, BRP, share code proof)
+    rtw_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "right_to_work_documents",
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "$or": [
+            {"active": {"$exists": False}},
+            {"active": True}
+        ],
+        "file_url": {"$exists": True, "$ne": None}
+    }, {"_id": 0, "verified": 1, "status": 1, "expiry_date": 1}).to_list(10)
+    
+    # Get Right to Work Verification Check
+    rtw_check = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "right_to_work_check",
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "$or": [
+            {"active": {"$exists": False}},
+            {"active": True}
+        ],
+        "file_url": {"$exists": True, "$ne": None}
+    }, {"_id": 0, "verified": 1, "status": 1}).to_list(5)
+    
+    # Process RTW Documents
+    if rtw_docs:
+        summary["documents_on_file"] = True
+        summary["documents_verified"] = all(
+            d.get("verified") or d.get("status") == "approved" 
+            for d in rtw_docs
+        )
+        # Check for expiry
+        for doc in rtw_docs:
+            if doc.get("expiry_date"):
+                summary["expiry_date"] = doc.get("expiry_date")
+                break
+    
+    # Process RTW Verification
+    if rtw_check:
+        summary["verification_on_file"] = True
+        summary["verification_verified"] = all(
+            c.get("verified") or c.get("status") == "approved" 
+            for c in rtw_check
+        )
+    
+    # Determine status based on both requirements
+    if summary["documents_on_file"] and summary["verification_on_file"]:
+        if summary["documents_verified"] and summary["verification_verified"]:
+            summary["rtw_status"] = "verified"
+            summary["rtw_status_label"] = "Verified"
+            summary["rtw_status_color"] = "green"
+        else:
+            summary["rtw_status"] = "pending_verification"
+            summary["rtw_status_label"] = "Pending Review"
+            summary["rtw_status_color"] = "blue"
+            summary["needs_attention"] = True
+    elif summary["documents_on_file"] or summary["verification_on_file"]:
+        # Partial - only one of the two requirements
+        summary["rtw_status"] = "incomplete"
+        summary["rtw_status_label"] = "Incomplete"
+        summary["rtw_status_color"] = "amber"
+        summary["needs_attention"] = True
+    else:
+        summary["rtw_status"] = "missing"
+        summary["rtw_status_label"] = "Missing"
+        summary["rtw_status_color"] = "red"
+        summary["needs_attention"] = True
+    
+    return summary
+
+
 async def derive_onboarding_status(employee_id: str, role: str, current_status: str = None) -> str:
     """Auto-derive onboarding status based on compliance progress"""
     # Don't change archived status
@@ -5832,7 +5925,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "has_alerts": len(expiring_soon_items) > 0 or len(expired_items) > 0
         },
         # DBS Summary - computed from single source
-        "dbs_summary": await get_employee_dbs_summary(employee_id)
+        "dbs_summary": await get_employee_dbs_summary(employee_id),
+        # RTW Summary - computed from single source
+        "rtw_summary": await get_employee_rtw_summary(employee_id)
     }
 
 @api_router.post("/employees/{employee_id}/upload-document")

@@ -3531,8 +3531,31 @@ export default function EmployeeProfilePage() {
                   <p>No compliance activity recorded yet</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {auditLogs.map((log, idx) => {
+                <div className="space-y-6">
+                  {/* Group audit logs by category */}
+                  {(() => {
+                    // Categorize logs
+                    const categorizeLog = (action) => {
+                      if (action?.includes('policy')) return 'policies';
+                      if (action?.includes('training') || action?.includes('certificate')) return 'training';
+                      if (action?.includes('document') || action?.includes('evidence') || action?.includes('verify') || action?.includes('upload')) return 'documents';
+                      return 'profile';
+                    };
+                    
+                    const grouped = {
+                      documents: auditLogs.filter(l => categorizeLog(l.action) === 'documents'),
+                      training: auditLogs.filter(l => categorizeLog(l.action) === 'training'),
+                      policies: auditLogs.filter(l => categorizeLog(l.action) === 'policies'),
+                      profile: auditLogs.filter(l => categorizeLog(l.action) === 'profile')
+                    };
+                    
+                    const categoryConfig = {
+                      documents: { label: 'Documents', icon: <Upload className="h-5 w-5" />, color: 'text-primary', bgColor: 'bg-primary/10' },
+                      training: { label: 'Training', icon: <GraduationCap className="h-5 w-5" />, color: 'text-blue-600', bgColor: 'bg-blue-100' },
+                      policies: { label: 'Policies', icon: <FileCheck className="h-5 w-5" />, color: 'text-purple-600', bgColor: 'bg-purple-100' },
+                      profile: { label: 'Profile Changes', icon: <User className="h-5 w-5" />, color: 'text-gray-600', bgColor: 'bg-gray-100' }
+                    };
+                    
                     // Format action for display
                     const formatAction = (action) => {
                       const actionMap = {
@@ -3540,6 +3563,8 @@ export default function EmployeeProfilePage() {
                         'policy_viewed': 'Policy Viewed',
                         'policy_acknowledged': 'Policy Acknowledged',
                         'policy_admin_reviewed': 'Policy Reviewed by Admin',
+                        'policy_unassigned': 'Policy Unassigned',
+                        'policy_withdrawn': 'Policy Withdrawn',
                         'document_verified': 'Document Verified',
                         'verify_requirement': 'Requirement Verified',
                         'unverify_requirement': 'Verification Removed',
@@ -3551,43 +3576,71 @@ export default function EmployeeProfilePage() {
                         'refresh_status': 'Status Refreshed',
                         'update_employee': 'Employee Updated',
                         'signoff_form': 'Form Signed Off',
-                        'complete_form': 'Form Completed'
+                        'complete_form': 'Form Completed',
+                        'training_correction': 'Training Record Corrected',
+                        'upload_training_certificate': 'Training Certificate Uploaded',
+                        'verify_training': 'Training Verified',
+                        'unverify_training': 'Training Verification Removed',
+                        'complete_training': 'Training Completed'
                       };
                       return actionMap[action] || action?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                     };
                     
-                    // Get icon based on action type
-                    const getActionIcon = (action) => {
-                      if (action?.includes('policy')) return <FileCheck className="h-5 w-5 text-blue-600" />;
-                      if (action?.includes('verified') || action?.includes('verify')) return <CheckCircle className="h-5 w-5 text-green-600" />;
-                      if (action?.includes('upload') || action?.includes('evidence')) return <Upload className="h-5 w-5 text-primary" />;
-                      if (action?.includes('removed')) return <FileX className="h-5 w-5 text-red-600" />;
-                      return <History className="h-5 w-5 text-primary" />;
-                    };
-                    
-                    return (
-                      <div key={log.id || idx} className="flex items-start gap-4 p-4 bg-[#F8FAFA] rounded-xl">
-                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center flex-shrink-0 border border-[#E4E8EB]">
-                          {getActionIcon(log.action)}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-medium text-text-primary">
-                            {formatAction(log.action)}
-                          </p>
-                          {log.details && (
-                            <div className="text-sm text-text-muted mt-1">
-                              {log.details.requirement_name && <span>• {log.details.requirement_name}</span>}
-                              {log.details.policy_title && <span>• {log.details.policy_title}</span>}
-                              {log.details.employee_name && <span> for {log.details.employee_name}</span>}
+                    return Object.entries(grouped)
+                      .filter(([_, logs]) => logs.length > 0)
+                      .map(([category, logs]) => {
+                        const config = categoryConfig[category];
+                        return (
+                          <div key={category} className="space-y-3">
+                            <div className="flex items-center gap-2 pb-2 border-b border-[#E4E8EB]">
+                              <div className={`p-1.5 rounded-lg ${config.bgColor} ${config.color}`}>
+                                {config.icon}
+                              </div>
+                              <h4 className="font-medium text-text-primary">{config.label}</h4>
+                              <span className="text-xs text-text-muted bg-[#F8FAFA] px-2 py-0.5 rounded-full">{logs.length}</span>
                             </div>
-                          )}
-                          <p className="text-xs text-text-muted mt-1">
-                            By {log.user_name || 'System'} · {new Date(log.created_at).toLocaleString()}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            <div className="space-y-2 pl-4">
+                              {logs.slice(0, 10).map((log, idx) => (
+                                <div key={log.id || idx} className="flex items-start gap-3 p-3 bg-[#F8FAFA] rounded-lg text-sm">
+                                  <div className="flex-1">
+                                    <p className="font-medium text-text-primary">
+                                      {formatAction(log.action)}
+                                    </p>
+                                    {log.metadata && (
+                                      <div className="text-text-muted mt-0.5 text-xs space-y-0.5">
+                                        {log.metadata.requirement_name && <p>• {log.metadata.requirement_name}</p>}
+                                        {log.metadata.policy_title && <p>• {log.metadata.policy_title}</p>}
+                                        {log.metadata.training_name && <p>• {log.metadata.training_name}</p>}
+                                        {log.metadata.field_changed && (
+                                          <p>• {log.metadata.field_changed}: {log.metadata.old_value || '(empty)'} → {log.metadata.new_value}</p>
+                                        )}
+                                        {log.metadata.reason && <p className="italic">Reason: {log.metadata.reason}</p>}
+                                      </div>
+                                    )}
+                                    {/* Fallback to details if metadata not available */}
+                                    {!log.metadata && log.details && (
+                                      <div className="text-text-muted mt-0.5 text-xs">
+                                        {log.details.requirement_name && <p>• {log.details.requirement_name}</p>}
+                                        {log.details.policy_title && <p>• {log.details.policy_title}</p>}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="text-right text-xs text-text-muted flex-shrink-0">
+                                    <p>{log.user_name || 'System'}</p>
+                                    <p>{new Date(log.created_at).toLocaleString()}</p>
+                                  </div>
+                                </div>
+                              ))}
+                              {logs.length > 10 && (
+                                <p className="text-xs text-text-muted text-center py-2">
+                                  + {logs.length - 10} more entries
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      });
+                  })()}
                 </div>
               )}
             </CardContent>

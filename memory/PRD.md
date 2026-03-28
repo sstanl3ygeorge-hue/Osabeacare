@@ -4,15 +4,50 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2026-03-28)
-**Policy System Simplification - COMPLETE**
-- REMOVED: Policy Assignments page (consolidated into Compliance Centre)
-- ADDED: "Assign to Employees" button on each policy row in Compliance Centre
-- ADDED: Assignment modal with multi-select employee list
-- UPDATED: Employee Policies tab uses Not Read/Acknowledged status
-- VALIDATION: Disabled Assign button if no document uploaded
-- MICROCOPY: Help text on all tabs (What's Needed, Documents, Policies)
+**CQC-Ready UI Redesigns & Safe Correction System - COMPLETE**
 
-## Previous Updates (2026-03-28)
+### Action-First Dashboard Redesign
+- REDESIGNED: "Needs Attention" section at top with 4 action cards:
+  - Expired (documents with past expiry dates)
+  - Needs Renewal (items expiring within 30 days)
+  - Not Ready to Work (staff missing mandatory requirements)
+  - Policies Not Yet Acknowledged
+- REDESIGNED: "Workforce Readiness" section with Ready to Work, Supervised Start, Not Ready counts
+- REDESIGNED: "Onboarding Progress" with "Progress to Full Compliance" microcopy
+- KEPT: Quick Actions and Recent Employees sections
+
+### Inspection-Ready Audit View
+- NEW: "Risks & Alerts" section at the TOP (CQC inspector focus)
+- NEW: "Last updated: [timestamp]" display
+- REDESIGNED: Clear sections - Workforce Status, Policies & Acknowledgement, Training & Certification Status
+- REDESIGNED: Staff Overview table with Work Status badges
+- READ-ONLY: No action buttons, inspector-friendly view
+
+### Training Matrix Redesign
+- NEW: "Expiry Date" column showing actual dates
+- NEW: "Renewal Status" column with color badges (Valid/Needs Renewal/Expired) and days count
+- NEW: "Verified" column showing verification status
+- NEW: Filter buttons: All Records, Expired, Needs Renewal, Valid
+- STATS: Completed, Verified, Needs Renewal, Expired counts at top
+
+### Safe Correction System (Audit-Safe)
+- NEW: Edit Record modal with field selector (Expiry Date, Completion Date, Status)
+- NEW: Mandatory "Reason for Change" field (min 3 characters)
+- NEW: Current Value display (read-only) and New Value input
+- NEW: Warning for corrections after verification
+- NEW: POST /api/training-records/{record_id}/correct endpoint
+- NEW: GET /api/training-records/{record_id}/history endpoint
+- AUDIT: All corrections logged with old_value, new_value, reason, user, timestamp
+
+### Grouped Audit Log
+- REDESIGNED: Audit log now grouped by category (Documents, Training, Policies, Profile Changes)
+- NEW: Category icons and counts
+- NEW: Enhanced metadata display showing field changes with old→new values
+- NEW: Reason display for corrections
+- LIMIT: 10 entries per category with "+ N more" indicator
+
+## Previous Update (2026-03-28)
+**Policy System Simplification - COMPLETE**
 **CQC-Ready Expiry System & Work Readiness Validation - COMPLETE**
 - Document expiry tracking per file (issue_date, expiry_date)
 - Dynamic expiry status: Valid (>30 days), Expiring Soon (<=30 days), Expired

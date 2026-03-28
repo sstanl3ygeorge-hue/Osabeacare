@@ -4,6 +4,50 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**DBS Register & Visibility Feature - COMPLETE**
+
+### Single Source of Truth
+Created `get_employee_dbs_summary(employee_id)` backend function that computes DBS status from existing evidence:
+- DBS Certificate (`requirement_id: dbs_certificate`)
+- DBS Update Service Check (`requirement_id: dbs_check`)
+
+**Computed fields:**
+- `dbs_status` / `dbs_status_label` / `dbs_status_color`
+- `last_dbs_check_date`
+- `next_dbs_review_due` (12 months from last check)
+- `days_until_review`
+- `certificate_on_file` / `certificate_verified`
+- `update_service_active` / `update_service_verified`
+- `needs_attention`
+
+### Screens Using This Function
+1. **DBS Register Page** (`/portal/dbs-register`) - NEW
+   - Shows all staff with DBS status
+   - Columns: Employee, Role, DBS Status, Last DBS Check, Next Review Due, Details, Action
+   - Summary stats: Total, Current, Cert Only, Pending, Due Soon, Overdue, Missing
+   - Filters: Search, Status dropdown, Needs Attention toggle
+
+2. **Employee Profile** (Audit Quick View DBS card)
+   - Shows same computed status from API `dbs_summary` field
+   - Displays Next Review Due date
+
+3. **Compliance Requirements API** (`/api/employees/{id}/compliance-requirements`)
+   - Returns `dbs_summary` object computed by same function
+
+### Status Logic
+- **Current**: Update Service verified + not overdue
+- **Review Due Soon**: Update Service verified + within 30 days of review
+- **Review Overdue**: Update Service verified + past review date
+- **Certificate Only**: Certificate verified but no Update Service
+- **Pending Verification**: Evidence exists but not verified
+- **Missing**: No DBS evidence at all
+
+### No Duplicate Logic
+- Frontend uses computed `dbs_summary` from API
+- No inline DBS calculations in frontend code
+- All views show identical values (verified via testing)
+
+## Previous Update (2025-12-28)
 **Progress Calculation Unification - CRITICAL FIX COMPLETE**
 
 ### Problem Solved

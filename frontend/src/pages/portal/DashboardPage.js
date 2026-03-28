@@ -101,12 +101,7 @@ export default function DashboardPage() {
                 Add New Employee
               </Button>
             </Link>
-            <Link to="/portal/templates" className="block">
-              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-templates">
-                <FileCheck className="mr-2 h-4 w-4" />
-                Form Templates
-              </Button>
-            </Link>
+            {/* Form Templates hidden for Audit Mode */}
             <Link to="/portal/compliance-centre" className="block">
               <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-compliance">
                 <FileCheck className="mr-2 h-4 w-4" />
@@ -148,11 +143,19 @@ export default function DashboardPage() {
                     data-testid={`employee-row-${emp.id}`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center">
-                        <span className="text-primary font-medium">
-                          {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
-                        </span>
-                      </div>
+                      {emp.profile_photo_url ? (
+                        <img 
+                          src={emp.profile_photo_url} 
+                          alt={`${emp.first_name} ${emp.last_name}`}
+                          className="w-10 h-10 rounded-xl object-cover border border-[#E4E8EB]"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center">
+                          <span className="text-primary font-medium">
+                            {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
+                          </span>
+                        </div>
+                      )}
                       <div>
                         <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
                         <p className="text-sm text-text-muted">{emp.employee_code} · {emp.role}</p>

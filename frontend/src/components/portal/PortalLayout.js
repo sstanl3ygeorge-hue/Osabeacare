@@ -19,7 +19,8 @@ import {
 const navigation = [
   { name: 'Dashboard', href: '/portal/dashboard', icon: LayoutDashboard },
   { name: 'Employees', href: '/portal/employees', icon: Users },
-  { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
+  // Templates hidden for Audit Mode - forms system hidden from UI
+  // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
   // Documents removed - all document management is now per-employee in Employee Profile → Documents tab
   // Policies removed - all policy management is now in Compliance Centre

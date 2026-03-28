@@ -654,6 +654,7 @@ class EmployeeCreate(BaseModel):
     manager_name: Optional[str] = None
     driver_status: bool = False
     notes: Optional[str] = None
+    profile_photo_url: Optional[str] = None
 
 class EmployeeUpdate(BaseModel):
     first_name: Optional[str] = None
@@ -667,6 +668,7 @@ class EmployeeUpdate(BaseModel):
     manager_name: Optional[str] = None
     driver_status: Optional[bool] = None
     notes: Optional[str] = None
+    profile_photo_url: Optional[str] = None
 
 class EmployeeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -684,6 +686,7 @@ class EmployeeResponse(BaseModel):
     driver_status: bool = False
     notes: Optional[str] = None
     completion_percentage: int = 0
+    profile_photo_url: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -1473,6 +1476,82 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
     }
 
 # ==================== EMPLOYEE COMPLIANCE ROUTES ====================
+
+@api_router.post("/employees/{employee_id}/profile-photo")
+async def upload_profile_photo(
+    employee_id: str, 
+    file: UploadFile = File(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Upload profile photo for an employee"""
+    # Validate employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate file type
+    allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, and WEBP images are allowed")
+    
+    # Check file size (5MB max)
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image must be less than 5MB")
+    
+    # Upload to storage
+    file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+    storage_path = f"{APP_NAME}/profile-photos/{employee_id}/photo.{file_ext}"
+    
+    try:
+        result = put_object(storage_path, content, file.content_type)
+        file_url = result.get("url", storage_path)
+        
+        # Update employee record
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "profile_photo_url": file_url,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        await log_audit_action(
+            user['user_id'],
+            "upload_profile_photo",
+            "employee",
+            employee_id,
+            {"photo_url": file_url[:50] + "..." if len(file_url) > 50 else file_url}
+        )
+        
+        return {"message": "Profile photo uploaded", "photo_url": file_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload photo: {str(e)}")
+
+@api_router.delete("/employees/{employee_id}/profile-photo")
+async def remove_profile_photo(employee_id: str, user: dict = Depends(require_manager_or_admin)):
+    """Remove profile photo for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "profile_photo_url": None,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "remove_profile_photo",
+        "employee",
+        employee_id,
+        {}
+    )
+    
+    return {"message": "Profile photo removed"}
 
 @api_router.get("/employees/{employee_id}/compliance")
 async def get_employee_compliance(employee_id: str, user: dict = Depends(get_current_user)):

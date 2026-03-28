@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -21,7 +21,8 @@ import {
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
-  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf
+  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
+  Camera
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -106,6 +107,10 @@ export default function EmployeeProfilePage() {
   const [trainingCertFile, setTrainingCertFile] = useState(null);
   const [isUploadingCert, setIsUploadingCert] = useState(false);
   const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
+  
+  // Profile photo upload state
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const photoInputRef = useRef(null);
   
   const { token, isAuditor, user } = useAuth();
   
@@ -766,6 +771,63 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  // Profile photo upload handler
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Only JPG, PNG, and WEBP images are allowed');
+      return;
+    }
+    
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image must be less than 5MB');
+      return;
+    }
+    
+    setIsUploadingPhoto(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/profile-photo`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      toast.success('Profile photo uploaded');
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to upload photo');
+    } finally {
+      setIsUploadingPhoto(false);
+      if (photoInputRef.current) photoInputRef.current.value = '';
+    }
+  };
+
+  // Remove profile photo handler
+  const handleRemovePhoto = async () => {
+    try {
+      await axios.delete(
+        `${API}/employees/${employeeId}/profile-photo`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Profile photo removed');
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to remove photo');
+    }
+  };
+
   const toggleTemplateSelection = (templateId) => {
     setSelectedTemplates(prev => 
       prev.includes(templateId)
@@ -892,10 +954,51 @@ export default function EmployeeProfilePage() {
         <CardContent className="p-6">
           <div className="flex flex-col lg:flex-row lg:items-start gap-6">
             <div className="flex items-start gap-4 flex-1">
-              <div className="w-16 h-16 bg-accent rounded-2xl flex items-center justify-center">
-                <span className="text-primary font-heading font-bold text-xl">
-                  {employee.first_name?.charAt(0)}{employee.last_name?.charAt(0)}
-                </span>
+              {/* Profile Photo with Upload */}
+              <div className="relative group">
+                {employee.profile_photo_url ? (
+                  <img 
+                    src={employee.profile_photo_url} 
+                    alt={`${employee.first_name} ${employee.last_name}`}
+                    className="w-16 h-16 rounded-2xl object-cover border-2 border-[#E4E8EB]"
+                    data-testid="profile-photo"
+                  />
+                ) : (
+                  <div className="w-16 h-16 bg-accent rounded-2xl flex items-center justify-center">
+                    <span className="text-primary font-heading font-bold text-xl">
+                      {employee.first_name?.charAt(0)}{employee.last_name?.charAt(0)}
+                    </span>
+                  </div>
+                )}
+                {/* Upload/Edit overlay */}
+                {!isAuditor() && (
+                  <div className="absolute inset-0 bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <label className="cursor-pointer p-2">
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/jpeg,image/jpg,image/png,image/webp"
+                        onChange={handlePhotoUpload}
+                        className="hidden"
+                        disabled={isUploadingPhoto}
+                      />
+                      {isUploadingPhoto ? (
+                        <Loader2 className="h-5 w-5 text-white animate-spin" />
+                      ) : (
+                        <Camera className="h-5 w-5 text-white" />
+                      )}
+                    </label>
+                    {employee.profile_photo_url && (
+                      <button
+                        onClick={handleRemovePhoto}
+                        className="p-2 hover:bg-white/20 rounded-lg"
+                        title="Remove photo"
+                      >
+                        <XCircle className="h-4 w-4 text-white" />
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
               <div>
                 <h1 className="font-heading text-2xl font-bold text-text-primary">
@@ -1240,30 +1343,8 @@ export default function EmployeeProfilePage() {
                 </DialogContent>
               </Dialog>
 
-              {/* Generate Forms Dropdown */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="rounded-xl" data-testid="generate-forms-btn">
-                    <ClipboardList className="mr-2 h-4 w-4" />
-                    Generate Forms
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => setGenerateFormsOpen(true)} data-testid="generate-blank-forms">
-                    <ClipboardList className="mr-2 h-4 w-4" />
-                    Generate Blank Forms
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setImportAppOpen(true)} data-testid="import-application">
-                    <FolderUp className="mr-2 h-4 w-4" />
-                    Import Application Form
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setImportDocOpen(true)} data-testid="import-document">
-                    <FileCheck className="mr-2 h-4 w-4" />
-                    Import Other Document
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* Generate Forms Dropdown - Hidden for Audit Mode */}
+              {/* Forms system hidden from UI. Backend retained for data integrity. */}
 
               {/* Generate Blank Forms Dialog */}
               <Dialog open={generateFormsOpen} onOpenChange={setGenerateFormsOpen}>
@@ -1675,10 +1756,7 @@ export default function EmployeeProfilePage() {
             <User className="h-4 w-4 mr-2" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <ClipboardList className="h-4 w-4 mr-2" />
-            Internal Forms (Admin)
-          </TabsTrigger>
+          {/* Forms tab hidden for Audit Mode - forms system hidden from UI */}
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
             Checklist

@@ -390,11 +390,19 @@ export default function EmployeesPage() {
                     <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
                       <td className="p-4">
                         <Link to={`/portal/employees/${emp.id}`} className="flex items-center gap-3" data-testid={`emp-link-${emp.id}`}>
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${emp.status === 'archived' ? 'bg-gray-200' : 'bg-accent'}`}>
-                            <span className={`font-medium text-sm ${emp.status === 'archived' ? 'text-gray-500' : 'text-primary'}`}>
-                              {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
-                            </span>
-                          </div>
+                          {emp.profile_photo_url ? (
+                            <img 
+                              src={emp.profile_photo_url} 
+                              alt={`${emp.first_name} ${emp.last_name}`}
+                              className={`w-10 h-10 rounded-xl object-cover border ${emp.status === 'archived' ? 'border-gray-300 grayscale' : 'border-[#E4E8EB]'}`}
+                            />
+                          ) : (
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${emp.status === 'archived' ? 'bg-gray-200' : 'bg-accent'}`}>
+                              <span className={`font-medium text-sm ${emp.status === 'archived' ? 'text-gray-500' : 'text-primary'}`}>
+                                {emp.first_name?.charAt(0)}{emp.last_name?.charAt(0)}
+                              </span>
+                            </div>
+                          )}
                           <div>
                             <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
                             <p className="text-sm text-text-muted">{emp.employee_code}</p>

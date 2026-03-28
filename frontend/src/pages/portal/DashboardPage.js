@@ -70,11 +70,15 @@ export default function DashboardPage() {
     ? Math.round(employees.reduce((sum, e) => sum + (e.completion_percentage || 0), 0) / employees.length)
     : 0;
 
-  // Calculate attention items
-  const expiredDocs = expiryAlerts?.total_expired || stats?.expired_documents || 0;
-  const expiringSoon = expiryAlerts?.total_expiring_soon || stats?.expiring_30_days || 0;
+  // Calculate attention items from expiry alerts API
+  const expiredDocs = expiryAlerts?.expired?.total_items || 0;
+  const expiringSoon = expiryAlerts?.expiring_soon?.total_items || stats?.expiring_30_days || 0;
   const policiesNotAcknowledged = stats?.unsigned_policies || 0;
-  const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged;
+  
+  // Calculate staff not ready to work
+  const staffNotReady = notReady;
+  
+  const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged + staffNotReady;
 
   return (
     <div className="space-y-8" data-testid="dashboard-page">
@@ -107,7 +111,8 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {needsAttentionTotal > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Expired Documents - Critical */}
               <div className={`p-4 rounded-xl ${expiredDocs > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiredDocs > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
@@ -115,10 +120,12 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <p className={`text-2xl font-heading font-bold ${expiredDocs > 0 ? 'text-red-700' : 'text-gray-400'}`}>{expiredDocs}</p>
-                    <p className={`text-sm ${expiredDocs > 0 ? 'text-red-600' : 'text-gray-500'}`}>Expired Documents</p>
+                    <p className={`text-sm ${expiredDocs > 0 ? 'text-red-600' : 'text-gray-500'}`}>Expired</p>
                   </div>
                 </div>
               </div>
+              
+              {/* Expiring Soon */}
               <div className={`p-4 rounded-xl ${expiringSoon > 0 ? 'bg-amber-100 border border-amber-200' : 'bg-white border border-gray-200'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiringSoon > 0 ? 'bg-amber-200' : 'bg-gray-100'}`}>
@@ -126,10 +133,25 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <p className={`text-2xl font-heading font-bold ${expiringSoon > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{expiringSoon}</p>
-                    <p className={`text-sm ${expiringSoon > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Expiring Soon</p>
+                    <p className={`text-sm ${expiringSoon > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Needs Renewal</p>
                   </div>
                 </div>
               </div>
+              
+              {/* Staff Not Ready */}
+              <div className={`p-4 rounded-xl ${staffNotReady > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${staffNotReady > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
+                    <AlertTriangle className={`h-5 w-5 ${staffNotReady > 0 ? 'text-red-600' : 'text-gray-400'}`} />
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-heading font-bold ${staffNotReady > 0 ? 'text-red-700' : 'text-gray-400'}`}>{staffNotReady}</p>
+                    <p className={`text-sm ${staffNotReady > 0 ? 'text-red-600' : 'text-gray-500'}`}>Not Ready to Work</p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Policies Not Acknowledged */}
               <div className={`p-4 rounded-xl ${policiesNotAcknowledged > 0 ? 'bg-blue-100 border border-blue-200' : 'bg-white border border-gray-200'}`}>
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${policiesNotAcknowledged > 0 ? 'bg-blue-200' : 'bg-gray-100'}`}>
@@ -143,7 +165,7 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            <p className="text-green-700">No expired documents, no items expiring soon, and all policies acknowledged. Great work!</p>
+            <p className="text-green-700">No expired documents, no items expiring soon, all staff ready, and all policies acknowledged. Great work!</p>
           )}
         </CardContent>
       </Card>
@@ -204,7 +226,7 @@ export default function DashboardPage() {
               </div>
               <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-text-muted">Average Progress to Full Compliance</span>
+                  <span className="text-text-muted">Progress to Full Compliance</span>
                   <span className="font-semibold text-text-primary">{avgCompletion}%</span>
                 </div>
                 <Progress value={avgCompletion} className="h-3" />

@@ -6550,6 +6550,129 @@ async def get_employee_training_requirements(
     }
 
 
+class TrainingCorrectionRequest(BaseModel):
+    """Request to correct a training record with mandatory audit reason"""
+    field: str  # 'completion_date', 'expiry_date', 'status', 'training_name'
+    old_value: Optional[str] = None
+    new_value: str
+    reason: str  # Mandatory reason for the correction
+
+
+@api_router.post("/training-records/{record_id}/correct")
+async def correct_training_record(
+    record_id: str,
+    correction: TrainingCorrectionRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Safe correction endpoint for training records.
+    - Requires a reason for every change
+    - Preserves original value in audit log
+    - Creates immutable audit trail
+    - Flags if record was verified before correction
+    """
+    # Validate reason
+    if not correction.reason or len(correction.reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason is required (minimum 3 characters)")
+    
+    # Valid fields that can be corrected
+    allowed_fields = ['completion_date', 'expiry_date', 'status', 'training_name']
+    if correction.field not in allowed_fields:
+        raise HTTPException(status_code=400, detail=f"Field '{correction.field}' cannot be corrected. Allowed: {allowed_fields}")
+    
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    # Get the actual old value from the record
+    actual_old_value = record.get(correction.field)
+    was_verified = record.get('verified', False)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get user name for audit
+    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    changed_by_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    # Create audit log entry
+    audit_entry = {
+        "id": str(uuid.uuid4()),
+        "entity_type": "training_record",
+        "entity_id": record_id,
+        "employee_id": record.get('employee_id'),
+        "action": "training_correction",
+        "field_changed": correction.field,
+        "old_value": str(actual_old_value) if actual_old_value else None,
+        "new_value": correction.new_value,
+        "reason": correction.reason.strip(),
+        "was_verified_before_correction": was_verified,
+        "changed_by": user['user_id'],
+        "changed_by_name": changed_by_name,
+        "created_at": now
+    }
+    await db.audit_logs.insert_one(audit_entry)
+    
+    # Apply the correction
+    update_data = {
+        correction.field: correction.new_value,
+        "updated_at": now,
+        "last_corrected_at": now,
+        "last_corrected_by": changed_by_name
+    }
+    
+    # If verified and being corrected, add a flag
+    if was_verified:
+        update_data["corrected_after_verification"] = True
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": update_data}
+    )
+    
+    updated_record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "message": f"Training record corrected: {correction.field}",
+        "training_record": updated_record,
+        "audit_entry": {
+            "field_changed": correction.field,
+            "old_value": str(actual_old_value) if actual_old_value else None,
+            "new_value": correction.new_value,
+            "reason": correction.reason,
+            "was_verified_before": was_verified,
+            "corrected_at": now,
+            "corrected_by": changed_by_name
+        }
+    }
+
+
+@api_router.get("/training-records/{record_id}/history")
+async def get_training_record_history(
+    record_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get complete audit history for a training record.
+    Shows all corrections with old/new values and reasons.
+    """
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    # Get all audit entries for this training record
+    history = await db.audit_logs.find(
+        {"entity_id": record_id, "entity_type": "training_record"},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return {
+        "training_record": record,
+        "history": history,
+        "total_corrections": sum(1 for h in history if h.get('action') == 'training_correction')
+    }
+
+
 # ==================== DASHBOARD ROUTES ====================
 
 @api_router.get("/dashboard/stats", response_model=DashboardStats)

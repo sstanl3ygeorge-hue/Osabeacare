@@ -1102,7 +1102,8 @@ export default function EmployeeProfilePage() {
       );
       toast.success('Document details updated');
       setEditEvidenceOpen(false);
-      fetchData();
+      // Force refresh data immediately after edit to ensure expiry status is recalculated
+      await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to update details');
     } finally {

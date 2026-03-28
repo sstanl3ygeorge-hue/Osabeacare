@@ -1,0 +1,74 @@
+{
+  "summary": "Frontend testing complete for expiry-date sync bug fix. All test cases passed. The fix (adding 'await' to fetchData() in handleSaveEvidenceEdit) ensures expiry status badges update immediately after editing evidence metadata. Tested: (1) Change expiry to past date -> status changes to 'Expired' immediately, (2) Change expiry to future date -> status changes to 'Valid' immediately, (3) Status persists correctly after page refresh.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Edit Document Details dialog", "issues": ["Console warning: Missing Description or aria-describedby for DialogContent - accessibility improvement needed"]}
+    ]
+  },
+
+  "passed_tests": [
+    "✅ Login as admin@osabea.care/admin123 - SUCCESS",
+    "✅ Navigate to Lawrence Egbeni profile - SUCCESS",
+    "✅ Go to What's Needed tab - SUCCESS",
+    "✅ Find Health & Safety Training with 'Valid until 2027-06-15' - SUCCESS",
+    "✅ Click dropdown menu on Health & Safety Training - SUCCESS",
+    "✅ Click 'Edit Details' - SUCCESS",
+    "✅ Change expiry date to past date (2024-01-01) - SUCCESS",
+    "✅ Add reason 'Testing expired status' - SUCCESS",
+    "✅ Click Save - SUCCESS",
+    "✅ Verify expiry badge changes to 'Expired 2024-01-01' IMMEDIATELY - SUCCESS",
+    "✅ Click Edit Details again - SUCCESS",
+    "✅ Change expiry date to future date (2028-12-31) - SUCCESS",
+    "✅ Add reason 'Testing valid status' - SUCCESS",
+    "✅ Click Save - SUCCESS",
+    "✅ Verify expiry badge changes to 'Valid until 2028-12-31' IMMEDIATELY - SUCCESS",
+    "✅ Refresh page - verify status persists correctly - SUCCESS",
+    "✅ Restore original expiry date (2027-06-15) - SUCCESS"
+  ],
+
+  "test_report_links": [
+    "/app/frontend/src/pages/portal/EmployeeProfilePage.js (lines 1083-1110 - handleSaveEvidenceEdit with await fetchData())"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "The fix is correctly implemented - 'await fetchData()' on line 1106 ensures data refresh completes before UI updates",
+    "Minor: DialogContent accessibility warning should be addressed by adding DialogDescription component"
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "N/A (frontend only testing)",
+    "frontend": "100% (all 17 tests passed)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123",
+    "role": "super_admin"
+  },
+
+  "seed_data_creation": "Used existing data - Lawrence Egbeni (OCS-0002, ID: ccfcbdbb-feda-4043-a8b2-2f1f9da88bdf). Health & Safety Training file_id: 61fd8ffc-c76d-4b7b-8f69-d222f35ed980. Expiry date restored to original value: 2027-06-15",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Expiry-date sync bug fix verified. The handleSaveEvidenceEdit function now properly awaits fetchData() after saving, ensuring immediate UI updates. Key test data: Employee Lawrence Egbeni (ccfcbdbb-feda-4043-a8b2-2f1f9da88bdf), Health & Safety Training requirement (health_safety), file_id (61fd8ffc-c76d-4b7b-8f69-d222f35ed980). The Edit Details dialog is accessible via data-testid='more-actions-health_safety' -> data-testid='edit-details-health_safety'. Expiry date field is the second date input in the dialog. Reason for Change is required (second textarea).",
+
+  "rca_of_the_issue": {
+    "root_cause": "The fetchData() call after saving evidence edits was not awaited, causing the UI to update before the data refresh completed",
+    "fix_applied": "Added 'await' keyword before fetchData() call on line 1106 of EmployeeProfilePage.js",
+    "verification": "Tested by changing expiry date to past (Expired status) and future (Valid status) dates - both updated immediately without page refresh"
+  }
+}

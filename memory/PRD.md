@@ -448,7 +448,27 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-27 - UX & Clarity Pass for Audit Presentation
+2026-03-28 - Imported Form Document-First UX Fix
+
+### Imported Form Document-First UX (Completed 2026-03-28)
+- [x] **Document-First View for Imported Forms**:
+  - Imported forms (status=completed_imported) no longer load form editor
+  - Shows clean "Uploaded Evidence" view instead
+  - Banner: "This document was uploaded as compliance evidence. The original file is available below."
+  - Actions: View Document → Download → Verify
+  - File info card with filename and upload date
+  - Metadata: Employee, Employee ID, Category, Date
+- [x] **Removed Error State**:
+  - No more "Failed to load form" error for imported forms
+  - Template loading is skipped entirely for imported documents
+- [x] **Internal Forms Tab Update**:
+  - Imported forms show inline View/Download buttons
+  - Not clickable cards - actions visible immediately
+  - Regular forms still show clickable cards → form editor
+- [x] **Single Source of Truth**:
+  - Forms = internal admin workflows
+  - Documents (PDFs) = audit evidence
+  - Everything auditor sees is viewable, downloadable, traceable
 
 ### UX & Clarity Pass (Completed 2026-03-27)
 - [x] **Fixed FormEditorPage Crash** (P0):

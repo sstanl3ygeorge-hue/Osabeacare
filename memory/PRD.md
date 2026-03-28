@@ -3,7 +3,42 @@
 ## Company
 **Osabea Healthcare Solutions**
 
-## Latest Update (2026-03-28)
+## Latest Update (2025-12-28)
+**Unified Training System UI Sync - COMPLETE**
+
+### What's Needed Tab Training Record Integration
+Training requirements in What's Needed tab now use the same unified training record system as the Training tab:
+
+**Training Record Info Display:**
+- Completion date shown below requirement name
+- Expiry date with color-coded status (green=valid, red=expired)
+- Verification status badge ("Verified by [user]")
+- "No certificate uploaded" warning when evidence missing
+
+**Unified Actions Dropdown:**
+For training requirements with existing records:
+- **Verify Training** - Uses training-specific endpoint (`/api/training-records/{id}/verify`)
+- **Remove Verification** - Uses training-specific endpoint (`/api/training-records/{id}/unverify`)
+- **Edit Training Record** - Opens correction dialog with field selector (expiry_date, completion_date, status)
+- **Replace Certificate** - Opens certificate upload dialog with superseding logic
+- **View History** - Shows training record correction history
+- **Delete Training Record** - Soft-deletes with audit trail
+
+**Single Source of Truth:**
+- All training state flows through `training_records` collection
+- Changes in What's Needed sync instantly to Training tab and Training Matrix
+- Documents/evidence are attachments to training records, not independent state
+- One active record per employee+requirement (deleted/superseded excluded from calculations)
+
+**Endpoints Used:**
+- `POST /api/training-records/{id}/verify` - Verify training
+- `POST /api/training-records/{id}/unverify` - Remove verification
+- `POST /api/training-records/{id}/correct` - Edit with audit trail
+- `DELETE /api/training-records/{id}` - Soft delete
+- `GET /api/training-records/{id}/history` - View correction history
+- `POST /api/employees/{id}/training/{req_id}/upload-certificate` - Upload/replace certificate
+
+## Previous Update (2026-03-28)
 **Simplified File Correction & Clickable Dashboard Cards - COMPLETE**
 
 ### Clickable Summary Cards with Drill-Down Navigation

@@ -20,7 +20,7 @@ import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
-  MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
+  MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
   Camera, Replace, FileX
 } from 'lucide-react';
@@ -106,6 +106,15 @@ export default function EmployeeProfilePage() {
   const [trainingCertFile, setTrainingCertFile] = useState(null);
   const [isUploadingCert, setIsUploadingCert] = useState(false);
   const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
+  
+  // Training correction/history dialog states
+  const [trainingCorrectionDialogOpen, setTrainingCorrectionDialogOpen] = useState(false);
+  const [editingTrainingRecord, setEditingTrainingRecord] = useState(null);
+  const [trainingCorrectionField, setTrainingCorrectionField] = useState('expiry_date');
+  const [trainingCorrectionValue, setTrainingCorrectionValue] = useState('');
+  const [trainingCorrectionReason, setTrainingCorrectionReason] = useState('');
+  const [trainingHistoryDialogOpen, setTrainingHistoryDialogOpen] = useState(false);
+  const [trainingHistory, setTrainingHistory] = useState([]);
   
   // Profile photo upload state
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -201,7 +210,7 @@ export default function EmployeeProfilePage() {
 
   const onboardingStatuses = [
     'New',
-    'Documents Pending',
+    'Recruitment File: Incomplete',
     'Under Review',
     'Ready for Placement',
     'Active',
@@ -971,6 +980,33 @@ export default function EmployeeProfilePage() {
       toast.success('Certificate downloaded');
     } catch (error) {
       toast.error('Failed to download certificate');
+    }
+  };
+  
+  // Training correction handler
+  const handleTrainingCorrection = async () => {
+    if (!trainingCorrectionReason || trainingCorrectionReason.trim().length < 3) {
+      toast.error('Please provide a reason for this correction (minimum 3 characters)');
+      return;
+    }
+    
+    try {
+      await axios.post(
+        `${API}/training-records/${editingTrainingRecord.id}/correct`,
+        {
+          field: trainingCorrectionField,
+          old_value: editingTrainingRecord[trainingCorrectionField],
+          new_value: trainingCorrectionValue,
+          reason: trainingCorrectionReason.trim()
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Training record corrected');
+      setTrainingCorrectionDialogOpen(false);
+      setEditingTrainingRecord(null);
+      await fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to correct training record');
     }
   };
 
@@ -3502,6 +3538,10 @@ export default function EmployeeProfilePage() {
         <TabsContent value="training">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardContent className="p-6">
+              <div className="mb-4 pb-4 border-b border-[#E4E8EB]">
+                <h3 className="font-heading text-lg font-semibold text-text-primary">Training & Certifications</h3>
+                <p className="text-sm text-text-muted">Track completion status, expiry dates, and renewal status</p>
+              </div>
               {training.length === 0 ? (
                 <div className="text-center py-12 text-text-muted">
                   <GraduationCap className="h-12 w-12 mx-auto mb-3 opacity-50" />
@@ -3509,25 +3549,164 @@ export default function EmployeeProfilePage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {training.map((record) => (
-                    <div key={record.id} className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl">
-                      <div>
-                        <p className="font-medium text-text-primary">{record.training_name}</p>
-                        <p className="text-sm text-text-muted">
-                          {record.mandatory ? 'Mandatory' : 'Optional'}
-                          {record.completion_date && ` · Completed: ${new Date(record.completion_date).toLocaleDateString()}`}
-                        </p>
+                  {training.map((record) => {
+                    // Calculate expiry status
+                    let expiryStatus = null;
+                    if (record.expiry_date) {
+                      const now = new Date();
+                      const expiry = new Date(record.expiry_date);
+                      const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+                      
+                      if (daysUntilExpiry < 0) {
+                        expiryStatus = { status: 'expired', label: 'Expired', color: 'red', days: Math.abs(daysUntilExpiry) };
+                      } else if (daysUntilExpiry <= 30) {
+                        expiryStatus = { status: 'expiring_soon', label: 'Needs Renewal', color: 'amber', days: daysUntilExpiry };
+                      } else {
+                        expiryStatus = { status: 'valid', label: 'Valid', color: 'green', days: daysUntilExpiry };
+                      }
+                    }
+                    
+                    const hasEvidence = record.certificate_url || (record.evidence_files && record.evidence_files.length > 0);
+                    
+                    return (
+                      <div key={record.id} className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]" data-testid={`training-record-${record.id}`}>
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-text-primary">{record.training_name}</p>
+                              {record.mandatory && (
+                                <span className="text-xs px-2 py-0.5 bg-red-100 text-red-600 rounded">Mandatory</span>
+                              )}
+                              {record.verified && (
+                                <span className="text-xs px-2 py-0.5 bg-green-100 text-green-600 rounded flex items-center gap-1">
+                                  <Shield className="h-3 w-3" />Verified
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-muted mt-1">
+                              {record.completion_date && (
+                                <span>Completed: {new Date(record.completion_date).toLocaleDateString()}</span>
+                              )}
+                              {record.expiry_date && (
+                                <span>Expires: {new Date(record.expiry_date).toLocaleDateString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Status and Renewal Status */}
+                          <div className="flex items-center gap-3">
+                            {/* Renewal Status Badge */}
+                            {expiryStatus && (
+                              <div className={`text-center px-3 py-1 rounded-lg ${
+                                expiryStatus.color === 'red' ? 'bg-red-100' :
+                                expiryStatus.color === 'amber' ? 'bg-amber-100' : 'bg-green-100'
+                              }`}>
+                                <p className={`text-xs font-medium ${
+                                  expiryStatus.color === 'red' ? 'text-red-700' :
+                                  expiryStatus.color === 'amber' ? 'text-amber-700' : 'text-green-700'
+                                }`}>{expiryStatus.label}</p>
+                                <p className={`text-xs ${
+                                  expiryStatus.color === 'red' ? 'text-red-600' :
+                                  expiryStatus.color === 'amber' ? 'text-amber-600' : 'text-green-600'
+                                }`}>
+                                  {expiryStatus.status === 'expired' ? `${expiryStatus.days}d ago` : `${expiryStatus.days}d left`}
+                                </p>
+                              </div>
+                            )}
+                            
+                            {/* Status Badge */}
+                            <span className={`px-3 py-1 rounded-lg text-sm font-medium ${
+                              record.status === 'completed' ? 'bg-green-100 text-green-700' :
+                              record.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                              record.status === 'expired' ? 'bg-red-100 text-red-700' :
+                              record.status === 'expiring' ? 'bg-amber-100 text-amber-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {record.status?.replace('_', ' ')}
+                            </span>
+                          </div>
+                          
+                          {/* Actions */}
+                          <div className="flex items-center gap-1">
+                            {/* View Evidence */}
+                            {hasEvidence && (
+                              <Button 
+                                size="sm" 
+                                variant="ghost"
+                                className="h-8 w-8 p-0 rounded-lg"
+                                onClick={() => handleViewCertificate(record.id)}
+                                title="View Evidence"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            )}
+                            
+                            {/* Download */}
+                            {hasEvidence && (
+                              <Button 
+                                size="sm" 
+                                variant="ghost"
+                                className="h-8 w-8 p-0 rounded-lg"
+                                onClick={() => handleDownloadCertificate(record.id)}
+                                title="Download"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            )}
+                            
+                            {/* Edit/Correct - shown via dropdown for admins */}
+                            {!isAuditor() && (
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-lg">
+                                    <MoreVertical className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  {!record.verified && (
+                                    <DropdownMenuItem onClick={() => handleVerifyTraining(record.id)}>
+                                      <Shield className="h-4 w-4 mr-2 text-green-600" />
+                                      Verify
+                                    </DropdownMenuItem>
+                                  )}
+                                  {record.verified && (
+                                    <DropdownMenuItem onClick={() => handleUnverifyTraining(record.id)}>
+                                      <Shield className="h-4 w-4 mr-2 text-red-600" />
+                                      Remove Verification
+                                    </DropdownMenuItem>
+                                  )}
+                                  <DropdownMenuItem onClick={() => {
+                                    setEditingTrainingRecord(record);
+                                    setTrainingCorrectionField('expiry_date');
+                                    setTrainingCorrectionValue(record.expiry_date?.split('T')[0] || '');
+                                    setTrainingCorrectionReason('');
+                                    setTrainingCorrectionDialogOpen(true);
+                                  }}>
+                                    <Edit className="h-4 w-4 mr-2" />
+                                    Edit / Correct
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={async () => {
+                                    try {
+                                      const res = await axios.get(`${API}/training-records/${record.id}/history`, {
+                                        headers: { Authorization: `Bearer ${token}` }
+                                      });
+                                      setTrainingHistory(res.data.history || []);
+                                      setTrainingHistoryDialogOpen(true);
+                                    } catch (error) {
+                                      toast.error('Failed to load history');
+                                    }
+                                  }}>
+                                    <History className="h-4 w-4 mr-2" />
+                                    View History
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <span className={`status-chip ${
-                        record.status === 'completed' ? 'status-success' :
-                        record.status === 'in_progress' ? 'status-info' :
-                        record.status === 'expired' ? 'status-error' :
-                        'status-neutral'
-                      }`}>
-                        {record.status?.replace('_', ' ')}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -4448,6 +4627,141 @@ export default function EmployeeProfilePage() {
           }
         } : undefined}
       />
+      
+      {/* Training Correction Dialog */}
+      <Dialog open={trainingCorrectionDialogOpen} onOpenChange={setTrainingCorrectionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-heading">Edit Training Record</DialogTitle>
+            <DialogDescription>
+              Make a correction to this training record. All changes require a reason and are logged for audit purposes.
+            </DialogDescription>
+          </DialogHeader>
+          {editingTrainingRecord && (
+            <div className="space-y-4 mt-4">
+              <div className="p-3 bg-[#F8FAFA] rounded-lg border border-[#E4E8EB]">
+                <p className="font-medium text-text-primary">{editingTrainingRecord.training_name}</p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Field to Edit</Label>
+                <Select value={trainingCorrectionField} onValueChange={(value) => {
+                  setTrainingCorrectionField(value);
+                  setTrainingCorrectionValue(editingTrainingRecord[value]?.split?.('T')?.[0] || editingTrainingRecord[value] || '');
+                }}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="expiry_date">Expiry Date</SelectItem>
+                    <SelectItem value="completion_date">Completion Date</SelectItem>
+                    <SelectItem value="status">Status</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Current Value</Label>
+                <Input 
+                  value={editingTrainingRecord[trainingCorrectionField] || '(not set)'} 
+                  disabled 
+                  className="rounded-xl bg-gray-100"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>New Value *</Label>
+                {trainingCorrectionField === 'status' ? (
+                  <Select value={trainingCorrectionValue} onValueChange={setTrainingCorrectionValue}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="Select new status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="not_started">Not Started</SelectItem>
+                      <SelectItem value="in_progress">In Progress</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="expired">Expired</SelectItem>
+                      <SelectItem value="expiring">Expiring</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input 
+                    type="date" 
+                    value={trainingCorrectionValue?.split?.('T')?.[0] || trainingCorrectionValue || ''} 
+                    onChange={(e) => setTrainingCorrectionValue(e.target.value)}
+                    className="rounded-xl"
+                  />
+                )}
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Reason for Change *</Label>
+                <Textarea 
+                  placeholder="Explain why this correction is being made (required for audit trail)"
+                  value={trainingCorrectionReason}
+                  onChange={(e) => setTrainingCorrectionReason(e.target.value)}
+                  className="rounded-xl min-h-[80px]"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="mt-6">
+            <Button variant="outline" onClick={() => setTrainingCorrectionDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleTrainingCorrection} 
+              disabled={!trainingCorrectionReason || !trainingCorrectionValue}
+              className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+            >
+              Save Correction
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Training History Dialog */}
+      <Dialog open={trainingHistoryDialogOpen} onOpenChange={setTrainingHistoryDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Training Record History</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 max-h-96 overflow-y-auto mt-4">
+            {trainingHistory.length === 0 ? (
+              <div className="text-center py-8 text-text-muted">
+                <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No correction history</p>
+              </div>
+            ) : (
+              trainingHistory.map((entry, idx) => (
+                <div key={entry.id || idx} className="p-3 bg-white rounded-lg border border-[#E4E8EB]">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="font-medium text-text-primary">
+                        {entry.action === 'training_correction' ? 'Correction' : entry.action?.replace('_', ' ')}
+                      </p>
+                      {entry.field_changed && (
+                        <p className="text-sm text-text-muted">
+                          <span className="font-medium">{entry.field_changed}</span>: {entry.old_value || '(empty)'} → {entry.new_value}
+                        </p>
+                      )}
+                      {entry.reason && (
+                        <p className="text-sm text-text-muted mt-1">
+                          <span className="font-medium">Reason:</span> {entry.reason}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right text-xs text-text-muted">
+                      <p>{entry.changed_by_name || 'System'}</p>
+                      <p>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''}</p>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

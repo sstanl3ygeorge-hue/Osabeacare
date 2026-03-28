@@ -935,28 +935,60 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
     }
 
 async def calculate_expiry_alerts_quick(employee_id: str) -> dict:
-    """Quick expiry alerts calculation for list views"""
+    """Quick expiry alerts calculation for list views.
+    Only includes ACTIVE, CURRENT records - excludes test, deleted, replaced records.
+    """
     expired_count = 0
     expiring_soon_count = 0
     
-    # Check documents with expiry dates
+    # Check documents with expiry dates (only active documents with evidence)
     docs = await db.employee_documents.find({
         "employee_id": employee_id,
-        "expiry_date": {"$exists": True, "$ne": None}
-    }, {"_id": 0, "expiry_date": 1}).to_list(100)
+        "expiry_date": {"$exists": True, "$ne": None},
+        # Must have actual evidence
+        "$or": [
+            {"file_url": {"$exists": True, "$ne": None}},
+            {"evidence_files": {"$exists": True, "$ne": []}}
+        ],
+        # Exclude soft-deleted or replaced
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived"]}
+    }, {"_id": 0, "expiry_date": 1, "evidence_files": 1}).to_list(100)
     
     for doc in docs:
-        status = calculate_expiry_status(doc.get('expiry_date'))
-        if status:
-            if status['status'] == 'expired':
-                expired_count += 1
-            elif status['status'] == 'expiring_soon':
-                expiring_soon_count += 1
+        # Check document-level expiry
+        doc_expiry = doc.get('expiry_date')
+        if doc_expiry:
+            status = calculate_expiry_status(doc_expiry)
+            if status:
+                if status['status'] == 'expired':
+                    expired_count += 1
+                elif status['status'] == 'expiring_soon':
+                    expiring_soon_count += 1
+        
+        # Also check evidence file level expiry
+        for ef in doc.get('evidence_files', []):
+            if ef.get('status') == 'active' and ef.get('expiry_date'):
+                status = calculate_expiry_status(ef.get('expiry_date'))
+                if status:
+                    if status['status'] == 'expired':
+                        expired_count += 1
+                    elif status['status'] == 'expiring_soon':
+                        expiring_soon_count += 1
     
     # Check training records with expiry dates
+    # EXCLUDE test records and ensure linked to valid requirement
     training = await db.training_records.find({
         "employee_id": employee_id,
-        "expiry_date": {"$exists": True, "$ne": None}
+        "expiry_date": {"$exists": True, "$ne": None},
+        # Must have actual evidence
+        "$or": [
+            {"certificate_url": {"$exists": True, "$ne": None}},
+            {"evidence_files": {"$exists": True, "$ne": []}}
+        ],
+        # Must be completed
+        "status": {"$in": ["completed", "expiring"]},
+        # Exclude TEST records
+        "training_name": {"$not": {"$regex": "^TEST", "$options": "i"}}
     }, {"_id": 0, "expiry_date": 1}).to_list(100)
     
     for t in training:
@@ -1899,18 +1931,57 @@ async def generate_employee_code():
     return f"OCS-{str(num).zfill(4)}"
 
 async def calculate_completion_percentage(employee_id: str) -> int:
-    """Calculate completion percentage based on REQUIREMENT completion, not document count"""
+    """Calculate completion percentage based on evidence-backed requirements.
+    MUST match the same logic used in /compliance-requirements endpoint.
+    """
     # Get employee role
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
     if not employee:
         return 0
     
     role = employee.get('role', '')
+    mandatory_items = get_mandatory_items_for_role(role)
+    total_items = len(mandatory_items)
     
-    # Use the requirement-based compliance calculation
-    compliance = await calculate_employee_compliance(employee_id, role)
+    if total_items == 0:
+        return 0
     
-    return compliance.get('completion_percentage', 0)
+    # Count evidence-backed completions (matches logic in /compliance-requirements)
+    evidence_backed_count = 0
+    for item in mandatory_items:
+        item_id = item['id']
+        item_type = item.get('type', 'document')
+        
+        has_evidence = False
+        
+        if item_type == 'training':
+            # Check training records with evidence
+            record = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "requirement_id": item_id,
+                "status": {"$in": ["completed", "expiring"]},
+                "$or": [
+                    {"certificate_url": {"$exists": True, "$ne": None}},
+                    {"evidence_files": {"$exists": True, "$ne": []}}
+                ]
+            }, {"_id": 0})
+            has_evidence = record is not None
+        else:
+            # Check employee documents with evidence
+            doc = await db.employee_documents.find_one({
+                "employee_id": employee_id,
+                "requirement_id": item_id,
+                "$or": [
+                    {"file_url": {"$exists": True, "$ne": None}},
+                    {"evidence_files": {"$exists": True, "$ne": []}}
+                ]
+            }, {"_id": 0})
+            has_evidence = doc is not None
+        
+        if has_evidence:
+            evidence_backed_count += 1
+    
+    return int((evidence_backed_count / total_items) * 100)
 
 async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     """Quick work readiness calculation for list views"""
@@ -6104,6 +6175,7 @@ async def get_training_records(
     employee_id: Optional[str] = None,
     status: Optional[str] = None,
     mandatory: Optional[bool] = None,
+    include_test: Optional[bool] = False,
     user: dict = Depends(get_current_user)
 ):
     query = {}
@@ -6114,8 +6186,28 @@ async def get_training_records(
     if mandatory is not None:
         query["mandatory"] = mandatory
     
+    # Exclude TEST records by default (unless explicitly requested)
+    if not include_test:
+        query["training_name"] = {"$not": {"$regex": "^TEST", "$options": "i"}}
+    
     records = await db.training_records.find(query, {"_id": 0}).to_list(1000)
     return [TrainingRecordResponse(**r) for r in records]
+
+
+@api_router.delete("/training-records/cleanup-test")
+async def cleanup_test_training_records(user: dict = Depends(require_admin)):
+    """Admin-only: Permanently delete all TEST training records.
+    These are records where training_name starts with 'TEST'.
+    """
+    result = await db.training_records.delete_many({
+        "training_name": {"$regex": "^TEST", "$options": "i"}
+    })
+    
+    return {
+        "deleted_count": result.deleted_count,
+        "message": f"Deleted {result.deleted_count} TEST training records"
+    }
+
 
 @api_router.put("/training-records/{record_id}", response_model=TrainingRecordResponse)
 async def update_training_record(record_id: str, update: TrainingRecordCreate, user: dict = Depends(require_manager_or_admin)):

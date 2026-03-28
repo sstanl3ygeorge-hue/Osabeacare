@@ -4,6 +4,63 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Application Form Auto-Extraction - COMPLETE**
+
+### Summary
+Implemented safe auto-extraction from uploaded application forms into employee profile fields using GPT-5.2 vision OCR. Features a review-before-apply flow to ensure data integrity.
+
+### Key Features
+1. **AI-Powered Extraction**: Uses GPT-5.2 vision to extract text from PDF/image application forms
+2. **Structured Field Parsing**: Parses extracted text into specific profile fields
+3. **Review Flow**: Admin reviews extracted values before applying - field, extracted value, current value, apply/skip toggle
+4. **Profile Only**: Updates profile data ONLY - does NOT complete compliance evidence
+
+### Extractable Fields
+```
+first_name, last_name, email, phone,
+address_line_1, address_line_2, city, county, postcode, country,
+ni_number, date_of_birth,
+next_of_kin_name, next_of_kin_relationship, next_of_kin_phone, next_of_kin_address,
+emergency_contact_name, emergency_contact_phone, emergency_contact_relationship,
+reference_1_name, reference_1_company, reference_1_phone, reference_1_email,
+reference_2_name, reference_2_company, reference_2_phone, reference_2_email,
+has_driving_licence, driving_licence_type, has_own_vehicle, vehicle_registration
+```
+
+### API Endpoints
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/employees/{id}/extract-from-application` | Trigger extraction from application form |
+| `GET /api/employees/{id}/extractions` | List all extractions for employee |
+| `GET /api/extractions/{id}` | Get specific extraction result |
+| `POST /api/extractions/{id}/apply` | Apply selected fields to profile |
+| `POST /api/extractions/{id}/discard` | Discard extraction |
+
+### Data Model Rules
+- Extracted values populate **profile data only**
+- They do NOT automatically complete compliance evidence items
+- Example: NI Number populates profile field, but "Proof of NI Number" remains a separate evidence requirement
+- Compliance % unchanged by profile extraction
+
+### Frontend UI
+- **Extract from App Form** button in Personal Details card (Overview tab)
+- **Review Dialog** shows table with: Apply checkbox, Field name, Extracted value, Current value, Confidence
+- **Quick Actions**: Select All, Select Empty Only, Clear All
+- **Compliance Note**: Yellow warning that this updates profile only, not compliance evidence
+
+### Test Status
+| Test | Status |
+|------|--------|
+| Backend: Extraction endpoint returns 200/422 appropriately | ✅ PASS |
+| Backend: Extended profile fields accepted in PUT | ✅ PASS |
+| Backend: Apply/Discard endpoints work | ✅ PASS |
+| Backend: Compliance % unchanged after profile update | ✅ PASS |
+| Frontend: Extract button visible | ✅ PASS |
+| Frontend: Review dialog with loading/error states | ✅ PASS |
+
+---
+
+## Previous Update (2025-12-28)
 **Conditional HMRC Starter Checklist - COMPLETE**
 
 ### Summary

@@ -2895,11 +2895,14 @@ export default function EmployeeProfilePage() {
                   {complianceRequirements.requirements
                     .filter(req => req.type === 'document' || req.type === 'db_record')
                     .map((req) => {
-                      const docs = req.documents || [];
+                      // Use evidence_files as the single source of truth (same as What's Needed tab)
+                      const allEvidenceFiles = req.evidence_files || [];
+                      // Filter to only active files
+                      const docs = allEvidenceFiles.filter(f => !f.status || f.status === 'active');
                       const hasFiles = docs.length > 0;
                       const verifiedDocs = docs.filter(d => d.verified);
                       const allVerified = hasFiles && verifiedDocs.length === docs.length && docs.length >= (req.min_files || 1);
-                      const isComplete = req.status === 'completed';
+                      const isComplete = req.status === 'completed' || req.has_evidence;
                       
                       return (
                         <div key={req.id} className={`p-4 ${
@@ -2969,12 +2972,12 @@ export default function EmployeeProfilePage() {
                             </div>
                           </div>
                           
-                          {/* Files List */}
+                          {/* Files List - Using evidence_files structure */}
                           {docs.length > 0 && (
                             <div className="mt-3 space-y-2">
                               {docs.map((doc, idx) => (
                                 <div 
-                                  key={doc.id} 
+                                  key={doc.file_id || idx} 
                                   className={`flex items-center justify-between p-3 rounded-lg border ${
                                     doc.verified ? 'border-success/30 bg-success/5' : 'border-[#E4E8EB] bg-white'
                                   }`}
@@ -2983,16 +2986,14 @@ export default function EmployeeProfilePage() {
                                     <FileText className="h-5 w-5 text-text-muted flex-shrink-0" />
                                     <div className="min-w-0">
                                       <p className="text-sm font-medium text-text-primary truncate">
-                                        {doc.document_label || doc.original_filename || 'Document'}
+                                        {doc.file_label || doc.original_filename || 'Document'}
                                       </p>
                                       <div className="flex items-center gap-2 text-xs text-text-muted">
-                                        {doc.version_number > 1 && (
-                                          <span className="text-primary">v{doc.version_number}</span>
-                                        )}
                                         {doc.source_type && (
                                           <span>
                                             {doc.source_type === 'form_submission' ? 'From Form' : 
-                                             doc.source_type === 'imported' ? 'Imported' : 'Manual'}
+                                             doc.source_type === 'imported' ? 'Imported' : 
+                                             doc.source_type === 'replacement' ? 'Replaced' : 'Manual'}
                                           </span>
                                         )}
                                         {doc.uploaded_at && (
@@ -3008,108 +3009,62 @@ export default function EmployeeProfilePage() {
                                     </div>
                                   </div>
                                   
-                                  {/* File Actions */}
+                                  {/* File Actions - using evidence file endpoint */}
                                   <div className="flex items-center gap-1">
-                                    {doc.file_url && (
-                                      <>
-                                        <Button 
-                                          size="sm" 
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0 rounded-lg"
-                                          onClick={() => handlePreviewDocument(
-                                            `${API}/employee-documents/${doc.id}/file`,
-                                            doc.document_type,
-                                            doc.original_filename
-                                          )}
-                                          title="View"
-                                        >
-                                          <Eye className="h-4 w-4" />
-                                        </Button>
-                                        <Button 
-                                          size="sm" 
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0 rounded-lg"
-                                          onClick={async () => {
-                                            try {
-                                              const response = await axios.get(`${API}/employee-documents/${doc.id}/download`, {
-                                                headers: { Authorization: `Bearer ${token}` },
-                                                responseType: 'blob'
-                                              });
-                                              const blob = new Blob([response.data]);
-                                              const url = URL.createObjectURL(blob);
-                                              const link = document.createElement('a');
-                                              link.href = url;
-                                              link.download = doc.original_filename || 'document';
-                                              link.click();
-                                              URL.revokeObjectURL(url);
-                                              toast.success('Downloaded');
-                                            } catch (error) {
-                                              toast.error('Failed to download');
-                                            }
-                                          }}
-                                          title="Download"
-                                        >
-                                          <FileDown className="h-4 w-4" />
-                                        </Button>
-                                      </>
-                                    )}
-                                    {!isAuditor() && doc.status === 'uploaded' && (
-                                      <>
-                                        <Button 
-                                          size="sm" 
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0 rounded-lg text-success hover:bg-success/10"
-                                          onClick={() => handleUpdateDocumentStatus(doc.id, 'approved')}
-                                          title="Approve"
-                                        >
-                                          <CheckCircle className="h-4 w-4" />
-                                        </Button>
-                                        <Button 
-                                          size="sm" 
-                                          variant="ghost"
-                                          className="h-8 w-8 p-0 rounded-lg text-error hover:bg-error/10"
-                                          onClick={() => handleUpdateDocumentStatus(doc.id, 'rejected')}
-                                          title="Reject"
-                                        >
-                                          <XCircle className="h-4 w-4" />
-                                        </Button>
-                                      </>
-                                    )}
-                                    {!isAuditor() && doc.status === 'approved' && !doc.verified && (
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 rounded-lg"
+                                      onClick={() => {
+                                        const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${doc.file_id}/view`;
+                                        setPreviewFile({
+                                          url: viewUrl,
+                                          name: doc.file_label || doc.original_filename || 'Document',
+                                          filename: doc.original_filename
+                                        });
+                                        setPreviewFiles([]);
+                                        setPreviewOpen(true);
+                                      }}
+                                      title="View"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 rounded-lg"
+                                      onClick={async () => {
+                                        try {
+                                          const downloadUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${doc.file_id}/view`;
+                                          const response = await axios.get(downloadUrl, {
+                                            headers: { Authorization: `Bearer ${token}` },
+                                            responseType: 'blob'
+                                          });
+                                          const blob = new Blob([response.data]);
+                                          const url = URL.createObjectURL(blob);
+                                          const link = document.createElement('a');
+                                          link.href = url;
+                                          link.download = doc.original_filename || 'document';
+                                          link.click();
+                                          URL.revokeObjectURL(url);
+                                          toast.success('Downloaded');
+                                        } catch (error) {
+                                          toast.error('Failed to download');
+                                        }
+                                      }}
+                                      title="Download"
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                    {!isAuditor() && !doc.verified && (
                                       <Button 
                                         size="sm" 
                                         variant="ghost"
                                         className="h-8 w-8 p-0 rounded-lg text-success hover:bg-success/10"
-                                        onClick={() => handleVerifyDocument(doc.id, doc.file_url)}
-                                        title="Verify"
+                                        onClick={() => handleVerifyRequirement(req.id)}
+                                        title="Approve"
                                       >
                                         <Shield className="h-4 w-4" />
-                                      </Button>
-                                    )}
-                                    {!isAuditor() && doc.verified && (
-                                      <Button 
-                                        size="sm" 
-                                        variant="ghost"
-                                        className="h-8 w-8 p-0 rounded-lg text-text-muted hover:text-error"
-                                        onClick={() => handleUnverifyDocument(doc.id)}
-                                        title="Remove verification"
-                                      >
-                                        <XCircle className="h-4 w-4" />
-                                      </Button>
-                                    )}
-                                    {!isAuditor() && req.allow_multiple_files && (
-                                      <Button 
-                                        size="sm" 
-                                        variant="ghost"
-                                        className="h-8 w-8 p-0 rounded-lg text-text-muted hover:text-error hover:bg-error/10"
-                                        onClick={() => {
-                                          if (window.confirm('Delete this file?')) {
-                                            handleDeleteDocument(doc.id);
-                                          }
-                                        }}
-                                        title="Delete file"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
                                       </Button>
                                     )}
                                   </div>

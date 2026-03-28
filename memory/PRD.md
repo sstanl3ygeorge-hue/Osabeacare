@@ -4,6 +4,40 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Progress Calculation Unification - CRITICAL FIX COMPLETE**
+
+### Problem Solved
+Employee list showed different progress % than Employee Profile. The root cause was multiple calculation paths with inconsistent logic.
+
+### Solution
+Created ONE unified calculation function chain:
+```
+check_item_completion() → calculate_employee_compliance() → calculate_completion_percentage()
+```
+
+**All views now use this single function:**
+- Employee list (`/api/employees`)
+- Employee profile (`/api/employees/{id}/compliance-requirements`)  
+- Dashboard
+- Audit View
+
+### Key Fixes
+1. **Form-generated items**: Now also check for uploaded documents (fallback when no form exists)
+2. **Training records**: Matched by requirement_id OR training name (handles legacy data)
+3. **Optional items**: Excluded from BOTH numerator and denominator
+4. **Acknowledgements**: Counted as completed AND verified
+
+### Verification
+- Olakunle Alonge: **81%** in list = **81%** in profile ✓
+- Calculation: 18 completed / 22 non-optional = 81%
+- Optional (Equal Opportunities) excluded from total
+
+### Data Model Rules
+- **COMPLETED** = verified document OR valid training record OR completed acknowledgement
+- **EXCLUDE** from counts: optional items, deleted/superseded records, test data
+- Total = total requirements - optional count
+
+## Previous Update (2025-12-28)
 **Lightweight Acknowledgement Flow & Optional Items - COMPLETE**
 
 ### Acknowledgement System (Contract/Handbook)

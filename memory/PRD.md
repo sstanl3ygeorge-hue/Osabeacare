@@ -3,6 +3,15 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Latest Update (2026-03-28)
+**Policy Acknowledgement & Document Verification System - COMPLETE**
+- Two-layer policy system (Org policies + Employee assignments)
+- Full acknowledgement workflow: Assigned → Viewed → Acknowledged
+- Admin review functionality after employee acknowledgement
+- Signature information display with names and timestamps
+- Comprehensive audit logging with compliance filter
+- New Policy Assignments page in sidebar navigation
+
 ## Original Problem Statement
 Build a comprehensive compliance management portal for a UK care recruitment agency to:
 - Manage employee onboarding and compliance documents
@@ -20,6 +29,35 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 ## Core Requirements
 
 ### Completed Features ✅
+
+#### Policy Acknowledgement & Document Verification System (Completed 2026-03-28)
+- [x] **Two-Layer Policy System**:
+  - Compliance Centre: 32 organisation-level policies
+  - Policy Assignments: Employee-level policy assignments with acknowledgement tracking
+- [x] **Policy Acknowledgement Flow**:
+  - "I have read and understood this policy" button
+  - Stores: employee_id, policy_id, policy_version, acknowledged_at, acknowledged_by_employee_name
+  - Status progression: Assigned → Viewed → Acknowledged
+- [x] **Admin Review Flow**:
+  - "Reviewed and Approved" button (after employee acknowledges)
+  - Stores: admin_id, admin_reviewed_at, admin_reviewed_by_name
+- [x] **Signature Information Display**:
+  - Employee Acknowledgement section: Name + Date/Time
+  - Admin Review section: Name + Date/Time
+- [x] **Document Verification**:
+  - "Verified by Admin" action for uploaded documents
+  - Stores: admin_id, verified_at, verified_by_name
+- [x] **Audit Logging**:
+  - policy_assigned, policy_viewed, policy_acknowledged, policy_admin_reviewed
+  - document_verified, document_uploaded, document_replaced
+  - compliance_only filter for focused audit trail
+- [x] **Policy Assignments Page**:
+  - Centralized view of all policies and assignment status
+  - Assign to Employee(s) action for active policies
+  - Shows: Total Policies, Total Assignments, Acknowledged count
+- [x] **Simple, Audit-Safe Design**:
+  - Timestamps, identity, clarity, audit trail
+  - No drawn signatures or complex PDF editing
 
 #### Separated Status Model (Completed 2026-03-28)
 - [x] **Three Separate Status Types**:
@@ -387,8 +425,9 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - AUDIT STATUS: Forms = internal workflow, PDFs = audit evidence
 
 ### Backlog (P1-P2)
-- [ ] Phase 2 Migration: Apply evidence-based structure to all employees
-- [ ] Expiry Tracking Enhancements: Dashboard alerts for expiring items
+- [x] ~~Phase 2 Migration: Apply evidence-based structure to all employees~~ (DONE)
+- [x] ~~Expiry Tracking Enhancements: Dashboard alerts for expiring items~~ (DONE)
+- [x] ~~Policy Acknowledgement System with audit trail~~ (DONE 2026-03-28)
 - [ ] Email notifications via Resend for document requests and expiries
 - [ ] Bulk document requests
 - [ ] Bulk policy assignment

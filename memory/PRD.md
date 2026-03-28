@@ -4,6 +4,77 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Care-Sector Structured Forms & Auto-Fill - COMPLETE**
+
+### Summary
+Implemented comprehensive care-sector standard forms with sectioned layouts and auto-fill from employee profiles.
+
+### Forms Implemented
+
+#### 1. Health Screening Form (6 Sections)
+| Section | Fields |
+|---------|--------|
+| A: Personal Details | Name, DOB, Job Title, Address, Phone, Email, GP Name, GP Address |
+| B: Job Exposure | 10 checkboxes (manual handling, blood/fluids, food handling, night shifts, etc.) |
+| C: Health History | Yes/No + details for 15+ conditions (epilepsy, heart, mental health, diabetes, etc.) |
+| D: Functional Ability | Standing, walking, climbing, lifting, driving with difficulty levels |
+| E: Employee Declaration | Signature, date, accuracy confirmation |
+| F: Employer Use Only | Notes, adjustments, fit-for-role assessment (admin only) |
+
+#### 2. Staff Personal Information (Profile Form)
+- **7 Sections**: Basic Details, Contact, NI Number, Emergency Contact, Bank Details, Driving/Vehicle, Declaration
+- **Updates Profile**: When submitted, updates employee profile fields
+- **Auto-fill**: Pre-fills from existing employee profile data
+
+#### 3. Recruitment Checklist (Simplified)
+- Identity & Legal verification
+- DBS verification  
+- Employment history verification
+- Qualifications verification
+- Final sign-off with signature
+
+#### 4. Equal Opportunities (Optional)
+- Ethnicity, Gender, Sexual Orientation, Religion, Disability, Caring Responsibilities
+- All fields have "Prefer not to say" option
+- **Does NOT affect compliance %**
+
+#### 5. HMRC Starter Checklist (Conditional)
+- **Required only if no P45** - Uses `conditional_on: "p45", conditional_inverse: true`
+- Pre-fills: Name, Address, NI Number, DOB, Start Date
+- Statement A/B/C, Student Loan details
+
+### Auto-Fill System
+```
+GET /api/form-submissions/auto-fill/{requirement_id}/{employee_id}
+```
+Returns pre-filled form data from employee profile:
+- Names → first_name, last_name, full_name
+- Address → address_line_1, city, postcode, etc.
+- Contact → phone, email
+- Emergency → next_of_kin_name, relationship, phone
+- Driving → has_driving_licence, vehicle_registration
+
+### Data Safety Rules
+- ✅ Profile data import does NOT change compliance %
+- ✅ Profile data does NOT complete evidence requirements
+- ✅ Ready to Work status unchanged by profile import
+- ✅ Auto-fill is review-before-apply (not auto-write)
+
+### Test Status
+| Test | Status |
+|------|--------|
+| Backend: Form templates return proper sections | ✅ PASS |
+| Backend: Auto-fill endpoint returns profile data | ✅ PASS |
+| Backend: Equal Opportunities is_optional=true | ✅ PASS |
+| Backend: HMRC is_conditional=true | ✅ PASS |
+| Frontend: Sectioned form layout renders | ✅ PASS |
+| Frontend: Auto-fill indicator "(auto-filled)" shows | ✅ PASS |
+| Frontend: Profile update notice appears | ✅ PASS |
+| Frontend: Conditional fields work | ✅ PASS |
+
+---
+
+## Previous Update (2025-12-28)
 **Application Form Auto-Extraction - COMPLETE**
 
 ### Summary

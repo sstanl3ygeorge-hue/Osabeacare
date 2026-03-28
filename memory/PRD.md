@@ -4,6 +4,51 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Progress Calculation Truth Bug - FIXED**
+
+### Issue
+Employee showed 81% progress but all visible items in "What's Needed" tab appeared complete (green). The 4 missing items were **hidden from the UI** but still counted in the percentage calculation.
+
+### Root Cause
+Frontend category names in `CATEGORY_DISPLAY` and `categoryOrder` did not match backend `MANDATORY_ITEMS` categories:
+- Frontend used: `3_Role_Readiness`, `4_Employment`
+- Backend uses: `3_Competency_Health`, `4_Recruitment_Record`
+
+This caused items in categories `3_Competency_Health` (Health Screening, Induction) and `4_Recruitment_Record` (Interview Record, Recruitment Checklist) to be filtered out and not rendered.
+
+### Fix Applied
+Updated `EmployeeProfilePage.js` lines 2795-2835:
+```javascript
+// Before (WRONG)
+"3_Role_Readiness": "Role Readiness",
+"4_Employment": "Employment",
+
+// After (CORRECT)
+"3_Competency_Health": "Supervised Start / Health",
+"4_Recruitment_Record": "Recruitment File",
+```
+
+### Verification
+| Metric | Value |
+|--------|-------|
+| Total Required Items | 22 |
+| Completed Items | 18 |
+| Missing Items | 4 |
+| Optional (Excluded) | 1 (Equal Opportunities) |
+| Final Percentage | 18/22 = **81%** |
+
+The 4 missing items are now **visible** with "Still Needed" labels:
+1. Health Screening Questionnaire (Supervised Start)
+2. Induction & Competency Assessment (Supervised Start)
+3. Interview Record (Recruitment)
+4. Recruitment Compliance Checklist (Recruitment)
+
+### Test Report
+`/app/test_reports/iteration_46.json` - 100% pass rate
+
+---
+
+## Previous Update (2025-12-28)
 **Amendment Capability for Compliance Records - COMPLETE**
 
 ### Feature Overview

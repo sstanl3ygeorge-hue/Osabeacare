@@ -46,6 +46,33 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - "⚠ Required before employee can start work" hint on mandatory items
 - [x] **Sorted Requirements**: Mandatory items always shown first (priority_order)
 - [x] **Backend API**: `work_readiness` object returned in compliance-requirements endpoint
+- [x] **Work Readiness Filter** on Employees List:
+  - Dropdown filter: All Readiness, Work Ready, Almost Ready, Not Ready
+  - Client-side filtering by work readiness status
+  - Helper text: "Filter employees by work readiness to quickly see who can start work"
+
+#### Expiry Tracking System (Completed 2026-03-28)
+- [x] **Expirable Requirements Defined**:
+  - Documents: DBS Certificate, Right to Work Documents, NMC Registration
+  - Training: Safeguarding, Manual Handling, Infection Control, BLS, Fire Safety, Health & Safety
+- [x] **Expiry Status Calculation**:
+  - Valid: Expiry date > 30 days away
+  - Expiring Soon: Within 30 days of expiry
+  - Expired: Past expiry date
+- [x] **Expiry Alerts Panel** on Employee Profile:
+  - Shows count of expired and expiring items
+  - Lists expired items with days overdue
+  - Lists expiring items with days until expiry
+- [x] **Expiry Status on Requirement Rows**:
+  - Badge showing "Expired [date]" / "Expires [date]" / "Valid until [date]"
+  - Individual file badges for expiry status
+- [x] **Expiry Indicator on Employees List**:
+  - Shows "X expired" or "X expiring" badge in Compliance column
+  - Red for expired, amber for expiring soon
+- [x] **Dashboard Endpoint**: `/api/dashboard/expiry-alerts`
+  - Returns all employees with expired/expiring items
+  - Grouped by severity (expired first, then expiring)
+  - Ready for dashboard UI integration
 
 #### Phase 1: Foundation (Completed 2026-03-27)
 - [x] React + FastAPI + MongoDB full-stack architecture

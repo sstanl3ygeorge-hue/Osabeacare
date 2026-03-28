@@ -21,7 +21,33 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 
 ### Completed Features ✅
 
-#### Work Readiness System (Completed 2026-03-28)
+#### Separated Status Model (Completed 2026-03-28)
+- [x] **Three Separate Status Types**:
+  1. **Start Status**: Not Ready / Supervised Start Only / Ready to Work
+     - "Shows whether this employee can safely start work."
+  2. **Recruitment File**: Incomplete / Complete
+     - "Shows whether the pre-employment record is complete."
+  3. **Policies**: No Policies Assigned / Policies Assigned / All Policies Acknowledged
+     - "Shows whether assigned policies have been read and acknowledged."
+  4. **Overall Compliance**: Percentage as supporting information only
+- [x] **Restructured Categories**:
+  - 1_Legal_Safety: RTW Documents, RTW Verification, Identity, DBS Certificate, DBS Check, NMC (nurses)
+  - 2_Core_Training: Safeguarding, Manual Handling, Infection Control, BLS, Fire Safety, Health & Safety
+  - 3_Competency_Health: Health Screening, Induction, Clinical Competency (nurses), Medication Competency
+  - 4_Recruitment_Record: Interview Record, Reference 1, Reference 2, Recruitment Checklist, Application Form, CV
+  - 5_Agreements: Contract Acknowledgement, Employee Handbook Acknowledgement
+  - 6_Admin: Personal Information Form, Equal Opportunities Monitoring
+- [x] **Elevated References**: References now in Recruitment Record category, marked as important pre-employment checks
+- [x] **Priority Badges Updated**:
+  - Red "Required" - start_required items (blocks work)
+  - Orange "Health" - supervised_start items
+  - Blue "Recruitment" - recruitment file items
+  - Gray/none - secondary items
+- [x] **Clean Overview**: Shows only Start Status, Recruitment File, Policies, Overall Compliance
+- [x] **Start Status Filter**: Dropdown with Ready to Work, Supervised Start Only, Not Ready
+- [x] **All Tabs Synchronized**: Overview, What's Needed, Documents all read from complianceRequirements
+
+#### Work Readiness System (Refactored 2026-03-28)
 - [x] **Defined Work Readiness Requirements (CQC Standards)**:
   - **MANDATORY (Blocks work)**: Right to Work Documents, RTW Verification, Identity Documents, DBS Certificate, DBS Update Service Check, Safeguarding Training, Manual Handling Training, Infection Control Training
   - **Nurse-specific mandatory**: NMC Registration (only for nurses)

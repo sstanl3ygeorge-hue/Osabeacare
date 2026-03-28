@@ -1991,6 +1991,77 @@ FORM_BASED_REQUIREMENTS = {
             {"id": "completion_date", "label": "Completion Date", "type": "date"},
             {"id": "notes", "label": "Additional Notes", "type": "textarea"},
         ]
+    },
+    "equal_opportunities": {
+        "name": "Equal Opportunities Monitoring",
+        "form_type": "equal_opportunities",
+        "is_optional": True,  # This form is optional and does not affect compliance
+        "fields": [
+            {"id": "intro_note", "label": "This information is collected for monitoring purposes only and will be kept confidential. All fields are voluntary.", "type": "info"},
+            {"id": "gender", "label": "Gender", "type": "select", "options": ["Female", "Male", "Non-binary", "Other", "Prefer not to say"]},
+            {"id": "age_range", "label": "Age Range", "type": "select", "options": ["16-24", "25-34", "35-44", "45-54", "55-64", "65+", "Prefer not to say"]},
+            {"id": "ethnicity", "label": "Ethnicity", "type": "select", "options": [
+                "Asian or Asian British - Bangladeshi",
+                "Asian or Asian British - Chinese", 
+                "Asian or Asian British - Indian",
+                "Asian or Asian British - Pakistani",
+                "Asian or Asian British - Other",
+                "Black or Black British - African",
+                "Black or Black British - Caribbean",
+                "Black or Black British - Other",
+                "Mixed - White and Asian",
+                "Mixed - White and Black African",
+                "Mixed - White and Black Caribbean",
+                "Mixed - Other",
+                "White - British",
+                "White - Irish",
+                "White - Other",
+                "Other ethnic group",
+                "Prefer not to say"
+            ]},
+            {"id": "religion", "label": "Religion or Belief", "type": "select", "options": [
+                "Buddhist",
+                "Christian",
+                "Hindu",
+                "Jewish",
+                "Muslim",
+                "Sikh",
+                "No religion",
+                "Other",
+                "Prefer not to say"
+            ]},
+            {"id": "sexual_orientation", "label": "Sexual Orientation", "type": "select", "options": [
+                "Heterosexual/Straight",
+                "Gay/Lesbian",
+                "Bisexual",
+                "Other",
+                "Prefer not to say"
+            ]},
+            {"id": "disability", "label": "Do you consider yourself to have a disability?", "type": "select", "options": [
+                "Yes",
+                "No",
+                "Prefer not to say"
+            ]},
+            {"id": "disability_details", "label": "If yes, please provide details (optional)", "type": "textarea"},
+            {"id": "caring_responsibilities", "label": "Do you have caring responsibilities?", "type": "select", "options": [
+                "Yes - Primary carer of child/children under 18",
+                "Yes - Primary carer of disabled child/children",
+                "Yes - Primary carer of disabled adult (18+)",
+                "Yes - Primary carer of older person",
+                "Yes - Secondary carer",
+                "No",
+                "Prefer not to say"
+            ]},
+            {"id": "marital_status", "label": "Marital/Civil Partnership Status", "type": "select", "options": [
+                "Single",
+                "Married/Civil Partnership",
+                "Divorced/Dissolved",
+                "Widowed/Surviving Partner",
+                "Separated",
+                "Prefer not to say"
+            ]},
+            {"id": "consent", "label": "I understand this information is voluntary and will be used for equal opportunities monitoring only", "type": "checkbox"},
+        ]
     }
 }
 

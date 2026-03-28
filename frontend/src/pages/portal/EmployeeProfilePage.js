@@ -28,7 +28,7 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Form-based requirements (open modal instead of file upload)
-const FORM_BASED_REQUIREMENTS = ['health_screening', 'induction', 'interview_record', 'recruitment_checklist'];
+const FORM_BASED_REQUIREMENTS = ['health_screening', 'induction', 'interview_record', 'recruitment_checklist', 'equal_opportunities'];
 
 const statusIcons = {
   not_started: Clock,
@@ -5650,71 +5650,92 @@ export default function EmployeeProfilePage() {
           
           {formTemplate && (
             <div className="space-y-4 mt-4">
+              {/* Optional form notice */}
+              {formTemplate.requirement_id === 'equal_opportunities' && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-sm text-blue-700 flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">Optional</span>
+                    This form does not affect compliance percentage or work readiness status.
+                  </p>
+                </div>
+              )}
+              
               <p className="text-sm text-text-muted">
-                Complete all required fields. This form will be saved and count toward compliance.
+                {formTemplate.requirement_id === 'equal_opportunities' 
+                  ? 'All fields are voluntary. You may select "Prefer not to say" for any question.'
+                  : 'Complete all required fields. This form will be saved and count toward compliance.'}
               </p>
               
               <div className="grid gap-4">
                 {formTemplate.fields?.map((field) => (
                   <div key={field.id} className="space-y-1.5">
-                    <Label className="text-sm font-medium">
-                      {field.label}
-                      {field.required && <span className="text-error ml-1">*</span>}
-                    </Label>
-                    
-                    {field.type === 'text' && (
-                      <Input
-                        value={formData[field.id] || ''}
-                        onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
-                        placeholder={field.placeholder || ''}
-                        className="rounded-xl"
-                      />
-                    )}
-                    
-                    {field.type === 'textarea' && (
-                      <Textarea
-                        value={formData[field.id] || ''}
-                        onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
-                        placeholder={field.placeholder || ''}
-                        className="rounded-xl"
-                        rows={3}
-                      />
-                    )}
-                    
-                    {field.type === 'date' && (
-                      <Input
-                        type="date"
-                        value={formData[field.id] || ''}
-                        onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
-                        className="rounded-xl"
-                      />
-                    )}
-                    
-                    {field.type === 'checkbox' && (
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={field.id}
-                          checked={formData[field.id] || false}
-                          onCheckedChange={(checked) => setFormData({...formData, [field.id]: checked})}
-                        />
-                        <label htmlFor={field.id} className="text-sm cursor-pointer">Yes</label>
-                      </div>
-                    )}
-                    
-                    {field.type === 'select' && (
-                      <Select 
-                        value={formData[field.id] || ''} 
-                        onValueChange={(v) => setFormData({...formData, [field.id]: v})}
-                      >
-                        <SelectTrigger className="rounded-xl">
-                          <SelectValue placeholder="Select..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {field.options?.map((opt) => (
-                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    {/* Info type - just display text, no input */}
+                    {field.type === 'info' ? (
+                      <p className="text-sm text-text-muted italic bg-[#F8FAFA] p-3 rounded-lg">
+                        {field.label}
+                      </p>
+                    ) : (
+                      <>
+                        <Label className="text-sm font-medium">
+                          {field.label}
+                          {field.required && <span className="text-error ml-1">*</span>}
+                        </Label>
+                        
+                        {field.type === 'text' && (
+                          <Input
+                            value={formData[field.id] || ''}
+                            onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
+                            placeholder={field.placeholder || ''}
+                            className="rounded-xl"
+                          />
+                        )}
+                        
+                        {field.type === 'textarea' && (
+                          <Textarea
+                            value={formData[field.id] || ''}
+                            onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
+                            placeholder={field.placeholder || ''}
+                            className="rounded-xl"
+                            rows={3}
+                          />
+                        )}
+                        
+                        {field.type === 'date' && (
+                          <Input
+                            type="date"
+                            value={formData[field.id] || ''}
+                            onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
+                            className="rounded-xl"
+                          />
+                        )}
+                        
+                        {field.type === 'checkbox' && (
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={field.id}
+                              checked={formData[field.id] || false}
+                              onCheckedChange={(checked) => setFormData({...formData, [field.id]: checked})}
+                            />
+                            <label htmlFor={field.id} className="text-sm cursor-pointer">Yes</label>
+                          </div>
+                        )}
+                        
+                        {field.type === 'select' && (
+                          <Select 
+                            value={formData[field.id] || ''} 
+                            onValueChange={(v) => setFormData({...formData, [field.id]: v})}
+                          >
+                            <SelectTrigger className="rounded-xl">
+                              <SelectValue placeholder="Select..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {field.options?.map((opt) => (
+                                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </>
                     )}
                   </div>
                 ))}

@@ -4,6 +4,57 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Equal Opportunities Monitoring Form - COMPLETE**
+
+### Summary
+Converted Equal Opportunities Monitoring from document upload to structured form while maintaining its optional status.
+
+### Form Template Added
+```python
+"equal_opportunities": {
+    "name": "Equal Opportunities Monitoring",
+    "form_type": "equal_opportunities",
+    "is_optional": True,
+    "fields": [
+        {"id": "intro_note", "type": "info", ...},
+        {"id": "gender", "type": "select", "options": [..., "Prefer not to say"]},
+        {"id": "age_range", "type": "select", ...},
+        {"id": "ethnicity", "type": "select", ...},
+        {"id": "religion", "type": "select", ...},
+        {"id": "sexual_orientation", "type": "select", ...},
+        {"id": "disability", "type": "select", ...},
+        {"id": "disability_details", "type": "textarea"},
+        {"id": "caring_responsibilities", "type": "select", ...},
+        {"id": "marital_status", "type": "select", ...},
+        {"id": "consent", "type": "checkbox"}
+    ]
+}
+```
+
+### UI Changes
+1. **"Fill Form" button** instead of "Upload Document"
+2. **"Optional" badge** clearly visible
+3. **"Does not affect compliance score"** text
+4. Form modal shows: "This form does not affect compliance percentage or work readiness status."
+5. All fields have "Prefer not to say" option
+6. Info field type added for explanatory text
+
+### Compliance Verification
+| Metric | Before | After | Status |
+|--------|--------|-------|--------|
+| Progress % | 100% | 100% | ✅ UNCHANGED |
+| Total Required | 22 | 22 | ✅ UNCHANGED |
+| Work Readiness | work_ready | work_ready | ✅ UNCHANGED |
+
+**Equal Opportunities remains:**
+- ✅ Optional
+- ✅ Excluded from compliance %
+- ✅ Excluded from Ready to Work
+- ✅ Not a blocking red incomplete item
+
+---
+
+## Previous Update (2025-12-28)
 **Structured Forms Implementation - COMPLETE**
 
 ### Overview

@@ -4,6 +4,59 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Amendment Capability for Compliance Records - COMPLETE**
+
+### Feature Overview
+Added safe Edit/Update capabilities with full audit trail for:
+- **Policies** - Organisation policies (e.g., Safeguarding, Medication)
+- **Insurance/Certificates** - Public Liability, Employer's Liability, CQC Registration, etc.
+- **Incidents** - Incident reports with root cause, corrective actions
+
+### Key Requirements Implemented
+1. **Reason Required**: All amendments require a "Reason for change" field
+2. **History Tracking**: Previous state is stored in `history` array before updates
+3. **No Silent Overwrites**: Data is never overwritten without audit trail
+
+### Backend Endpoints Added
+| Endpoint | Purpose |
+|----------|---------|
+| `PUT /api/compliance/policies/{id}/amend` | Amend policy with history |
+| `PUT /api/compliance/insurance/{id}/amend` | Amend insurance with history |
+| `PUT /api/compliance/incidents/{id}/amend` | Amend incident with history |
+| `GET /api/compliance/policies/{id}/history` | Get policy amendment history |
+| `GET /api/compliance/insurance/{id}/history` | Get insurance amendment history |
+| `GET /api/compliance/incidents/{id}/history` | Get incident amendment history |
+
+### Pydantic Models
+- `InsuranceDocUpdate` - includes required `reason: str`
+- `OrgPolicyAmend` - includes required `reason: str`
+- `IncidentLogAmend` - includes required `reason: str`
+
+### Frontend UI Changes (ComplianceCentrePage.js)
+- **Edit Button**: Visible on policies/insurance with uploaded files, all incidents
+- **History Button**: Clock icon to view amendment history
+- **Amendment Modal**: Shows all editable fields + required "Reason for Change" field
+- **History Modal**: Shows timeline of amendments with reasons, dates, previous values
+
+### History Document Structure
+Each amendment stores:
+```javascript
+{
+  ...previousState,  // All fields from before the change
+  amended_at: "ISO timestamp",
+  amended_by: "user_id",
+  amendment_reason: "User provided reason"
+}
+```
+
+### Test Results
+- Backend: 100% (18/18 tests passed)
+- Frontend: 100% (all UI elements verified)
+- Test report: `/app/test_reports/iteration_45.json`
+
+---
+
+## Previous Update (2025-12-28)
 **Truth Reconciliation Pass - COMPLETE**
 
 ### Problem Identified

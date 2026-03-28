@@ -4,14 +4,22 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2026-03-28)
+**UI Language Standardization - COMPLETE**
+- Employee list columns simplified: Employee, Role, Work Status, File Status, Progress, Actions
+- Work Status labels standardized: Ready to Work, Supervised Start, Not Ready
+- File Status labels standardized: Incomplete, Nearly Complete, Complete
+- Progress format standardized: X% Complete
+- Employee profile header: "Progress" (was "Compliance Score"), "File Status" badge
+- Bulk Upload button removed from employee profile
+- Overview card labels: Work Status, Recruitment File, Policies, Progress
+
+## Previous Updates (2026-03-28)
 **Critical Bug Fixes & Policy Reversal System - COMPLETE**
 - Fixed document removal sync (await fetchData for immediate UI update)
 - Fixed scoring inconsistency (single source of truth for compliance %)
 - Added Policy Unassign/Withdraw functionality with audit trail
 - Added Organisation Settings with service_type (adults_only/children_only/mixed)
-- All changes preserve audit history
 
-## Previous Update (2026-03-28)
 **Policy Acknowledgement & Document Verification System - COMPLETE**
 - Two-layer policy system (Org policies + Employee assignments)
 - Full acknowledgement workflow: Assigned → Viewed → Acknowledged

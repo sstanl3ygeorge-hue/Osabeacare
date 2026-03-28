@@ -700,6 +700,25 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Documents (PDFs) = audit evidence
   - Everything auditor sees is viewable, downloadable, traceable
 
+### Phase 2 Migration: Evidence Files Array (Completed 2026-03-28)
+- [x] **Data Structure Migration**:
+  - Migrated 10 training records from `certificate_url` to `evidence_files` array
+  - All employee documents already using `evidence_files` structure (8 docs)
+  - Migration script: `/app/backend/migrations/migrate_to_evidence_files.py`
+- [x] **Consistent Multi-File Support**:
+  - Training records now support multiple evidence files per item
+  - Each evidence file has: file_id, file_url, original_filename, file_label, source_type, status
+  - Proper labels: "Manual Handling Certificate", "Safeguarding Certificate", etc.
+- [x] **Documents Tab Sync Fix** (P0):
+  - Fixed JSX syntax error in EmployeeProfilePage.js (lines 3073-3145)
+  - Documents tab now uses `evidence_files` array (same as What's Needed tab)
+  - Both tabs display identical file counts for all requirements
+  - DBS Certificate correctly shows 2 files (Front/Back) in both tabs
+- [x] **Verification**:
+  - Lawrence Egbeni: 4 training certificates with evidence_files
+  - Olakunle Alonge: 5 verified training certificates, 12/23 items verified
+  - Certificate preview modal working with page navigation
+
 ### UX & Clarity Pass (Completed 2026-03-27)
 - [x] **Fixed FormEditorPage Crash** (P0):
   - Imported forms without templates now load gracefully

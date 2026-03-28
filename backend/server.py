@@ -440,6 +440,114 @@ MANDATORY_ITEMS = {
     ]
 }
 
+# ============================================================================
+# PHASE 1: TRAINING CATALOGUE FOUNDATION
+# ============================================================================
+# Feature flag - when False, employee_training_assignments are IGNORED
+# This ensures Phase 1 is behavior-neutral until explicitly enabled
+ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS = False  # DO NOT ENABLE until Phase 2
+
+async def ensure_training_catalogue_exists():
+    """
+    Creates and seeds training_catalogue collection from MANDATORY_ITEMS.
+    Safe to call multiple times - will not duplicate entries.
+    """
+    # Get existing catalogue entries
+    existing_ids = set()
+    async for doc in db.training_catalogue.find({}, {"id": 1}):
+        existing_ids.add(doc["id"])
+    
+    # Seed from MANDATORY_ITEMS["training"]
+    training_items = MANDATORY_ITEMS.get("training", [])
+    nurse_training = [i for i in MANDATORY_ITEMS.get("nurse_specific", []) if i.get("type") == "training"]
+    all_training = training_items + nurse_training
+    
+    inserted_count = 0
+    for item in all_training:
+        if item["id"] not in existing_ids:
+            catalogue_entry = {
+                "id": item["id"],
+                "name": item["name"],
+                "training_name": item.get("training_name", item["name"]),
+                "category": "core" if item.get("priority") == "start_required" else "standard",
+                "default_required": True,  # All existing training is required by default
+                "priority": item.get("priority", "secondary"),
+                "priority_order": item.get("priority_order", 99),
+                "description": item.get("description", ""),
+                "expiry_months": 12,  # Default 12 month expiry
+                "source": "mandatory_items",  # Indicates seeded from hardcoded items
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "active": True
+            }
+            await db.training_catalogue.insert_one(catalogue_entry)
+            inserted_count += 1
+            existing_ids.add(item["id"])
+    
+    return {"seeded": inserted_count, "total": len(existing_ids)}
+
+
+async def get_training_catalogue() -> List[dict]:
+    """
+    Returns all active training types from catalogue.
+    Phase 1: Read-only, for admin visibility.
+    """
+    catalogue = await db.training_catalogue.find(
+        {"active": True}, 
+        {"_id": 0}
+    ).to_list(100)
+    return catalogue
+
+
+async def get_employee_training_assignments(employee_id: str) -> List[dict]:
+    """
+    Returns training assignments for a specific employee.
+    Phase 1: Always returns empty list (feature flag disabled).
+    Phase 2+: Returns actual assignments when flag enabled.
+    """
+    if not ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS:
+        return []  # Feature disabled - no assignments affect compliance
+    
+    assignments = await db.employee_training_assignments.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).to_list(50)
+    return assignments
+
+
+async def get_required_training_for_employee(employee_id: str, role: str) -> List[dict]:
+    """
+    FUTURE USE: Returns merged list of required training for an employee.
+    
+    Phase 1: Returns ONLY MANDATORY_ITEMS["training"] (behavior unchanged)
+    Phase 2+: Will merge:
+      - MANDATORY_ITEMS["training"] (global defaults)
+      - employee_training_assignments where is_required=True
+    
+    This function is NOT YET USED in calculate_employee_compliance().
+    It is prepared for Phase 2 integration.
+    """
+    # Phase 1: Return existing behavior exactly
+    items = MANDATORY_ITEMS["training"].copy()
+    
+    # Add nurse-specific training if applicable
+    if role and "nurse" in role.lower():
+        nurse_training = [i for i in MANDATORY_ITEMS["nurse_specific"] if i.get("type") == "training"]
+        items.extend(nurse_training)
+    
+    # Phase 2 would add:
+    # if ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS:
+    #     assignments = await get_employee_training_assignments(employee_id)
+    #     for assign in assignments:
+    #         if assign.get("is_required"):
+    #             # Merge from catalogue...
+    
+    return items
+
+
+# ============================================================================
+# END PHASE 1 FOUNDATION
+# ============================================================================
+
 # Priority display configuration
 PRIORITY_CONFIG = {
     "start_required": {
@@ -11589,6 +11697,84 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
+
+# ============================================================================
+# PHASE 1: TRAINING CATALOGUE ADMIN ENDPOINTS
+# ============================================================================
+
+@api_router.get("/admin/training-catalogue")
+async def get_training_catalogue_endpoint(user: dict = Depends(require_admin)):
+    """
+    Admin endpoint to view training catalogue.
+    Phase 1: Read-only view of seeded training types.
+    """
+    catalogue = await get_training_catalogue()
+    
+    # Get assignment feature flag status
+    return {
+        "catalogue": catalogue,
+        "total": len(catalogue),
+        "feature_flag": {
+            "ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS": ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS,
+            "status": "DISABLED - Phase 1 foundation only"
+        }
+    }
+
+
+@api_router.post("/admin/training-catalogue/seed")
+async def seed_training_catalogue_endpoint(user: dict = Depends(require_admin)):
+    """
+    Admin endpoint to manually seed training catalogue.
+    Safe to call multiple times - will not duplicate entries.
+    """
+    result = await ensure_training_catalogue_exists()
+    
+    # Create indexes for training_catalogue
+    await db.training_catalogue.create_index("id", unique=True)
+    await db.training_catalogue.create_index("active")
+    
+    # Create indexes for employee_training_assignments (empty for now)
+    await db.employee_training_assignments.create_index([("employee_id", 1), ("training_id", 1)], unique=True)
+    await db.employee_training_assignments.create_index("employee_id")
+    
+    return {
+        "success": True,
+        "message": f"Training catalogue seeded",
+        "seeded_count": result["seeded"],
+        "total_count": result["total"],
+        "collections_created": ["training_catalogue", "employee_training_assignments"],
+        "indexes_created": True
+    }
+
+
+@api_router.get("/admin/training-catalogue/status")
+async def get_training_catalogue_status(user: dict = Depends(require_admin)):
+    """
+    Check status of training catalogue system.
+    """
+    catalogue_count = await db.training_catalogue.count_documents({})
+    assignments_count = await db.employee_training_assignments.count_documents({})
+    
+    return {
+        "phase": "Phase 1 - Foundation",
+        "collections": {
+            "training_catalogue": {
+                "exists": catalogue_count > 0,
+                "count": catalogue_count
+            },
+            "employee_training_assignments": {
+                "exists": True,
+                "count": assignments_count,
+                "note": "Empty until Phase 2"
+            }
+        },
+        "feature_flags": {
+            "ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS": ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS
+        },
+        "behavior": "UNCHANGED - compliance calculation uses MANDATORY_ITEMS only"
+    }
+
+
 # Include router
 app.include_router(api_router)
 
@@ -11653,6 +11839,17 @@ async def startup():
                 }
                 await db.insurance_docs.insert_one(doc)
             logger.info(f"Auto-seeded {len(INSURANCE_TYPES)} insurance documents")
+        
+        # Phase 1: Auto-seed training catalogue from MANDATORY_ITEMS
+        catalogue_count = await db.training_catalogue.count_documents({})
+        if catalogue_count == 0:
+            result = await ensure_training_catalogue_exists()
+            # Create indexes
+            await db.training_catalogue.create_index("id", unique=True)
+            await db.training_catalogue.create_index("active")
+            await db.employee_training_assignments.create_index([("employee_id", 1), ("training_id", 1)], unique=True)
+            await db.employee_training_assignments.create_index("employee_id")
+            logger.info(f"Phase 1: Auto-seeded training catalogue with {result['seeded']} items")
     except Exception as e:
         logger.error(f"Auto-seeding failed: {e}")
 

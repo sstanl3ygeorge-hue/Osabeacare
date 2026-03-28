@@ -4,6 +4,43 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Audit Day UI Visibility Improvements - COMPLETE**
+
+### Audit Quick View Section
+Added a compact compliance summary at the top of Employee Profile with 5 status cards:
+- **DBS**: Shows Missing/Expired/Pending Review/Verified with expiry date
+- **Right to Work**: Shows Missing/Pending Review/Verified
+- **Training**: Shows completed/verified count or expired count
+- **Documents**: Shows missing/unverified count
+- **Progress**: Shows completion percentage
+
+Each card is color-coded: Red (critical), Amber (needs attention), Blue (pending), Green (verified/complete).
+
+### High-Risk Item Badges
+DBS and RTW items now have prominent colored badges in What's Needed tab:
+- **DBS Badge**: White text on red/amber/green background based on status
+- **RTW Badge**: White text on red/amber/green background based on status
+- Badges appear next to requirement names for instant visibility
+
+### Documents Tab Improvements
+- File rows show expiry status with colored badges (Expired/Expiring Soon/Valid)
+- DBS/RTW files tagged with category badges
+- Expiry date shown prominently
+- Verification status badge improved
+
+### Helper Text/Microcopy Updates
+- **What's Needed**: "Upload each required document, then verify it. Only verified documents count towards compliance."
+- **Training Tab**: "Track completion status, expiry dates, and renewal status. Verified training counts toward work readiness."
+- **Documents Tab**: "Upload and verify documents. Only verified documents count towards compliance."
+- **Training Matrix**: "Track staff training, expiry dates, and renewals. Use filters to find risks quickly."
+
+### Technical Notes
+- Used existing backend data and calculation logic (no new endpoints)
+- No duplicate state introduced
+- Progress/count calculations unchanged
+- Requirement IDs: `dbs_certificate`, `dbs_check`, `dbs_update_service`, `right_to_work_documents`, `right_to_work_check`
+
+## Previous Update (2025-12-28)
 **Unified Training System UI Sync - COMPLETE**
 
 ### What's Needed Tab Training Record Integration

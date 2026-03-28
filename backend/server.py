@@ -3035,12 +3035,17 @@ class OrgPolicyResponse(BaseModel):
     name: str
     category: str
     version: str
-    status: str  # missing, active, expired, under_review
+    status: str  # missing, active, expired, under_review, due_soon
+    required: Optional[bool] = True
+    conditional: Optional[bool] = False
+    review_period_months: Optional[int] = 12
     file_url: Optional[str] = None
     original_filename: Optional[str] = None
-    review_date: Optional[str] = None
+    review_date: Optional[str] = None  # Next review due date
     last_reviewed_at: Optional[str] = None
     reviewed_by: Optional[str] = None
+    review_status: Optional[str] = None  # current, due_soon, overdue
+    assigned_staff_count: Optional[int] = 0
     notes: Optional[str] = None
     created_at: str
     updated_at: str
@@ -3058,10 +3063,15 @@ class InsuranceDocResponse(BaseModel):
     id: str
     name: str
     insurance_type: str
+    category: Optional[str] = "insurance"  # insurance, regulatory, safety
+    required: Optional[bool] = True
+    conditional: Optional[bool] = False
+    renewal_period_months: Optional[int] = 12
     status: str  # valid, expiring_soon, expired, missing
     file_url: Optional[str] = None
     original_filename: Optional[str] = None
     expiry_date: Optional[str] = None
+    issue_date: Optional[str] = None
     policy_number: Optional[str] = None
     provider: Optional[str] = None
     notes: Optional[str] = None
@@ -10023,6 +10033,231 @@ def calculate_audit_score(ready: int, review: int, pending: int,
         "staff_readiness": staff_score
     }
 
+
+@api_router.get("/compliance/centre-summary")
+async def get_compliance_centre_summary(user: dict = Depends(get_current_user)):
+    """
+    Enhanced Compliance Centre summary for CQC audit readiness.
+    Returns summary counts for policies, certificates, and staff compliance.
+    """
+    now = datetime.now(timezone.utc)
+    thirty_days = timedelta(days=30)
+    exp_30 = (now + thirty_days).isoformat()
+    
+    # === POLICIES SUMMARY ===
+    policies = await db.org_policies.find({}, {"_id": 0}).to_list(200)
+    policies_total = len(policies)
+    policies_active = 0
+    policies_missing = 0
+    policies_due_soon = 0
+    policies_overdue = 0
+    policies_required_complete = 0
+    policies_required_total = 0
+    missing_required_policies = []
+    
+    for policy in policies:
+        is_required = policy.get("required", True)
+        if is_required:
+            policies_required_total += 1
+        
+        if policy.get("status") == "missing":
+            policies_missing += 1
+            if is_required:
+                missing_required_policies.append({
+                    "id": policy["id"],
+                    "name": policy["name"],
+                    "category": policy.get("category"),
+                    "required": is_required,
+                    "conditional": policy.get("conditional", False)
+                })
+        elif policy.get("status") == "active":
+            policies_active += 1
+            if is_required:
+                policies_required_complete += 1
+        
+        # Check review date
+        if policy.get("review_date"):
+            try:
+                review_str = policy["review_date"]
+                if 'T' in str(review_str):
+                    review_date = datetime.fromisoformat(review_str.replace('Z', '+00:00'))
+                else:
+                    review_date = datetime.fromisoformat(f"{review_str}T00:00:00+00:00")
+                
+                if review_date < now:
+                    policies_overdue += 1
+                elif review_date < now + thirty_days:
+                    policies_due_soon += 1
+            except Exception:
+                pass
+    
+    # === CERTIFICATES SUMMARY ===
+    certificates = await db.insurance_docs.find({}, {"_id": 0}).to_list(100)
+    certs_total = len(certificates)
+    certs_valid = 0
+    certs_missing = 0
+    certs_expiring = 0
+    certs_expired = 0
+    certs_required_complete = 0
+    certs_required_total = 0
+    missing_required_certs = []
+    
+    for cert in certificates:
+        is_required = cert.get("required", True)
+        if is_required:
+            certs_required_total += 1
+        
+        status = cert.get("status", "missing")
+        
+        # Recalculate status based on expiry date
+        if cert.get("expiry_date"):
+            try:
+                exp_str = cert["expiry_date"]
+                if 'T' in str(exp_str):
+                    exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                else:
+                    exp_date = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
+                
+                if exp_date < now:
+                    status = "expired"
+                elif exp_date < now + thirty_days:
+                    status = "expiring_soon"
+                elif cert.get("file_url"):
+                    status = "valid"
+            except Exception:
+                pass
+        elif cert.get("file_url"):
+            status = "valid"  # Has file but no expiry date
+        
+        if status == "missing":
+            certs_missing += 1
+            if is_required:
+                missing_required_certs.append({
+                    "id": cert["id"],
+                    "name": cert["name"],
+                    "type": cert.get("insurance_type"),
+                    "category": cert.get("category", "insurance"),
+                    "required": is_required,
+                    "conditional": cert.get("conditional", False)
+                })
+        elif status == "valid":
+            certs_valid += 1
+            if is_required:
+                certs_required_complete += 1
+        elif status == "expiring_soon":
+            certs_expiring += 1
+            if is_required:
+                certs_required_complete += 1  # Still counts as complete
+        elif status == "expired":
+            certs_expired += 1
+    
+    # === STAFF COMPLIANCE SUMMARY ===
+    employees = await db.employees.find(
+        {"status": {"$ne": "archived"}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1}
+    ).to_list(1000)
+    
+    staff_total = len(employees)
+    staff_compliant = 0
+    staff_with_issues = 0
+    
+    # DBS Register status
+    dbs_valid = 0
+    dbs_missing = 0
+    dbs_expiring = 0
+    
+    # Training in last 12 months
+    twelve_months_ago = (now - timedelta(days=365)).isoformat()
+    training_completed_recently = 0
+    
+    for emp in employees:
+        emp_id = emp["id"]
+        
+        # Check DBS status
+        dbs_doc = await db.employee_documents.find_one({
+            "employee_id": emp_id,
+            "requirement_id": {"$in": ["dbs_certificate", "dbs_check"]}
+        }, {"_id": 0, "expiry_date": 1})
+        
+        if dbs_doc:
+            if dbs_doc.get("expiry_date"):
+                try:
+                    exp_str = dbs_doc["expiry_date"]
+                    if 'T' in str(exp_str):
+                        exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                    else:
+                        exp_date = datetime.fromisoformat(f"{exp_str}T00:00:00+00:00")
+                    
+                    if exp_date < now:
+                        dbs_missing += 1  # Expired counts as missing
+                    elif exp_date < now + thirty_days:
+                        dbs_expiring += 1
+                    else:
+                        dbs_valid += 1
+                except Exception:
+                    dbs_valid += 1
+            else:
+                dbs_valid += 1
+        else:
+            dbs_missing += 1
+        
+        # Check recent training
+        recent_training = await db.training_records.count_documents({
+            "employee_id": emp_id,
+            "completion_date": {"$gte": twelve_months_ago}
+        })
+        if recent_training > 0:
+            training_completed_recently += 1
+    
+    # Calculate overall status
+    policies_ok = policies_missing == 0 and policies_overdue == 0
+    certs_ok = certs_missing == 0 and certs_expired == 0
+    staff_ok = dbs_missing == 0
+    
+    if policies_ok and certs_ok and staff_ok:
+        overall_status = "OK"
+    elif (policies_missing > 5 or certs_missing > 3 or dbs_missing > (staff_total * 0.2)):
+        overall_status = "Critical"
+    else:
+        overall_status = "Needs Attention"
+    
+    return {
+        "overall_status": overall_status,
+        "policies": {
+            "complete": policies_active,
+            "total": policies_total,
+            "missing": policies_missing,
+            "due_soon": policies_due_soon,
+            "overdue": policies_overdue,
+            "required_complete": policies_required_complete,
+            "required_total": policies_required_total
+        },
+        "certificates": {
+            "valid": certs_valid,
+            "total": certs_total,
+            "missing": certs_missing,
+            "expiring": certs_expiring,
+            "expired": certs_expired,
+            "required_complete": certs_required_complete,
+            "required_total": certs_required_total
+        },
+        "staff_compliance": {
+            "total": staff_total,
+            "dbs_valid": dbs_valid,
+            "dbs_missing": dbs_missing,
+            "dbs_expiring": dbs_expiring,
+            "training_last_12_months": training_completed_recently
+        },
+        "missing_items": {
+            "required_policies": missing_required_policies[:10],
+            "required_certificates": missing_required_certs[:10],
+            "has_more_policies": len(missing_required_policies) > 10,
+            "has_more_certificates": len(missing_required_certs) > 10
+        }
+    }
+
+
+
 @api_router.get("/dashboard/expiry-alerts")
 async def get_expiry_alerts_dashboard(user: dict = Depends(get_current_user)):
     """
@@ -11790,52 +12025,52 @@ async def send_templated_email(request: SendEmailRequest, user: dict = Depends(r
 # ==================== COMPLIANCE CENTRE - ORG POLICIES ====================
 
 # Core policies that should exist as placeholders
-# Comprehensive Organisation Policies organised by category
+# Comprehensive Organisation Policies organised by category with REQUIRED/CONDITIONAL tags
 CORE_POLICIES = [
-    # Core Policies - Essential Safeguarding & Safety
-    {"name": "Safeguarding Adults Policy", "category": "Core"},
-    {"name": "Safeguarding Children Policy", "category": "Core"},
-    {"name": "Mental Capacity Act & DoLS Policy", "category": "Core"},
-    {"name": "Health & Safety Policy", "category": "Core"},
-    {"name": "Fire Safety Policy", "category": "Core"},
-    {"name": "First Aid Policy", "category": "Core"},
-    {"name": "Equality, Diversity & Inclusion Policy", "category": "Core"},
-    {"name": "Whistleblowing Policy", "category": "Core"},
+    # Core Policies - Essential Safeguarding & Safety (ALL REQUIRED by CQC)
+    {"name": "Safeguarding Adults Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "Safeguarding Children Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "Mental Capacity Act & DoLS Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "Health & Safety Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "Fire Safety Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "First Aid Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "Equality, Diversity & Inclusion Policy", "category": "Core", "required": True, "review_period_months": 12},
+    {"name": "Whistleblowing Policy", "category": "Core", "required": True, "review_period_months": 12},
     
-    # Clinical Policies - Care & Medical
-    {"name": "Medication Policy", "category": "Clinical"},
-    {"name": "Infection Prevention & Control Policy", "category": "Clinical"},
-    {"name": "Manual Handling Policy", "category": "Clinical"},
-    {"name": "COSHH Policy", "category": "Clinical"},
-    {"name": "Care Planning Policy", "category": "Clinical"},
-    {"name": "End of Life Care Policy", "category": "Clinical"},
-    {"name": "Nutrition & Hydration Policy", "category": "Clinical"},
-    {"name": "Pressure Ulcer Prevention Policy", "category": "Clinical"},
+    # Clinical Policies - Care & Medical (REQUIRED for domiciliary care)
+    {"name": "Medication Policy", "category": "Clinical", "required": True, "review_period_months": 12},
+    {"name": "Infection Prevention & Control Policy", "category": "Clinical", "required": True, "review_period_months": 12},
+    {"name": "Manual Handling Policy", "category": "Clinical", "required": True, "review_period_months": 12},
+    {"name": "COSHH Policy", "category": "Clinical", "required": True, "review_period_months": 12},
+    {"name": "Care Planning Policy", "category": "Clinical", "required": True, "review_period_months": 12},
+    {"name": "End of Life Care Policy", "category": "Clinical", "required": False, "conditional": True, "review_period_months": 24},
+    {"name": "Nutrition & Hydration Policy", "category": "Clinical", "required": True, "review_period_months": 12},
+    {"name": "Pressure Ulcer Prevention Policy", "category": "Clinical", "required": False, "conditional": True, "review_period_months": 24},
     
-    # Operational Policies - Day-to-Day Operations
-    {"name": "Lone Working Policy", "category": "Operational"},
-    {"name": "Risk Assessment Policy", "category": "Operational"},
-    {"name": "Record Keeping Policy", "category": "Operational"},
-    {"name": "Confidentiality Policy", "category": "Operational"},
-    {"name": "Complaints Policy", "category": "Operational"},
-    {"name": "Incident Reporting Policy", "category": "Operational"},
-    {"name": "Business Continuity Policy", "category": "Operational"},
-    {"name": "Service User Feedback Policy", "category": "Operational"},
+    # Operational Policies - Day-to-Day Operations (REQUIRED)
+    {"name": "Lone Working Policy", "category": "Operational", "required": True, "review_period_months": 12},
+    {"name": "Risk Assessment Policy", "category": "Operational", "required": True, "review_period_months": 12},
+    {"name": "Record Keeping Policy", "category": "Operational", "required": True, "review_period_months": 12},
+    {"name": "Confidentiality Policy", "category": "Operational", "required": True, "review_period_months": 12},
+    {"name": "Complaints Policy", "category": "Operational", "required": True, "review_period_months": 12},
+    {"name": "Incident Reporting Policy", "category": "Operational", "required": True, "review_period_months": 12},
+    {"name": "Business Continuity Policy", "category": "Operational", "required": True, "review_period_months": 24},
+    {"name": "Service User Feedback Policy", "category": "Operational", "required": True, "review_period_months": 12},
     
-    # Governance Policies - HR & Regulatory
-    {"name": "Recruitment & Selection Policy", "category": "Governance"},
-    {"name": "DBS & Vetting Policy", "category": "Governance"},
-    {"name": "Induction & Probation Policy", "category": "Governance"},
-    {"name": "Training & Development Policy", "category": "Governance"},
-    {"name": "Supervision & Appraisal Policy", "category": "Governance"},
-    {"name": "Disciplinary & Grievance Policy", "category": "Governance"},
-    {"name": "Data Protection & GDPR Policy", "category": "Governance"},
-    {"name": "Code of Conduct", "category": "Governance"},
+    # Governance Policies - HR & Regulatory (REQUIRED)
+    {"name": "Recruitment & Selection Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "DBS & Vetting Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "Induction & Probation Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "Training & Development Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "Supervision & Appraisal Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "Disciplinary & Grievance Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "Data Protection & GDPR Policy", "category": "Governance", "required": True, "review_period_months": 12},
+    {"name": "Code of Conduct", "category": "Governance", "required": True, "review_period_months": 12},
 ]
 
 @api_router.post("/compliance/seed-policies")
 async def seed_org_policies(user: dict = Depends(require_admin)):
-    """Seed core organisation policies as placeholders"""
+    """Seed core organisation policies as placeholders with review tracking"""
     now = datetime.now(timezone.utc).isoformat()
     created = 0
     
@@ -11848,11 +12083,15 @@ async def seed_org_policies(user: dict = Depends(require_admin)):
                 "category": policy["category"],
                 "version": "v1.0",
                 "status": "missing",
+                "required": policy.get("required", True),
+                "conditional": policy.get("conditional", False),
+                "review_period_months": policy.get("review_period_months", 12),
                 "file_url": None,
                 "original_filename": None,
-                "review_date": None,
+                "review_date": None,  # Next review due date
                 "last_reviewed_at": None,
                 "reviewed_by": None,
+                "assigned_staff_count": 0,
                 "notes": None,
                 "created_at": now,
                 "updated_at": now,
@@ -11869,7 +12108,7 @@ async def get_org_policies(
     status: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
-    """Get all organisation policies"""
+    """Get all organisation policies with review status tracking"""
     query = {}
     if category:
         query["category"] = category
@@ -11878,9 +12117,28 @@ async def get_org_policies(
     
     policies = await db.org_policies.find(query, {"_id": 0}).sort("category", 1).to_list(100)
     
-    # Check for expired policies based on review date
+    # Compute review status based on review date and last reviewed
     now = datetime.now(timezone.utc)
+    thirty_days = timedelta(days=30)
+    
+    # Get assignment counts per policy
+    assignments_pipeline = [
+        {"$match": {"status": {"$ne": "removed"}}},
+        {"$group": {"_id": "$policy_id", "count": {"$sum": 1}}}
+    ]
+    assignment_counts = {}
+    try:
+        assignments = await db.policy_assignments.aggregate(assignments_pipeline).to_list(1000)
+        for a in assignments:
+            assignment_counts[a["_id"]] = a["count"]
+    except Exception:
+        pass
+    
     for policy in policies:
+        # Update assigned staff count
+        policy["assigned_staff_count"] = assignment_counts.get(policy["id"], 0)
+        
+        # Determine review status
         if policy.get("review_date"):
             try:
                 review_str = policy["review_date"]
@@ -11890,11 +12148,19 @@ async def get_org_policies(
                     review_date = datetime.fromisoformat(review_str.replace('Z', '+00:00'))
                 else:
                     review_date = datetime.fromisoformat(f"{review_str}T00:00:00+00:00")
-                    
-                if review_date < now and policy["status"] == "active":
-                    policy["status"] = "expired"
+                
+                if review_date < now:
+                    policy["review_status"] = "overdue"
+                    if policy["status"] == "active":
+                        policy["status"] = "expired"
+                elif review_date < now + thirty_days:
+                    policy["review_status"] = "due_soon"
+                else:
+                    policy["review_status"] = "current"
             except Exception:
-                pass  # Keep current status if date parsing fails
+                policy["review_status"] = None
+        else:
+            policy["review_status"] = None if policy["status"] == "missing" else "current"
     
     return policies
 
@@ -11974,7 +12240,32 @@ async def update_org_policy(
 
 # ==================== COMPLIANCE CENTRE - INSURANCE ====================
 
-# Insurance & Certificates required for care agency compliance
+# Insurance & Certificates required for care agency compliance (CQC aligned)
+# Structure: Required certificates are mandatory, Conditional depend on service type
+COMPLIANCE_CERTIFICATES = [
+    # REQUIRED - Insurance
+    {"name": "Public Liability Insurance", "type": "public_liability", "category": "insurance", "required": True, "renewal_period_months": 12},
+    {"name": "Employer's Liability Insurance", "type": "employers_liability", "category": "insurance", "required": True, "renewal_period_months": 12},
+    {"name": "Professional Indemnity Insurance", "type": "professional_indemnity", "category": "insurance", "required": True, "renewal_period_months": 12},
+    
+    # REQUIRED - Regulatory Certificates
+    {"name": "CQC Registration Certificate", "type": "cqc_registration", "category": "regulatory", "required": True, "renewal_period_months": 0},  # No renewal - perpetual until canceled
+    {"name": "ICO Registration Certificate", "type": "ico_registration", "category": "regulatory", "required": True, "renewal_period_months": 12},
+    {"name": "Company Registration Certificate", "type": "company_registration", "category": "regulatory", "required": True, "renewal_period_months": 0},
+    
+    # REQUIRED - Safety Certificates
+    {"name": "Fire Safety Certificate", "type": "fire_safety", "category": "safety", "required": True, "renewal_period_months": 12},
+    {"name": "Electrical Installation Certificate (EICR)", "type": "electrical_inspection", "category": "safety", "required": True, "renewal_period_months": 60},  # 5 years
+    {"name": "Gas Safety Certificate", "type": "gas_safety", "category": "safety", "required": True, "renewal_period_months": 12},
+    {"name": "PAT Testing Certificate", "type": "pat_testing", "category": "safety", "required": True, "renewal_period_months": 12},
+    
+    # CONDITIONAL - Based on service type
+    {"name": "Legionella Risk Assessment", "type": "legionella", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 24},
+    {"name": "Food Hygiene Rating Certificate", "type": "food_hygiene", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 12},
+    {"name": "Asbestos Survey Report", "type": "asbestos_survey", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 0},
+]
+
+# Legacy compatibility - keep old list for backward compatibility
 INSURANCE_TYPES = [
     {"name": "Public Liability Insurance", "type": "public_liability"},
     {"name": "Employer's Liability Insurance", "type": "employers_liability"},
@@ -11986,21 +12277,26 @@ INSURANCE_TYPES = [
 
 @api_router.post("/compliance/seed-insurance")
 async def seed_insurance_docs(user: dict = Depends(require_admin)):
-    """Seed insurance document placeholders"""
+    """Seed insurance and certificate document placeholders (CQC aligned)"""
     now = datetime.now(timezone.utc).isoformat()
     created = 0
     
-    for ins in INSURANCE_TYPES:
-        existing = await db.insurance_docs.find_one({"insurance_type": ins["type"]})
+    for cert in COMPLIANCE_CERTIFICATES:
+        existing = await db.insurance_docs.find_one({"insurance_type": cert["type"]})
         if not existing:
             doc = {
                 "id": str(uuid.uuid4()),
-                "name": ins["name"],
-                "insurance_type": ins["type"],
+                "name": cert["name"],
+                "insurance_type": cert["type"],
+                "category": cert.get("category", "insurance"),
+                "required": cert.get("required", True),
+                "conditional": cert.get("conditional", False),
+                "renewal_period_months": cert.get("renewal_period_months", 12),
                 "status": "missing",
                 "file_url": None,
                 "original_filename": None,
                 "expiry_date": None,
+                "issue_date": None,
                 "policy_number": None,
                 "provider": None,
                 "notes": None,
@@ -12010,7 +12306,7 @@ async def seed_insurance_docs(user: dict = Depends(require_admin)):
             await db.insurance_docs.insert_one(doc)
             created += 1
     
-    return {"message": f"Created {created} insurance placeholders", "total": len(INSURANCE_TYPES)}
+    return {"message": f"Created {created} certificate placeholders", "total": len(COMPLIANCE_CERTIFICATES)}
 
 @api_router.get("/compliance/insurance", response_model=List[InsuranceDocResponse])
 async def get_insurance_docs(user: dict = Depends(get_current_user)):

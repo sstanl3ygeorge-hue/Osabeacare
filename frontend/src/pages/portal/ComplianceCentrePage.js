@@ -16,7 +16,7 @@ import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
   RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
-  Edit, History, Save
+  Edit, History, Save, BookOpen
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -29,6 +29,7 @@ export default function ComplianceCentrePage() {
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'policies');
   const [loading, setLoading] = useState(true);
   const [dashboard, setDashboard] = useState(null);
+  const [centreSummary, setCentreSummary] = useState(null);
   const [policies, setPolicies] = useState([]);
   const [insurance, setInsurance] = useState([]);
   const [incidents, setIncidents] = useState([]);
@@ -148,8 +149,9 @@ export default function ComplianceCentrePage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [dashRes, policiesRes, insuranceRes, incidentsRes, employeesRes, assignmentsRes] = await Promise.all([
+      const [dashRes, summaryRes, policiesRes, insuranceRes, incidentsRes, employeesRes, assignmentsRes] = await Promise.all([
         axios.get(`${API}/compliance/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/compliance/centre-summary`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/policies`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/insurance`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/incidents`, { headers: { Authorization: `Bearer ${token}` } }),
@@ -158,6 +160,7 @@ export default function ComplianceCentrePage() {
       ]);
       
       setDashboard(dashRes.data);
+      setCentreSummary(summaryRes.data);
       setPolicies(policiesRes.data);
       setInsurance(insuranceRes.data);
       setIncidents(incidentsRes.data);
@@ -523,68 +526,203 @@ export default function ComplianceCentrePage() {
         )}
       </div>
 
-      {/* Dashboard Summary */}
-      {dashboard && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="border-[#E4E8EB] shadow-sm">
+      {/* CQC Compliance Summary */}
+      {centreSummary && (
+        <div className="space-y-4">
+          {/* Overall Status Banner */}
+          <Card className={`border-l-4 shadow-sm ${
+            centreSummary.overall_status === 'OK' 
+              ? 'border-l-success bg-success/5' 
+              : centreSummary.overall_status === 'Critical'
+              ? 'border-l-error bg-error/5'
+              : 'border-l-warning bg-warning/5'
+          }`}>
             <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${dashboard.policies.missing > 0 ? 'bg-error/10' : 'bg-success/10'}`}>
-                  <FileText className={`h-5 w-5 ${dashboard.policies.missing > 0 ? 'text-error' : 'text-success'}`} />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-text-primary">
-                    {dashboard.policies.active}/{dashboard.policies.total}
-                  </p>
-                  <p className="text-xs text-text-muted">Policies Active</p>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {centreSummary.overall_status === 'OK' ? (
+                    <CheckCircle className="h-8 w-8 text-success" />
+                  ) : centreSummary.overall_status === 'Critical' ? (
+                    <XCircle className="h-8 w-8 text-error" />
+                  ) : (
+                    <AlertTriangle className="h-8 w-8 text-warning" />
+                  )}
+                  <div>
+                    <h2 className="font-heading text-lg font-bold">
+                      {centreSummary.overall_status === 'OK' 
+                        ? 'CQC Compliance: All Clear' 
+                        : centreSummary.overall_status === 'Critical'
+                        ? 'CQC Compliance: Critical Issues'
+                        : 'CQC Compliance: Needs Attention'}
+                    </h2>
+                    <p className="text-sm text-text-muted">
+                      {centreSummary.overall_status === 'OK' 
+                        ? 'All required policies and certificates are in place'
+                        : `${centreSummary.missing_items.required_policies.length + centreSummary.missing_items.required_certificates.length} required items missing`}
+                    </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
           </Card>
           
-          <Card className="border-[#E4E8EB] shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${dashboard.insurance.missing > 0 || dashboard.insurance.expired > 0 ? 'bg-error/10' : 'bg-success/10'}`}>
-                  <Shield className={`h-5 w-5 ${dashboard.insurance.missing > 0 || dashboard.insurance.expired > 0 ? 'text-error' : 'text-success'}`} />
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Policies */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    centreSummary.policies.missing === 0 ? 'bg-success/10' : 'bg-error/10'
+                  }`}>
+                    <FileText className={`h-5 w-5 ${
+                      centreSummary.policies.missing === 0 ? 'text-success' : 'text-error'
+                    }`} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-text-primary">
+                      {centreSummary.policies.complete}/{centreSummary.policies.total}
+                    </p>
+                    <p className="text-xs text-text-muted">Policies Active</p>
+                    {centreSummary.policies.overdue > 0 && (
+                      <p className="text-[10px] text-error font-medium">{centreSummary.policies.overdue} overdue review</p>
+                    )}
+                    {centreSummary.policies.due_soon > 0 && centreSummary.policies.overdue === 0 && (
+                      <p className="text-[10px] text-warning font-medium">{centreSummary.policies.due_soon} due for review</p>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-bold text-text-primary">
-                    {dashboard.insurance.valid}/{dashboard.insurance.total}
-                  </p>
-                  <p className="text-xs text-text-muted">Insurance Valid</p>
+              </CardContent>
+            </Card>
+            
+            {/* Certificates */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    centreSummary.certificates.missing === 0 && centreSummary.certificates.expired === 0 
+                      ? 'bg-success/10' 
+                      : 'bg-error/10'
+                  }`}>
+                    <Shield className={`h-5 w-5 ${
+                      centreSummary.certificates.missing === 0 && centreSummary.certificates.expired === 0
+                        ? 'text-success' 
+                        : 'text-error'
+                    }`} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-text-primary">
+                      {centreSummary.certificates.valid}/{centreSummary.certificates.total}
+                    </p>
+                    <p className="text-xs text-text-muted">Certificates Valid</p>
+                    {centreSummary.certificates.expired > 0 && (
+                      <p className="text-[10px] text-error font-medium">{centreSummary.certificates.expired} expired</p>
+                    )}
+                    {centreSummary.certificates.expiring > 0 && centreSummary.certificates.expired === 0 && (
+                      <p className="text-[10px] text-warning font-medium">{centreSummary.certificates.expiring} expiring soon</p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+            
+            {/* Staff Compliance - DBS */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${
+                    centreSummary.staff_compliance.dbs_missing === 0 ? 'bg-success/10' : 'bg-error/10'
+                  }`}>
+                    <Users className={`h-5 w-5 ${
+                      centreSummary.staff_compliance.dbs_missing === 0 ? 'text-success' : 'text-error'
+                    }`} />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-text-primary">
+                      {centreSummary.staff_compliance.dbs_valid}/{centreSummary.staff_compliance.total}
+                    </p>
+                    <p className="text-xs text-text-muted">Staff DBS Valid</p>
+                    {centreSummary.staff_compliance.dbs_missing > 0 && (
+                      <p className="text-[10px] text-error font-medium">{centreSummary.staff_compliance.dbs_missing} missing DBS</p>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            
+            {/* Staff Training */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-info/10">
+                    <BookOpen className="h-5 w-5 text-info" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-text-primary">
+                      {centreSummary.staff_compliance.training_last_12_months}/{centreSummary.staff_compliance.total}
+                    </p>
+                    <p className="text-xs text-text-muted">Training (12 months)</p>
+                    <p className="text-[10px] text-text-muted">Staff with recent training</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
           
-          <Card className="border-[#E4E8EB] shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${dashboard.incidents.open > 0 ? 'bg-warning/10' : 'bg-success/10'}`}>
-                  <AlertCircle className={`h-5 w-5 ${dashboard.incidents.open > 0 ? 'text-warning' : 'text-success'}`} />
+          {/* Missing Required Items Panel */}
+          {(centreSummary.missing_items.required_policies.length > 0 || 
+            centreSummary.missing_items.required_certificates.length > 0) && (
+            <Card className="border-error/30 bg-error/5 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="font-heading text-base text-error flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Required Items Missing
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid md:grid-cols-2 gap-4">
+                  {centreSummary.missing_items.required_policies.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-sm mb-2">Policies</h4>
+                      <ul className="space-y-1">
+                        {centreSummary.missing_items.required_policies.slice(0, 5).map((item, idx) => (
+                          <li key={idx} className="text-sm flex items-center gap-2">
+                            <XCircle className="h-3 w-3 text-error flex-shrink-0" />
+                            <span>{item.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-error/20 text-error rounded">REQUIRED</span>
+                          </li>
+                        ))}
+                        {centreSummary.missing_items.required_policies.length > 5 && (
+                          <li className="text-xs text-text-muted">
+                            +{centreSummary.missing_items.required_policies.length - 5} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                  {centreSummary.missing_items.required_certificates.length > 0 && (
+                    <div>
+                      <h4 className="font-medium text-sm mb-2">Certificates</h4>
+                      <ul className="space-y-1">
+                        {centreSummary.missing_items.required_certificates.slice(0, 5).map((item, idx) => (
+                          <li key={idx} className="text-sm flex items-center gap-2">
+                            <XCircle className="h-3 w-3 text-error flex-shrink-0" />
+                            <span>{item.name}</span>
+                            <span className="text-[10px] px-1.5 py-0.5 bg-error/20 text-error rounded">REQUIRED</span>
+                          </li>
+                        ))}
+                        {centreSummary.missing_items.required_certificates.length > 5 && (
+                          <li className="text-xs text-text-muted">
+                            +{centreSummary.missing_items.required_certificates.length - 5} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p className="text-2xl font-bold text-text-primary">{dashboard.incidents.open}</p>
-                  <p className="text-xs text-text-muted">Open Incidents</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card className="border-[#E4E8EB] shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-primary/10">
-                  <Users className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-text-primary">{dashboard.staff.active}</p>
-                  <p className="text-xs text-text-muted">Active Staff</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
 
@@ -595,9 +733,13 @@ export default function ComplianceCentrePage() {
             <FileText className="h-4 w-4 mr-2" />
             Policies
           </TabsTrigger>
-          <TabsTrigger value="insurance" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-insurance">
+          <TabsTrigger value="certificates" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-certificates">
             <Shield className="h-4 w-4 mr-2" />
-            Insurance & Certificates
+            Certificates
+          </TabsTrigger>
+          <TabsTrigger value="staff" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-staff">
+            <Users className="h-4 w-4 mr-2" />
+            Staff Compliance
           </TabsTrigger>
           <TabsTrigger value="incidents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white" data-testid="tab-incidents">
             <AlertCircle className="h-4 w-4 mr-2" />
@@ -681,7 +823,13 @@ export default function ComplianceCentrePage() {
                           {categoryPolicies.map((policy) => (
                             <div 
                               key={policy.id}
-                              className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] hover:border-primary/30 transition-colors"
+                              className={`flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border transition-colors ${
+                                policy.review_status === 'overdue' 
+                                  ? 'border-error/50 bg-error/5' 
+                                  : policy.review_status === 'due_soon'
+                                  ? 'border-warning/50 bg-warning/5'
+                                  : 'border-[#E4E8EB] hover:border-primary/30'
+                              }`}
                               data-testid={`policy-${policy.id}`}
                             >
                               <div className="flex items-center gap-4">
@@ -689,19 +837,52 @@ export default function ComplianceCentrePage() {
                                   <FileText className={`h-5 w-5 ${policy.status === 'active' ? 'text-success' : 'text-error'}`} />
                                 </div>
                                 <div>
-                                  <p className="font-medium text-text-primary">{policy.name}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-text-primary">{policy.name}</p>
+                                    {/* Required/Conditional Tags */}
+                                    {policy.required !== false && (
+                                      <span className="text-[9px] px-1.5 py-0.5 bg-error/20 text-error rounded font-medium">
+                                        REQUIRED
+                                      </span>
+                                    )}
+                                    {policy.conditional && (
+                                      <span className="text-[9px] px-1.5 py-0.5 bg-warning/20 text-warning rounded font-medium">
+                                        CONDITIONAL
+                                      </span>
+                                    )}
+                                    {/* Review Status */}
+                                    {policy.review_status === 'overdue' && (
+                                      <span className="text-[9px] px-1.5 py-0.5 bg-error text-white rounded font-medium">
+                                        REVIEW OVERDUE
+                                      </span>
+                                    )}
+                                    {policy.review_status === 'due_soon' && (
+                                      <span className="text-[9px] px-1.5 py-0.5 bg-warning text-white rounded font-medium">
+                                        REVIEW DUE
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
                                     <span>Version: {policy.version}</span>
                                     {policy.review_date && (
-                                      <span className="flex items-center gap-1">
+                                      <span className={`flex items-center gap-1 ${
+                                        policy.review_status === 'overdue' ? 'text-error' : 
+                                        policy.review_status === 'due_soon' ? 'text-warning' : ''
+                                      }`}>
                                         <Calendar className="h-3 w-3" />
-                                        Review: {new Date(policy.review_date).toLocaleDateString()}
+                                        Next review: {new Date(policy.review_date).toLocaleDateString()}
                                       </span>
                                     )}
                                     {policy.last_reviewed_at && (
+                                      <span className="flex items-center gap-1 text-success">
+                                        <CheckCircle className="h-3 w-3" />
+                                        Last: {new Date(policy.last_reviewed_at).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    {policy.assigned_staff_count > 0 && (
                                       <span className="flex items-center gap-1">
-                                        <CheckCircle className="h-3 w-3 text-success" />
-                                        Last reviewed: {new Date(policy.last_reviewed_at).toLocaleDateString()}
+                                        <Users className="h-3 w-3" />
+                                        {policy.assigned_staff_count} assigned
                                       </span>
                                     )}
                                   </div>
@@ -833,14 +1014,17 @@ export default function ComplianceCentrePage() {
           </Card>
         </TabsContent>
 
-        {/* Insurance Tab */}
-        <TabsContent value="insurance">
+        {/* Certificates Tab (formerly Insurance) */}
+        <TabsContent value="certificates">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="font-heading text-lg">Insurance & Certificates</CardTitle>
+                <CardTitle className="font-heading text-lg">Compliance Certificates</CardTitle>
                 <p className="text-sm text-text-muted mt-1">
-                  {insurance.filter(i => i.status === 'valid').length} of {insurance.length} documents valid
+                  Insurance, regulatory, and safety certificates required for CQC compliance
+                </p>
+                <p className="text-xs text-text-muted mt-1">
+                  {insurance.filter(i => i.status === 'valid').length} of {insurance.length} certificates valid
                 </p>
               </div>
               {insurance.some(i => i.status === 'missing' || i.status === 'expired') && (
@@ -854,119 +1038,356 @@ export default function ComplianceCentrePage() {
               {insurance.length === 0 ? (
                 <div className="text-center py-12">
                   <Shield className="h-12 w-12 mx-auto text-text-muted/50 mb-3" />
-                  <p className="text-text-muted">No insurance documents configured</p>
+                  <p className="text-text-muted">No certificates configured</p>
+                  {isAdmin() && (
+                    <Button 
+                      onClick={async () => {
+                        try {
+                          await axios.post(`${API}/compliance/seed-insurance`, {}, {
+                            headers: { Authorization: `Bearer ${token}` }
+                          });
+                          toast.success('Certificate types initialized');
+                          fetchData();
+                        } catch (error) {
+                          toast.error('Failed to initialize certificates');
+                        }
+                      }} 
+                      className="mt-4 rounded-xl"
+                    >
+                      Initialize Certificates
+                    </Button>
+                  )}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {insurance.map((ins) => (
-                    <div 
-                      key={ins.id}
-                      className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] hover:border-primary/30 transition-colors"
-                      data-testid={`insurance-${ins.id}`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`p-2 rounded-lg ${ins.status === 'valid' ? 'bg-success/10' : ins.status === 'expiring_soon' ? 'bg-warning/10' : 'bg-error/10'}`}>
-                          <Shield className={`h-5 w-5 ${ins.status === 'valid' ? 'text-success' : ins.status === 'expiring_soon' ? 'text-warning' : 'text-error'}`} />
+                <div className="space-y-6">
+                  {/* Group by category */}
+                  {['insurance', 'regulatory', 'safety'].map((category) => {
+                    const categoryItems = insurance.filter(i => (i.category || 'insurance') === category);
+                    if (categoryItems.length === 0) return null;
+                    
+                    const categoryNames = {
+                      'insurance': 'Insurance',
+                      'regulatory': 'Regulatory Certificates',
+                      'safety': 'Safety Certificates'
+                    };
+                    
+                    const categoryColors = {
+                      'insurance': 'bg-info',
+                      'regulatory': 'bg-primary',
+                      'safety': 'bg-warning'
+                    };
+                    
+                    return (
+                      <div key={category}>
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className={`w-1 h-6 rounded-full ${categoryColors[category]}`}></div>
+                          <h3 className="font-semibold text-text-primary">{categoryNames[category]}</h3>
+                          <span className="text-xs text-text-muted">
+                            {categoryItems.filter(i => i.status === 'valid').length}/{categoryItems.length} valid
+                          </span>
                         </div>
-                        <div>
-                          <p className="font-medium text-text-primary">{ins.name}</p>
-                          <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
-                            {ins.provider && <span>Provider: {ins.provider}</span>}
-                            {ins.policy_number && <span>Policy #: {ins.policy_number}</span>}
-                            {ins.expiry_date && (
-                              <span className="flex items-center gap-1">
-                                <Calendar className="h-3 w-3" />
-                                Expires: {new Date(ins.expiry_date).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
+                        <div className="space-y-2 ml-4">
+                          {categoryItems.map((cert) => (
+                            <div 
+                              key={cert.id}
+                              className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${
+                                cert.status === 'expired' 
+                                  ? 'bg-error/5 border-error/30' 
+                                  : cert.status === 'expiring_soon'
+                                  ? 'bg-warning/5 border-warning/30'
+                                  : 'bg-[#F8FAFA] border-[#E4E8EB] hover:border-primary/30'
+                              }`}
+                              data-testid={`certificate-${cert.id}`}
+                            >
+                              <div className="flex items-center gap-4">
+                                <div className={`p-2 rounded-lg ${
+                                  cert.status === 'valid' ? 'bg-success/10' : 
+                                  cert.status === 'expiring_soon' ? 'bg-warning/10' : 'bg-error/10'
+                                }`}>
+                                  <Shield className={`h-5 w-5 ${
+                                    cert.status === 'valid' ? 'text-success' : 
+                                    cert.status === 'expiring_soon' ? 'text-warning' : 'text-error'
+                                  }`} />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-text-primary">{cert.name}</p>
+                                    {cert.required !== false && (
+                                      <span className="text-[9px] px-1.5 py-0.5 bg-error/20 text-error rounded font-medium">
+                                        REQUIRED
+                                      </span>
+                                    )}
+                                    {cert.conditional && (
+                                      <span className="text-[9px] px-1.5 py-0.5 bg-warning/20 text-warning rounded font-medium">
+                                        CONDITIONAL
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-3 text-xs text-text-muted mt-1">
+                                    {cert.provider && <span>Provider: {cert.provider}</span>}
+                                    {cert.policy_number && <span>Ref #: {cert.policy_number}</span>}
+                                    {cert.issue_date && (
+                                      <span className="flex items-center gap-1">
+                                        Issued: {new Date(cert.issue_date).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    {cert.expiry_date && (
+                                      <span className={`flex items-center gap-1 ${
+                                        cert.status === 'expired' ? 'text-error font-medium' :
+                                        cert.status === 'expiring_soon' ? 'text-warning font-medium' : ''
+                                      }`}>
+                                        <Calendar className="h-3 w-3" />
+                                        {cert.status === 'expired' ? 'Expired: ' : 'Expires: '}
+                                        {new Date(cert.expiry_date).toLocaleDateString()}
+                                      </span>
+                                    )}
+                                    {cert.renewal_period_months && cert.renewal_period_months > 0 && (
+                                      <span className="text-text-muted/70">
+                                        Renews: {cert.renewal_period_months === 12 ? 'Annually' : 
+                                                 cert.renewal_period_months === 60 ? 'Every 5 years' :
+                                                 `Every ${cert.renewal_period_months} months`}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-3">
+                                {getStatusBadge(cert.status)}
+                                
+                                {cert.file_url ? (
+                                  <div className="flex items-center gap-2">
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm"
+                                      className="rounded-lg"
+                                      onClick={() => handleViewDocument('insurance', cert.id, cert.name, cert.original_filename)}
+                                      data-testid={`view-certificate-${cert.id}`}
+                                    >
+                                      <Eye className="h-4 w-4 mr-1" />
+                                      View
+                                    </Button>
+                                    {isAdmin() && (
+                                      <>
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm"
+                                          className="rounded-lg"
+                                          onClick={() => openAmendDialog('insurance', cert)}
+                                        >
+                                          <Edit className="h-4 w-4 mr-1" />
+                                          Amend
+                                        </Button>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm"
+                                          className="rounded-lg text-text-muted"
+                                          onClick={() => loadHistory('insurance', cert.id)}
+                                          title="View history"
+                                        >
+                                          <History className="h-4 w-4" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                ) : isAdmin() && (
+                                  <Button 
+                                    size="sm"
+                                    className="bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                    onClick={() => {
+                                      setSelectedPolicy(null);
+                                      setSelectedInsurance(cert);
+                                      setUploadDialogOpen(true);
+                                    }}
+                                    data-testid={`upload-certificate-${cert.id}`}
+                                  >
+                                    <Upload className="h-4 w-4 mr-1" />
+                                    Upload
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                      
-                      <div className="flex items-center gap-3">
-                        {getStatusBadge(ins.status)}
-                        
-                        {ins.file_url ? (
-                          <div className="flex items-center gap-2">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="rounded-lg"
-                              onClick={() => handleViewDocument('insurance', ins.id, ins.name, ins.original_filename)}
-                              data-testid={`view-insurance-${ins.id}`}
-                            >
-                              <Eye className="h-4 w-4 mr-1" />
-                              View
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              className="rounded-lg"
-                              onClick={() => handleDownloadDocument('insurance', ins.id, ins.original_filename || `${ins.name}.pdf`)}
-                              data-testid={`download-insurance-${ins.id}`}
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              Download
-                            </Button>
-                            {isAdmin() && (
-                              <>
-                                <Button 
-                                  size="sm"
-                                  variant="outline"
-                                  className="rounded-lg"
-                                  onClick={() => openAmendDialog('insurance', ins)}
-                                  data-testid={`edit-insurance-${ins.id}`}
-                                >
-                                  <Edit className="h-4 w-4 mr-1" />
-                                  Edit
-                                </Button>
-                                <Button 
-                                  size="sm"
-                                  variant="ghost"
-                                  className="rounded-lg text-text-muted hover:text-text-primary"
-                                  onClick={() => loadHistory('insurance', ins.id)}
-                                  data-testid={`history-insurance-${ins.id}`}
-                                  title="View amendment history"
-                                >
-                                  <History className="h-4 w-4" />
-                                </Button>
-                                <Button 
-                                  size="sm"
-                                  variant="outline"
-                                  className="rounded-lg"
-                                  onClick={() => {
-                                    setSelectedInsurance(ins);
-                                    setSelectedPolicy(null);
-                                    setUploadDialogOpen(true);
-                                  }}
-                                >
-                                  <RefreshCw className="h-4 w-4 mr-1" />
-                                  Replace
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        ) : isAdmin() && (
-                          <Button 
-                            size="sm"
-                            className="bg-primary hover:bg-primary-hover text-white rounded-lg"
-                            onClick={() => {
-                              setSelectedInsurance(ins);
-                              setSelectedPolicy(null);
-                              setUploadDialogOpen(true);
-                            }}
-                          >
-                            <Upload className="h-4 w-4 mr-1" />
-                            Upload
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+        
+        {/* Staff Compliance Tab */}
+        <TabsContent value="staff">
+          <div className="space-y-6">
+            {/* Staff Compliance Summary Cards */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {/* DBS Register */}
+              <Card className="border-[#E4E8EB] shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="font-heading text-base flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-primary" />
+                    DBS Register Status
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {centreSummary && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Valid DBS</span>
+                        <span className="font-bold text-success">{centreSummary.staff_compliance.dbs_valid}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Missing DBS</span>
+                        <span className={`font-bold ${centreSummary.staff_compliance.dbs_missing > 0 ? 'text-error' : 'text-success'}`}>
+                          {centreSummary.staff_compliance.dbs_missing}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Expiring Soon</span>
+                        <span className={`font-bold ${centreSummary.staff_compliance.dbs_expiring > 0 ? 'text-warning' : 'text-success'}`}>
+                          {centreSummary.staff_compliance.dbs_expiring}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t">
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-success h-2 rounded-full" 
+                            style={{ 
+                              width: `${centreSummary.staff_compliance.total > 0 
+                                ? (centreSummary.staff_compliance.dbs_valid / centreSummary.staff_compliance.total) * 100 
+                                : 0}%` 
+                            }}
+                          ></div>
+                        </div>
+                        <p className="text-xs text-text-muted mt-1">
+                          {centreSummary.staff_compliance.dbs_valid}/{centreSummary.staff_compliance.total} staff with valid DBS
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              
+              {/* Training Last 12 Months */}
+              <Card className="border-[#E4E8EB] shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="font-heading text-base flex items-center gap-2">
+                    <BookOpen className="h-4 w-4 text-info" />
+                    Training (Last 12 Months)
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {centreSummary && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Staff with Training</span>
+                        <span className="font-bold text-success">{centreSummary.staff_compliance.training_last_12_months}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">No Recent Training</span>
+                        <span className={`font-bold ${
+                          centreSummary.staff_compliance.total - centreSummary.staff_compliance.training_last_12_months > 0 
+                            ? 'text-warning' 
+                            : 'text-success'
+                        }`}>
+                          {centreSummary.staff_compliance.total - centreSummary.staff_compliance.training_last_12_months}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t">
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className="bg-info h-2 rounded-full" 
+                            style={{ 
+                              width: `${centreSummary.staff_compliance.total > 0 
+                                ? (centreSummary.staff_compliance.training_last_12_months / centreSummary.staff_compliance.total) * 100 
+                                : 0}%` 
+                            }}
+                          ></div>
+                        </div>
+                        <p className="text-xs text-text-muted mt-1">
+                          {Math.round((centreSummary.staff_compliance.training_last_12_months / centreSummary.staff_compliance.total) * 100) || 0}% training coverage
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              
+              {/* Staff List Completeness */}
+              <Card className="border-[#E4E8EB] shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="font-heading text-base flex items-center gap-2">
+                    <Users className="h-4 w-4 text-primary" />
+                    Staff List Completeness
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {centreSummary && dashboard && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Total Active Staff</span>
+                        <span className="font-bold">{centreSummary.staff_compliance.total}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Work Ready</span>
+                        <span className="font-bold text-success">{dashboard.staff?.work_ready || 0}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-text-muted">Pending Compliance</span>
+                        <span className={`font-bold ${
+                          (dashboard.staff?.pending_compliance || 0) > 0 ? 'text-warning' : 'text-success'
+                        }`}>
+                          {dashboard.staff?.pending_compliance || (centreSummary.staff_compliance.total - (dashboard.staff?.work_ready || 0))}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full rounded-lg"
+                          onClick={() => window.location.href = '/portal/employees'}
+                        >
+                          View All Staff
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+            
+            {/* Staff with Issues Alert */}
+            {centreSummary && (centreSummary.staff_compliance.dbs_missing > 0 || centreSummary.staff_compliance.dbs_expiring > 0) && (
+              <Card className="border-warning/30 bg-warning/5 shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="font-heading text-base text-warning flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    Staff Requiring Attention
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-text-muted">
+                    {centreSummary.staff_compliance.dbs_missing > 0 && (
+                      <span className="text-error">{centreSummary.staff_compliance.dbs_missing} staff missing DBS checks. </span>
+                    )}
+                    {centreSummary.staff_compliance.dbs_expiring > 0 && (
+                      <span className="text-warning">{centreSummary.staff_compliance.dbs_expiring} DBS checks expiring within 30 days.</span>
+                    )}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 rounded-lg"
+                    onClick={() => window.location.href = '/portal/employees?filter=dbs_issues'}
+                  >
+                    Review Staff
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
         </TabsContent>
 
         {/* Incidents Tab */}

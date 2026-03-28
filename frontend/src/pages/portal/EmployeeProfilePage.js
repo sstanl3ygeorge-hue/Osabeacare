@@ -2380,67 +2380,63 @@ export default function EmployeeProfilePage() {
               )}
             </CardHeader>
             <CardContent>
-              {/* WORK READINESS ALERT PANEL */}
-              {complianceRequirements?.work_readiness && (
+              {/* START STATUS ALERT PANEL - Using new statuses model */}
+              {complianceRequirements?.statuses?.start_status && (
                 <div className={`mb-6 p-4 rounded-xl border ${
-                  complianceRequirements.work_readiness.is_fully_compliant ? 'bg-green-50 border-green-200' :
-                  complianceRequirements.work_readiness.is_work_ready ? 'bg-emerald-50 border-emerald-200' :
-                  complianceRequirements.work_readiness.status === 'almost_ready' ? 'bg-amber-50 border-amber-200' :
+                  complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'bg-green-50 border-green-200' :
+                  complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'bg-amber-50 border-amber-200' :
                   'bg-red-50 border-red-200'
                 }`}>
                   <div className="flex items-start gap-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      complianceRequirements.work_readiness.is_fully_compliant ? 'bg-green-100' :
-                      complianceRequirements.work_readiness.is_work_ready ? 'bg-emerald-100' :
-                      complianceRequirements.work_readiness.status === 'almost_ready' ? 'bg-amber-100' :
+                      complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'bg-green-100' :
+                      complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'bg-amber-100' :
                       'bg-red-100'
                     }`}>
-                      {complianceRequirements.work_readiness.is_fully_compliant ? (
-                        <CheckCircle className="h-5 w-5 text-green-600" />
-                      ) : complianceRequirements.work_readiness.is_work_ready ? (
-                        <Shield className="h-5 w-5 text-emerald-600" />
+                      {complianceRequirements.statuses.start_status.status === 'ready_to_work' ? (
+                        <Shield className="h-5 w-5 text-green-600" />
+                      ) : complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? (
+                        <Shield className="h-5 w-5 text-amber-600" />
                       ) : (
                         <AlertTriangle className="h-5 w-5 text-red-600" />
                       )}
                     </div>
                     <div className="flex-1">
                       <h4 className={`font-semibold ${
-                        complianceRequirements.work_readiness.is_fully_compliant ? 'text-green-900' :
-                        complianceRequirements.work_readiness.is_work_ready ? 'text-emerald-900' :
-                        complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-900' :
+                        complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'text-green-900' :
+                        complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-900' :
                         'text-red-900'
                       }`}>
-                        Work Readiness Status: {complianceRequirements.work_readiness.status_label}
+                        Start Status: {complianceRequirements.statuses.start_status.label}
                       </h4>
                       <p className={`text-sm mt-1 ${
-                        complianceRequirements.work_readiness.is_fully_compliant ? 'text-green-800' :
-                        complianceRequirements.work_readiness.is_work_ready ? 'text-emerald-800' :
-                        complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-800' :
+                        complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'text-green-800' :
+                        complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-800' :
                         'text-red-800'
                       }`}>
-                        {complianceRequirements.work_readiness.is_fully_compliant ? (
-                          "All compliance requirements are complete and verified. This employee is fully compliant."
-                        ) : complianceRequirements.work_readiness.is_work_ready ? (
-                          "All mandatory items are verified. This employee can start work."
+                        {complianceRequirements.statuses.start_status.status === 'ready_to_work' ? (
+                          "All legal, safety, and core training requirements are verified. This employee can safely start work."
+                        ) : complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? (
+                          "Legal and safety basics are complete but health/competency items are still incomplete. Employee can start with supervision."
                         ) : (
                           <>
-                            <strong>{complianceRequirements.work_readiness.mandatory?.complete || 0} of {complianceRequirements.work_readiness.mandatory?.total || 0}</strong> required items complete
+                            <strong>{complianceRequirements.statuses.start_status.verified || 0} of {complianceRequirements.statuses.start_status.total || 0}</strong> required items verified
                           </>
                         )}
                       </p>
                       
-                      {/* Missing Mandatory Items */}
-                      {complianceRequirements.work_readiness.mandatory?.missing?.length > 0 && (
+                      {/* Missing Required Items */}
+                      {complianceRequirements.statuses.start_status.missing?.length > 0 && (
                         <div className="mt-3">
                           <p className={`text-sm font-medium ${
-                            complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-900' : 'text-red-900'
+                            complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-900' : 'text-red-900'
                           }`}>
                             Missing items (required to start work):
                           </p>
                           <ul className={`mt-1 space-y-1 text-sm ${
-                            complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-800' : 'text-red-800'
+                            complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-800' : 'text-red-800'
                           }`}>
-                            {complianceRequirements.work_readiness.mandatory.missing.map((item, idx) => (
+                            {complianceRequirements.statuses.start_status.missing.map((item, idx) => (
                               <li key={idx} className="flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
                                 {item.name}
@@ -2450,23 +2446,23 @@ export default function EmployeeProfilePage() {
                         </div>
                       )}
 
-                      {/* Weighted Score */}
+                      {/* Overall Compliance Score */}
                       <div className="mt-3 flex items-center gap-3">
                         <div className={`text-sm font-medium ${
-                          complianceRequirements.work_readiness.weighted_score >= 80 ? 'text-green-700' :
-                          complianceRequirements.work_readiness.weighted_score >= 50 ? 'text-amber-700' :
+                          (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 80 ? 'text-green-700' :
+                          (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 50 ? 'text-amber-700' :
                           'text-red-700'
                         }`}>
-                          Compliance Score: {complianceRequirements.work_readiness.weighted_score}%
+                          Overall Compliance: {complianceRequirements.statuses.overall_compliance?.percentage || 0}%
                         </div>
                         <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div 
                             className={`h-full rounded-full transition-all ${
-                              complianceRequirements.work_readiness.weighted_score >= 80 ? 'bg-green-500' :
-                              complianceRequirements.work_readiness.weighted_score >= 50 ? 'bg-amber-500' :
+                              (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 80 ? 'bg-green-500' :
+                              (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 50 ? 'bg-amber-500' :
                               'bg-red-500'
                             }`}
-                            style={{ width: `${complianceRequirements.work_readiness.weighted_score}%` }}
+                            style={{ width: `${complianceRequirements.statuses.overall_compliance?.percentage || 0}%` }}
                           />
                         </div>
                       </div>
@@ -2479,7 +2475,7 @@ export default function EmployeeProfilePage() {
               <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl">
                 <h3 className="font-semibold text-blue-900 mb-2">Complete Required Items First</h3>
                 <p className="text-sm text-blue-800 mb-3">
-                  Items marked with <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">🔴 Required</span> must be completed and verified before the employee can start work.
+                  Items marked with <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">Required</span> must be completed and verified before the employee can start work.
                 </p>
                 <div className="text-sm text-blue-700 space-y-1">
                   <p className="font-medium">Priority guide:</p>
@@ -2490,10 +2486,14 @@ export default function EmployeeProfilePage() {
                     </li>
                     <li className="flex items-center gap-2">
                       <span className="inline-block w-3 h-3 rounded-full bg-orange-500"></span>
-                      <span><strong>Required Soon</strong> — Complete within first 2 weeks</span>
+                      <span><strong>Supervised Start / Health</strong> — Required for supervised work</span>
                     </li>
                     <li className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full bg-yellow-500"></span>
+                      <span className="inline-block w-3 h-3 rounded-full bg-blue-500"></span>
+                      <span><strong>Recruitment File</strong> — Pre-employment record</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 rounded-full bg-gray-400"></span>
                       <span><strong>Complete After Start</strong> — For full compliance</span>
                     </li>
                   </ul>
@@ -2692,16 +2692,22 @@ export default function EmployeeProfilePage() {
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {/* PRIORITY BADGE - Shows work readiness priority */}
-                                    {req.priority === 'mandatory' && (
+                                    {req.priority === 'start_required' && (
                                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex items-center gap-1">
                                         <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
                                         Required
                                       </span>
                                     )}
-                                    {req.priority === 'required_soon' && (
+                                    {req.priority === 'supervised_start' && (
                                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium flex items-center gap-1">
                                         <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
-                                        Soon
+                                        Health
+                                      </span>
+                                    )}
+                                    {req.priority === 'recruitment' && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                        Recruitment
                                       </span>
                                     )}
                                     <p className="font-medium text-text-primary">{req.name}</p>
@@ -2720,14 +2726,14 @@ export default function EmployeeProfilePage() {
                                   </div>
                                   
                                   {/* WORK READY HINT - Shows when item blocks work */}
-                                  {req.is_mandatory_for_work && !isVerified && (
+                                  {(req.priority === 'start_required' || req.is_mandatory_for_work) && !isVerified && (
                                     <p className="text-[10px] text-red-600 font-medium mt-0.5">
-                                      ⚠ Required before employee can start work
+                                      Required before employee can start work
                                     </p>
                                   )}
                                   
                                   {/* MICROCOPY HELPER TEXT - Shows guidance for each requirement */}
-                                  {helpText && !hasEvidence && !req.is_mandatory_for_work && (
+                                  {helpText && !hasEvidence && !(req.priority === 'start_required' || req.is_mandatory_for_work) && (
                                     <p className="text-xs text-text-muted mt-0.5">{helpText}</p>
                                   )}
                                   

@@ -335,22 +335,22 @@ export default function EmployeesPage() {
             </div>
             {/* Work Readiness Filter */}
             <Select value={workReadinessFilter || "all"} onValueChange={(v) => setWorkReadinessFilter(v === "all" ? "" : v)}>
-              <SelectTrigger className="w-full sm:w-44 rounded-xl" data-testid="work-readiness-filter">
+              <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="work-readiness-filter">
                 <Shield className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Work Readiness" />
+                <SelectValue placeholder="Start Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Readiness</SelectItem>
-                <SelectItem value="work_ready">
+                <SelectItem value="all">All Start Status</SelectItem>
+                <SelectItem value="ready_to_work">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-success"></span>
-                    Work Ready
+                    Ready to Work
                   </span>
                 </SelectItem>
-                <SelectItem value="almost_ready">
+                <SelectItem value="supervised_start">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning"></span>
-                    Almost Ready
+                    Supervised Start Only
                   </span>
                 </SelectItem>
                 <SelectItem value="not_ready">
@@ -414,10 +414,10 @@ export default function EmployeesPage() {
                 const filteredEmployees = workReadinessFilter 
                   ? employees.filter(emp => {
                       const status = emp.work_readiness?.status;
-                      if (workReadinessFilter === 'work_ready') {
+                      if (workReadinessFilter === 'ready_to_work') {
                         return status === 'work_ready' || status === 'fully_compliant';
-                      } else if (workReadinessFilter === 'almost_ready') {
-                        return status === 'almost_ready';
+                      } else if (workReadinessFilter === 'supervised_start') {
+                        return status === 'supervised_start' || status === 'almost_ready';
                       } else if (workReadinessFilter === 'not_ready') {
                         return status === 'not_started' || status === 'in_progress' || !status;
                       }
@@ -443,7 +443,7 @@ export default function EmployeesPage() {
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Onboarding Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm">Work Ready</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm">Start Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Compliance</th>
                     {!isAuditor() && <th className="text-left p-4 font-medium text-text-muted text-sm w-16">Actions</th>}
                   </tr>

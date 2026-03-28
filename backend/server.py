@@ -194,12 +194,13 @@ REQUIRED_SOON = {
 MANDATORY_ITEMS = {
     "base": [  # Common to all roles - ordered by work readiness priority
         
-        # ======== MANDATORY: LEGAL (Required to Start Work) ========
+        # ======== CATEGORY 1: LEGAL & SAFETY (Required to Start Work) ========
         {"id": "right_to_work_documents", "name": "Right to Work Documents", 
          "category": "1_Legal_Safety", "type": "document", "source": "employee",
          "document_types": ["visa", "brp", "share_code", "settled_status"],
          "allow_multiple_files": True, "min_files": 1,
-         "priority": "mandatory", "priority_order": 1,
+         "priority": "start_required", "priority_order": 1,
+         "status_group": "start_status",
          "description": "Visa, BRP, share code evidence, settled status proof",
          "work_ready_hint": "Required before employee can start work"},
         
@@ -207,7 +208,8 @@ MANDATORY_ITEMS = {
          "category": "1_Legal_Safety", "type": "document", "source": "internal",
          "document_types": ["rtw_check", "share_code_check"],
          "allow_multiple_files": True,
-         "priority": "mandatory", "priority_order": 2,
+         "priority": "start_required", "priority_order": 2,
+         "status_group": "start_status",
          "description": "Internal RTW verification - share code check result",
          "work_ready_hint": "Required before employee can start work"},
         
@@ -215,16 +217,17 @@ MANDATORY_ITEMS = {
          "category": "1_Legal_Safety", "type": "document", "source": "employee",
          "document_types": ["passport", "driving_licence", "national_id"],
          "allow_multiple_files": True, "min_files": 1,
-         "priority": "mandatory", "priority_order": 3,
+         "priority": "start_required", "priority_order": 3,
+         "status_group": "start_status",
          "description": "Passport, driving licence, or other photo ID",
          "work_ready_hint": "Required before employee can start work"},
         
-        # ======== MANDATORY: SAFETY (Required to Start Work) ========
         {"id": "dbs_certificate", "name": "DBS Certificate", "category": "1_Legal_Safety",
          "type": "document", "source": "employee",
          "document_types": ["dbs", "dbs_certificate"],
          "allow_multiple_files": True,
-         "priority": "mandatory", "priority_order": 4,
+         "priority": "start_required", "priority_order": 4,
+         "status_group": "start_status",
          "description": "DBS certificate from employee",
          "work_ready_hint": "Required before employee can start work"},
         
@@ -232,85 +235,94 @@ MANDATORY_ITEMS = {
          "type": "document", "source": "internal",
          "document_types": ["dbs_check", "dbs_update_service"],
          "allow_multiple_files": True,
-         "priority": "mandatory", "priority_order": 5,
+         "priority": "start_required", "priority_order": 5,
+         "status_group": "start_status",
          "description": "Internal DBS verification - update service check result",
          "work_ready_hint": "Required before employee can start work"},
         
-        # ======== REQUIRED SOON: Additional Training ========
-        # (Core training defined in "training" section below)
+        # ======== CATEGORY 2: CORE TRAINING (Required to Start Work) ========
+        # (Defined in "training" section below)
         
-        # ======== REQUIRED SOON: Role Readiness ========
+        # ======== CATEGORY 3: COMPETENCY & HEALTH (For Supervised Start) ========
         {"id": "health_screening", "name": "Health Screening Questionnaire", 
-         "category": "3_Role_Readiness", "type": "form-generated",
+         "category": "3_Competency_Health", "type": "form-generated",
          "template_name": "Health Screening Questionnaire",
          "allow_multiple_files": True, "source": "form",
-         "priority": "required_soon", "priority_order": 20,
+         "priority": "supervised_start", "priority_order": 20,
+         "status_group": "competency_health",
          "description": "Health questionnaire and medical attachments",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "work_ready_hint": "Required for supervised start"},
         
         {"id": "induction", "name": "Induction & Competency Assessment", 
-         "category": "3_Role_Readiness", "type": "form-generated",
+         "category": "3_Competency_Health", "type": "form-generated",
          "template_name": "Induction & Competency Assessment",
          "allow_multiple_files": True, "source": "internal",
-         "priority": "secondary", "priority_order": 30,
+         "priority": "supervised_start", "priority_order": 21,
+         "status_group": "competency_health",
          "description": "Induction checklist, shadowing records, competency sign-offs",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required for supervised start"},
         
+        # ======== CATEGORY 4: RECRUITMENT RECORD (Pre-employment File) ========
         {"id": "interview_record", "name": "Interview Record", 
-         "category": "3_Role_Readiness", "type": "form-generated",
+         "category": "4_Recruitment_Record", "type": "form-generated",
          "template_name": "Interview Record Form",
          "allow_multiple_files": True, "source": "internal",
-         "priority": "secondary", "priority_order": 31,
+         "priority": "recruitment", "priority_order": 30,
+         "status_group": "recruitment_file",
          "description": "Interview notes, assessment, and supporting documents",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required for complete recruitment file"},
         
-        # ======== REQUIRED SOON: References ========
-        {"id": "reference_1", "name": "Reference 1", "category": "4_Employment",
+        {"id": "reference_1", "name": "Reference 1", "category": "4_Recruitment_Record",
          "type": "document", "source": "employee",
          "document_types": ["reference"],
          "allow_multiple_files": True,
-         "priority": "required_soon", "priority_order": 21,
-         "description": "First reference letter and attachments",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "priority": "recruitment", "priority_order": 31,
+         "status_group": "recruitment_file",
+         "description": "First professional reference - verified and documented",
+         "work_ready_hint": "Important pre-employment check"},
         
-        {"id": "reference_2", "name": "Reference 2", "category": "4_Employment",
+        {"id": "reference_2", "name": "Reference 2", "category": "4_Recruitment_Record",
          "type": "document", "source": "employee",
          "document_types": ["reference"],
          "allow_multiple_files": True,
-         "priority": "required_soon", "priority_order": 22,
-         "description": "Second reference letter and attachments",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "priority": "recruitment", "priority_order": 32,
+         "status_group": "recruitment_file",
+         "description": "Second professional reference - verified and documented",
+         "work_ready_hint": "Important pre-employment check"},
         
-        # ======== SECONDARY: Employment Records ========
         {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", 
-         "category": "4_Employment", "type": "form-generated", 
+         "category": "4_Recruitment_Record", "type": "form-generated", 
          "template_name": "Recruitment Compliance Checklist",
          "allow_multiple_files": True, "source": "internal",
-         "priority": "secondary", "priority_order": 32,
+         "priority": "recruitment", "priority_order": 33,
+         "status_group": "recruitment_file",
          "description": "Internal recruitment tracking checklist",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required for complete recruitment file"},
         
-        {"id": "application_form", "name": "Application Form", "category": "4_Employment", 
+        {"id": "application_form", "name": "Application Form", "category": "4_Recruitment_Record", 
          "type": "form-generated", "template_name": "Application Form", 
          "allow_multiple_files": False, "source": "form",
-         "priority": "secondary", "priority_order": 33,
+         "priority": "recruitment", "priority_order": 34,
+         "status_group": "recruitment_file",
          "description": "Completed application form",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required for complete recruitment file"},
         
-        {"id": "cv", "name": "CV / Resume", "category": "4_Employment", 
+        {"id": "cv", "name": "CV / Resume", "category": "4_Recruitment_Record", 
          "type": "document", "source": "employee",
          "document_types": ["cv", "resume"], 
          "allow_multiple_files": True,
-         "priority": "secondary", "priority_order": 34,
+         "priority": "recruitment", "priority_order": 35,
+         "status_group": "recruitment_file",
          "description": "CV and supporting documents",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required for complete recruitment file"},
         
-        # ======== SECONDARY: Agreements ========
+        # ======== CATEGORY 5: AGREEMENTS ========
         {"id": "contract", "name": "Contract Acknowledgement", 
          "category": "5_Agreements", "type": "form-generated",
          "template_name": "Contract Acknowledgement Form",
          "allow_multiple_files": True, "source": "form",
-         "priority": "secondary", "priority_order": 35,
+         "priority": "secondary", "priority_order": 40,
+         "status_group": "other",
          "description": "Signed contract/offer letter and appendices",
          "work_ready_hint": "Complete after employee starts"},
         
@@ -318,16 +330,18 @@ MANDATORY_ITEMS = {
          "category": "5_Agreements", "type": "form-generated",
          "template_name": "Employee Handbook Acknowledgement",
          "allow_multiple_files": False, "source": "form",
-         "priority": "secondary", "priority_order": 36,
+         "priority": "secondary", "priority_order": 41,
+         "status_group": "other",
          "description": "Signed handbook acknowledgement",
          "work_ready_hint": "Complete after employee starts"},
         
-        # ======== SECONDARY: Admin / Other ========
+        # ======== CATEGORY 6: ADMIN / OTHER ========
         {"id": "personal_info", "name": "Personal Information Form", 
          "category": "6_Admin", "type": "form-generated", 
          "template_name": "Personal Information Form",
          "allow_multiple_files": True, "source": "form",
-         "priority": "secondary", "priority_order": 37,
+         "priority": "secondary", "priority_order": 42,
+         "status_group": "other",
          "description": "Personal details form with supporting docs",
          "work_ready_hint": "Complete after employee starts"},
         
@@ -335,114 +349,149 @@ MANDATORY_ITEMS = {
          "category": "6_Admin", "type": "form-generated",
          "template_name": "Equal Opportunities Monitoring Form",
          "allow_multiple_files": False, "source": "form",
-         "priority": "secondary", "priority_order": 38,
+         "priority": "secondary", "priority_order": 43,
+         "status_group": "other",
          "description": "Diversity monitoring form",
          "work_ready_hint": "Complete after employee starts"},
     ],
     
     "training": [  # Training items with priority
-        # ======== MANDATORY: Core Training (Required to Start Work) ========
+        # ======== CORE TRAINING (Required to Start Work) ========
         {"id": "safeguarding", "name": "Safeguarding Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Safeguarding",
          "allow_multiple_files": True,
-         "priority": "mandatory", "priority_order": 6,
+         "priority": "start_required", "priority_order": 6,
+         "status_group": "start_status",
          "description": "Safeguarding certificate and transcript",
          "work_ready_hint": "Required before employee can start work"},
         
         {"id": "manual_handling", "name": "Manual Handling Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Manual Handling",
          "allow_multiple_files": True,
-         "priority": "mandatory", "priority_order": 7,
+         "priority": "start_required", "priority_order": 7,
+         "status_group": "start_status",
          "description": "Manual handling certificate",
          "work_ready_hint": "Required before employee can start work"},
         
         {"id": "infection_control", "name": "Infection Control Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Infection Control",
          "allow_multiple_files": True,
-         "priority": "mandatory", "priority_order": 8,
+         "priority": "start_required", "priority_order": 8,
+         "status_group": "start_status",
          "description": "Infection control certificate",
          "work_ready_hint": "Required before employee can start work"},
         
-        # ======== REQUIRED SOON: Additional Training ========
+        # ======== ADDITIONAL TRAINING (Supervised Start) ========
         {"id": "bls", "name": "Basic Life Support (BLS)", "category": "2_Core_Training",
          "type": "training", "training_name": "Basic Life Support",
          "allow_multiple_files": True,
-         "priority": "required_soon", "priority_order": 23,
+         "priority": "supervised_start", "priority_order": 22,
+         "status_group": "competency_health",
          "description": "BLS certificate, renewal card",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "work_ready_hint": "Required for supervised start"},
         
         {"id": "fire_safety", "name": "Fire Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Fire Safety",
          "allow_multiple_files": True,
-         "priority": "required_soon", "priority_order": 24,
+         "priority": "secondary", "priority_order": 44,
+         "status_group": "other",
          "description": "Fire safety certificate",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "work_ready_hint": "Complete after employee starts"},
         
         {"id": "health_safety", "name": "Health & Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Health & Safety",
          "allow_multiple_files": True,
-         "priority": "required_soon", "priority_order": 25,
+         "priority": "secondary", "priority_order": 45,
+         "status_group": "other",
          "description": "Health & Safety certificate",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "work_ready_hint": "Complete after employee starts"},
     ],
     
     "nurse_specific": [  # Additional items for Nurses only
-        # ======== MANDATORY for Nurses ========
+        # ======== MANDATORY for Nurses (Required to Start Work) ========
         {"id": "nmc_registration", "name": "NMC Registration", "category": "1_Legal_Safety",
          "type": "document", "source": "employee",
          "document_types": ["nmc_registration", "professional_registration"],
          "allow_multiple_files": True, "min_files": 1,
-         "priority": "mandatory", "priority_order": 9,
+         "priority": "start_required", "priority_order": 9,
+         "status_group": "start_status",
          "description": "NMC PIN card, registration letter",
          "work_ready_hint": "Required before nurse can start work"},
         
+        # ======== NURSE COMPETENCY & HEALTH ========
         {"id": "clinical_competency", "name": "Clinical Competency Evidence", 
-         "category": "2_Core_Training", "type": "document", "source": "employee",
+         "category": "3_Competency_Health", "type": "document", "source": "employee",
          "document_types": ["clinical_competency", "competency_assessment"],
          "allow_multiple_files": True, "min_files": 1,
-         "priority": "required_soon", "priority_order": 26,
+         "priority": "supervised_start", "priority_order": 23,
+         "status_group": "competency_health",
          "description": "Clinical competency assessments, skill sign-offs",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "work_ready_hint": "Required for supervised start"},
         
         {"id": "medication_competency", "name": "Medication Competency", 
-         "category": "2_Core_Training", "type": "training", "training_name": "Medication",
+         "category": "3_Competency_Health", "type": "training", "training_name": "Medication",
          "allow_multiple_files": True,
-         "priority": "required_soon", "priority_order": 27,
+         "priority": "supervised_start", "priority_order": 24,
+         "status_group": "competency_health",
          "description": "Medication administration competency certificate",
-         "work_ready_hint": "Complete within first 2 weeks"},
+         "work_ready_hint": "Required for supervised start"},
     ]
 }
 
 # Priority display configuration
 PRIORITY_CONFIG = {
-    "mandatory": {
+    "start_required": {
         "label": "Required to Start Work",
         "color": "red",
-        "weight": 0.8,  # 80% of score
         "emoji": "🔴"
     },
-    "required_soon": {
-        "label": "Required Soon",
+    "supervised_start": {
+        "label": "Required for Supervised Start",
         "color": "orange",
-        "weight": 0.15,  # 15% of score
         "emoji": "🟠"
+    },
+    "recruitment": {
+        "label": "Recruitment File",
+        "color": "blue",
+        "emoji": "🔵"
     },
     "secondary": {
         "label": "Complete After Start",
-        "color": "yellow",
-        "weight": 0.05,  # 5% of score
-        "emoji": "🟡"
+        "color": "gray",
+        "emoji": "⚪"
     }
 }
 
-# Category display names (care-focused)
+# Category display names (updated)
 CATEGORY_DISPLAY_NAMES = {
     "1_Legal_Safety": "Legal & Safety",
     "2_Core_Training": "Core Training",
-    "3_Role_Readiness": "Role Readiness",
-    "4_Employment": "Employment",
+    "3_Competency_Health": "Competency & Health",
+    "4_Recruitment_Record": "Recruitment Record",
     "5_Agreements": "Agreements",
     "6_Admin": "Admin / Other"
+}
+
+# Status group definitions
+STATUS_GROUPS = {
+    "start_status": {
+        "name": "Start Status",
+        "description": "Shows whether this employee can safely start work.",
+        "items": ["right_to_work_documents", "right_to_work_check", "identity_documents", 
+                  "dbs_certificate", "dbs_check", "nmc_registration",
+                  "safeguarding", "manual_handling", "infection_control"]
+    },
+    "competency_health": {
+        "name": "Competency & Health",
+        "description": "Health and competency assessments required for supervised work.",
+        "items": ["health_screening", "induction", "bls", "clinical_competency", "medication_competency"]
+    },
+    "recruitment_file": {
+        "name": "Recruitment File",
+        "description": "Shows whether the pre-employment record is complete.",
+        "items": ["interview_record", "reference_1", "reference_2", "recruitment_checklist", 
+                  "application_form", "cv"]
+    }
 }
 
 # Legacy ID mapping for data migration
@@ -536,7 +585,7 @@ def get_mandatory_items_for_role(role: str) -> List[dict]:
     return items
 
 def get_work_ready_items_for_role(role: str) -> set:
-    """Get the set of requirement IDs that are mandatory for work readiness"""
+    """Get the set of requirement IDs that are mandatory for work readiness (Start Status)"""
     work_ready = WORK_READY_REQUIREMENTS.copy()
     
     # Add nurse-specific mandatory item
@@ -544,6 +593,162 @@ def get_work_ready_items_for_role(role: str) -> set:
         work_ready.add("nmc_registration")
     
     return work_ready
+
+def get_recruitment_file_items() -> set:
+    """Get the set of requirement IDs for recruitment file"""
+    return {
+        "interview_record", "reference_1", "reference_2", 
+        "recruitment_checklist", "application_form", "cv"
+    }
+
+def get_competency_health_items(role: str) -> set:
+    """Get the set of requirement IDs for competency & health"""
+    items = {"health_screening", "induction", "bls"}
+    if role and "nurse" in role.lower():
+        items.add("clinical_competency")
+        items.add("medication_competency")
+    return items
+
+def calculate_separated_statuses(requirements: List[dict], role: str, policies_data: dict = None) -> dict:
+    """
+    Calculate the three separated status types:
+    1. Start Status - Can the employee safely start work?
+    2. Recruitment File - Is the pre-employment record complete?
+    3. Policies - Have assigned policies been acknowledged?
+    
+    Returns a unified status object for the overview.
+    """
+    work_ready_ids = get_work_ready_items_for_role(role)
+    recruitment_ids = get_recruitment_file_items()
+    competency_ids = get_competency_health_items(role)
+    
+    # Initialize counters
+    start_items = []
+    recruitment_items = []
+    competency_items = []
+    other_items = []
+    
+    for req in requirements:
+        req_id = req.get('id')
+        status_group = req.get('status_group', 'other')
+        
+        if req_id in work_ready_ids or status_group == 'start_status':
+            start_items.append(req)
+        elif req_id in recruitment_ids or status_group == 'recruitment_file':
+            recruitment_items.append(req)
+        elif req_id in competency_ids or status_group == 'competency_health':
+            competency_items.append(req)
+        else:
+            other_items.append(req)
+    
+    # Calculate Start Status
+    start_complete = sum(1 for r in start_items if r.get('status') == 'completed' and r.get('has_evidence'))
+    start_verified = sum(1 for r in start_items if r.get('verified', False))
+    start_total = len(start_items)
+    start_missing = [{"id": r['id'], "name": r['name']} for r in start_items 
+                     if not (r.get('status') == 'completed' and r.get('has_evidence'))]
+    
+    # Determine Start Status
+    if start_verified == start_total and start_total > 0:
+        start_status = "ready_to_work"
+        start_label = "Ready to Work"
+        start_color = "success"
+    elif start_complete == start_total and start_total > 0:
+        # All start items complete but not all verified - check competency/health
+        competency_complete = sum(1 for r in competency_items if r.get('status') == 'completed' and r.get('has_evidence'))
+        if competency_complete < len(competency_items):
+            start_status = "supervised_start_only"
+            start_label = "Supervised Start Only"
+            start_color = "warning"
+        else:
+            start_status = "supervised_start_only"
+            start_label = "Supervised Start Only"
+            start_color = "warning"
+    else:
+        start_status = "not_ready"
+        start_label = "Not Ready"
+        start_color = "error"
+    
+    # Calculate Recruitment File Status
+    recruitment_complete = sum(1 for r in recruitment_items if r.get('status') == 'completed' and r.get('has_evidence'))
+    recruitment_total = len(recruitment_items)
+    recruitment_missing = [{"id": r['id'], "name": r['name']} for r in recruitment_items 
+                           if not (r.get('status') == 'completed' and r.get('has_evidence'))]
+    
+    if recruitment_complete == recruitment_total and recruitment_total > 0:
+        recruitment_status = "complete"
+        recruitment_label = "Complete"
+        recruitment_color = "success"
+    else:
+        recruitment_status = "incomplete"
+        recruitment_label = "Incomplete"
+        recruitment_color = "warning"
+    
+    # Calculate Policies Status (from policies_data if provided)
+    if policies_data:
+        policies_assigned = policies_data.get('assigned', 0)
+        policies_acknowledged = policies_data.get('acknowledged', 0)
+        
+        if policies_assigned == 0:
+            policies_status = "no_policies"
+            policies_label = "No Policies Assigned"
+            policies_color = "neutral"
+        elif policies_acknowledged == policies_assigned:
+            policies_status = "all_acknowledged"
+            policies_label = "All Policies Acknowledged"
+            policies_color = "success"
+        else:
+            policies_status = "policies_assigned"
+            policies_label = f"{policies_assigned} Assigned · {policies_acknowledged} Acknowledged"
+            policies_color = "warning"
+    else:
+        policies_status = "no_policies"
+        policies_label = "No Policies Assigned"
+        policies_color = "neutral"
+        policies_assigned = 0
+        policies_acknowledged = 0
+    
+    # Calculate Overall Compliance Percentage
+    total_items = len(requirements)
+    total_complete = sum(1 for r in requirements if r.get('status') == 'completed' and r.get('has_evidence'))
+    total_verified = sum(1 for r in requirements if r.get('verified', False))
+    overall_percentage = int((total_complete / total_items) * 100) if total_items > 0 else 0
+    
+    return {
+        "start_status": {
+            "status": start_status,
+            "label": start_label,
+            "color": start_color,
+            "complete": start_complete,
+            "verified": start_verified,
+            "total": start_total,
+            "missing": start_missing
+        },
+        "recruitment_file": {
+            "status": recruitment_status,
+            "label": recruitment_label,
+            "color": recruitment_color,
+            "complete": recruitment_complete,
+            "total": recruitment_total,
+            "missing": recruitment_missing
+        },
+        "policies": {
+            "status": policies_status,
+            "label": policies_label,
+            "color": policies_color,
+            "assigned": policies_assigned if policies_data else 0,
+            "acknowledged": policies_acknowledged if policies_data else 0
+        },
+        "overall_compliance": {
+            "percentage": overall_percentage,
+            "complete": total_complete,
+            "verified": total_verified,
+            "total": total_items
+        },
+        # Legacy compatibility
+        "is_work_ready": start_status == "ready_to_work",
+        "is_fully_compliant": total_verified == total_items and total_items > 0
+    }
 
 def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
     """
@@ -569,7 +774,7 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
         is_verified = req.get('verified', False)
         priority = req.get('priority', 'secondary')
         
-        if req_id in work_ready_ids or priority == 'mandatory':
+        if req_id in work_ready_ids or priority == 'start_required':
             mandatory_items.append(req)
             if is_complete:
                 mandatory_complete += 1
@@ -581,7 +786,7 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
                     "name": req.get('name'),
                     "status": req.get('status')
                 })
-        elif priority == 'required_soon':
+        elif priority in ['supervised_start', 'recruitment']:
             required_soon_items.append(req)
             if is_complete:
                 required_soon_complete += 1
@@ -613,11 +818,11 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
         status_color = "success"
     elif all_mandatory_verified:
         status = "work_ready"
-        status_label = "Work Ready"
+        status_label = "Ready to Work"
         status_color = "success"
     elif all_mandatory_complete:
-        status = "almost_ready"
-        status_label = "Almost Ready"
+        status = "supervised_start"
+        status_label = "Supervised Start Only"
         status_color = "warning"
     elif mandatory_complete > 0:
         status = "in_progress"
@@ -1624,9 +1829,9 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     total_mandatory = len(work_ready_ids)
     
     if mandatory_complete == total_mandatory:
-        return {"status": "work_ready", "label": "Work Ready", "color": "success"}
+        return {"status": "work_ready", "label": "Ready to Work", "color": "success"}
     elif mandatory_complete >= total_mandatory - 2:
-        return {"status": "almost_ready", "label": "Almost Ready", "color": "warning"}
+        return {"status": "supervised_start", "label": "Supervised Start Only", "color": "warning"}
     elif mandatory_complete > 0:
         return {"status": "in_progress", "label": "Not Ready", "color": "error"}
     else:
@@ -4619,8 +4824,24 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     completion_percentage = int((evidence_backed_count / total_count) * 100) if total_count > 0 else 0
     verification_percentage = int((verified_count / evidence_backed_count) * 100) if evidence_backed_count > 0 else 0
     
+    # Fetch policies data for the employee
+    assigned_policies = await db.employee_policies.find({
+        "employee_id": employee_id
+    }, {"_id": 0, "acknowledged": 1, "acknowledged_at": 1}).to_list(100)
+    
+    policies_assigned = len(assigned_policies)
+    policies_acknowledged = sum(1 for p in assigned_policies if p.get('acknowledged', False))
+    
+    policies_data = {
+        "assigned": policies_assigned,
+        "acknowledged": policies_acknowledged
+    }
+    
     # Calculate Work Readiness
     work_readiness = calculate_work_readiness(requirements, role)
+    
+    # Calculate Separated Statuses (new model)
+    separated_statuses = calculate_separated_statuses(requirements, role, policies_data)
     
     return {
         "employee_id": employee_id,
@@ -4638,6 +4859,7 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "audit_ready": verified_count == evidence_backed_count and evidence_backed_count == total_count
         },
         "work_readiness": work_readiness,
+        "statuses": separated_statuses,  # New separated status model
         "expiry_alerts": {
             "expiring_soon": expiring_soon_items,
             "expired": expired_items,

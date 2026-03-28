@@ -4,6 +4,49 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2026-03-28)
+**Simplified File Correction & Clickable Dashboard Cards - COMPLETE**
+
+### Clickable Summary Cards with Drill-Down Navigation
+Dashboard and Audit View cards now navigate to filtered pages:
+- **Expired** → Training Matrix (?filter=expired)
+- **Needs Renewal** → Training Matrix (?filter=expiring_soon)
+- **Staff Not Ready** → Employees (?work_readiness=not_ready)
+- **Supervised Start** → Employees (?work_readiness=supervised_start)
+- **Ready to Work** → Employees (?work_readiness=ready_to_work)
+- **Policies Not Acknowledged** → Compliance Centre (?tab=policies)
+- **DBS Pending** → Employees (?requirement=dbs)
+- **RTW Missing** → Employees (?requirement=rtw)
+- **References Outstanding** → Employees (?requirement=references)
+
+Cards show hover states, pointer cursor, arrow icons, and helper text.
+
+### Simplified File Correction System
+Every uploaded file now shows 4 actions:
+- **View** - Opens file in preview
+- **Download** - Downloads to user's device
+- **Replace** - Upload new file to replace existing
+- **Delete** - Permanently remove from active use
+
+Delete behavior:
+- Removes file from active requirement immediately
+- Removes from compliance calculation
+- Removes from verification flow
+- Requirement status updates correctly (Still Needed / Ready for Review)
+- Creates audit trail with: filename, requirement, deleted_by, deleted_at, optional reason
+
+Broken file handling:
+- Shows "File unavailable" if file cannot be accessed
+- View/Download disabled
+- Replace/Delete always available
+
+### Training Matrix URL-Based Filters
+Added ?filter parameter support:
+- ?filter=expired - Shows expired training records
+- ?filter=expiring_soon - Shows records needing renewal
+- ?filter=valid - Shows valid records
+- Filter state syncs with URL for navigation preservation
+
+## Previous Update (2026-03-28)
 **CQC-Ready UI Redesigns & Safe Correction System - COMPLETE**
 
 ### Action-First Dashboard Redesign

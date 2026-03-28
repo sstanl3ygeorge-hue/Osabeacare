@@ -339,18 +339,21 @@ MANDATORY_ITEMS = {
          "work_ready_hint": "Complete after employee starts"},
         
         # ======== CATEGORY 6: ADMIN / OTHER ========
-        {"id": "personal_info", "name": "Personal Information Form", 
+        {"id": "staff_personal_info", "name": "Staff Personal Information", 
          "category": "6_Admin", "type": "form-generated", 
-         "template_name": "Personal Information Form",
-         "allow_multiple_files": True, "source": "form",
+         "template_name": "Staff Personal Information",
+         "form_requirement_id": "staff_personal_info",
+         "allow_multiple_files": False, "source": "form",
          "priority": "secondary", "priority_order": 42,
          "status_group": "other",
-         "description": "Personal details form with supporting docs",
+         "updates_profile": True,
+         "description": "Personal details form - can update employee profile",
          "work_ready_hint": "Complete after employee starts"},
         
         {"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", 
          "category": "6_Admin", "type": "form-generated",
          "template_name": "HMRC Starter Checklist",
+         "form_requirement_id": "hmrc_starter_checklist",
          "allow_multiple_files": False, "source": "form",
          "priority": "secondary", "priority_order": 43,
          "status_group": "other",
@@ -362,8 +365,9 @@ MANDATORY_ITEMS = {
         {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", 
          "category": "6_Admin", "type": "form-generated",
          "template_name": "Equal Opportunities Monitoring Form",
+         "form_requirement_id": "equal_opportunities",
          "allow_multiple_files": False, "source": "form",
-         "priority": "optional", "priority_order": 43,
+         "priority": "optional", "priority_order": 44,
          "status_group": "other",
          "optional": True,
          "description": "Diversity monitoring form (optional - does not affect compliance)",
@@ -1821,8 +1825,11 @@ class EmployeeCreate(BaseModel):
 class EmployeeUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    middle_name: Optional[str] = None
+    title: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
+    phone_secondary: Optional[str] = None
     role: Optional[str] = None
     onboarding_status: Optional[str] = None
     status: Optional[str] = None
@@ -1840,11 +1847,18 @@ class EmployeeUpdate(BaseModel):
     country: Optional[str] = None
     ni_number: Optional[str] = None
     date_of_birth: Optional[str] = None
-    # Next of kin / Emergency contact
+    marital_status: Optional[str] = None
+    # Next of kin / Emergency contact - extended fields
     next_of_kin_name: Optional[str] = None
     next_of_kin_relationship: Optional[str] = None
     next_of_kin_phone: Optional[str] = None
+    next_of_kin_email: Optional[str] = None
     next_of_kin_address: Optional[str] = None
+    next_of_kin_address_line_1: Optional[str] = None
+    next_of_kin_city: Optional[str] = None
+    next_of_kin_county: Optional[str] = None
+    next_of_kin_postcode: Optional[str] = None
+    next_of_kin_country: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     emergency_contact_relationship: Optional[str] = None
@@ -1853,15 +1867,32 @@ class EmployeeUpdate(BaseModel):
     reference_1_company: Optional[str] = None
     reference_1_phone: Optional[str] = None
     reference_1_email: Optional[str] = None
+    reference_1_start_date: Optional[str] = None
+    reference_1_end_date: Optional[str] = None
     reference_2_name: Optional[str] = None
     reference_2_company: Optional[str] = None
     reference_2_phone: Optional[str] = None
     reference_2_email: Optional[str] = None
+    reference_2_start_date: Optional[str] = None
+    reference_2_end_date: Optional[str] = None
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
+    driving_licence_number: Optional[str] = None
     has_own_vehicle: Optional[bool] = None
     vehicle_registration: Optional[str] = None
+    vehicle_make_model: Optional[str] = None
+    # Bank details (for Staff Personal Info form)
+    bank_name: Optional[str] = None
+    bank_sort_code: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    # Working declarations from application form
+    working_time_opt_out: Optional[bool] = None
+    dbs_update_service_consent: Optional[bool] = None
+    criminal_offence_declared: Optional[bool] = None
+    professional_misconduct_declared: Optional[bool] = None
+    health_issue_declared: Optional[bool] = None
 
 class EmployeeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1869,8 +1900,11 @@ class EmployeeResponse(BaseModel):
     employee_code: str
     first_name: str
     last_name: str
+    middle_name: Optional[str] = None
+    title: Optional[str] = None
     email: str
     phone: Optional[str] = None
+    phone_secondary: Optional[str] = None
     role: str
     onboarding_status: str = OnboardingStatus.NEW
     status: str
@@ -1893,11 +1927,18 @@ class EmployeeResponse(BaseModel):
     country: Optional[str] = None
     ni_number: Optional[str] = None
     date_of_birth: Optional[str] = None
-    # Next of kin / Emergency contact
+    marital_status: Optional[str] = None
+    # Next of kin / Emergency contact - extended fields
     next_of_kin_name: Optional[str] = None
     next_of_kin_relationship: Optional[str] = None
     next_of_kin_phone: Optional[str] = None
+    next_of_kin_email: Optional[str] = None
     next_of_kin_address: Optional[str] = None
+    next_of_kin_address_line_1: Optional[str] = None
+    next_of_kin_city: Optional[str] = None
+    next_of_kin_county: Optional[str] = None
+    next_of_kin_postcode: Optional[str] = None
+    next_of_kin_country: Optional[str] = None
     emergency_contact_name: Optional[str] = None
     emergency_contact_phone: Optional[str] = None
     emergency_contact_relationship: Optional[str] = None
@@ -1906,15 +1947,32 @@ class EmployeeResponse(BaseModel):
     reference_1_company: Optional[str] = None
     reference_1_phone: Optional[str] = None
     reference_1_email: Optional[str] = None
+    reference_1_start_date: Optional[str] = None
+    reference_1_end_date: Optional[str] = None
     reference_2_name: Optional[str] = None
     reference_2_company: Optional[str] = None
     reference_2_phone: Optional[str] = None
     reference_2_email: Optional[str] = None
+    reference_2_start_date: Optional[str] = None
+    reference_2_end_date: Optional[str] = None
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
+    driving_licence_number: Optional[str] = None
     has_own_vehicle: Optional[bool] = None
     vehicle_registration: Optional[str] = None
+    vehicle_make_model: Optional[str] = None
+    # Bank details (for Staff Personal Info form)
+    bank_name: Optional[str] = None
+    bank_sort_code: Optional[str] = None
+    bank_account_number: Optional[str] = None
+    bank_account_name: Optional[str] = None
+    # Working declarations from application form
+    working_time_opt_out: Optional[bool] = None
+    dbs_update_service_consent: Optional[bool] = None
+    criminal_offence_declared: Optional[bool] = None
+    professional_misconduct_declared: Optional[bool] = None
+    health_issue_declared: Optional[bool] = None
 
 # Document Type Models
 class DocumentTypeCreate(BaseModel):
@@ -1992,180 +2050,558 @@ class EmployeeDocumentResponse(BaseModel):
 
 # Form types that replace document uploads
 FORM_BASED_REQUIREMENTS = {
+    # ========================================================================
+    # 1. HEALTH SCREENING FORM - Care Sector Standard
+    # ========================================================================
     "health_screening": {
         "name": "Health Screening Questionnaire",
         "form_type": "health_screening",
-        "fields": [
-            {"id": "general_health", "label": "General Health Status", "type": "select", "options": ["Good", "Fair", "Under Treatment"]},
-            {"id": "medical_conditions", "label": "Any medical conditions?", "type": "textarea"},
-            {"id": "medications", "label": "Current medications", "type": "textarea"},
-            {"id": "allergies", "label": "Known allergies", "type": "textarea"},
-            {"id": "physical_limitations", "label": "Physical limitations affecting work", "type": "textarea"},
-            {"id": "vaccinations_up_to_date", "label": "Vaccinations up to date?", "type": "checkbox"},
-            {"id": "fit_for_role", "label": "Fit for role?", "type": "select", "options": ["Yes", "Yes with adjustments", "No"]},
-            {"id": "adjustments_required", "label": "Adjustments required (if any)", "type": "textarea"},
-            {"id": "screener_notes", "label": "Screener notes", "type": "textarea"},
-        ]
+        "auto_fill_fields": ["full_name", "date_of_birth", "job_title", "address", "phone", "email"],
+        "sections": [
+            {
+                "id": "section_a",
+                "title": "Section A: Personal Details",
+                "description": "Auto-filled where possible from employee profile",
+                "fields": [
+                    {"id": "full_name", "label": "Full Name", "type": "text", "auto_fill": "full_name"},
+                    {"id": "date_of_birth", "label": "Date of Birth", "type": "date", "auto_fill": "date_of_birth"},
+                    {"id": "job_title", "label": "Job Title", "type": "text", "auto_fill": "role"},
+                    {"id": "address", "label": "Address", "type": "textarea", "auto_fill": "full_address"},
+                    {"id": "phone", "label": "Phone Number", "type": "text", "auto_fill": "phone"},
+                    {"id": "email", "label": "Email Address", "type": "text", "auto_fill": "email"},
+                    {"id": "gp_name", "label": "GP Name", "type": "text"},
+                    {"id": "gp_address", "label": "GP Address", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "section_b",
+                "title": "Section B: Job Exposure",
+                "description": "Does your role involve exposure to any of the following?",
+                "fields": [
+                    {"id": "exposure_manual_handling", "label": "Manual handling / lifting", "type": "checkbox"},
+                    {"id": "exposure_blood_fluids", "label": "Human blood / bodily fluids", "type": "checkbox"},
+                    {"id": "exposure_food_handling", "label": "Food handling", "type": "checkbox"},
+                    {"id": "exposure_night_shifts", "label": "Night shifts", "type": "checkbox"},
+                    {"id": "exposure_hazardous_substances", "label": "Hazardous substances", "type": "checkbox"},
+                    {"id": "exposure_driving", "label": "Driving (company or personal vehicle)", "type": "checkbox"},
+                    {"id": "exposure_dse", "label": "Display Screen Equipment (DSE)", "type": "checkbox"},
+                    {"id": "exposure_noisy_environments", "label": "Noisy environments", "type": "checkbox"},
+                    {"id": "exposure_working_at_height", "label": "Working at height", "type": "checkbox"},
+                    {"id": "exposure_other", "label": "Other exposure (please specify)", "type": "text"},
+                ]
+            },
+            {
+                "id": "section_c",
+                "title": "Section C: Health History",
+                "description": "Do you have or have you previously had any of the following?",
+                "fields": [
+                    {"id": "has_epilepsy_fainting", "label": "Epilepsy / fainting", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "epilepsy_fainting_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_epilepsy_fainting", "conditional_value": "Yes"},
+                    {"id": "has_heart_problems", "label": "Heart problems / blood pressure", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "heart_problems_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_heart_problems", "conditional_value": "Yes"},
+                    {"id": "has_mental_health", "label": "Mental health conditions (anxiety / depression)", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "mental_health_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_mental_health", "conditional_value": "Yes"},
+                    {"id": "has_diabetes", "label": "Diabetes", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "diabetes_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_diabetes", "conditional_value": "Yes"},
+                    {"id": "has_asthma_chest", "label": "Asthma / chest issues", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "asthma_chest_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_asthma_chest", "conditional_value": "Yes"},
+                    {"id": "has_back_joint", "label": "Back / joint problems", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "back_joint_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_back_joint", "conditional_value": "Yes"},
+                    {"id": "has_injury_operations", "label": "Serious injury or operations", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "injury_operations_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_injury_operations", "conditional_value": "Yes"},
+                    {"id": "has_skin_conditions", "label": "Skin conditions", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "skin_conditions_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_skin_conditions", "conditional_value": "Yes"},
+                    {"id": "has_hearing_problems", "label": "Hearing problems", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "hearing_problems_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_hearing_problems", "conditional_value": "Yes"},
+                    {"id": "has_vision_problems", "label": "Vision problems", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "vision_problems_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_vision_problems", "conditional_value": "Yes"},
+                    {"id": "has_other_conditions", "label": "Any other medical conditions?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "other_conditions_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_other_conditions", "conditional_value": "Yes"},
+                    {"id": "taking_medication", "label": "Are you currently taking any medication?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "medication_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "taking_medication", "conditional_value": "Yes"},
+                    {"id": "has_allergies", "label": "Do you have any allergies?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "allergies_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_allergies", "conditional_value": "Yes"},
+                    {"id": "has_implanted_device", "label": "Do you have any implanted medical device (pacemaker, etc.)?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "days_absent_3_years", "label": "Days absent due to illness in last 3 years", "type": "number"},
+                ]
+            },
+            {
+                "id": "section_d",
+                "title": "Section D: Functional Ability",
+                "description": "Do you have any difficulty with the following activities?",
+                "fields": [
+                    {"id": "difficulty_standing", "label": "Standing for prolonged periods", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable"]},
+                    {"id": "standing_details", "label": "Details if applicable", "type": "text"},
+                    {"id": "difficulty_walking", "label": "Walking", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable"]},
+                    {"id": "walking_details", "label": "Details if applicable", "type": "text"},
+                    {"id": "difficulty_climbing", "label": "Climbing stairs", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable"]},
+                    {"id": "climbing_details", "label": "Details if applicable", "type": "text"},
+                    {"id": "difficulty_lifting", "label": "Lifting and carrying", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable"]},
+                    {"id": "lifting_details", "label": "Details if applicable", "type": "text"},
+                    {"id": "difficulty_using_hands", "label": "Using hands / manual dexterity", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable"]},
+                    {"id": "hands_details", "label": "Details if applicable", "type": "text"},
+                    {"id": "difficulty_driving", "label": "Driving", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable", "Do not drive"]},
+                    {"id": "driving_details", "label": "Details if applicable", "type": "text"},
+                    {"id": "difficulty_working_height", "label": "Working at height", "type": "select", "options": ["No difficulty", "Some difficulty", "Unable"]},
+                    {"id": "height_details", "label": "Details if applicable", "type": "text"},
+                ]
+            },
+            {
+                "id": "section_e",
+                "title": "Section E: Employee Declaration",
+                "description": "",
+                "fields": [
+                    {"id": "declaration_accurate", "label": "I confirm that the information provided above is accurate and complete to the best of my knowledge", "type": "checkbox", "required": True},
+                    {"id": "employee_signature", "label": "Employee Signature (type full name)", "type": "text", "required": True},
+                    {"id": "employee_sign_date", "label": "Date Signed", "type": "date", "required": True},
+                ]
+            },
+            {
+                "id": "section_f",
+                "title": "Section F: Employer Use Only",
+                "description": "To be completed by recruiting manager/HR",
+                "admin_only": True,
+                "fields": [
+                    {"id": "employer_notes", "label": "Notes / Comments", "type": "textarea"},
+                    {"id": "adjustments_required", "label": "Adjustments Required", "type": "textarea"},
+                    {"id": "fit_for_role", "label": "Fitness for Role Assessment", "type": "select", "options": ["Fit", "Fit with adjustments", "Not fit - refer to Occupational Health"], "required": True},
+                    {"id": "assessor_name", "label": "Assessor Name", "type": "text"},
+                    {"id": "assessment_date", "label": "Assessment Date", "type": "date"},
+                ]
+            }
+        ],
+        # Flattened fields for backward compatibility
+        "fields": []
     },
-    "induction": {
-        "name": "Induction & Competency Assessment",
-        "form_type": "induction",
-        "fields": [
-            {"id": "induction_date", "label": "Induction Date", "type": "date"},
-            {"id": "inducted_by", "label": "Inducted By", "type": "text"},
-            {"id": "policies_reviewed", "label": "Key policies reviewed?", "type": "checkbox"},
-            {"id": "fire_safety_briefed", "label": "Fire safety briefing completed?", "type": "checkbox"},
-            {"id": "manual_handling_demo", "label": "Manual handling demonstrated?", "type": "checkbox"},
-            {"id": "infection_control_briefed", "label": "Infection control briefed?", "type": "checkbox"},
-            {"id": "safeguarding_awareness", "label": "Safeguarding awareness confirmed?", "type": "checkbox"},
-            {"id": "emergency_procedures", "label": "Emergency procedures explained?", "type": "checkbox"},
-            {"id": "equipment_training", "label": "Equipment training completed?", "type": "checkbox"},
-            {"id": "competency_assessment_passed", "label": "Competency assessment passed?", "type": "select", "options": ["Yes", "Needs follow-up", "No"]},
-            {"id": "follow_up_required", "label": "Follow-up actions required", "type": "textarea"},
-            {"id": "assessor_notes", "label": "Assessor notes", "type": "textarea"},
-        ]
-    },
-    "interview_record": {
-        "name": "Interview Record",
-        "form_type": "interview_record",
-        "fields": [
-            {"id": "interview_date", "label": "Interview Date", "type": "date"},
-            {"id": "interviewer_name", "label": "Interviewer Name", "type": "text"},
-            {"id": "interview_type", "label": "Interview Type", "type": "select", "options": ["In-person", "Video call", "Phone"]},
-            {"id": "position_applied", "label": "Position Applied For", "type": "text"},
-            {"id": "experience_summary", "label": "Relevant Experience Summary", "type": "textarea"},
-            {"id": "strengths", "label": "Identified Strengths", "type": "textarea"},
-            {"id": "areas_for_development", "label": "Areas for Development", "type": "textarea"},
-            {"id": "right_to_work_verified", "label": "Right to Work verified at interview?", "type": "checkbox"},
-            {"id": "references_discussed", "label": "References discussed?", "type": "checkbox"},
-            {"id": "availability_confirmed", "label": "Availability confirmed?", "type": "checkbox"},
-            {"id": "overall_impression", "label": "Overall Impression", "type": "select", "options": ["Strongly recommend", "Recommend", "Consider", "Do not recommend"]},
-            {"id": "decision", "label": "Interview Decision", "type": "select", "options": ["Offer", "Second interview", "Reject", "Hold"]},
-            {"id": "interviewer_notes", "label": "Interviewer Notes", "type": "textarea"},
-        ]
-    },
+    
+    # ========================================================================
+    # 2. RECRUITMENT CHECKLIST - Simplified Verification Form
+    # ========================================================================
     "recruitment_checklist": {
         "name": "Recruitment Compliance Checklist",
         "form_type": "recruitment_checklist",
-        "fields": [
-            {"id": "application_received", "label": "Application form received?", "type": "checkbox"},
-            {"id": "cv_reviewed", "label": "CV reviewed?", "type": "checkbox"},
-            {"id": "interview_completed", "label": "Interview completed?", "type": "checkbox"},
-            {"id": "references_requested", "label": "References requested?", "type": "checkbox"},
-            {"id": "references_received", "label": "References received and verified?", "type": "checkbox"},
-            {"id": "dbs_applied", "label": "DBS check applied for?", "type": "checkbox"},
-            {"id": "right_to_work_verified", "label": "Right to work verified?", "type": "checkbox"},
-            {"id": "identity_verified", "label": "Identity verified?", "type": "checkbox"},
-            {"id": "qualifications_verified", "label": "Qualifications verified?", "type": "checkbox"},
-            {"id": "employment_history_verified", "label": "Employment history verified (3 years)?", "type": "checkbox"},
-            {"id": "gaps_explained", "label": "Employment gaps explained?", "type": "checkbox"},
-            {"id": "contract_issued", "label": "Contract issued?", "type": "checkbox"},
-            {"id": "offer_letter_signed", "label": "Offer letter signed?", "type": "checkbox"},
-            {"id": "recruitment_complete", "label": "All recruitment checks complete?", "type": "checkbox"},
-            {"id": "recruiter_name", "label": "Recruiter Name", "type": "text"},
-            {"id": "completion_date", "label": "Completion Date", "type": "date"},
-            {"id": "notes", "label": "Additional Notes", "type": "textarea"},
-        ]
+        "auto_fill_fields": ["employee_name", "position"],
+        "sections": [
+            {
+                "id": "identity_legal",
+                "title": "Identity & Legal",
+                "fields": [
+                    {"id": "identity_verified", "label": "Identity verified?", "type": "select", "options": ["Yes", "No", "Pending"], "required": True},
+                    {"id": "photo_available", "label": "Photo available?", "type": "select", "options": ["Yes", "No"], "required": True},
+                    {"id": "identity_notes", "label": "Details / Notes", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "dbs_section",
+                "title": "DBS Check",
+                "fields": [
+                    {"id": "dbs_verified", "label": "DBS seen or Update Service checked?", "type": "select", "options": ["Yes", "No", "Pending"], "required": True},
+                    {"id": "dbs_notes", "label": "Details (certificate number, date, level)", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "employment_history",
+                "title": "Employment History",
+                "fields": [
+                    {"id": "employment_verified", "label": "Previous employment verified?", "type": "select", "options": ["Yes", "No", "N/A"], "required": True},
+                    {"id": "conduct_satisfactory", "label": "Conduct satisfactory?", "type": "select", "options": ["Yes", "No", "N/A"], "required": True},
+                    {"id": "reason_leaving_verified", "label": "Reason for leaving verified where required?", "type": "select", "options": ["Yes", "No", "N/A"], "required": True},
+                    {"id": "employment_notes", "label": "Notes", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "qualifications",
+                "title": "Qualifications",
+                "fields": [
+                    {"id": "qualifications_verified", "label": "Qualifications verified?", "type": "select", "options": ["Yes", "No", "N/A"], "required": True},
+                    {"id": "qualifications_notes", "label": "Details", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "final_section",
+                "title": "Final Sign-off",
+                "fields": [
+                    {"id": "completed_by", "label": "Completed By (Name)", "type": "text", "required": True},
+                    {"id": "signature", "label": "Signature (type full name)", "type": "text", "required": True},
+                    {"id": "completion_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
     },
+    
+    # ========================================================================
+    # 3. STAFF PERSONAL INFORMATION FORM - Profile Data (NEW)
+    # ========================================================================
+    "staff_personal_info": {
+        "name": "Staff Personal Information",
+        "form_type": "staff_personal_info",
+        "auto_fill_fields": ["title", "first_name", "middle_name", "last_name", "date_of_birth", "address_line_1", "address_line_2", "city", "county", "postcode", "country", "phone", "email", "ni_number", "emergency_contact_name", "emergency_contact_relationship", "emergency_contact_phone", "emergency_contact_email", "emergency_contact_address", "has_driving_licence", "driving_licence_number", "has_own_vehicle", "vehicle_registration"],
+        "updates_profile": True,  # This form can update employee profile fields
+        "sections": [
+            {
+                "id": "basic_details",
+                "title": "Basic Details",
+                "fields": [
+                    {"id": "title", "label": "Title", "type": "select", "options": ["Mr", "Mrs", "Ms", "Miss", "Dr", "Other"], "auto_fill": "title"},
+                    {"id": "first_name", "label": "First Name", "type": "text", "required": True, "auto_fill": "first_name"},
+                    {"id": "middle_name", "label": "Middle Name(s)", "type": "text", "auto_fill": "middle_name"},
+                    {"id": "last_name", "label": "Last Name", "type": "text", "required": True, "auto_fill": "last_name"},
+                    {"id": "date_of_birth", "label": "Date of Birth", "type": "date", "auto_fill": "date_of_birth"},
+                    {"id": "marital_status", "label": "Marital Status", "type": "select", "options": ["Single", "Married", "Civil Partnership", "Divorced", "Widowed", "Prefer not to say"]},
+                ]
+            },
+            {
+                "id": "contact_details",
+                "title": "Contact Details",
+                "fields": [
+                    {"id": "address_line_1", "label": "Address Line 1", "type": "text", "auto_fill": "address_line_1"},
+                    {"id": "address_line_2", "label": "Address Line 2", "type": "text", "auto_fill": "address_line_2"},
+                    {"id": "city", "label": "City", "type": "text", "auto_fill": "city"},
+                    {"id": "county", "label": "County", "type": "text", "auto_fill": "county"},
+                    {"id": "postcode", "label": "Postcode", "type": "text", "auto_fill": "postcode"},
+                    {"id": "country", "label": "Country", "type": "text", "auto_fill": "country"},
+                    {"id": "phone_primary", "label": "Primary Phone", "type": "text", "auto_fill": "phone"},
+                    {"id": "phone_secondary", "label": "Secondary Phone", "type": "text", "auto_fill": "phone_secondary"},
+                    {"id": "email", "label": "Email Address", "type": "text", "auto_fill": "email"},
+                ]
+            },
+            {
+                "id": "national_insurance",
+                "title": "National Insurance",
+                "fields": [
+                    {"id": "ni_number", "label": "National Insurance Number", "type": "text", "auto_fill": "ni_number", "placeholder": "e.g., AB123456C"},
+                ]
+            },
+            {
+                "id": "emergency_contact",
+                "title": "Emergency Contact / Next of Kin",
+                "fields": [
+                    {"id": "emergency_name", "label": "Contact Name", "type": "text", "auto_fill": "next_of_kin_name"},
+                    {"id": "emergency_relationship", "label": "Relationship", "type": "text", "auto_fill": "next_of_kin_relationship"},
+                    {"id": "emergency_phone", "label": "Phone Number", "type": "text", "auto_fill": "next_of_kin_phone"},
+                    {"id": "emergency_email", "label": "Email Address", "type": "text"},
+                    {"id": "emergency_address", "label": "Address", "type": "textarea", "auto_fill": "next_of_kin_address"},
+                ]
+            },
+            {
+                "id": "bank_details",
+                "title": "Bank Details",
+                "description": "For payroll purposes only",
+                "fields": [
+                    {"id": "bank_name", "label": "Bank Name", "type": "text"},
+                    {"id": "sort_code", "label": "Sort Code", "type": "text", "placeholder": "00-00-00"},
+                    {"id": "account_number", "label": "Account Number", "type": "text"},
+                    {"id": "account_name", "label": "Account Holder Name", "type": "text"},
+                ]
+            },
+            {
+                "id": "driving_vehicle",
+                "title": "Driving & Vehicle Information",
+                "fields": [
+                    {"id": "has_driving_licence", "label": "Do you have a driving licence?", "type": "select", "options": ["Yes", "No"], "auto_fill": "has_driving_licence"},
+                    {"id": "licence_number", "label": "Driving Licence Number", "type": "text", "conditional_on": "has_driving_licence", "conditional_value": "Yes"},
+                    {"id": "licence_categories", "label": "Licence Categories (e.g., B, BE)", "type": "text", "conditional_on": "has_driving_licence", "conditional_value": "Yes"},
+                    {"id": "has_own_vehicle", "label": "Do you have access to your own vehicle?", "type": "select", "options": ["Yes", "No"], "auto_fill": "has_own_vehicle"},
+                    {"id": "vehicle_make_model", "label": "Vehicle Make/Model", "type": "text", "conditional_on": "has_own_vehicle", "conditional_value": "Yes"},
+                    {"id": "vehicle_registration", "label": "Registration Number", "type": "text", "conditional_on": "has_own_vehicle", "conditional_value": "Yes", "auto_fill": "vehicle_registration"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "fields": [
+                    {"id": "info_accurate", "label": "I confirm the information provided is accurate and I will notify the company of any changes", "type": "checkbox", "required": True},
+                    {"id": "signature", "label": "Signature (type full name)", "type": "text", "required": True},
+                    {"id": "sign_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
+    },
+    
+    # ========================================================================
+    # 4. EQUAL OPPORTUNITIES FORM - Optional, No Compliance Impact
+    # ========================================================================
     "equal_opportunities": {
         "name": "Equal Opportunities Monitoring",
         "form_type": "equal_opportunities",
         "is_optional": True,  # This form is optional and does not affect compliance
-        "fields": [
-            {"id": "intro_note", "label": "This information is collected for monitoring purposes only and will be kept confidential. All fields are voluntary.", "type": "info"},
-            {"id": "gender", "label": "Gender", "type": "select", "options": ["Female", "Male", "Non-binary", "Other", "Prefer not to say"]},
-            {"id": "age_range", "label": "Age Range", "type": "select", "options": ["16-24", "25-34", "35-44", "45-54", "55-64", "65+", "Prefer not to say"]},
-            {"id": "ethnicity", "label": "Ethnicity", "type": "select", "options": [
-                "Asian or Asian British - Bangladeshi",
-                "Asian or Asian British - Chinese", 
-                "Asian or Asian British - Indian",
-                "Asian or Asian British - Pakistani",
-                "Asian or Asian British - Other",
-                "Black or Black British - African",
-                "Black or Black British - Caribbean",
-                "Black or Black British - Other",
-                "Mixed - White and Asian",
-                "Mixed - White and Black African",
-                "Mixed - White and Black Caribbean",
-                "Mixed - Other",
-                "White - British",
-                "White - Irish",
-                "White - Other",
-                "Other ethnic group",
-                "Prefer not to say"
-            ]},
-            {"id": "religion", "label": "Religion or Belief", "type": "select", "options": [
-                "Buddhist",
-                "Christian",
-                "Hindu",
-                "Jewish",
-                "Muslim",
-                "Sikh",
-                "No religion",
-                "Other",
-                "Prefer not to say"
-            ]},
-            {"id": "sexual_orientation", "label": "Sexual Orientation", "type": "select", "options": [
-                "Heterosexual/Straight",
-                "Gay/Lesbian",
-                "Bisexual",
-                "Other",
-                "Prefer not to say"
-            ]},
-            {"id": "disability", "label": "Do you consider yourself to have a disability?", "type": "select", "options": [
-                "Yes",
-                "No",
-                "Prefer not to say"
-            ]},
-            {"id": "disability_details", "label": "If yes, please provide details (optional)", "type": "textarea"},
-            {"id": "caring_responsibilities", "label": "Do you have caring responsibilities?", "type": "select", "options": [
-                "Yes - Primary carer of child/children under 18",
-                "Yes - Primary carer of disabled child/children",
-                "Yes - Primary carer of disabled adult (18+)",
-                "Yes - Primary carer of older person",
-                "Yes - Secondary carer",
-                "No",
-                "Prefer not to say"
-            ]},
-            {"id": "marital_status", "label": "Marital/Civil Partnership Status", "type": "select", "options": [
-                "Single",
-                "Married/Civil Partnership",
-                "Divorced/Dissolved",
-                "Widowed/Surviving Partner",
-                "Separated",
-                "Prefer not to say"
-            ]},
-            {"id": "consent", "label": "I understand this information is voluntary and will be used for equal opportunities monitoring only", "type": "checkbox"},
-        ]
+        "description": "This information is collected for equality monitoring purposes only and will be kept strictly confidential. Completion is entirely voluntary and will have no impact on your application or employment.",
+        "sections": [
+            {
+                "id": "monitoring_info",
+                "title": "Equality Monitoring Information",
+                "fields": [
+                    {"id": "intro_note", "label": "All fields below are optional. You may select 'Prefer not to say' for any question.", "type": "info"},
+                    {"id": "ethnicity", "label": "Ethnicity", "type": "select", "options": [
+                        "Asian or Asian British - Bangladeshi",
+                        "Asian or Asian British - Chinese", 
+                        "Asian or Asian British - Indian",
+                        "Asian or Asian British - Pakistani",
+                        "Asian or Asian British - Other Asian background",
+                        "Black or Black British - African",
+                        "Black or Black British - Caribbean",
+                        "Black or Black British - Other Black background",
+                        "Mixed - White and Asian",
+                        "Mixed - White and Black African",
+                        "Mixed - White and Black Caribbean",
+                        "Mixed - Other mixed background",
+                        "White - British",
+                        "White - Irish",
+                        "White - Gypsy or Irish Traveller",
+                        "White - Other White background",
+                        "Arab",
+                        "Other ethnic group",
+                        "Prefer not to say"
+                    ]},
+                    {"id": "gender", "label": "Gender", "type": "select", "options": [
+                        "Female",
+                        "Male",
+                        "Non-binary",
+                        "Other",
+                        "Prefer not to say"
+                    ]},
+                    {"id": "sexual_orientation", "label": "Sexual Orientation", "type": "select", "options": [
+                        "Heterosexual/Straight",
+                        "Gay",
+                        "Lesbian",
+                        "Bisexual",
+                        "Other",
+                        "Prefer not to say"
+                    ]},
+                    {"id": "religion", "label": "Religion or Belief", "type": "select", "options": [
+                        "Buddhist",
+                        "Christian",
+                        "Hindu",
+                        "Jewish",
+                        "Muslim",
+                        "Sikh",
+                        "No religion",
+                        "Other",
+                        "Prefer not to say"
+                    ]},
+                    {"id": "disability", "label": "Do you consider yourself to have a disability?", "type": "select", "options": [
+                        "Yes",
+                        "No",
+                        "Prefer not to say"
+                    ]},
+                    {"id": "disability_details", "label": "If you selected 'Yes', please provide details if you wish (optional)", "type": "textarea", "conditional_on": "disability", "conditional_value": "Yes"},
+                    {"id": "caring_responsibilities", "label": "Do you have caring responsibilities?", "type": "select", "options": [
+                        "Yes",
+                        "No",
+                        "Prefer not to say"
+                    ]},
+                    {"id": "caring_type", "label": "If yes, please select all that apply", "type": "multi_select", "options": [
+                        "Children under 18",
+                        "Disabled person",
+                        "Elderly person"
+                    ], "conditional_on": "caring_responsibilities", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "fields": [
+                    {"id": "submission_consent", "label": "I understand this form is optional and my answers will be used solely for equality monitoring purposes", "type": "checkbox"},
+                ]
+            }
+        ],
+        "fields": []
     },
+    
+    # ========================================================================
+    # 5. HMRC STARTER CHECKLIST - Conditional on P45 Absence
+    # ========================================================================
     "hmrc_starter_checklist": {
         "name": "HMRC Starter Checklist",
         "form_type": "hmrc_starter_checklist",
         "is_conditional": True,  # Only required if no P45
         "condition_field": "p45",  # If P45 exists, this is not required
-        "fields": [
-            {"id": "intro_note", "label": "Complete this form if the employee does not have a P45 from a previous employer. This is used for payroll/tax setup. Do not send to HMRC - retain for your records.", "type": "info"},
-            {"id": "employee_statement", "label": "Employee Statement (select one)", "type": "select", "options": [
-                "A - This is my first job since 6 April and I have not been receiving taxable Jobseeker's Allowance, Employment and Support Allowance, taxable Incapacity Benefit, State or Occupational Pension",
-                "B - This is now my only job, but since 6 April I have had another job, or received taxable Jobseeker's Allowance, Employment and Support Allowance or taxable Incapacity Benefit. I do not receive a State or Occupational Pension",
-                "C - I have another job or receive a State or Occupational Pension"
-            ]},
-            {"id": "has_student_loan", "label": "Do you have a student loan?", "type": "select", "options": ["Yes", "No"]},
-            {"id": "student_loan_plan", "label": "If yes, which plan type?", "type": "select", "options": [
-                "Plan 1 (started before 1 September 2012)",
-                "Plan 2 (started on or after 1 September 2012)",
-                "Plan 4 (Scottish students from April 2021)",
-                "Postgraduate Loan",
-                "Not applicable"
-            ]},
-            {"id": "has_postgrad_loan", "label": "Do you have a Postgraduate Loan?", "type": "select", "options": ["Yes", "No", "Not applicable"]},
-            {"id": "national_insurance_number", "label": "National Insurance Number", "type": "text"},
-            {"id": "date_of_birth", "label": "Date of Birth", "type": "date"},
-            {"id": "full_name", "label": "Full Name (as shown on official documents)", "type": "text"},
-            {"id": "address", "label": "Current Address", "type": "textarea"},
-            {"id": "signature_date", "label": "Date Signed", "type": "date"},
-            {"id": "declaration", "label": "I confirm the information provided is correct to the best of my knowledge", "type": "checkbox"},
-        ]
+        "auto_fill_fields": ["full_name", "address", "postcode", "country", "ni_number", "date_of_birth"],
+        "description": "Complete this form if the employee does not have a P45 from a previous employer. This is used for payroll/tax setup.",
+        "sections": [
+            {
+                "id": "employee_details",
+                "title": "Employee Details",
+                "description": "Pre-filled from employee profile where available",
+                "fields": [
+                    {"id": "full_name", "label": "Full Name (as shown on official documents)", "type": "text", "required": True, "auto_fill": "full_name"},
+                    {"id": "address", "label": "Address", "type": "textarea", "required": True, "auto_fill": "full_address"},
+                    {"id": "postcode", "label": "Postcode", "type": "text", "required": True, "auto_fill": "postcode"},
+                    {"id": "country", "label": "Country", "type": "text", "auto_fill": "country"},
+                    {"id": "ni_number", "label": "National Insurance Number", "type": "text", "auto_fill": "ni_number", "placeholder": "e.g., AB123456C"},
+                    {"id": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True, "auto_fill": "date_of_birth"},
+                    {"id": "employment_start_date", "label": "Employment Start Date", "type": "date", "auto_fill": "start_date"},
+                ]
+            },
+            {
+                "id": "tax_statement",
+                "title": "Employee Tax Statement",
+                "description": "Select the statement that applies to you",
+                "fields": [
+                    {"id": "employee_statement", "label": "Select one statement", "type": "select", "required": True, "options": [
+                        "A - This is my first job since 6 April and I have not been receiving taxable Jobseeker's Allowance, Employment and Support Allowance, taxable Incapacity Benefit, State or Occupational Pension",
+                        "B - This is now my only job, but since 6 April I have had another job, or received taxable Jobseeker's Allowance, Employment and Support Allowance or taxable Incapacity Benefit. I do not receive a State or Occupational Pension",
+                        "C - I have another job or receive a State or Occupational Pension"
+                    ]},
+                ]
+            },
+            {
+                "id": "student_loans",
+                "title": "Student Loan",
+                "fields": [
+                    {"id": "has_student_loan", "label": "Do you have a student loan?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "student_loan_plan", "label": "Which student loan plan type?", "type": "select", "options": [
+                        "Plan 1 (started before 1 September 2012)",
+                        "Plan 2 (started on or after 1 September 2012, England/Wales)",
+                        "Plan 4 (Scottish students from April 2021)",
+                        "Plan 5 (started on or after 1 August 2023, England)",
+                        "Postgraduate Loan"
+                    ], "conditional_on": "has_student_loan", "conditional_value": "Yes"},
+                    {"id": "has_postgrad_loan", "label": "Do you have a Postgraduate Loan (separate from student loan)?", "type": "select", "options": ["No", "Yes"]},
+                ]
+            },
+            {
+                "id": "additional_info",
+                "title": "Additional Information",
+                "fields": [
+                    {"id": "has_additional_income", "label": "Do you have any other income or employment?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "additional_income_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_additional_income", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "fields": [
+                    {"id": "declaration_accurate", "label": "I confirm the information provided is correct to the best of my knowledge", "type": "checkbox", "required": True},
+                    {"id": "signature", "label": "Signature (type full name)", "type": "text", "required": True},
+                    {"id": "sign_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
+    },
+    
+    # ========================================================================
+    # 6. INDUCTION & COMPETENCY ASSESSMENT
+    # ========================================================================
+    "induction": {
+        "name": "Induction & Competency Assessment",
+        "form_type": "induction",
+        "auto_fill_fields": ["employee_name", "job_title", "start_date"],
+        "sections": [
+            {
+                "id": "induction_details",
+                "title": "Induction Details",
+                "fields": [
+                    {"id": "employee_name", "label": "Employee Name", "type": "text", "auto_fill": "full_name"},
+                    {"id": "job_title", "label": "Job Title", "type": "text", "auto_fill": "role"},
+                    {"id": "induction_date", "label": "Induction Date", "type": "date", "required": True},
+                    {"id": "inducted_by", "label": "Inducted By", "type": "text", "required": True},
+                    {"id": "location", "label": "Location/Site", "type": "text"},
+                ]
+            },
+            {
+                "id": "policies_procedures",
+                "title": "Policies & Procedures",
+                "fields": [
+                    {"id": "policies_reviewed", "label": "Key policies reviewed and understood?", "type": "checkbox"},
+                    {"id": "employee_handbook", "label": "Employee handbook issued and explained?", "type": "checkbox"},
+                    {"id": "reporting_structure", "label": "Reporting structure explained?", "type": "checkbox"},
+                    {"id": "absence_procedures", "label": "Absence reporting procedures explained?", "type": "checkbox"},
+                ]
+            },
+            {
+                "id": "health_safety",
+                "title": "Health & Safety",
+                "fields": [
+                    {"id": "fire_safety_briefed", "label": "Fire safety and evacuation procedures explained?", "type": "checkbox"},
+                    {"id": "first_aid_location", "label": "First aid facilities location shown?", "type": "checkbox"},
+                    {"id": "manual_handling_demo", "label": "Manual handling principles demonstrated?", "type": "checkbox"},
+                    {"id": "infection_control_briefed", "label": "Infection control procedures explained?", "type": "checkbox"},
+                    {"id": "ppe_issued", "label": "PPE issued and explained where required?", "type": "checkbox"},
+                    {"id": "coshh_awareness", "label": "COSHH awareness (if applicable)?", "type": "checkbox"},
+                ]
+            },
+            {
+                "id": "safeguarding",
+                "title": "Safeguarding & Care",
+                "fields": [
+                    {"id": "safeguarding_awareness", "label": "Safeguarding awareness and reporting explained?", "type": "checkbox"},
+                    {"id": "dignity_care", "label": "Dignity in care principles discussed?", "type": "checkbox"},
+                    {"id": "medication_admin", "label": "Medication administration procedures (if applicable)?", "type": "checkbox"},
+                    {"id": "emergency_procedures", "label": "Emergency procedures and contacts provided?", "type": "checkbox"},
+                ]
+            },
+            {
+                "id": "competency",
+                "title": "Competency Assessment",
+                "fields": [
+                    {"id": "equipment_training", "label": "Equipment training completed where required?", "type": "checkbox"},
+                    {"id": "competency_assessment_passed", "label": "Initial competency assessment", "type": "select", "options": ["Passed", "Needs follow-up", "Not assessed yet"], "required": True},
+                    {"id": "follow_up_required", "label": "Follow-up actions required", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "sign_off",
+                "title": "Sign-off",
+                "fields": [
+                    {"id": "employee_confirmation", "label": "Employee confirms completion of induction", "type": "checkbox", "required": True},
+                    {"id": "employee_signature", "label": "Employee Signature", "type": "text", "required": True},
+                    {"id": "inductor_signature", "label": "Inductor Signature", "type": "text", "required": True},
+                    {"id": "sign_date", "label": "Date", "type": "date", "required": True},
+                    {"id": "assessor_notes", "label": "Assessor Notes", "type": "textarea"},
+                ]
+            }
+        ],
+        "fields": []
+    },
+    
+    # ========================================================================
+    # 7. INTERVIEW RECORD
+    # ========================================================================
+    "interview_record": {
+        "name": "Interview Record",
+        "form_type": "interview_record",
+        "auto_fill_fields": ["candidate_name", "position_applied"],
+        "sections": [
+            {
+                "id": "interview_info",
+                "title": "Interview Information",
+                "fields": [
+                    {"id": "candidate_name", "label": "Candidate Name", "type": "text", "auto_fill": "full_name", "required": True},
+                    {"id": "position_applied", "label": "Position Applied For", "type": "text", "auto_fill": "role", "required": True},
+                    {"id": "interview_date", "label": "Interview Date", "type": "date", "required": True},
+                    {"id": "interview_type", "label": "Interview Type", "type": "select", "options": ["In-person", "Video call", "Phone"], "required": True},
+                    {"id": "interviewer_name", "label": "Interviewer Name(s)", "type": "text", "required": True},
+                ]
+            },
+            {
+                "id": "assessment",
+                "title": "Assessment",
+                "fields": [
+                    {"id": "experience_summary", "label": "Relevant Experience Summary", "type": "textarea"},
+                    {"id": "strengths", "label": "Identified Strengths", "type": "textarea"},
+                    {"id": "areas_for_development", "label": "Areas for Development", "type": "textarea"},
+                    {"id": "right_to_work_verified", "label": "Right to Work discussed/verified at interview?", "type": "checkbox"},
+                    {"id": "references_discussed", "label": "References discussed?", "type": "checkbox"},
+                    {"id": "availability_confirmed", "label": "Availability confirmed?", "type": "checkbox"},
+                ]
+            },
+            {
+                "id": "decision",
+                "title": "Interview Outcome",
+                "fields": [
+                    {"id": "overall_impression", "label": "Overall Impression", "type": "select", "options": ["Strongly recommend", "Recommend", "Consider", "Do not recommend"], "required": True},
+                    {"id": "decision", "label": "Interview Decision", "type": "select", "options": ["Offer", "Second interview", "Hold", "Reject"], "required": True},
+                    {"id": "interviewer_notes", "label": "Interviewer Notes", "type": "textarea"},
+                    {"id": "interviewer_signature", "label": "Interviewer Signature", "type": "text", "required": True},
+                    {"id": "interview_sign_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
     }
 }
 
@@ -3329,17 +3765,87 @@ async def view_profile_photo(employee_id: str, user: dict = Depends(get_current_
 # Extracts profile data from uploaded application forms using AI/OCR
 # NOTE: This populates PROFILE DATA ONLY - NOT compliance evidence
 
+# Complete mapping of application form fields to employee profile fields
+APPLICATION_FORM_FIELD_MAPPING = {
+    # Personal Details
+    "first_name": "first_name",
+    "last_name": "last_name",
+    "middle_name": "middle_name",
+    "title": "title",
+    "street": "address_line_1",
+    "address_line_1": "address_line_1",
+    "address_line_2": "address_line_2",
+    "city": "city",
+    "county": "county",
+    "postcode": "postcode",
+    "country": "country",
+    "national_insurance_number": "ni_number",
+    "ni_number": "ni_number",
+    "contact_number": "phone",
+    "phone": "phone",
+    "other_contact_number": "phone_secondary",
+    "phone_secondary": "phone_secondary",
+    "primary_email_address": "email",
+    "email": "email",
+    "date_of_birth": "date_of_birth",
+    "do_you_drive": "has_driving_licence",
+    "has_driving_licence": "has_driving_licence",
+    "driving_licence_number": "driving_licence_number",
+    "do_you_have_access_to_your_own_vehicle": "has_own_vehicle",
+    "has_own_vehicle": "has_own_vehicle",
+    "vehicle_registration": "vehicle_registration",
+    "vehicle_make_model": "vehicle_make_model",
+    
+    # Next of Kin
+    "next_of_kin_name": "next_of_kin_name",
+    "nok_name": "next_of_kin_name",
+    "next_of_kin_relationship": "next_of_kin_relationship",
+    "nok_relationship": "next_of_kin_relationship",
+    "next_of_kin_phone": "next_of_kin_phone",
+    "nok_phone": "next_of_kin_phone",
+    "next_of_kin_address": "next_of_kin_address",
+    "nok_address": "next_of_kin_address",
+    "next_of_kin_city": "next_of_kin_city",
+    "nok_city": "next_of_kin_city",
+    "next_of_kin_county": "next_of_kin_county",
+    "nok_county": "next_of_kin_county",
+    "next_of_kin_postcode": "next_of_kin_postcode",
+    "nok_postcode": "next_of_kin_postcode",
+    "next_of_kin_country": "next_of_kin_country",
+    "nok_country": "next_of_kin_country",
+    
+    # References
+    "referee_1_name": "reference_1_name",
+    "reference_1_name": "reference_1_name",
+    "referee_1_organisation": "reference_1_company",
+    "reference_1_company": "reference_1_company",
+    "referee_1_email": "reference_1_email",
+    "reference_1_email": "reference_1_email",
+    "referee_1_phone": "reference_1_phone",
+    "reference_1_phone": "reference_1_phone",
+    "referee_1_start_date": "reference_1_start_date",
+    "reference_1_end_date": "reference_1_end_date",
+    "referee_2_name": "reference_2_name",
+    "reference_2_name": "reference_2_name",
+    "referee_2_organisation": "reference_2_company",
+    "reference_2_company": "reference_2_company",
+    "referee_2_email": "reference_2_email",
+    "reference_2_email": "reference_2_email",
+    "referee_2_phone": "reference_2_phone",
+    "reference_2_phone": "reference_2_phone",
+    "referee_2_start_date": "reference_2_start_date",
+    "reference_2_end_date": "reference_2_end_date",
+    
+    # Declarations (flags only - not evidence)
+    "working_time_opt_out": "working_time_opt_out",
+    "dbs_update_service_consent": "dbs_update_service_consent",
+    "criminal_offence_declaration": "criminal_offence_declared",
+    "professional_misconduct_declaration": "professional_misconduct_declared",
+    "health_issue_declaration": "health_issue_declared",
+}
+
 # Fields that can be extracted from application forms
-EXTRACTABLE_PROFILE_FIELDS = [
-    "first_name", "last_name", "email", "phone",
-    "address_line_1", "address_line_2", "city", "county", "postcode", "country",
-    "ni_number", "date_of_birth",
-    "next_of_kin_name", "next_of_kin_relationship", "next_of_kin_phone", "next_of_kin_address",
-    "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relationship",
-    "reference_1_name", "reference_1_company", "reference_1_phone", "reference_1_email",
-    "reference_2_name", "reference_2_company", "reference_2_phone", "reference_2_email",
-    "has_driving_licence", "driving_licence_type", "has_own_vehicle", "vehicle_registration"
-]
+EXTRACTABLE_PROFILE_FIELDS = list(set(APPLICATION_FORM_FIELD_MAPPING.values()))
 
 class ExtractedField(BaseModel):
     """A single extracted field with its value and confidence"""
@@ -7309,11 +7815,159 @@ async def get_form_template(requirement_id: str, user: dict = Depends(get_curren
         raise HTTPException(status_code=404, detail="Form template not found")
     
     config = FORM_BASED_REQUIREMENTS[requirement_id]
+    
+    # Return sections if available, otherwise fallback to flat fields
     return {
         "requirement_id": requirement_id,
         "name": config["name"],
         "form_type": config["form_type"],
-        "fields": config["fields"]
+        "description": config.get("description"),
+        "is_optional": config.get("is_optional", False),
+        "is_conditional": config.get("is_conditional", False),
+        "updates_profile": config.get("updates_profile", False),
+        "auto_fill_fields": config.get("auto_fill_fields", []),
+        "sections": config.get("sections", []),
+        "fields": config.get("fields", [])  # Backward compatibility
+    }
+
+
+@api_router.get("/form-submissions/auto-fill/{requirement_id}/{employee_id}")
+async def get_form_auto_fill_data(
+    requirement_id: str,
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get auto-fill data for a form from employee profile.
+    
+    This pre-fills form fields from existing employee profile data.
+    Does NOT write any data - just provides suggested values.
+    
+    Forms that support auto-fill:
+    - Health Screening: name, address, phone, email, job title
+    - Staff Personal Info: all non-sensitive profile fields
+    - HMRC Starter Checklist: name, address, NI number, DOB, start date
+    - Recruitment Checklist: employee name, position
+    - Induction: employee name, job title, start date
+    - Interview Record: candidate name, position
+    
+    Medical answers, identity/DBS verifications, and equality data
+    are NEVER auto-filled - these must be explicitly entered.
+    """
+    if requirement_id not in FORM_BASED_REQUIREMENTS:
+        raise HTTPException(status_code=404, detail="Form template not found")
+    
+    # Get employee data
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    config = FORM_BASED_REQUIREMENTS[requirement_id]
+    auto_fill_fields = config.get("auto_fill_fields", [])
+    
+    # Build auto-fill data map
+    auto_fill_data = {}
+    
+    # Helper to build full address
+    def build_full_address():
+        parts = [
+            employee.get("address_line_1"),
+            employee.get("address_line_2"),
+            employee.get("city"),
+            employee.get("county"),
+            employee.get("postcode"),
+            employee.get("country")
+        ]
+        return ", ".join(filter(None, parts))
+    
+    # Helper to build full name
+    def build_full_name():
+        parts = [
+            employee.get("first_name"),
+            employee.get("middle_name"),
+            employee.get("last_name")
+        ]
+        return " ".join(filter(None, parts))
+    
+    # Helper to build next of kin full address
+    def build_nok_address():
+        parts = [
+            employee.get("next_of_kin_address_line_1") or employee.get("next_of_kin_address"),
+            employee.get("next_of_kin_city"),
+            employee.get("next_of_kin_county"),
+            employee.get("next_of_kin_postcode"),
+            employee.get("next_of_kin_country")
+        ]
+        return ", ".join(filter(None, parts))
+    
+    # Map auto-fill field IDs to employee data
+    field_value_map = {
+        "full_name": build_full_name(),
+        "first_name": employee.get("first_name"),
+        "middle_name": employee.get("middle_name"),
+        "last_name": employee.get("last_name"),
+        "title": employee.get("title"),
+        "date_of_birth": employee.get("date_of_birth"),
+        "job_title": employee.get("role"),
+        "role": employee.get("role"),
+        "position": employee.get("role"),
+        "full_address": build_full_address(),
+        "address": build_full_address(),
+        "address_line_1": employee.get("address_line_1"),
+        "address_line_2": employee.get("address_line_2"),
+        "city": employee.get("city"),
+        "county": employee.get("county"),
+        "postcode": employee.get("postcode"),
+        "country": employee.get("country"),
+        "phone": employee.get("phone"),
+        "phone_primary": employee.get("phone"),
+        "phone_secondary": employee.get("phone_secondary"),
+        "email": employee.get("email"),
+        "ni_number": employee.get("ni_number"),
+        "start_date": employee.get("start_date"),
+        "employment_start_date": employee.get("start_date"),
+        "marital_status": employee.get("marital_status"),
+        # Next of kin / Emergency contact
+        "next_of_kin_name": employee.get("next_of_kin_name") or employee.get("emergency_contact_name"),
+        "emergency_name": employee.get("next_of_kin_name") or employee.get("emergency_contact_name"),
+        "next_of_kin_relationship": employee.get("next_of_kin_relationship") or employee.get("emergency_contact_relationship"),
+        "emergency_relationship": employee.get("next_of_kin_relationship") or employee.get("emergency_contact_relationship"),
+        "next_of_kin_phone": employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone"),
+        "emergency_phone": employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone"),
+        "next_of_kin_address": build_nok_address(),
+        "emergency_address": build_nok_address(),
+        # Driving
+        "has_driving_licence": "Yes" if employee.get("has_driving_licence") else "No" if employee.get("has_driving_licence") == False else None,
+        "driving_licence_number": employee.get("driving_licence_number"),
+        "has_own_vehicle": "Yes" if employee.get("has_own_vehicle") else "No" if employee.get("has_own_vehicle") == False else None,
+        "vehicle_registration": employee.get("vehicle_registration"),
+        "vehicle_make_model": employee.get("vehicle_make_model"),
+        # For interview/recruitment forms
+        "candidate_name": build_full_name(),
+        "employee_name": build_full_name(),
+        "position_applied": employee.get("role"),
+    }
+    
+    # Build the auto-fill response based on what the form requests
+    # Go through each section and field, matching auto_fill keys
+    sections = config.get("sections", [])
+    
+    for section in sections:
+        for field in section.get("fields", []):
+            field_id = field.get("id")
+            auto_fill_key = field.get("auto_fill")
+            
+            if auto_fill_key and auto_fill_key in field_value_map:
+                value = field_value_map[auto_fill_key]
+                if value is not None and value != "":
+                    auto_fill_data[field_id] = value
+    
+    return {
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "auto_fill_data": auto_fill_data,
+        "source": "employee_profile",
+        "note": "Auto-fill data from employee profile. Review before applying to form."
     }
 
 

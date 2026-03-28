@@ -2554,33 +2554,82 @@ export default function EmployeeProfilePage() {
                                     </p>
                                   )}
                                   
-                                  {/* Evidence files list - compact with status indicators */}
+                                  {/* Evidence files list - clickable to view each file */}
                                   {evidenceFiles.length > 0 && (
-                                    <div className="text-xs text-text-muted space-y-0.5 mt-1">
-                                      {evidenceFiles.slice(0, 2).map((file, idx) => (
-                                        <div key={file.file_id || idx} className="flex items-center gap-1 group">
-                                          <FileText className="h-3 w-3 flex-shrink-0" />
-                                          <span className="truncate max-w-[200px]">
+                                    <div className="text-xs text-text-muted space-y-1 mt-1">
+                                      {evidenceFiles.map((file, idx) => (
+                                        <div key={file.file_id || idx} className="flex items-center gap-2 group py-0.5 px-1 -mx-1 rounded hover:bg-gray-50">
+                                          <FileText className="h-3 w-3 flex-shrink-0 text-primary" />
+                                          {/* Clickable file name to view */}
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
+                                              setPreviewFile({
+                                                url: viewUrl,
+                                                filename: file.file_label || file.original_filename || 'Document',
+                                                content_type: file.content_type
+                                              });
+                                            }}
+                                            className="truncate max-w-[180px] text-left hover:text-primary hover:underline font-medium"
+                                            title={`Click to view: ${file.file_label || file.original_filename}`}
+                                          >
                                             {file.file_label || file.original_filename || 'Document'}
-                                          </span>
+                                          </button>
                                           {file.verified && <Shield className="h-3 w-3 text-success flex-shrink-0" />}
-                                          {/* Per-file quick actions - show on hover for multi-file */}
-                                          {evidenceFiles.length > 1 && !isAuditor() && (
-                                            <div className="hidden group-hover:flex items-center gap-1 ml-1">
+                                          {/* Quick actions for each file */}
+                                          <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
+                                                setPreviewFile({
+                                                  url: viewUrl,
+                                                  filename: file.file_label || file.original_filename || 'Document',
+                                                  content_type: file.content_type
+                                                });
+                                              }}
+                                              className="p-1 hover:bg-primary/10 rounded text-primary"
+                                              title="View file"
+                                            >
+                                              <Eye className="h-3 w-3" />
+                                            </button>
+                                            <button
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                try {
+                                                  const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
+                                                  const response = await axios.get(viewUrl, {
+                                                    headers: { Authorization: `Bearer ${token}` },
+                                                    responseType: 'blob'
+                                                  });
+                                                  const url = window.URL.createObjectURL(response.data);
+                                                  const link = document.createElement('a');
+                                                  link.href = url;
+                                                  link.download = file.original_filename || 'document';
+                                                  link.click();
+                                                  window.URL.revokeObjectURL(url);
+                                                } catch (err) {
+                                                  toast.error('Failed to download file');
+                                                }
+                                              }}
+                                              className="p-1 hover:bg-gray-200 rounded text-gray-600"
+                                              title="Download file"
+                                            >
+                                              <Download className="h-3 w-3" />
+                                            </button>
+                                            {!isAuditor() && evidenceFiles.length > 1 && (
                                               <button
                                                 onClick={(e) => { e.stopPropagation(); openRemoveDialog(file, req.id); }}
-                                                className="p-0.5 hover:bg-error/10 rounded text-error/70 hover:text-error"
+                                                className="p-1 hover:bg-error/10 rounded text-error/70 hover:text-error"
                                                 title="Remove this file"
                                               >
                                                 <XCircle className="h-3 w-3" />
                                               </button>
-                                            </div>
-                                          )}
+                                            )}
+                                          </div>
                                         </div>
                                       ))}
-                                      {evidenceFiles.length > 2 && (
-                                        <p className="text-primary">+{evidenceFiles.length - 2} more files</p>
-                                      )}
                                     </div>
                                   )}
                                   

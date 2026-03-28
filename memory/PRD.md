@@ -448,7 +448,33 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Audit-Ready Status Overhaul
+2026-03-28 - Care-Focused Language + Evidence Editing
+
+### Care-Focused Language (Completed 2026-03-28)
+- [x] **Renamed all audit terminology to care terminology**:
+  - "Audit Summary" → "Care Status"
+  - "Verified" → "Checked & Approved"
+  - "Evidence Uploaded" → "Ready for Review"  
+  - "Missing" → "Still Needed"
+  - "Expired" → "Needs Updating"
+  - "Checklist" → "What's Needed"
+  - "Audit Progress" → "Profile Progress"
+  - "Verify" → "Approve"
+- [x] **ComplianceOverview sections updated**: Checked & Approved, Ready for Review, Still Needed, Needs Updating
+- [x] **Progress bar**: Shows "Profile Progress - X/Y approved"
+
+### Evidence Editing with Audit Trail (Completed 2026-03-28)
+- [x] **Edit Details action**: More menu (⋯) on each evidence item with Edit Details and View History
+- [x] **Editable fields**: Issue Date, Expiry Date, Notes, Document Label
+- [x] **Required reason**: Every edit requires a reason (min 3 characters) for audit trail
+- [x] **Full audit trail**: Creates immutable log entry with:
+  - employee_id, file_id, requirement_id
+  - field_changed, old_value, new_value
+  - changed_by, changed_by_name, changed_at
+  - reason, was_verified_before_edit
+- [x] **View History modal**: Shows complete change history
+- [x] **Post-approval flag**: Edits after approval flagged as "edited_after_approval"
+- [x] **Expiry tracking**: Updated expiry dates immediately affect dashboard alerts
 
 ### Audit-Ready Status Overhaul (Completed 2026-03-28)
 - [x] **Removed "Complete" status entirely** - No "complete" label anywhere in UI

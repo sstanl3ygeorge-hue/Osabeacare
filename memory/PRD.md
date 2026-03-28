@@ -308,7 +308,9 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - AUDIT STATUS: Forms = internal workflow, PDFs = audit evidence
 
 ### Backlog (P1-P2)
-- [ ] Email notifications via Resend for form requests
+- [ ] Phase 2 Migration: Apply evidence-based structure to all employees
+- [ ] Expiry Tracking Enhancements: Dashboard alerts for expiring items
+- [ ] Email notifications via Resend for document requests and expiries
 - [ ] Bulk document requests
 - [ ] Bulk policy assignment
 - [ ] Employee self-service portal
@@ -448,7 +450,19 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Care-Focused Language + Evidence Editing
+2026-03-28 - Checklist Reordering + Care-Focused Language + Evidence Editing
+
+### Checklist Reordering by Audit Priority (Completed 2026-03-28)
+- [x] **Reorganized categories by real-world care audit priority**:
+  - 1_Legal_Safety: Legal & Safety (RTW, DBS, Identity) - 5 items
+  - 2_Core_Training: Core Training (Safeguarding, Manual Handling, etc.) - 6 items
+  - 3_Role_Readiness: Role Readiness (Health Screening, Induction, References) - 3 items
+  - 4_Employment: Employment (Contract, Application, Interview) - 5 items
+  - 5_Agreements: Agreements (Handbook, Policies) - 2 items
+  - 6_Admin: Admin / Other - 2 items
+- [x] **Backend**: Updated MANDATORY_ITEMS dictionary in server.py with new category prefixes
+- [x] **Frontend**: Updated categoryOrder and CATEGORY_DISPLAY in EmployeeProfilePage.js
+- [x] **Testing**: All 23 requirements display in correct order, categories verified
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

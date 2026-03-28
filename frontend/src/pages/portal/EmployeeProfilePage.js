@@ -461,20 +461,6 @@ export default function EmployeeProfilePage() {
 
   const handleVerifyDocument = async (docId, fileUrl) => {
     try {
-      // First check if file is accessible
-      if (fileUrl) {
-        try {
-          // Try to fetch with HEAD request to verify file exists
-          await axios.head(fileUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            timeout: 10000
-          });
-        } catch (fileError) {
-          toast.error('Cannot verify - file is not accessible. Please re-upload the document.');
-          return;
-        }
-      }
-      
       await axios.post(`${API}/employee-documents/${docId}/verify`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -515,9 +501,8 @@ export default function EmployeeProfilePage() {
 
   // Verify all documents under a requirement
   const handleVerifyRequirement = async (requirementId) => {
-    // First, check if the file is accessible before allowing verification
     try {
-      // Get the requirement data to find file URL
+      // Get the requirement data
       const req = complianceRequirements?.requirements?.find(r => r.id === requirementId);
       if (!req) {
         toast.error('Requirement not found');
@@ -531,28 +516,13 @@ export default function EmployeeProfilePage() {
         return;
       }
       
-      // Check if at least one file is accessible
-      const fileToCheck = evidenceFiles[0];
-      if (fileToCheck?.file_id) {
-        try {
-          const checkUrl = `${API}/employees/${employeeId}/requirements/${requirementId}/evidence/${fileToCheck.file_id}/view`;
-          const checkResponse = await axios.head(checkUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-            timeout: 10000
-          });
-          // If we get here, file is accessible
-        } catch (fileError) {
-          toast.error('Cannot verify - file is not accessible. Please re-upload the document.');
-          return;
-        }
-      }
-      
-      // File is accessible, proceed with verification
+      // Proceed with verification - backend will handle file validation
       await axios.post(`${API}/employees/${employeeId}/requirements/${requirementId}/verify-all`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       toast.success('Requirement approved');
-      fetchData();
+      await fetchData();
+      await fetchCompliance();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to verify requirement');
     }

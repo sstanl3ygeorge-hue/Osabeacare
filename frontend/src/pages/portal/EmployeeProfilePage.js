@@ -1312,15 +1312,17 @@ export default function EmployeeProfilePage() {
                   }`}>
                     {employee.status?.replace('_', ' ')}
                   </span>
-                  <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                    employee.onboarding_status === 'Ready for Placement' ? 'bg-success/10 text-success' :
-                    employee.onboarding_status === 'Under Review' ? 'bg-info/10 text-info' :
-                    employee.onboarding_status === 'Documents Pending' ? 'bg-warning/10 text-warning' :
-                    employee.onboarding_status === 'Active' ? 'bg-success/10 text-success' :
-                    'bg-gray-100 text-gray-600'
-                  }`}>
-                    {employee.onboarding_status || 'New'}
-                  </span>
+                  {/* File Status Badge - Standardized */}
+                  {(() => {
+                    const progress = complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0;
+                    const fileStatus = progress >= 100 ? 'Complete' : progress >= 80 ? 'Nearly Complete' : 'Incomplete';
+                    const fileStatusColor = progress >= 100 ? 'bg-success/10 text-success' : progress >= 80 ? 'bg-warning/10 text-warning' : 'bg-gray-100 text-gray-600';
+                    return (
+                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${fileStatusColor}`}>
+                        File Status: {fileStatus}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -1328,10 +1330,10 @@ export default function EmployeeProfilePage() {
             <div className="flex flex-col items-end gap-4">
               <div className="flex items-center gap-3">
                 <div className="text-right">
-                  <p className="text-sm text-text-muted">Compliance Score</p>
+                  <p className="text-sm text-text-muted">Progress</p>
                   {/* Use single source of truth from complianceRequirements */}
                   <p className="text-3xl font-heading font-bold text-text-primary">
-                    {complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0}%
+                    {complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0}% Complete
                   </p>
                 </div>
                 {!isAuditor() && (
@@ -1577,76 +1579,8 @@ export default function EmployeeProfilePage() {
                 </DialogContent>
               </Dialog>
 
-              {/* Bulk Upload Dialog */}
-              <Dialog open={bulkUploadOpen} onOpenChange={setBulkUploadOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="rounded-xl" data-testid="bulk-upload-btn">
-                    <FolderUp className="mr-2 h-4 w-4" />
-                    Bulk Upload
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle className="font-heading">Bulk Document Upload</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 mt-4">
-                    <div className="space-y-2">
-                      <Label>Select Files</Label>
-                      <Input
-                        type="file"
-                        multiple
-                        onChange={(e) => {
-                          setBulkFiles(Array.from(e.target.files));
-                          setBulkDocTypes({});
-                        }}
-                        className="rounded-xl"
-                        data-testid="bulk-file-input"
-                      />
-                    </div>
-                    
-                    {bulkFiles.length > 0 && (
-                      <div className="space-y-3 max-h-64 overflow-y-auto">
-                        <p className="text-sm text-text-muted">{bulkFiles.length} files selected. Assign document types:</p>
-                        {bulkFiles.map((file, index) => (
-                          <div key={index} className="flex items-center gap-3 p-3 bg-[#F8FAFA] rounded-xl">
-                            <FileText className="h-5 w-5 text-text-muted flex-shrink-0" />
-                            <span className="text-sm text-text-primary flex-1 truncate">{file.name}</span>
-                            <Select 
-                              value={bulkDocTypes[index] || ''} 
-                              onValueChange={(v) => setBulkDocTypes(prev => ({...prev, [index]: v}))}
-                            >
-                              <SelectTrigger className="w-48 rounded-lg text-sm">
-                                <SelectValue placeholder="Select type" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {documentTypes.map((type) => (
-                                  <SelectItem key={type.id} value={type.id}>
-                                    {type.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    
-                    <div className="flex justify-end gap-3 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setBulkUploadOpen(false)} className="rounded-xl">
-                        Cancel
-                      </Button>
-                      <Button 
-                        onClick={handleBulkUpload} 
-                        disabled={isUploading || bulkFiles.length === 0}
-                        className="bg-primary hover:bg-primary-hover text-white rounded-xl"
-                        data-testid="bulk-upload-submit"
-                      >
-                        {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : `Upload ${bulkFiles.length} Files`}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+              {/* Note: Bulk Upload functionality removed from individual employee profile.
+                  Bulk operations should be done from the bulk actions screen. */}
 
               {/* Generate Forms Dropdown - Hidden for Audit Mode */}
               {/* Forms system hidden from UI. Backend retained for data integrity. */}

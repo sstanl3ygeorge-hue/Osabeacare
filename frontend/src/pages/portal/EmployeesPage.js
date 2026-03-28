@@ -320,7 +320,7 @@ export default function EmployeesPage() {
         <CardContent className="p-4">
           {/* Helper text */}
           <p className="text-sm text-text-muted mb-3">
-            Filter employees by work readiness to quickly see who can start work.
+            Filter employees by work status to quickly see who can start work.
           </p>
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="relative flex-1">
@@ -333,14 +333,14 @@ export default function EmployeesPage() {
                 data-testid="employees-search"
               />
             </div>
-            {/* Work Readiness Filter */}
+            {/* Work Status Filter */}
             <Select value={workReadinessFilter || "all"} onValueChange={(v) => setWorkReadinessFilter(v === "all" ? "" : v)}>
               <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="work-readiness-filter">
                 <Shield className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Start Status" />
+                <SelectValue placeholder="Work Status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Start Status</SelectItem>
+                <SelectItem value="all">All Work Status</SelectItem>
                 <SelectItem value="ready_to_work">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-success"></span>
@@ -350,7 +350,7 @@ export default function EmployeesPage() {
                 <SelectItem value="supervised_start">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning"></span>
-                    Supervised Start Only
+                    Supervised Start
                   </span>
                 </SelectItem>
                 <SelectItem value="not_ready">
@@ -441,15 +441,32 @@ export default function EmployeesPage() {
                   <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Employee</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Onboarding Status</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm">Start Status</th>
-                    <th className="text-left p-4 font-medium text-text-muted text-sm">Compliance</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm">Work Status</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">File Status</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm">Progress</th>
                     {!isAuditor() && <th className="text-left p-4 font-medium text-text-muted text-sm w-16">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEmployees.map((emp) => (
+                  {filteredEmployees.map((emp) => {
+                    // Calculate File Status
+                    const progress = emp.completion_percentage || 0;
+                    const fileStatus = progress >= 100 ? 'Complete' : progress >= 80 ? 'Nearly Complete' : 'Incomplete';
+                    const fileStatusColor = progress >= 100 ? 'bg-success/10 text-success' : progress >= 80 ? 'bg-warning/10 text-warning' : 'bg-gray-100 text-gray-600';
+                    
+                    // Standardize Work Status labels
+                    const getWorkStatusLabel = (status) => {
+                      if (status === 'work_ready' || status === 'fully_compliant') return 'Ready to Work';
+                      if (status === 'almost_ready' || status === 'supervised_start') return 'Supervised Start';
+                      return 'Not Ready';
+                    };
+                    const getWorkStatusColor = (status) => {
+                      if (status === 'work_ready' || status === 'fully_compliant') return 'bg-success/10 text-success';
+                      if (status === 'almost_ready' || status === 'supervised_start') return 'bg-warning/10 text-warning';
+                      return 'bg-error/10 text-error';
+                    };
+                    
+                    return (
                     <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
                       <td className="p-4">
                         <Link to={`/portal/employees/${emp.id}`} className="flex items-center gap-3" data-testid={`emp-link-${emp.id}`}>
@@ -471,36 +488,24 @@ export default function EmployeesPage() {
                       <td className="p-4 hidden md:table-cell">
                         <span className="text-text-primary">{emp.role}</span>
                       </td>
+                      <td className="p-4">
+                        {/* Work Status Badge - Standardized Labels */}
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                          emp.work_readiness ? getWorkStatusColor(emp.work_readiness.status) : 'bg-error/10 text-error'
+                        }`}>
+                          {emp.work_readiness?.status === 'work_ready' || emp.work_readiness?.status === 'fully_compliant' ? (
+                            <Shield className="h-3.5 w-3.5" />
+                          ) : (
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                          )}
+                          {emp.work_readiness ? getWorkStatusLabel(emp.work_readiness.status) : 'Not Ready'}
+                        </div>
+                      </td>
                       <td className="p-4 hidden lg:table-cell">
-                        <span className="text-text-muted">{emp.onboarding_status || 'New'}</span>
-                      </td>
-                      <td className="p-4">
-                        <span className={`status-chip ${statusColors[emp.status] || 'status-neutral'}`}>
-                          {emp.status?.replace('_', ' ')}
+                        {/* File Status Badge */}
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${fileStatusColor}`}>
+                          {fileStatus}
                         </span>
-                      </td>
-                      <td className="p-4">
-                        {/* Work Readiness Badge */}
-                        {emp.work_readiness ? (
-                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                            emp.work_readiness.status === 'work_ready' || emp.work_readiness.status === 'fully_compliant'
-                              ? 'bg-success/10 text-success'
-                              : emp.work_readiness.status === 'almost_ready'
-                              ? 'bg-warning/10 text-warning'
-                              : 'bg-error/10 text-error'
-                          }`}>
-                            {emp.work_readiness.status === 'work_ready' || emp.work_readiness.status === 'fully_compliant' ? (
-                              <Shield className="h-3.5 w-3.5" />
-                            ) : emp.work_readiness.status === 'almost_ready' ? (
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                            ) : (
-                              <AlertTriangle className="h-3.5 w-3.5" />
-                            )}
-                            {emp.work_readiness.label}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-text-muted">—</span>
-                        )}
                       </td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">
@@ -510,7 +515,7 @@ export default function EmployeesPage() {
                               style={{ width: `${emp.completion_percentage}%` }}
                             ></div>
                           </div>
-                          <span className="text-sm text-text-muted">{emp.completion_percentage}%</span>
+                          <span className="text-sm text-text-muted">{emp.completion_percentage}% Complete</span>
                           {/* Expiry Alert Indicator */}
                           {emp.expiry_alerts?.has_alerts && (
                             <span 
@@ -584,7 +589,8 @@ export default function EmployeesPage() {
                         </td>
                       )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
                 );

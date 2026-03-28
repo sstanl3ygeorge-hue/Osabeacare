@@ -73,7 +73,7 @@ export default function ComplianceOverview({
       {/* Primary Status Cards - Separated Model */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
-        {/* Start Status */}
+        {/* Work Status */}
         <Card className={`rounded-2xl border ${startColors.border} shadow-sm ${startColors.bg}`}>
           <CardContent className="p-5">
             <div className="flex items-start gap-4">
@@ -87,9 +87,11 @@ export default function ComplianceOverview({
                 )}
               </div>
               <div className="flex-1">
-                <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Start Status</p>
+                <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Work Status</p>
                 <p className={`text-lg font-semibold ${startColors.text} mt-0.5`}>
-                  {statuses.start_status?.label || 'Not Ready'}
+                  {statuses.start_status?.status === 'ready_to_work' ? 'Ready to Work' :
+                   statuses.start_status?.status === 'supervised_start_only' ? 'Supervised Start' :
+                   'Not Ready'}
                 </p>
                 <p className="text-xs text-text-muted mt-1">
                   Shows whether this employee can safely start work.
@@ -119,10 +121,12 @@ export default function ComplianceOverview({
               <div className="flex-1">
                 <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Recruitment File</p>
                 <p className={`text-lg font-semibold ${recruitmentColors.text} mt-0.5`}>
-                  {statuses.recruitment_file?.label || 'Incomplete'}
+                  {statuses.recruitment_file?.status === 'complete' ? 'Complete' :
+                   (statuses.recruitment_file?.complete || 0) / (statuses.recruitment_file?.total || 1) >= 0.8 ? 'Nearly Complete' :
+                   'Incomplete'}
                 </p>
                 <p className="text-xs text-text-muted mt-1">
-                  Shows whether the pre-employment record is complete.
+                  Shows whether the employee record is complete.
                 </p>
                 <p className="text-xs mt-2">
                   <span className={recruitmentColors.text}>{statuses.recruitment_file?.complete || 0}/{statuses.recruitment_file?.total || 0}</span>
@@ -149,12 +153,12 @@ export default function ComplianceOverview({
               <div className="flex-1">
                 <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Policies</p>
                 <p className={`text-lg font-semibold ${policiesColors.text} mt-0.5`}>
-                  {statuses.policies?.label || 'No Policies Assigned'}
+                  {statuses.policies?.status === 'all_acknowledged' ? 'All Policies Acknowledged' :
+                   statuses.policies?.status === 'no_policies' ? 'No Policies Assigned' :
+                   `${statuses.policies?.acknowledged || 0} of ${statuses.policies?.assigned || 0} Acknowledged`}
                 </p>
                 <p className="text-xs text-text-muted mt-1">
-                  {statuses.policies?.status === 'no_policies' 
-                    ? 'No policies assigned yet.'
-                    : 'Shows whether assigned policies have been read and acknowledged.'}
+                  Shows whether assigned policies have been read and acknowledged.
                 </p>
                 {statuses.policies?.assigned > 0 && (
                   <p className="text-xs mt-2">
@@ -168,7 +172,7 @@ export default function ComplianceOverview({
         </Card>
       </div>
 
-      {/* Overall Compliance - Supporting Info */}
+      {/* Progress - Supporting Info */}
       <Card className="rounded-2xl border-[#E4E8EB] shadow-sm">
         <CardContent className="p-5">
           <div className="flex items-center justify-between">
@@ -177,12 +181,12 @@ export default function ComplianceOverview({
                 <Users className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Overall Compliance</p>
+                <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Progress</p>
                 <p className="text-lg font-semibold text-text-primary mt-0.5">
                   {statuses.overall_compliance?.percentage || 0}% Complete
                 </p>
                 <p className="text-xs text-text-muted mt-1">
-                  {statuses.overall_compliance?.verified || 0} of {statuses.overall_compliance?.total || 0} items verified
+                  Shows how much of the employee record is complete.
                 </p>
               </div>
             </div>

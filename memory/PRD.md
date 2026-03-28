@@ -4,6 +4,55 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Truth Reconciliation Pass - COMPLETE**
+
+### Problem Identified
+Employee Profile showed "Nearly Complete" or "Incomplete" status even when work_readiness was "Ready to Work". This was caused by **duplicate inline calculations** in the frontend that computed file status based on progress percentage instead of using the API's work_readiness status.
+
+### Root Cause
+Two frontend files had inline calculations:
+1. **EmployeesPage.js**: Calculated `fileStatus` from `completion_percentage` (>=100→Complete, >=80→Nearly Complete, <80→Incomplete)
+2. **EmployeeProfilePage.js**: Same calculation for File Status badge
+
+These bypassed the backend's unified work_readiness calculation.
+
+### Fix Applied
+Removed inline calculations and replaced with direct API data:
+```javascript
+// BEFORE (duplicate calculation)
+const fileStatus = progress >= 100 ? 'Complete' : progress >= 80 ? 'Nearly Complete' : 'Incomplete';
+
+// AFTER (single source of truth)
+const workStatusLabel = emp.work_readiness?.label || 'Unknown';
+```
+
+### Where Old Calculations Were Removed
+1. **EmployeesPage.js** (lines 490-510): Removed `fileStatus`, `getWorkStatusLabel`, `getWorkStatusColor` inline functions
+2. **EmployeeProfilePage.js** (lines 1420-1430): Removed File Status badge inline calculation
+
+### Golden Test Case Verification
+**Employee: Olakunle Alonge (OCS-0001)**
+
+| View | Before Fix | After Fix |
+|------|-----------|-----------|
+| Employees List - Work Status | Ready to Work ✓ | Ready to Work ✓ |
+| Employees List - File Status | Nearly Complete ✗ | Ready to Work ✓ |
+| Employee Profile - Badge | Nearly Complete ✗ | Ready to Work ✓ |
+| Employee Profile - Progress | 81% | 81% |
+| Employee Profile - DBS Card | Current | Current |
+| DBS Register | Current | Current |
+| Audit View | Ready to Work ✓ | Ready to Work ✓ |
+
+### Canonical Summary Objects Used
+1. **Employee work_readiness**: `{ status, label, color }` - returned by `/api/employees` and `/api/employees/{id}/compliance-requirements`
+2. **DBS summary**: `get_employee_dbs_summary()` - used by `/api/dbs-register` and `/api/employees/{id}/compliance-requirements`
+3. **Compliance summary**: `calculate_employee_compliance()` - used by all progress calculations
+
+### Remaining Edge Cases
+- **Recruitment File status** (document completion 4/6) is a separate metric from work_readiness and correctly shows "Incomplete" in the status breakdown - this is expected behavior
+- The 4 missing recruitment items are: Interview Record, Recruitment Compliance Checklist (these are "recruitment" priority items)
+
+## Previous Update (2025-12-28)
 **DBS Register & Visibility Feature - COMPLETE**
 
 ### Single Source of Truth

@@ -172,6 +172,13 @@ export default function EmployeeProfilePage() {
   const [viewFormOpen, setViewFormOpen] = useState(false);
   const [viewFormData, setViewFormData] = useState(null);
   
+  // Profile extraction from application form state
+  const [extractionDialogOpen, setExtractionDialogOpen] = useState(false);
+  const [extractionResult, setExtractionResult] = useState(null);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [fieldsToApply, setFieldsToApply] = useState({});
+  const [isApplyingExtraction, setIsApplyingExtraction] = useState(false);
+  
   const { token, isAuditor, isAdmin, user } = useAuth();
   
   // Document preview modal state
@@ -1320,6 +1327,138 @@ export default function EmployeeProfilePage() {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete employee');
     }
+  };
+
+  // ========== Application Form Extraction Handlers ==========
+  
+  // Start extraction from application form
+  const handleExtractFromApplication = async () => {
+    setIsExtracting(true);
+    setExtractionDialogOpen(true);
+    setExtractionResult(null);
+    setFieldsToApply({});
+    
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/extract-from-application`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      setExtractionResult(response.data);
+      
+      // Initialize fields to apply based on extraction result
+      const initialFields = {};
+      response.data.fields.forEach(field => {
+        // Default: apply if field is empty in profile OR if extracted value differs
+        initialFields[field.field_name] = field.apply;
+      });
+      setFieldsToApply(initialFields);
+      
+      toast.success(`Extracted ${response.data.fields.length} fields from application form`);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to extract data from application form');
+      setExtractionDialogOpen(false);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+  
+  // Toggle a field for applying
+  const toggleFieldToApply = (fieldName) => {
+    setFieldsToApply(prev => ({
+      ...prev,
+      [fieldName]: !prev[fieldName]
+    }));
+  };
+  
+  // Apply selected extracted fields to profile
+  const handleApplyExtraction = async () => {
+    if (!extractionResult) return;
+    
+    const selectedFields = Object.entries(fieldsToApply)
+      .filter(([_, apply]) => apply)
+      .map(([fieldName]) => fieldName);
+    
+    if (selectedFields.length === 0) {
+      toast.error('Please select at least one field to apply');
+      return;
+    }
+    
+    setIsApplyingExtraction(true);
+    try {
+      await axios.post(
+        `${API}/extractions/${extractionResult.extraction_id}/apply`,
+        { extraction_id: extractionResult.extraction_id, fields_to_apply: selectedFields },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(`Applied ${selectedFields.length} field(s) to profile`);
+      setExtractionDialogOpen(false);
+      setExtractionResult(null);
+      fetchData(); // Refresh employee data
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to apply extracted data');
+    } finally {
+      setIsApplyingExtraction(false);
+    }
+  };
+  
+  // Discard extraction without applying
+  const handleDiscardExtraction = async () => {
+    if (!extractionResult) {
+      setExtractionDialogOpen(false);
+      return;
+    }
+    
+    try {
+      await axios.post(
+        `${API}/extractions/${extractionResult.extraction_id}/discard`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.info('Extraction discarded');
+    } catch (error) {
+      // Ignore discard errors
+    }
+    
+    setExtractionDialogOpen(false);
+    setExtractionResult(null);
+  };
+  
+  // Human-readable field name mapping
+  const FIELD_LABELS = {
+    first_name: 'First Name',
+    last_name: 'Last Name',
+    email: 'Email Address',
+    phone: 'Phone Number',
+    address_line_1: 'Address Line 1',
+    address_line_2: 'Address Line 2',
+    city: 'City',
+    county: 'County',
+    postcode: 'Postcode',
+    country: 'Country',
+    ni_number: 'NI Number',
+    date_of_birth: 'Date of Birth',
+    next_of_kin_name: 'Next of Kin Name',
+    next_of_kin_relationship: 'Next of Kin Relationship',
+    next_of_kin_phone: 'Next of Kin Phone',
+    next_of_kin_address: 'Next of Kin Address',
+    emergency_contact_name: 'Emergency Contact Name',
+    emergency_contact_phone: 'Emergency Contact Phone',
+    emergency_contact_relationship: 'Emergency Contact Relationship',
+    reference_1_name: 'Reference 1 Name',
+    reference_1_company: 'Reference 1 Company',
+    reference_1_phone: 'Reference 1 Phone',
+    reference_1_email: 'Reference 1 Email',
+    reference_2_name: 'Reference 2 Name',
+    reference_2_company: 'Reference 2 Company',
+    reference_2_phone: 'Reference 2 Phone',
+    reference_2_email: 'Reference 2 Email',
+    has_driving_licence: 'Has Driving Licence',
+    driving_licence_type: 'Driving Licence Type',
+    has_own_vehicle: 'Has Own Vehicle',
+    vehicle_registration: 'Vehicle Registration'
   };
 
   // ========== Form Submission Handlers ==========
@@ -2568,7 +2707,25 @@ export default function EmployeeProfilePage() {
           <div className="grid lg:grid-cols-2 gap-6">
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader>
-                <CardTitle className="font-heading text-lg">Personal Details</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="font-heading text-lg">Personal Details</CardTitle>
+                  {!isAuditor() && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExtractFromApplication}
+                      disabled={isExtracting}
+                      className="text-xs"
+                      data-testid="extract-from-app-btn"
+                    >
+                      {isExtracting ? (
+                        <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Extracting...</>
+                      ) : (
+                        <><FileText className="h-3 w-3 mr-1" /> Extract from App Form</>
+                      )}
+                    </Button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
@@ -2596,7 +2753,69 @@ export default function EmployeeProfilePage() {
                     <p className="text-sm text-text-muted">Phone</p>
                     <p className="font-medium text-text-primary">{employee.phone || 'Not provided'}</p>
                   </div>
+                  {employee.ni_number && (
+                    <div>
+                      <p className="text-sm text-text-muted">NI Number</p>
+                      <p className="font-medium text-text-primary">{employee.ni_number}</p>
+                    </div>
+                  )}
+                  {employee.date_of_birth && (
+                    <div>
+                      <p className="text-sm text-text-muted">Date of Birth</p>
+                      <p className="font-medium text-text-primary">{employee.date_of_birth}</p>
+                    </div>
+                  )}
                 </div>
+                
+                {/* Address Section */}
+                {(employee.address_line_1 || employee.city || employee.postcode) && (
+                  <div className="pt-3 border-t border-gray-100">
+                    <p className="text-sm text-text-muted mb-1">Address</p>
+                    <p className="font-medium text-text-primary">
+                      {[employee.address_line_1, employee.address_line_2, employee.city, employee.county, employee.postcode, employee.country]
+                        .filter(Boolean)
+                        .join(', ')}
+                    </p>
+                  </div>
+                )}
+                
+                {/* Emergency Contact Section */}
+                {(employee.next_of_kin_name || employee.emergency_contact_name) && (
+                  <div className="pt-3 border-t border-gray-100">
+                    <p className="text-sm text-text-muted mb-1">Emergency Contact / Next of Kin</p>
+                    {employee.next_of_kin_name && (
+                      <p className="font-medium text-text-primary text-sm">
+                        {employee.next_of_kin_name} {employee.next_of_kin_relationship && `(${employee.next_of_kin_relationship})`}
+                        {employee.next_of_kin_phone && ` - ${employee.next_of_kin_phone}`}
+                      </p>
+                    )}
+                    {employee.emergency_contact_name && !employee.next_of_kin_name && (
+                      <p className="font-medium text-text-primary text-sm">
+                        {employee.emergency_contact_name} {employee.emergency_contact_relationship && `(${employee.emergency_contact_relationship})`}
+                        {employee.emergency_contact_phone && ` - ${employee.emergency_contact_phone}`}
+                      </p>
+                    )}
+                  </div>
+                )}
+                
+                {/* Driving Info */}
+                {(employee.has_driving_licence || employee.has_own_vehicle) && (
+                  <div className="pt-3 border-t border-gray-100">
+                    <p className="text-sm text-text-muted mb-1">Driving / Vehicle</p>
+                    <div className="flex gap-3 text-sm">
+                      {employee.has_driving_licence && (
+                        <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                          {employee.driving_licence_type || 'Driving Licence'}
+                        </span>
+                      )}
+                      {employee.has_own_vehicle && (
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
+                          Own Vehicle {employee.vehicle_registration && `(${employee.vehicle_registration})`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -5872,6 +6091,161 @@ export default function EmployeeProfilePage() {
                   </Button>
                 )}
               </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      
+      {/* Extraction Review Dialog */}
+      <Dialog open={extractionDialogOpen} onOpenChange={(open) => {
+        if (!open && !isApplyingExtraction) {
+          handleDiscardExtraction();
+        }
+      }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Review Extracted Data
+            </DialogTitle>
+            <DialogDescription>
+              Review the extracted values below. Select which fields to apply to the employee profile.
+              <span className="block mt-2 text-amber-600 font-medium">
+                Note: This updates profile data only. Compliance evidence requirements remain unchanged.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          
+          {isExtracting ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+              <p className="text-text-muted">Extracting data from application form...</p>
+              <p className="text-xs text-text-muted mt-1">This may take a few seconds</p>
+            </div>
+          ) : extractionResult ? (
+            <div className="space-y-4">
+              {/* Compliance Note */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-800">
+                    <p className="font-medium">Profile Data Only</p>
+                    <p>Extracted values will populate profile fields (e.g., NI Number field). They do NOT complete compliance requirements (e.g., "Proof of NI Number" still needs evidence upload).</p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Fields Table */}
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="text-left p-3 font-medium">Apply</th>
+                      <th className="text-left p-3 font-medium">Field</th>
+                      <th className="text-left p-3 font-medium">Extracted Value</th>
+                      <th className="text-left p-3 font-medium">Current Value</th>
+                      <th className="text-left p-3 font-medium">Confidence</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {extractionResult.fields.map((field, idx) => (
+                      <tr key={field.field_name} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="p-3">
+                          <input
+                            type="checkbox"
+                            checked={fieldsToApply[field.field_name] || false}
+                            onChange={() => toggleFieldToApply(field.field_name)}
+                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                            data-testid={`apply-field-${field.field_name}`}
+                          />
+                        </td>
+                        <td className="p-3 font-medium text-text-primary">
+                          {FIELD_LABELS[field.field_name] || field.field_name}
+                        </td>
+                        <td className="p-3">
+                          <span className={`${field.extracted_value ? 'text-text-primary' : 'text-text-muted italic'}`}>
+                            {field.extracted_value || 'Not found'}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <span className={`${field.current_value ? 'text-text-primary' : 'text-text-muted italic'}`}>
+                            {field.current_value || 'Empty'}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            field.confidence === 'high' ? 'bg-green-100 text-green-700' :
+                            field.confidence === 'medium' ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            {field.confidence}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Quick Actions */}
+              <div className="flex gap-2 text-xs">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const allSelected = {};
+                    extractionResult.fields.forEach(f => { allSelected[f.field_name] = true; });
+                    setFieldsToApply(allSelected);
+                  }}
+                >
+                  Select All
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const emptyOnly = {};
+                    extractionResult.fields.forEach(f => {
+                      emptyOnly[f.field_name] = !f.current_value && !!f.extracted_value;
+                    });
+                    setFieldsToApply(emptyOnly);
+                  }}
+                >
+                  Select Empty Only
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFieldsToApply({})}
+                >
+                  Clear All
+                </Button>
+              </div>
+              
+              <DialogFooter className="pt-4">
+                <Button
+                  variant="outline"
+                  onClick={handleDiscardExtraction}
+                  disabled={isApplyingExtraction}
+                >
+                  Discard
+                </Button>
+                <Button
+                  onClick={handleApplyExtraction}
+                  disabled={isApplyingExtraction || Object.values(fieldsToApply).filter(Boolean).length === 0}
+                  data-testid="apply-extraction-btn"
+                >
+                  {isApplyingExtraction ? (
+                    <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Applying...</>
+                  ) : (
+                    <>Apply {Object.values(fieldsToApply).filter(Boolean).length} Field(s)</>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-text-muted">
+              <p>No extraction data available.</p>
             </div>
           )}
         </DialogContent>

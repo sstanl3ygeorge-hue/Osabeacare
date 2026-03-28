@@ -10,6 +10,7 @@ import uuid
 import asyncio
 import io
 import zipfile
+import base64
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional, Dict, Any
@@ -25,6 +26,7 @@ from reportlab.lib.units import mm, inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1829,6 +1831,37 @@ class EmployeeUpdate(BaseModel):
     driver_status: Optional[bool] = None
     notes: Optional[str] = None
     profile_photo_url: Optional[str] = None
+    # Extended profile fields - populated from application form extraction
+    address_line_1: Optional[str] = None
+    address_line_2: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    postcode: Optional[str] = None
+    country: Optional[str] = None
+    ni_number: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    # Next of kin / Emergency contact
+    next_of_kin_name: Optional[str] = None
+    next_of_kin_relationship: Optional[str] = None
+    next_of_kin_phone: Optional[str] = None
+    next_of_kin_address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    # Reference details (informational only - not evidence)
+    reference_1_name: Optional[str] = None
+    reference_1_company: Optional[str] = None
+    reference_1_phone: Optional[str] = None
+    reference_1_email: Optional[str] = None
+    reference_2_name: Optional[str] = None
+    reference_2_company: Optional[str] = None
+    reference_2_phone: Optional[str] = None
+    reference_2_email: Optional[str] = None
+    # Driving / Vehicle
+    has_driving_licence: Optional[bool] = None
+    driving_licence_type: Optional[str] = None
+    has_own_vehicle: Optional[bool] = None
+    vehicle_registration: Optional[str] = None
 
 class EmployeeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -1851,6 +1884,37 @@ class EmployeeResponse(BaseModel):
     expiry_alerts: Optional[dict] = None  # Expiry alerts count for list view
     created_at: str
     updated_at: str
+    # Extended profile fields
+    address_line_1: Optional[str] = None
+    address_line_2: Optional[str] = None
+    city: Optional[str] = None
+    county: Optional[str] = None
+    postcode: Optional[str] = None
+    country: Optional[str] = None
+    ni_number: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    # Next of kin / Emergency contact
+    next_of_kin_name: Optional[str] = None
+    next_of_kin_relationship: Optional[str] = None
+    next_of_kin_phone: Optional[str] = None
+    next_of_kin_address: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    # Reference details (informational only - not evidence)
+    reference_1_name: Optional[str] = None
+    reference_1_company: Optional[str] = None
+    reference_1_phone: Optional[str] = None
+    reference_1_email: Optional[str] = None
+    reference_2_name: Optional[str] = None
+    reference_2_company: Optional[str] = None
+    reference_2_phone: Optional[str] = None
+    reference_2_email: Optional[str] = None
+    # Driving / Vehicle
+    has_driving_licence: Optional[bool] = None
+    driving_licence_type: Optional[str] = None
+    has_own_vehicle: Optional[bool] = None
+    vehicle_registration: Optional[str] = None
 
 # Document Type Models
 class DocumentTypeCreate(BaseModel):
@@ -3259,6 +3323,451 @@ async def view_profile_photo(employee_id: str, user: dict = Depends(get_current_
     except Exception as e:
         logger.error(f"Failed to retrieve profile photo: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve photo")
+
+
+# ==================== APPLICATION FORM EXTRACTION ====================
+# Extracts profile data from uploaded application forms using AI/OCR
+# NOTE: This populates PROFILE DATA ONLY - NOT compliance evidence
+
+# Fields that can be extracted from application forms
+EXTRACTABLE_PROFILE_FIELDS = [
+    "first_name", "last_name", "email", "phone",
+    "address_line_1", "address_line_2", "city", "county", "postcode", "country",
+    "ni_number", "date_of_birth",
+    "next_of_kin_name", "next_of_kin_relationship", "next_of_kin_phone", "next_of_kin_address",
+    "emergency_contact_name", "emergency_contact_phone", "emergency_contact_relationship",
+    "reference_1_name", "reference_1_company", "reference_1_phone", "reference_1_email",
+    "reference_2_name", "reference_2_company", "reference_2_phone", "reference_2_email",
+    "has_driving_licence", "driving_licence_type", "has_own_vehicle", "vehicle_registration"
+]
+
+class ExtractedField(BaseModel):
+    """A single extracted field with its value and confidence"""
+    field_name: str
+    extracted_value: Optional[str] = None
+    current_value: Optional[str] = None
+    confidence: str = "medium"  # low, medium, high
+    apply: bool = True  # Default to apply, user can skip
+
+class ExtractionResult(BaseModel):
+    """Result of application form extraction"""
+    employee_id: str
+    document_id: str
+    extraction_id: str
+    fields: List[ExtractedField]
+    extraction_notes: Optional[str] = None
+    extracted_at: str
+    status: str = "pending_review"  # pending_review, applied, discarded
+
+class ApplyExtractionRequest(BaseModel):
+    """Request to apply extracted values"""
+    extraction_id: str
+    fields_to_apply: List[str]  # List of field names to apply
+
+
+async def extract_text_from_document(file_url: str) -> str:
+    """Extract text content from a document using OCR/AI"""
+    try:
+        # Get document bytes
+        file_bytes, content_type = get_object(file_url)
+        
+        # Convert to base64 for AI processing
+        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+        
+        # Use GPT-5.2 vision for extraction
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        if not api_key:
+            raise HTTPException(status_code=500, detail="LLM API key not configured")
+        
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"extraction-{uuid.uuid4()}",
+            system_message="""You are a document data extraction specialist. Extract all visible text and data from the provided document image.
+Focus on identifying form fields, their labels, and the values filled in.
+Return the extracted content in a structured, readable format."""
+        ).with_model("openai", "gpt-5.2")
+        
+        # Create message with image
+        image_content = ImageContent(image_base64=file_base64)
+        user_message = UserMessage(
+            text="Extract all text and data from this document. Include form field labels and their values.",
+            file_contents=[image_content]
+        )
+        
+        response = await chat.send_message(user_message)
+        return response
+    except Exception as e:
+        logger.error(f"Failed to extract text from document: {e}")
+        return ""
+
+
+async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str) -> List[ExtractedField]:
+    """Parse extracted text into structured profile fields using AI"""
+    try:
+        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        if not api_key:
+            return []
+        
+        # Get current employee data for comparison
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        current_values = {}
+        if employee:
+            for field in EXTRACTABLE_PROFILE_FIELDS:
+                current_values[field] = employee.get(field)
+        
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"parsing-{uuid.uuid4()}",
+            system_message="""You are a data parsing specialist. Parse the extracted document text into structured profile fields.
+Return a JSON array of objects, each with: field_name, extracted_value, confidence (low/medium/high).
+Only include fields where you found data. Use exact field names from the allowed list."""
+        ).with_model("openai", "gpt-5.2")
+        
+        field_list = ", ".join(EXTRACTABLE_PROFILE_FIELDS)
+        prompt = f"""Parse this extracted application form text into profile fields.
+
+Allowed field names: {field_list}
+
+For boolean fields (has_driving_licence, has_own_vehicle), use "true" or "false" as strings.
+For date_of_birth, use format YYYY-MM-DD if possible.
+For ni_number, preserve the format (e.g., AB123456C).
+
+Extracted text:
+---
+{extracted_text}
+---
+
+Return ONLY a JSON array like:
+[
+  {{"field_name": "first_name", "extracted_value": "John", "confidence": "high"}},
+  {{"field_name": "postcode", "extracted_value": "SW1A 1AA", "confidence": "medium"}}
+]
+
+If no data can be extracted, return an empty array: []"""
+
+        response = await chat.send_message(UserMessage(text=prompt))
+        
+        # Parse JSON response
+        import json
+        try:
+            # Find JSON array in response
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                parsed_fields = json.loads(json_match.group())
+            else:
+                parsed_fields = []
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse AI response as JSON: {response[:200]}")
+            parsed_fields = []
+        
+        # Convert to ExtractedField objects with current values
+        result = []
+        for field_data in parsed_fields:
+            field_name = field_data.get('field_name', '')
+            if field_name in EXTRACTABLE_PROFILE_FIELDS:
+                extracted_val = field_data.get('extracted_value')
+                current_val = current_values.get(field_name)
+                
+                # Convert current value to string for comparison
+                if current_val is not None and not isinstance(current_val, str):
+                    current_val = str(current_val)
+                
+                result.append(ExtractedField(
+                    field_name=field_name,
+                    extracted_value=extracted_val,
+                    current_value=current_val,
+                    confidence=field_data.get('confidence', 'medium'),
+                    apply=True if not current_val else False  # Default apply only if field is empty
+                ))
+        
+        return result
+    except Exception as e:
+        logger.error(f"Failed to parse extracted text: {e}")
+        return []
+
+
+@api_router.post("/employees/{employee_id}/extract-from-application")
+async def extract_from_application_form(
+    employee_id: str,
+    document_id: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract profile data from an uploaded application form.
+    
+    This extracts data into a REVIEW queue - values are NOT applied automatically.
+    User must review and approve each field before it updates the profile.
+    
+    NOTE: This populates PROFILE fields only. It does NOT:
+    - Complete compliance requirements
+    - Provide evidence for NI number verification, address proof, etc.
+    - Affect compliance calculations
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Find application form document
+    query = {"employee_id": employee_id, "requirement_id": "application_form"}
+    if document_id:
+        query["id"] = document_id
+    
+    app_form_doc = await db.employee_documents.find_one(
+        query,
+        {"_id": 0},
+        sort=[("uploaded_at", -1)]  # Get most recent
+    )
+    
+    if not app_form_doc:
+        # Also check generated_forms collection
+        app_form = await db.generated_forms.find_one(
+            {"employee_id": employee_id, "template_name": {"$regex": "Application", "$options": "i"}},
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        if app_form and app_form.get('pdf_url'):
+            doc_id = app_form['id']
+            file_url = app_form['pdf_url']
+        else:
+            raise HTTPException(
+                status_code=404, 
+                detail="No application form found. Please upload an application form first."
+            )
+    else:
+        doc_id = app_form_doc['id']
+        file_url = app_form_doc.get('file_url')
+        if not file_url:
+            # Check evidence_files
+            evidence_files = app_form_doc.get('evidence_files', [])
+            if evidence_files:
+                file_url = evidence_files[0].get('file_url')
+    
+    if not file_url:
+        raise HTTPException(status_code=404, detail="Application form has no file attached")
+    
+    # Step 1: Extract text from document
+    logger.info(f"Extracting text from application form for employee {employee_id}")
+    extracted_text = await extract_text_from_document(file_url)
+    
+    if not extracted_text:
+        raise HTTPException(
+            status_code=422, 
+            detail="Could not extract text from document. Please ensure the document is readable."
+        )
+    
+    # Step 2: Parse text into structured fields
+    logger.info(f"Parsing extracted text into profile fields")
+    extracted_fields = await parse_extracted_text_to_fields(extracted_text, employee_id)
+    
+    if not extracted_fields:
+        raise HTTPException(
+            status_code=422,
+            detail="No profile fields could be identified in the document."
+        )
+    
+    # Step 3: Save extraction result for review
+    extraction_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    extraction_record = {
+        "id": extraction_id,
+        "employee_id": employee_id,
+        "document_id": doc_id,
+        "file_url": file_url,
+        "fields": [f.model_dump() for f in extracted_fields],
+        "extracted_text_preview": extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text,
+        "status": "pending_review",
+        "extracted_at": now,
+        "extracted_by": user['user_id'],
+        "extracted_by_name": user.get('name', user.get('email', 'Unknown')),
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.profile_extractions.insert_one(extraction_record)
+    
+    await log_audit_action(
+        user['user_id'],
+        "extract_from_application",
+        "employee",
+        employee_id,
+        {
+            "extraction_id": extraction_id,
+            "document_id": doc_id,
+            "fields_count": len(extracted_fields)
+        }
+    )
+    
+    return {
+        "extraction_id": extraction_id,
+        "employee_id": employee_id,
+        "document_id": doc_id,
+        "fields": extracted_fields,
+        "status": "pending_review",
+        "message": "Extraction complete. Review fields below and apply selected values to profile.",
+        "compliance_note": "Extracted values update PROFILE DATA only. They do NOT complete compliance evidence requirements."
+    }
+
+
+@api_router.get("/employees/{employee_id}/extractions")
+async def get_employee_extractions(
+    employee_id: str,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get all extraction results for an employee"""
+    query = {"employee_id": employee_id}
+    if status:
+        query["status"] = status
+    
+    extractions = await db.profile_extractions.find(
+        query,
+        {"_id": 0}
+    ).sort("extracted_at", -1).to_list(50)
+    
+    return {"extractions": extractions}
+
+
+@api_router.get("/extractions/{extraction_id}")
+async def get_extraction(extraction_id: str, user: dict = Depends(get_current_user)):
+    """Get a specific extraction result"""
+    extraction = await db.profile_extractions.find_one(
+        {"id": extraction_id},
+        {"_id": 0}
+    )
+    
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+    
+    return extraction
+
+
+@api_router.post("/extractions/{extraction_id}/apply")
+async def apply_extraction(
+    extraction_id: str,
+    request: ApplyExtractionRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Apply selected extracted fields to employee profile.
+    
+    IMPORTANT: This updates PROFILE DATA only. It does NOT:
+    - Mark any compliance requirements as complete
+    - Provide evidence for document requirements
+    - Affect compliance percentage calculations
+    
+    Example: Extracting NI number populates the profile field,
+    but "Proof of NI Number" remains a separate evidence requirement.
+    """
+    extraction = await db.profile_extractions.find_one(
+        {"id": extraction_id},
+        {"_id": 0}
+    )
+    
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+    
+    if extraction['status'] != 'pending_review':
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Extraction already processed (status: {extraction['status']})"
+        )
+    
+    employee_id = extraction['employee_id']
+    fields_to_apply = request.fields_to_apply
+    
+    if not fields_to_apply:
+        raise HTTPException(status_code=400, detail="No fields selected to apply")
+    
+    # Build update dict from selected fields
+    update_data = {}
+    applied_fields = []
+    
+    for field_data in extraction['fields']:
+        field_name = field_data['field_name']
+        if field_name in fields_to_apply and field_data.get('extracted_value'):
+            value = field_data['extracted_value']
+            
+            # Convert boolean strings
+            if field_name in ['has_driving_licence', 'has_own_vehicle', 'driver_status']:
+                value = value.lower() in ['true', 'yes', '1'] if isinstance(value, str) else bool(value)
+            
+            update_data[field_name] = value
+            applied_fields.append({
+                "field": field_name,
+                "value": value,
+                "previous": field_data.get('current_value')
+            })
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to apply")
+    
+    # Update employee profile
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_data}
+    )
+    
+    # Mark extraction as applied
+    await db.profile_extractions.update_one(
+        {"id": extraction_id},
+        {"$set": {
+            "status": "applied",
+            "applied_at": datetime.now(timezone.utc).isoformat(),
+            "applied_by": user['user_id'],
+            "applied_by_name": user.get('name', user.get('email', 'Unknown')),
+            "applied_fields": applied_fields,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "apply_extraction",
+        "employee",
+        employee_id,
+        {
+            "extraction_id": extraction_id,
+            "applied_fields": applied_fields
+        }
+    )
+    
+    return {
+        "message": f"Successfully applied {len(applied_fields)} field(s) to profile",
+        "applied_fields": applied_fields,
+        "compliance_note": "Profile data updated. Compliance evidence requirements remain unchanged."
+    }
+
+
+@api_router.post("/extractions/{extraction_id}/discard")
+async def discard_extraction(
+    extraction_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Discard an extraction without applying any values"""
+    extraction = await db.profile_extractions.find_one(
+        {"id": extraction_id},
+        {"_id": 0}
+    )
+    
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+    
+    await db.profile_extractions.update_one(
+        {"id": extraction_id},
+        {"$set": {
+            "status": "discarded",
+            "discarded_at": datetime.now(timezone.utc).isoformat(),
+            "discarded_by": user['user_id'],
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {"message": "Extraction discarded"}
+
 
 @api_router.get("/employees/{employee_id}/compliance")
 async def get_employee_compliance(employee_id: str, user: dict = Depends(get_current_user)):

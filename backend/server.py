@@ -1276,7 +1276,22 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
     
     # ====== FORM-GENERATED TYPE ======
     if item_type in ["form", "form-generated"]:
-        # Check for completed form with PDF evidence
+        # FIRST: Check for structured form submissions (new system)
+        form_submission = await db.form_submissions.find_one({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id,
+            "status": {"$nin": ["deleted", "superseded"]}
+        }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "submitted_at": 1, "submitted_by_name": 1})
+        
+        if form_submission:
+            result["status"] = "complete"
+            result["verified"] = form_submission.get("verified", False)
+            result["has_evidence"] = True
+            result["details"] = f"Form submitted by {form_submission.get('submitted_by_name', 'Unknown')}"
+            result["form_submission_id"] = form_submission.get("id")
+            return result
+        
+        # Check for completed form with PDF evidence (legacy generated_forms)
         form = await db.generated_forms.find_one({
             "employee_id": employee_id,
             "$or": [
@@ -1676,11 +1691,19 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             d.get("verified") or d.get("status") == "approved" 
             for d in rtw_docs
         )
-        # Check for expiry
+        # Check for expiry - get the earliest expiry date
         for doc in rtw_docs:
             if doc.get("expiry_date"):
-                summary["expiry_date"] = doc.get("expiry_date")
-                break
+                doc_expiry = doc.get("expiry_date")
+                if summary["expiry_date"] is None or doc_expiry < summary["expiry_date"]:
+                    summary["expiry_date"] = doc_expiry
+        
+        # Calculate expiry status if we have an expiry date
+        if summary["expiry_date"]:
+            expiry_status = calculate_expiry_status(summary["expiry_date"])
+            summary["expiry_status"] = expiry_status.get("status")
+            summary["expiry_label"] = expiry_status.get("label")
+            summary["days_until_expiry"] = expiry_status.get("days_until_expiry")
     
     # Process RTW Verification
     if rtw_check:
@@ -1885,6 +1908,125 @@ class EmployeeDocumentResponse(BaseModel):
     requirement_id: Optional[str] = None  # Links to MANDATORY_ITEMS id
     requirement_name: Optional[str] = None
     document_label: Optional[str] = None  # e.g., "Passport Front", "Visa"
+
+
+# ============================================================================
+# FORM SUBMISSION MODELS
+# ============================================================================
+# For structured in-system forms (Health Screening, Induction, Interview, etc.)
+
+# Form types that replace document uploads
+FORM_BASED_REQUIREMENTS = {
+    "health_screening": {
+        "name": "Health Screening Questionnaire",
+        "form_type": "health_screening",
+        "fields": [
+            {"id": "general_health", "label": "General Health Status", "type": "select", "options": ["Good", "Fair", "Under Treatment"]},
+            {"id": "medical_conditions", "label": "Any medical conditions?", "type": "textarea"},
+            {"id": "medications", "label": "Current medications", "type": "textarea"},
+            {"id": "allergies", "label": "Known allergies", "type": "textarea"},
+            {"id": "physical_limitations", "label": "Physical limitations affecting work", "type": "textarea"},
+            {"id": "vaccinations_up_to_date", "label": "Vaccinations up to date?", "type": "checkbox"},
+            {"id": "fit_for_role", "label": "Fit for role?", "type": "select", "options": ["Yes", "Yes with adjustments", "No"]},
+            {"id": "adjustments_required", "label": "Adjustments required (if any)", "type": "textarea"},
+            {"id": "screener_notes", "label": "Screener notes", "type": "textarea"},
+        ]
+    },
+    "induction": {
+        "name": "Induction & Competency Assessment",
+        "form_type": "induction",
+        "fields": [
+            {"id": "induction_date", "label": "Induction Date", "type": "date"},
+            {"id": "inducted_by", "label": "Inducted By", "type": "text"},
+            {"id": "policies_reviewed", "label": "Key policies reviewed?", "type": "checkbox"},
+            {"id": "fire_safety_briefed", "label": "Fire safety briefing completed?", "type": "checkbox"},
+            {"id": "manual_handling_demo", "label": "Manual handling demonstrated?", "type": "checkbox"},
+            {"id": "infection_control_briefed", "label": "Infection control briefed?", "type": "checkbox"},
+            {"id": "safeguarding_awareness", "label": "Safeguarding awareness confirmed?", "type": "checkbox"},
+            {"id": "emergency_procedures", "label": "Emergency procedures explained?", "type": "checkbox"},
+            {"id": "equipment_training", "label": "Equipment training completed?", "type": "checkbox"},
+            {"id": "competency_assessment_passed", "label": "Competency assessment passed?", "type": "select", "options": ["Yes", "Needs follow-up", "No"]},
+            {"id": "follow_up_required", "label": "Follow-up actions required", "type": "textarea"},
+            {"id": "assessor_notes", "label": "Assessor notes", "type": "textarea"},
+        ]
+    },
+    "interview_record": {
+        "name": "Interview Record",
+        "form_type": "interview_record",
+        "fields": [
+            {"id": "interview_date", "label": "Interview Date", "type": "date"},
+            {"id": "interviewer_name", "label": "Interviewer Name", "type": "text"},
+            {"id": "interview_type", "label": "Interview Type", "type": "select", "options": ["In-person", "Video call", "Phone"]},
+            {"id": "position_applied", "label": "Position Applied For", "type": "text"},
+            {"id": "experience_summary", "label": "Relevant Experience Summary", "type": "textarea"},
+            {"id": "strengths", "label": "Identified Strengths", "type": "textarea"},
+            {"id": "areas_for_development", "label": "Areas for Development", "type": "textarea"},
+            {"id": "right_to_work_verified", "label": "Right to Work verified at interview?", "type": "checkbox"},
+            {"id": "references_discussed", "label": "References discussed?", "type": "checkbox"},
+            {"id": "availability_confirmed", "label": "Availability confirmed?", "type": "checkbox"},
+            {"id": "overall_impression", "label": "Overall Impression", "type": "select", "options": ["Strongly recommend", "Recommend", "Consider", "Do not recommend"]},
+            {"id": "decision", "label": "Interview Decision", "type": "select", "options": ["Offer", "Second interview", "Reject", "Hold"]},
+            {"id": "interviewer_notes", "label": "Interviewer Notes", "type": "textarea"},
+        ]
+    },
+    "recruitment_checklist": {
+        "name": "Recruitment Compliance Checklist",
+        "form_type": "recruitment_checklist",
+        "fields": [
+            {"id": "application_received", "label": "Application form received?", "type": "checkbox"},
+            {"id": "cv_reviewed", "label": "CV reviewed?", "type": "checkbox"},
+            {"id": "interview_completed", "label": "Interview completed?", "type": "checkbox"},
+            {"id": "references_requested", "label": "References requested?", "type": "checkbox"},
+            {"id": "references_received", "label": "References received and verified?", "type": "checkbox"},
+            {"id": "dbs_applied", "label": "DBS check applied for?", "type": "checkbox"},
+            {"id": "right_to_work_verified", "label": "Right to work verified?", "type": "checkbox"},
+            {"id": "identity_verified", "label": "Identity verified?", "type": "checkbox"},
+            {"id": "qualifications_verified", "label": "Qualifications verified?", "type": "checkbox"},
+            {"id": "employment_history_verified", "label": "Employment history verified (3 years)?", "type": "checkbox"},
+            {"id": "gaps_explained", "label": "Employment gaps explained?", "type": "checkbox"},
+            {"id": "contract_issued", "label": "Contract issued?", "type": "checkbox"},
+            {"id": "offer_letter_signed", "label": "Offer letter signed?", "type": "checkbox"},
+            {"id": "recruitment_complete", "label": "All recruitment checks complete?", "type": "checkbox"},
+            {"id": "recruiter_name", "label": "Recruiter Name", "type": "text"},
+            {"id": "completion_date", "label": "Completion Date", "type": "date"},
+            {"id": "notes", "label": "Additional Notes", "type": "textarea"},
+        ]
+    }
+}
+
+
+class FormSubmissionCreate(BaseModel):
+    employee_id: str
+    requirement_id: str  # e.g., "health_screening", "induction"
+    form_type: str
+    data: dict  # JSON form data
+    
+
+class FormSubmissionUpdate(BaseModel):
+    data: Optional[dict] = None
+    verified: Optional[bool] = None
+    verified_by: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class FormSubmissionResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    employee_id: str
+    requirement_id: str
+    form_type: str
+    data: dict
+    submitted_at: str
+    submitted_by: Optional[str] = None
+    submitted_by_name: Optional[str] = None
+    verified: bool = False
+    verified_by: Optional[str] = None
+    verified_by_name: Optional[str] = None
+    verified_at: Optional[str] = None
+    status: str = "submitted"  # submitted, verified, superseded
+    version: int = 1
+    notes: Optional[str] = None
+
 
 # Policy Models
 class PolicyCreate(BaseModel):
@@ -5792,6 +5934,43 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                             "file_label": f"Completed {linked_form.get('template_name', 'Form')}",
                             "verified": False  # Forms need separate verification
                         })
+            
+            # NEW: Check for structured form submissions (from form_submissions collection)
+            form_submission = await db.form_submissions.find_one({
+                "employee_id": employee_id,
+                "requirement_id": req_id,
+                "status": {"$nin": ["deleted", "superseded"]}
+            }, {"_id": 0})
+            
+            if form_submission:
+                req['form_submission'] = {
+                    "id": form_submission['id'],
+                    "status": form_submission['status'],
+                    "submitted_at": form_submission.get('submitted_at'),
+                    "submitted_by_name": form_submission.get('submitted_by_name'),
+                    "verified": form_submission.get('verified', False),
+                    "verified_by_name": form_submission.get('verified_by_name'),
+                    "verified_at": form_submission.get('verified_at'),
+                    "data": form_submission.get('data', {})
+                }
+                
+                # Form submission counts as evidence
+                evidence_files.append({
+                    "file_id": form_submission['id'],
+                    "file_url": None,  # No file URL - it's structured data
+                    "original_filename": f"{item['name']} (Form)",
+                    "uploaded_at": form_submission.get('submitted_at'),
+                    "uploaded_by_name": form_submission.get('submitted_by_name'),
+                    "source_type": "structured_form",
+                    "file_label": f"Submitted {item['name']}",
+                    "verified": form_submission.get('verified', False)
+                })
+                
+                # Update verified status if form is verified
+                if form_submission.get('verified'):
+                    req['verified'] = True
+                    req['verified_by'] = form_submission.get('verified_by_name')
+                    req['verified_at'] = form_submission.get('verified_at')
         
         # ======== Handle Training ========
         if req_type == 'training':
@@ -6432,6 +6611,253 @@ async def download_file(path: str, authorization: str = Header(None), auth: str 
     except Exception as e:
         logger.error(f"File download failed: {e}")
         raise HTTPException(status_code=404, detail="File not found")
+
+
+# ==================== FORM SUBMISSION ROUTES ====================
+# Structured in-system forms (Health Screening, Induction, Interview Record, etc.)
+
+@api_router.get("/form-submissions/templates")
+async def get_form_templates(user: dict = Depends(get_current_user)):
+    """Get available form templates for structured forms"""
+    templates = []
+    for req_id, config in FORM_BASED_REQUIREMENTS.items():
+        templates.append({
+            "requirement_id": req_id,
+            "name": config["name"],
+            "form_type": config["form_type"],
+            "fields": config["fields"]
+        })
+    return templates
+
+
+@api_router.get("/form-submissions/template/{requirement_id}")
+async def get_form_template(requirement_id: str, user: dict = Depends(get_current_user)):
+    """Get a specific form template"""
+    if requirement_id not in FORM_BASED_REQUIREMENTS:
+        raise HTTPException(status_code=404, detail="Form template not found")
+    
+    config = FORM_BASED_REQUIREMENTS[requirement_id]
+    return {
+        "requirement_id": requirement_id,
+        "name": config["name"],
+        "form_type": config["form_type"],
+        "fields": config["fields"]
+    }
+
+
+@api_router.post("/form-submissions", response_model=FormSubmissionResponse)
+async def create_form_submission(submission: FormSubmissionCreate, user: dict = Depends(get_current_user)):
+    """Submit a structured form"""
+    employee_id = submission.employee_id
+    requirement_id = submission.requirement_id
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Verify form type exists
+    if requirement_id not in FORM_BASED_REQUIREMENTS:
+        raise HTTPException(status_code=400, detail=f"Unknown form type: {requirement_id}")
+    
+    # Check for existing submission (supersede if exists)
+    existing = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "status": {"$nin": ["deleted", "superseded"]}
+    })
+    
+    if existing:
+        # Supersede the existing submission
+        await db.form_submissions.update_one(
+            {"id": existing["id"]},
+            {"$set": {"status": "superseded", "superseded_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    
+    now = datetime.now(timezone.utc).isoformat()
+    submission_id = str(uuid.uuid4())
+    
+    # Get submitter name
+    submitter = await db.users.find_one({"id": user['user_id']})
+    submitter_name = submitter.get("name", user['user_id']) if submitter else user['user_id']
+    
+    new_submission = {
+        "id": submission_id,
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "form_type": submission.form_type,
+        "data": submission.data,
+        "submitted_at": now,
+        "submitted_by": user['user_id'],
+        "submitted_by_name": submitter_name,
+        "verified": False,
+        "verified_by": None,
+        "verified_by_name": None,
+        "verified_at": None,
+        "status": "submitted",
+        "version": (existing.get("version", 0) + 1) if existing else 1,
+        "notes": None
+    }
+    
+    await db.form_submissions.insert_one(new_submission)
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "form_submitted", "form_submission", submission_id, {
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "form_type": submission.form_type,
+        "version": new_submission["version"]
+    })
+    
+    return FormSubmissionResponse(**new_submission)
+
+
+@api_router.get("/form-submissions")
+async def get_form_submissions(
+    employee_id: Optional[str] = None,
+    requirement_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get form submissions with optional filtering"""
+    query = {"status": {"$nin": ["deleted", "superseded"]}}
+    
+    if employee_id:
+        query["employee_id"] = employee_id
+    if requirement_id:
+        query["requirement_id"] = requirement_id
+    
+    submissions = await db.form_submissions.find(query, {"_id": 0}).to_list(100)
+    return submissions
+
+
+@api_router.get("/form-submissions/{submission_id}", response_model=FormSubmissionResponse)
+async def get_form_submission(submission_id: str, user: dict = Depends(get_current_user)):
+    """Get a specific form submission"""
+    submission = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    return FormSubmissionResponse(**submission)
+
+
+@api_router.put("/form-submissions/{submission_id}", response_model=FormSubmissionResponse)
+async def update_form_submission(
+    submission_id: str, 
+    update: FormSubmissionUpdate, 
+    user: dict = Depends(get_current_user)
+):
+    """Update a form submission"""
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    update_fields = {"updated_at": now}
+    
+    if update.data is not None:
+        update_fields["data"] = update.data
+    if update.notes is not None:
+        update_fields["notes"] = update.notes
+    
+    await db.form_submissions.update_one(
+        {"id": submission_id},
+        {"$set": update_fields}
+    )
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "form_updated", "form_submission", submission_id, {
+        "updated_fields": list(update_fields.keys())
+    })
+    
+    updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
+    return FormSubmissionResponse(**updated)
+
+
+@api_router.post("/form-submissions/{submission_id}/verify")
+async def verify_form_submission(submission_id: str, user: dict = Depends(require_admin)):
+    """Verify a form submission"""
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get verifier name
+    verifier = await db.users.find_one({"id": user['user_id']})
+    verifier_name = verifier.get("name", user['user_id']) if verifier else user['user_id']
+    
+    await db.form_submissions.update_one(
+        {"id": submission_id},
+        {"$set": {
+            "verified": True,
+            "verified_by": user['user_id'],
+            "verified_by_name": verifier_name,
+            "verified_at": now,
+            "status": "verified"
+        }}
+    )
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "form_verified", "form_submission", submission_id, {
+        "employee_id": submission["employee_id"],
+        "requirement_id": submission["requirement_id"]
+    })
+    
+    updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
+    return FormSubmissionResponse(**updated)
+
+
+@api_router.post("/form-submissions/{submission_id}/unverify")
+async def unverify_form_submission(submission_id: str, user: dict = Depends(require_admin)):
+    """Remove verification from a form submission"""
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    await db.form_submissions.update_one(
+        {"id": submission_id},
+        {"$set": {
+            "verified": False,
+            "verified_by": None,
+            "verified_by_name": None,
+            "verified_at": None,
+            "status": "submitted"
+        }}
+    )
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "form_unverified", "form_submission", submission_id, {
+        "employee_id": submission["employee_id"],
+        "requirement_id": submission["requirement_id"]
+    })
+    
+    updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
+    return FormSubmissionResponse(**updated)
+
+
+@api_router.delete("/form-submissions/{submission_id}")
+async def delete_form_submission(submission_id: str, user: dict = Depends(require_admin)):
+    """Delete a form submission (soft delete)"""
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    await db.form_submissions.update_one(
+        {"id": submission_id},
+        {"$set": {
+            "status": "deleted",
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "deleted_by": user['user_id']
+        }}
+    )
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "form_deleted", "form_submission", submission_id, {
+        "employee_id": submission["employee_id"],
+        "requirement_id": submission["requirement_id"]
+    })
+    
+    return {"success": True, "message": "Form submission deleted"}
+
 
 # ==================== POLICY ROUTES ====================
 

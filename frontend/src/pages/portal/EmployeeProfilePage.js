@@ -22,10 +22,13 @@ import {
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
-  Camera, Replace, FileX
+  Camera, Replace, FileX, ClipboardCheck, FormInput
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Form-based requirements (open modal instead of file upload)
+const FORM_BASED_REQUIREMENTS = ['health_screening', 'induction', 'interview_record', 'recruitment_checklist'];
 
 const statusIcons = {
   not_started: Clock,
@@ -160,6 +163,14 @@ export default function EmployeeProfilePage() {
   const [isReplacing, setIsReplacing] = useState(false);
   const [requirementHistory, setRequirementHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  
+  // Form submission modal state (for structured forms)
+  const [formModalOpen, setFormModalOpen] = useState(false);
+  const [formTemplate, setFormTemplate] = useState(null);
+  const [formData, setFormData] = useState({});
+  const [isSubmittingForm, setIsSubmittingForm] = useState(false);
+  const [viewFormOpen, setViewFormOpen] = useState(false);
+  const [viewFormData, setViewFormData] = useState(null);
   
   const { token, isAuditor, isAdmin, user } = useAuth();
   
@@ -1311,6 +1322,89 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  // ========== Form Submission Handlers ==========
+  
+  // Open form modal for a specific requirement
+  const openFormModal = async (requirementId) => {
+    try {
+      const response = await axios.get(`${API}/form-submissions/template/${requirementId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setFormTemplate(response.data);
+      
+      // Check if there's an existing submission to pre-fill
+      const existingResponse = await axios.get(`${API}/form-submissions?employee_id=${employeeId}&requirement_id=${requirementId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (existingResponse.data && existingResponse.data.length > 0) {
+        setFormData(existingResponse.data[0].data || {});
+      } else {
+        // Auto-fill employee data where possible
+        setFormData({
+          employee_name: `${employee.first_name} ${employee.last_name}`,
+          employee_id: employee.employee_id
+        });
+      }
+      
+      setFormModalOpen(true);
+    } catch (error) {
+      toast.error('Failed to load form template');
+    }
+  };
+  
+  // Submit structured form
+  const handleFormSubmit = async () => {
+    if (!formTemplate) return;
+    
+    setIsSubmittingForm(true);
+    try {
+      await axios.post(`${API}/form-submissions`, {
+        employee_id: employeeId,
+        requirement_id: formTemplate.requirement_id,
+        form_type: formTemplate.form_type,
+        data: formData
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      toast.success(`${formTemplate.name} submitted successfully`);
+      setFormModalOpen(false);
+      setFormTemplate(null);
+      setFormData({});
+      fetchComplianceRequirements();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to submit form');
+    } finally {
+      setIsSubmittingForm(false);
+    }
+  };
+  
+  // View submitted form
+  const openViewForm = (requirement) => {
+    if (requirement.form_submission) {
+      setViewFormData({
+        ...requirement.form_submission,
+        requirementName: requirement.name
+      });
+      setViewFormOpen(true);
+    }
+  };
+  
+  // Verify form submission
+  const handleVerifyFormSubmission = async (submissionId) => {
+    try {
+      await axios.post(`${API}/form-submissions/${submissionId}/verify`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Form verified successfully');
+      setViewFormOpen(false);
+      fetchComplianceRequirements();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to verify form');
+    }
+  };
+
   const groupedTemplates = templates.reduce((acc, template) => {
     if (!acc[template.category]) acc[template.category] = [];
     acc[template.category].push(template);
@@ -1595,6 +1689,20 @@ export default function EmployeeProfilePage() {
                     }`}>
                       {rtwSummary.rtw_status_label || 'Unknown'}
                     </p>
+                    {/* RTW Expiry Date */}
+                    {rtwSummary.expiry_date && (
+                      <p className={`text-xs mt-1 ${
+                        rtwSummary.expiry_status === 'expired' ? 'text-red-600 font-medium' :
+                        rtwSummary.expiry_status === 'expiring_soon' ? 'text-amber-600' :
+                        'text-text-muted'
+                      }`}>
+                        {rtwSummary.expiry_status === 'expired' ? 'Expired: ' : 'Expires: '}
+                        {new Date(rtwSummary.expiry_date).toLocaleDateString()}
+                        {rtwSummary.days_until_expiry !== undefined && rtwSummary.days_until_expiry > 0 && (
+                          <span className="ml-1">({rtwSummary.days_until_expiry} days)</span>
+                        )}
+                      </p>
+                    )}
                   </div>
                   
                   {/* Training Status */}
@@ -3165,6 +3273,18 @@ export default function EmployeeProfilePage() {
                                         <FileText className="h-3 w-3 mr-1" />
                                         Generate PDF
                                       </Button>
+                                    ) : req.type !== 'acknowledgement' && !hasEvidence && FORM_BASED_REQUIREMENTS.includes(req.id) ? (
+                                      /* FORM-BASED REQUIREMENT: Show "Fill Form" button */
+                                      <Button 
+                                        size="sm" 
+                                        variant="default"
+                                        onClick={() => openFormModal(req.id)}
+                                        className="text-xs h-7 bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                        data-testid={`fill-form-${req.id}`}
+                                      >
+                                        <ClipboardCheck className="h-3 w-3 mr-1" />
+                                        Fill Form
+                                      </Button>
                                     ) : req.type !== 'acknowledgement' && !hasEvidence ? (
                                       <Button 
                                         size="sm" 
@@ -3217,6 +3337,32 @@ export default function EmployeeProfilePage() {
                                     <Eye className="h-3 w-3 mr-1" />
                                     View {evidenceFiles.length > 1 ? `(${evidenceFiles.length})` : ''}
                                   </Button>
+                                )}
+                                
+                                {/* View/Edit Form Submission */}
+                                {req.form_submission && (
+                                  <>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openViewForm(req)}
+                                      className="text-xs h-7 rounded-lg"
+                                      data-testid={`view-form-${req.id}`}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1" />
+                                      View Form
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => openFormModal(req.id)}
+                                      className="text-xs h-7 rounded-lg"
+                                      data-testid={`edit-form-${req.id}`}
+                                    >
+                                      <Edit className="h-3 w-3 mr-1" />
+                                      Edit
+                                    </Button>
+                                  </>
                                 )}
                                 
                                 {/* ACTION 3: Download */}
@@ -5483,6 +5629,202 @@ export default function EmployeeProfilePage() {
               Confirm & Complete
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Form Submission Modal - Structured forms */}
+      <Dialog open={formModalOpen} onOpenChange={(open) => {
+        setFormModalOpen(open);
+        if (!open) {
+          setFormTemplate(null);
+          setFormData({});
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <ClipboardCheck className="h-5 w-5 text-primary" />
+              {formTemplate?.name || 'Complete Form'}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {formTemplate && (
+            <div className="space-y-4 mt-4">
+              <p className="text-sm text-text-muted">
+                Complete all required fields. This form will be saved and count toward compliance.
+              </p>
+              
+              <div className="grid gap-4">
+                {formTemplate.fields?.map((field) => (
+                  <div key={field.id} className="space-y-1.5">
+                    <Label className="text-sm font-medium">
+                      {field.label}
+                      {field.required && <span className="text-error ml-1">*</span>}
+                    </Label>
+                    
+                    {field.type === 'text' && (
+                      <Input
+                        value={formData[field.id] || ''}
+                        onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
+                        placeholder={field.placeholder || ''}
+                        className="rounded-xl"
+                      />
+                    )}
+                    
+                    {field.type === 'textarea' && (
+                      <Textarea
+                        value={formData[field.id] || ''}
+                        onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
+                        placeholder={field.placeholder || ''}
+                        className="rounded-xl"
+                        rows={3}
+                      />
+                    )}
+                    
+                    {field.type === 'date' && (
+                      <Input
+                        type="date"
+                        value={formData[field.id] || ''}
+                        onChange={(e) => setFormData({...formData, [field.id]: e.target.value})}
+                        className="rounded-xl"
+                      />
+                    )}
+                    
+                    {field.type === 'checkbox' && (
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id={field.id}
+                          checked={formData[field.id] || false}
+                          onCheckedChange={(checked) => setFormData({...formData, [field.id]: checked})}
+                        />
+                        <label htmlFor={field.id} className="text-sm cursor-pointer">Yes</label>
+                      </div>
+                    )}
+                    
+                    {field.type === 'select' && (
+                      <Select 
+                        value={formData[field.id] || ''} 
+                        onValueChange={(v) => setFormData({...formData, [field.id]: v})}
+                      >
+                        <SelectTrigger className="rounded-xl">
+                          <SelectValue placeholder="Select..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {field.options?.map((opt) => (
+                            <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              <DialogFooter className="pt-4">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setFormModalOpen(false)} 
+                  className="rounded-xl"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleFormSubmit}
+                  disabled={isSubmittingForm}
+                  className="rounded-xl bg-primary hover:bg-primary-hover"
+                  data-testid="submit-form-btn"
+                >
+                  {isSubmittingForm ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Submit Form
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* View Form Modal - Display submitted form data */}
+      <Dialog open={viewFormOpen} onOpenChange={setViewFormOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <ClipboardCheck className="h-5 w-5 text-primary" />
+              {viewFormData?.requirementName || 'Form Submission'}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {viewFormData && (
+            <div className="space-y-4 mt-4">
+              {/* Status badges */}
+              <div className="flex items-center gap-3 p-3 bg-[#F8FAFA] rounded-xl">
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    viewFormData.verified 
+                      ? 'bg-green-100 text-green-700' 
+                      : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {viewFormData.verified ? 'Verified' : 'Submitted'}
+                  </span>
+                </div>
+                <div className="text-xs text-text-muted">
+                  Submitted: {viewFormData.submitted_at ? new Date(viewFormData.submitted_at).toLocaleString() : 'Unknown'}
+                </div>
+                {viewFormData.submitted_by_name && (
+                  <div className="text-xs text-text-muted">
+                    By: {viewFormData.submitted_by_name}
+                  </div>
+                )}
+              </div>
+              
+              {/* Form data display */}
+              <div className="space-y-3">
+                {Object.entries(viewFormData.data || {}).map(([key, value]) => (
+                  <div key={key} className="flex items-start gap-3 p-2 border-b border-[#E4E8EB]">
+                    <span className="text-sm font-medium text-text-primary min-w-[180px] capitalize">
+                      {key.replace(/_/g, ' ')}:
+                    </span>
+                    <span className="text-sm text-text-muted flex-1">
+                      {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || '-')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Verification info if verified */}
+              {viewFormData.verified && viewFormData.verified_by_name && (
+                <div className="p-3 bg-green-50 rounded-xl border border-green-200">
+                  <p className="text-sm text-green-700">
+                    <CheckCircle className="h-4 w-4 inline mr-2" />
+                    Verified by {viewFormData.verified_by_name} on {new Date(viewFormData.verified_at).toLocaleString()}
+                  </p>
+                </div>
+              )}
+              
+              <DialogFooter className="pt-4">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setViewFormOpen(false)} 
+                  className="rounded-xl"
+                >
+                  Close
+                </Button>
+                {!viewFormData.verified && isAdmin() && (
+                  <Button 
+                    onClick={() => handleVerifyFormSubmission(viewFormData.id)}
+                    className="rounded-xl bg-green-600 hover:bg-green-700"
+                    data-testid="verify-form-btn"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Verify Form
+                  </Button>
+                )}
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

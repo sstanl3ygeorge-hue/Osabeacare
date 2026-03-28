@@ -85,10 +85,10 @@ const COMPLIANCE_ITEMS = [
   }
 ];
 
-// AUDIT-READY STATUS CONFIG - Only 4 statuses
+// CARE-FOCUSED STATUS CONFIG - Supportive language for healthcare context
 const STATUS_CONFIG = {
   verified: {
-    label: 'Verified',
+    label: 'Checked & Approved',
     bgColor: 'bg-success/10',
     textColor: 'text-success',
     borderColor: 'border-success/20',
@@ -96,7 +96,7 @@ const STATUS_CONFIG = {
     priority: 1
   },
   evidence_uploaded: {
-    label: 'Evidence Uploaded',
+    label: 'Ready for Review',
     bgColor: 'bg-info/10',
     textColor: 'text-info',
     borderColor: 'border-info/20',
@@ -104,7 +104,7 @@ const STATUS_CONFIG = {
     priority: 2
   },
   expired: {
-    label: 'Expired',
+    label: 'Needs Updating',
     bgColor: 'bg-warning/10',
     textColor: 'text-warning',
     borderColor: 'border-warning/20',
@@ -112,7 +112,7 @@ const STATUS_CONFIG = {
     priority: 3
   },
   missing: {
-    label: 'Missing',
+    label: 'Still Needed',
     bgColor: 'bg-error/10',
     textColor: 'text-error',
     borderColor: 'border-error/20',
@@ -403,39 +403,39 @@ export default function ComplianceOverview({
         <div className="flex items-center justify-between">
           <CardTitle className="font-heading text-lg flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
-            Audit Summary
+            Care Status
           </CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Audit Summary Cards */}
+        {/* Care Status Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 bg-success/10 border border-success/20 rounded-xl text-center">
             <p className="text-2xl font-bold text-success">{summary.verified}</p>
-            <p className="text-xs text-success font-medium">Verified</p>
+            <p className="text-xs text-success font-medium">Checked & Approved</p>
           </div>
           <div className="p-3 bg-info/10 border border-info/20 rounded-xl text-center">
             <p className="text-2xl font-bold text-info">{summary.evidence_uploaded}</p>
-            <p className="text-xs text-info font-medium">Needs Verification</p>
+            <p className="text-xs text-info font-medium">Ready for Review</p>
           </div>
           <div className="p-3 bg-error/10 border border-error/20 rounded-xl text-center">
             <p className="text-2xl font-bold text-error">{summary.missing}</p>
-            <p className="text-xs text-error font-medium">Missing</p>
+            <p className="text-xs text-error font-medium">Still Needed</p>
           </div>
           <div className="p-3 bg-warning/10 border border-warning/20 rounded-xl text-center">
             <p className="text-2xl font-bold text-warning">{summary.expired}</p>
-            <p className="text-xs text-warning font-medium">Expired</p>
+            <p className="text-xs text-warning font-medium">Needs Updating</p>
           </div>
         </div>
 
         {/* Items grouped by status */}
         <div className="space-y-4">
-          {/* Verified Items */}
+          {/* Checked & Approved Items */}
           {groupedItems.verified.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-success mb-2 flex items-center gap-2">
                 <Shield className="h-4 w-4" />
-                Verified ({groupedItems.verified.length})
+                Checked & Approved ({groupedItems.verified.length})
               </h4>
               <div className="space-y-2">
                 {groupedItems.verified.map(renderItem)}
@@ -443,12 +443,12 @@ export default function ComplianceOverview({
             </div>
           )}
 
-          {/* Needs Verification Items */}
+          {/* Ready for Review Items */}
           {groupedItems.needs_verification.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-info mb-2 flex items-center gap-2">
                 <Eye className="h-4 w-4" />
-                Needs Verification ({groupedItems.needs_verification.length})
+                Ready for Review ({groupedItems.needs_verification.length})
               </h4>
               <div className="space-y-2">
                 {groupedItems.needs_verification.map(renderItem)}
@@ -456,12 +456,12 @@ export default function ComplianceOverview({
             </div>
           )}
 
-          {/* Missing Items */}
+          {/* Still Needed Items */}
           {groupedItems.missing.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-error mb-2 flex items-center gap-2">
                 <Upload className="h-4 w-4" />
-                Missing ({groupedItems.missing.length})
+                Still Needed ({groupedItems.missing.length})
               </h4>
               <div className="space-y-2">
                 {groupedItems.missing.map(renderItem)}
@@ -469,12 +469,12 @@ export default function ComplianceOverview({
             </div>
           )}
 
-          {/* Expired Items */}
+          {/* Needs Updating Items */}
           {groupedItems.expired.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-warning mb-2 flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
-                Expired ({groupedItems.expired.length})
+                Needs Updating ({groupedItems.expired.length})
               </h4>
               <div className="space-y-2">
                 {groupedItems.expired.map(renderItem)}
@@ -486,9 +486,9 @@ export default function ComplianceOverview({
         {/* Progress Bar */}
         <div className="pt-4 border-t border-[#E4E8EB]">
           <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-text-muted">Audit Progress</span>
+            <span className="text-text-muted">Profile Progress</span>
             <span className="font-medium text-text-primary">
-              {summary.verified}/{summary.total} verified
+              {summary.verified}/{summary.total} approved
             </span>
           </div>
           <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex">

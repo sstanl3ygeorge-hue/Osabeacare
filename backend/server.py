@@ -2910,7 +2910,307 @@ async def download_requirement_evidence(
         raise HTTPException(status_code=500, detail=f"Failed to download file: {str(e)}")
 
 
-@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")
+# ==================== EVIDENCE EDITING WITH AUDIT TRAIL ====================
+
+class EvidenceEditRequest(BaseModel):
+    issue_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    notes: Optional[str] = None
+    file_label: Optional[str] = None
+    reason: str  # Required - reason for change
+
+class EvidenceEditLog(BaseModel):
+    id: str
+    employee_id: str
+    requirement_id: str
+    file_id: str
+    field_changed: str
+    old_value: Optional[str]
+    new_value: Optional[str]
+    changed_by: str
+    changed_by_name: str
+    changed_at: str
+    reason: str
+
+@api_router.put("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}")
+async def edit_evidence_metadata(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    edit_request: EvidenceEditRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Edit metadata for a specific evidence file (issue_date, expiry_date, notes, label).
+    Creates an immutable audit log entry for every change.
+    Does NOT replace the underlying file.
+    """
+    if not edit_request.reason or len(edit_request.reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="A reason for the change is required (min 3 characters)")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    now = datetime.now(timezone.utc).isoformat()
+    changes_made = []
+    was_verified = False
+    
+    # Try to find and update in training records
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": requirement_id},
+            {"id": file_id},
+            {"evidence_files.file_id": file_id}
+        ]
+    }, {"_id": 0})
+    
+    if record:
+        was_verified = record.get('verified', False)
+        evidence_files = record.get('evidence_files', [])
+        file_index = next((i for i, f in enumerate(evidence_files) if f.get('file_id') == file_id), None)
+        
+        if file_index is not None:
+            file_data = evidence_files[file_index]
+            
+            # Track changes and update
+            if edit_request.issue_date is not None and edit_request.issue_date != file_data.get('issue_date'):
+                changes_made.append({
+                    "field": "issue_date",
+                    "old": file_data.get('issue_date'),
+                    "new": edit_request.issue_date
+                })
+                evidence_files[file_index]['issue_date'] = edit_request.issue_date
+            
+            if edit_request.expiry_date is not None and edit_request.expiry_date != file_data.get('expiry_date'):
+                changes_made.append({
+                    "field": "expiry_date",
+                    "old": file_data.get('expiry_date'),
+                    "new": edit_request.expiry_date
+                })
+                evidence_files[file_index]['expiry_date'] = edit_request.expiry_date
+            
+            if edit_request.notes is not None and edit_request.notes != file_data.get('notes'):
+                changes_made.append({
+                    "field": "notes",
+                    "old": file_data.get('notes'),
+                    "new": edit_request.notes
+                })
+                evidence_files[file_index]['notes'] = edit_request.notes
+            
+            if edit_request.file_label is not None and edit_request.file_label != file_data.get('file_label'):
+                changes_made.append({
+                    "field": "file_label",
+                    "old": file_data.get('file_label'),
+                    "new": edit_request.file_label
+                })
+                evidence_files[file_index]['file_label'] = edit_request.file_label
+            
+            evidence_files[file_index]['last_edited_at'] = now
+            evidence_files[file_index]['last_edited_by'] = user_name
+            
+            # Update training record
+            update_data = {
+                "evidence_files": evidence_files,
+                "updated_at": now
+            }
+            
+            # Also update top-level expiry if changed
+            if edit_request.expiry_date is not None:
+                update_data["expiry_date"] = edit_request.expiry_date
+            
+            # Flag if edited after verification
+            if was_verified and changes_made:
+                update_data["edited_after_approval"] = True
+                update_data["edited_after_approval_at"] = now
+            
+            await db.training_records.update_one(
+                {"id": record['id']},
+                {"$set": update_data}
+            )
+    else:
+        # Try documents
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            was_verified = doc.get('verified', False) or doc.get('status') == 'approved'
+            evidence_files = doc.get('evidence_files', [])
+            file_index = next((i for i, f in enumerate(evidence_files) if f.get('file_id') == file_id), None)
+            
+            if file_index is not None:
+                file_data = evidence_files[file_index]
+                
+                # Track changes and update
+                if edit_request.issue_date is not None and edit_request.issue_date != file_data.get('issue_date'):
+                    changes_made.append({
+                        "field": "issue_date",
+                        "old": file_data.get('issue_date'),
+                        "new": edit_request.issue_date
+                    })
+                    evidence_files[file_index]['issue_date'] = edit_request.issue_date
+                
+                if edit_request.expiry_date is not None and edit_request.expiry_date != file_data.get('expiry_date'):
+                    changes_made.append({
+                        "field": "expiry_date",
+                        "old": file_data.get('expiry_date'),
+                        "new": edit_request.expiry_date
+                    })
+                    evidence_files[file_index]['expiry_date'] = edit_request.expiry_date
+                
+                if edit_request.notes is not None and edit_request.notes != file_data.get('notes'):
+                    changes_made.append({
+                        "field": "notes",
+                        "old": file_data.get('notes'),
+                        "new": edit_request.notes
+                    })
+                    evidence_files[file_index]['notes'] = edit_request.notes
+                
+                if edit_request.file_label is not None and edit_request.file_label != file_data.get('file_label'):
+                    changes_made.append({
+                        "field": "file_label",
+                        "old": file_data.get('file_label'),
+                        "new": edit_request.file_label
+                    })
+                    evidence_files[file_index]['file_label'] = edit_request.file_label
+                
+                evidence_files[file_index]['last_edited_at'] = now
+                evidence_files[file_index]['last_edited_by'] = user_name
+                
+                update_data = {
+                    "evidence_files": evidence_files,
+                    "updated_at": now
+                }
+                
+                # Also update top-level fields
+                if edit_request.expiry_date is not None:
+                    update_data["expiry_date"] = edit_request.expiry_date
+                if edit_request.issue_date is not None:
+                    update_data["issue_date"] = edit_request.issue_date
+                
+                # Flag if edited after verification
+                if was_verified and changes_made:
+                    update_data["edited_after_approval"] = True
+                    update_data["edited_after_approval_at"] = now
+                
+                await db.employee_documents.update_one(
+                    {"id": doc['id']},
+                    {"$set": update_data}
+                )
+            else:
+                # Single file document (no evidence_files array)
+                if edit_request.issue_date is not None and edit_request.issue_date != doc.get('issue_date'):
+                    changes_made.append({
+                        "field": "issue_date",
+                        "old": doc.get('issue_date'),
+                        "new": edit_request.issue_date
+                    })
+                
+                if edit_request.expiry_date is not None and edit_request.expiry_date != doc.get('expiry_date'):
+                    changes_made.append({
+                        "field": "expiry_date",
+                        "old": doc.get('expiry_date'),
+                        "new": edit_request.expiry_date
+                    })
+                
+                if edit_request.notes is not None and edit_request.notes != doc.get('notes'):
+                    changes_made.append({
+                        "field": "notes",
+                        "old": doc.get('notes'),
+                        "new": edit_request.notes
+                    })
+                
+                update_data = {"updated_at": now}
+                if edit_request.issue_date is not None:
+                    update_data["issue_date"] = edit_request.issue_date
+                if edit_request.expiry_date is not None:
+                    update_data["expiry_date"] = edit_request.expiry_date
+                if edit_request.notes is not None:
+                    update_data["notes"] = edit_request.notes
+                
+                # Flag if edited after verification
+                if was_verified and changes_made:
+                    update_data["edited_after_approval"] = True
+                    update_data["edited_after_approval_at"] = now
+                
+                await db.employee_documents.update_one(
+                    {"id": doc['id']},
+                    {"$set": update_data}
+                )
+    
+    if not changes_made:
+        return {"success": True, "message": "No changes detected", "changes": []}
+    
+    # Create audit log entries for each change
+    for change in changes_made:
+        log_entry = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "requirement_id": requirement_id,
+            "file_id": file_id,
+            "field_changed": change["field"],
+            "old_value": change["old"],
+            "new_value": change["new"],
+            "changed_by": user['user_id'],
+            "changed_by_name": user_name,
+            "changed_at": now,
+            "reason": edit_request.reason,
+            "was_verified_before_edit": was_verified
+        }
+        await db.evidence_edit_logs.insert_one(log_entry)
+    
+    # Also add to main audit log
+    await log_audit_action(
+        user['user_id'],
+        "edit_evidence_metadata",
+        "evidence",
+        file_id,
+        {
+            "employee_id": employee_id,
+            "requirement_id": requirement_id,
+            "changes": changes_made,
+            "reason": edit_request.reason,
+            "was_verified": was_verified
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Updated {len(changes_made)} field(s)",
+        "changes": changes_made,
+        "edited_after_approval": was_verified
+    }
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/history")
+async def get_evidence_edit_history(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get edit history for a specific evidence file"""
+    logs = await db.evidence_edit_logs.find(
+        {
+            "employee_id": employee_id,
+            "file_id": file_id
+        },
+        {"_id": 0}
+    ).sort("changed_at", -1).to_list(100)
+    
+    return logs
+
+
+
 async def verify_requirement(
     employee_id: str,
     requirement_id: str,

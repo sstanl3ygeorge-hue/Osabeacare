@@ -82,7 +82,6 @@ export default function EmployeeProfilePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [editForm, setEditForm] = useState({});
   const [importAppOpen, setImportAppOpen] = useState(false);
   const [importAppFile, setImportAppFile] = useState(null);
   const [importCvFile, setImportCvFile] = useState(null);
@@ -111,6 +110,20 @@ export default function EmployeeProfilePage() {
   // Profile photo upload state
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const photoInputRef = useRef(null);
+  
+  // Evidence edit state
+  const [editEvidenceOpen, setEditEvidenceOpen] = useState(false);
+  const [editEvidenceData, setEditEvidenceData] = useState(null);
+  const [editHistory, setEditHistory] = useState([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [isEditingEvidence, setIsEditingEvidence] = useState(false);
+  const [editForm, setEditForm] = useState({
+    issue_date: '',
+    expiry_date: '',
+    notes: '',
+    file_label: '',
+    reason: ''
+  });
   
   const { token, isAuditor, user } = useAuth();
   
@@ -825,6 +838,66 @@ export default function EmployeeProfilePage() {
       fetchData();
     } catch (error) {
       toast.error('Failed to remove photo');
+    }
+  };
+
+  // Open edit evidence modal
+  const openEditEvidence = (reqId, fileData) => {
+    setEditEvidenceData({ 
+      requirementId: reqId, 
+      file: fileData 
+    });
+    setEditForm({
+      issue_date: fileData.issue_date || '',
+      expiry_date: fileData.expiry_date || '',
+      notes: fileData.notes || '',
+      file_label: fileData.file_label || fileData.original_filename || '',
+      reason: ''
+    });
+    setEditEvidenceOpen(true);
+  };
+
+  // Save evidence edits
+  const handleSaveEvidenceEdit = async () => {
+    if (!editForm.reason || editForm.reason.trim().length < 3) {
+      toast.error('Please provide a reason for this change (min 3 characters)');
+      return;
+    }
+    
+    setIsEditingEvidence(true);
+    try {
+      await axios.put(
+        `${API}/employees/${employeeId}/requirements/${editEvidenceData.requirementId}/evidence/${editEvidenceData.file.file_id}`,
+        {
+          issue_date: editForm.issue_date || null,
+          expiry_date: editForm.expiry_date || null,
+          notes: editForm.notes || null,
+          file_label: editForm.file_label || null,
+          reason: editForm.reason
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Document details updated');
+      setEditEvidenceOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update details');
+    } finally {
+      setIsEditingEvidence(false);
+    }
+  };
+
+  // Load evidence edit history
+  const loadEditHistory = async (reqId, fileId) => {
+    try {
+      const response = await axios.get(
+        `${API}/employees/${employeeId}/requirements/${reqId}/evidence/${fileId}/history`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setEditHistory(response.data);
+      setHistoryOpen(true);
+    } catch (error) {
+      toast.error('Failed to load history');
     }
   };
 
@@ -1759,7 +1832,7 @@ export default function EmployeeProfilePage() {
           {/* Forms tab hidden for Audit Mode - forms system hidden from UI */}
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
-            Checklist
+            What's Needed
           </TabsTrigger>
           <TabsTrigger value="documents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileText className="h-4 w-4 mr-2" />
@@ -1990,24 +2063,24 @@ export default function EmployeeProfilePage() {
 
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader>
-                <CardTitle className="font-heading text-lg">Audit Status</CardTitle>
+                <CardTitle className="font-heading text-lg">Care Status</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-success/10 border border-success/20 rounded-xl">
-                    <p className="text-sm text-success font-medium">Verified</p>
+                    <p className="text-sm text-success font-medium">Checked & Approved</p>
                     <p className="text-2xl font-heading font-bold text-success">
                       {complianceRequirements?.summary?.verified || 0}/{complianceRequirements?.summary?.total || 0}
                     </p>
                   </div>
                   <div className="p-4 bg-info/10 border border-info/20 rounded-xl">
-                    <p className="text-sm text-info font-medium">Evidence Uploaded</p>
+                    <p className="text-sm text-info font-medium">Ready for Review</p>
                     <p className="text-2xl font-heading font-bold text-info">
                       {(complianceRequirements?.summary?.completed || 0) - (complianceRequirements?.summary?.verified || 0)}
                     </p>
                   </div>
                   <div className="p-4 bg-error/10 border border-error/20 rounded-xl">
-                    <p className="text-sm text-error font-medium">Missing</p>
+                    <p className="text-sm text-error font-medium">Still Needed</p>
                     <p className="text-2xl font-heading font-bold text-error">
                       {complianceRequirements?.summary?.missing || 0}
                     </p>
@@ -2052,15 +2125,15 @@ export default function EmployeeProfilePage() {
           />
         </TabsContent>
 
-        {/* Checklist Tab - Mandatory Items */}
+        {/* What's Needed Tab - Mandatory Items */}
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="font-heading text-lg">Mandatory Compliance Items</CardTitle>
+                <CardTitle className="font-heading text-lg">What's Needed</CardTitle>
                 {complianceRequirements && (
                   <p className="text-sm text-text-muted mt-1">
-                    {complianceRequirements.summary.verified} verified · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} awaiting verification · {complianceRequirements.summary.missing} missing
+                    {complianceRequirements.summary.verified} approved · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} ready for review · {complianceRequirements.summary.missing} still needed
                   </p>
                 )}
               </div>
@@ -2094,8 +2167,8 @@ export default function EmployeeProfilePage() {
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="font-semibold text-text-primary">{categoryLabel}</h3>
                           <span className="text-xs text-text-muted">
-                            {verifiedInCategory}/{categoryItems.length} verified
-                            {withEvidenceCount > verifiedInCategory && ` · ${withEvidenceCount - verifiedInCategory} awaiting`}
+                            {verifiedInCategory}/{categoryItems.length} approved
+                            {withEvidenceCount > verifiedInCategory && ` · ${withEvidenceCount - verifiedInCategory} ready for review`}
                           </span>
                         </div>
                         <div className="space-y-2">
@@ -2115,11 +2188,11 @@ export default function EmployeeProfilePage() {
                               return 'bg-error/5 border-error/20';
                             };
                             
-                            // Determine status badge - STANDARDIZED: Missing, Evidence Uploaded, Verified
+                            // Determine status badge - CARE-FOCUSED: Still Needed, Ready for Review, Checked & Approved
                             const getStatusBadge = () => {
-                              if (isVerified) return { text: 'Verified', style: 'bg-success/10 text-success' };
-                              if (hasEvidence) return { text: 'Evidence Uploaded', style: 'bg-info/10 text-info' };
-                              return { text: 'Missing', style: 'bg-error/10 text-error' };
+                              if (isVerified) return { text: 'Checked & Approved', style: 'bg-success/10 text-success' };
+                              if (hasEvidence) return { text: 'Ready for Review', style: 'bg-info/10 text-info' };
+                              return { text: 'Still Needed', style: 'bg-error/10 text-error' };
                             };
                             
                             const statusBadge = getStatusBadge();
@@ -2241,7 +2314,7 @@ export default function EmployeeProfilePage() {
                                         data-testid={`upload-evidence-${req.id}`}
                                       >
                                         <Upload className="h-3 w-3 mr-1" />
-                                        Upload
+                                        Add Document
                                       </Button>
                                     ) : req.allow_multiple_files ? (
                                       <Button 
@@ -2320,7 +2393,7 @@ export default function EmployeeProfilePage() {
                                   </Button>
                                 )}
                                 
-                                {/* ACTION 4: Verify (only when evidence exists and not yet verified) */}
+                                {/* ACTION 4: Approve (only when evidence exists and not yet verified) */}
                                 {hasEvidence && !isVerified && !isAuditor() && (
                                   <Button 
                                     size="sm" 
@@ -2332,19 +2405,51 @@ export default function EmployeeProfilePage() {
                                           {},
                                           { headers: { Authorization: `Bearer ${token}` } }
                                         );
-                                        toast.success(`${req.name} verified`);
+                                        toast.success(`${req.name} approved`);
                                         fetchData();
                                       } catch (e) {
-                                        toast.error(e.response?.data?.detail || 'Verification failed');
+                                        toast.error(e.response?.data?.detail || 'Approval failed');
                                       }
                                     }}
                                     className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
                                     data-testid={`verify-${req.id}`}
-                                    title="Verification requires uploaded evidence"
+                                    title="Approve this document"
                                   >
                                     <Shield className="h-3 w-3 mr-1" />
-                                    Verify
+                                    Approve
                                   </Button>
+                                )}
+                                
+                                {/* ACTION 5: Edit Details & History (when evidence exists) */}
+                                {evidenceFiles.length > 0 && !isAuditor() && (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="text-xs h-7 px-2 rounded-lg"
+                                        data-testid={`more-actions-${req.id}`}
+                                      >
+                                        <MoreHorizontal className="h-3 w-3" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem 
+                                        onClick={() => openEditEvidence(req.id, evidenceFiles[0])}
+                                        data-testid={`edit-details-${req.id}`}
+                                      >
+                                        <Edit className="h-4 w-4 mr-2" />
+                                        Edit Details
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem 
+                                        onClick={() => loadEditHistory(req.id, evidenceFiles[0].file_id)}
+                                        data-testid={`view-history-${req.id}`}
+                                      >
+                                        <History className="h-4 w-4 mr-2" />
+                                        View History
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 )}
                                 
                                 {/* Unverify option */}
@@ -2359,14 +2464,15 @@ export default function EmployeeProfilePage() {
                                           {},
                                           { headers: { Authorization: `Bearer ${token}` } }
                                         );
-                                        toast.success('Verification removed');
+                                        toast.success('Approval removed');
                                         fetchData();
                                       } catch (e) {
-                                        toast.error('Failed to remove verification');
+                                        toast.error('Failed to remove approval');
                                       }
                                     }}
                                     className="text-xs h-7 text-text-muted hover:text-warning rounded-lg"
                                     data-testid={`unverify-${req.id}`}
+                                    title="Remove approval"
                                   >
                                     <XCircle className="h-3 w-3" />
                                   </Button>
@@ -2445,15 +2551,15 @@ export default function EmployeeProfilePage() {
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              {/* Status Badge - Standardized */}
+                              {/* Status Badge - Care-focused */}
                               <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
                                 allVerified ? 'bg-success/10 text-success' :
                                 hasFiles ? 'bg-info/10 text-info' :
                                 'bg-error/10 text-error'
                               }`}>
-                                {allVerified ? 'Verified' :
-                                 hasFiles ? 'Evidence Uploaded' :
-                                 'Missing'}
+                                {allVerified ? 'Checked & Approved' :
+                                 hasFiles ? 'Ready for Review' :
+                                 'Still Needed'}
                               </span>
                               
                               {/* Action Buttons */}
@@ -3131,6 +3237,181 @@ export default function EmployeeProfilePage() {
                   Upload Certificate
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Evidence Details Modal */}
+      <Dialog open={editEvidenceOpen} onOpenChange={setEditEvidenceOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Edit Document Details</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-text-muted">
+              Update document metadata. A reason is required for audit trail purposes.
+            </p>
+            
+            <div className="space-y-2">
+              <Label>Document Label</Label>
+              <Input
+                value={editForm.file_label}
+                onChange={(e) => setEditForm(prev => ({ ...prev, file_label: e.target.value }))}
+                placeholder="e.g., DBS Certificate 2024"
+                className="rounded-xl"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Issue Date</Label>
+                <Input
+                  type="date"
+                  value={editForm.issue_date}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, issue_date: e.target.value }))}
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Expiry Date</Label>
+                <Input
+                  type="date"
+                  value={editForm.expiry_date}
+                  onChange={(e) => setEditForm(prev => ({ ...prev, expiry_date: e.target.value }))}
+                  className="rounded-xl"
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={editForm.notes}
+                onChange={(e) => setEditForm(prev => ({ ...prev, notes: e.target.value }))}
+                placeholder="Additional notes about this document..."
+                className="rounded-xl"
+                rows={3}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label className="text-warning">Reason for Change *</Label>
+              <Textarea
+                value={editForm.reason}
+                onChange={(e) => setEditForm(prev => ({ ...prev, reason: e.target.value }))}
+                placeholder="e.g., Wrong expiry year entered, Corrected issue date from certificate..."
+                className="rounded-xl border-warning/50 focus:border-warning"
+                rows={2}
+              />
+              <p className="text-xs text-text-muted">
+                This will be recorded in the audit trail for CQC compliance.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setEditEvidenceOpen(false)}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSaveEvidenceEdit}
+              disabled={isEditingEvidence || !editForm.reason}
+              className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+            >
+              {isEditingEvidence ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Changes
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit History Modal */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <History className="h-5 w-5 text-primary" />
+              Change History
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-4">
+            {editHistory.length === 0 ? (
+              <div className="text-center py-8">
+                <History className="h-10 w-10 mx-auto text-text-muted/50 mb-2" />
+                <p className="text-text-muted">No changes recorded</p>
+                <p className="text-xs text-text-muted mt-1">
+                  Document details have not been modified since upload.
+                </p>
+              </div>
+            ) : (
+              editHistory.map((log) => (
+                <div 
+                  key={log.id} 
+                  className="p-3 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
+                >
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4 text-primary" />
+                      <span className="font-medium text-text-primary text-sm">
+                        {log.changed_by_name}
+                      </span>
+                    </div>
+                    <span className="text-xs text-text-muted">
+                      {new Date(log.changed_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="text-sm space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-text-muted">Field:</span>
+                      <span className="font-medium text-text-primary capitalize">
+                        {log.field_changed.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-text-muted">From:</span>
+                      <span className="text-error line-through">
+                        {log.old_value || '(empty)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-text-muted">To:</span>
+                      <span className="text-success">
+                        {log.new_value || '(empty)'}
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2 mt-2 pt-2 border-t border-[#E4E8EB]">
+                      <span className="text-text-muted">Reason:</span>
+                      <span className="text-text-primary italic">
+                        "{log.reason}"
+                      </span>
+                    </div>
+                    {log.was_verified_before_edit && (
+                      <div className="mt-2 px-2 py-1 bg-warning/10 text-warning text-xs rounded-lg inline-block">
+                        Changed after approval
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setHistoryOpen(false)}
+              className="rounded-xl"
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

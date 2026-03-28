@@ -4,10 +4,12 @@ import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Progress } from '../../components/ui/progress';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import {
-  Users, UserPlus, Clock, AlertTriangle, FileX, ShieldAlert,
-  FileCheck, CalendarClock, ArrowRight, Loader2
+  Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
+  FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
+  Clock, AlertCircle, CheckCircle
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -16,17 +18,20 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
+  const [expiryAlerts, setExpiryAlerts] = useState(null);
   const { token } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, employeesRes] = await Promise.all([
+        const [statsRes, employeesRes, expiryRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-          axios.get(`${API}/employees?limit=5`, { headers: { Authorization: `Bearer ${token}` } })
+          axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
         ]);
         setStats(statsRes.data);
-        setEmployees(employeesRes.data.slice(0, 5));
+        setEmployees(employeesRes.data);
+        setExpiryAlerts(expiryRes.data);
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
       } finally {
@@ -44,48 +49,173 @@ export default function DashboardPage() {
     );
   }
 
-  const statCards = [
-    { label: 'Total Employees', value: stats?.total_employees || 0, icon: Users, color: 'bg-primary' },
-    { label: 'Fully Verified', value: stats?.fully_verified_employees || 0, icon: ShieldAlert, color: 'bg-success', highlight: true },
-    { label: 'Onboarding', value: stats?.onboarding_in_progress || 0, icon: Clock, color: 'bg-info' },
-    { label: 'Missing Documents', value: stats?.missing_urgent_documents || 0, icon: FileX, color: 'bg-error', alert: true },
-    { label: 'Unsigned Policies', value: stats?.unsigned_policies || 0, icon: FileCheck, color: 'bg-warning', alert: true },
-    { label: 'DBS Pending', value: stats?.dbs_pending || 0, icon: ShieldAlert, color: 'bg-warning' },
-    { label: 'RTW Missing', value: stats?.rtw_missing || 0, icon: AlertTriangle, color: 'bg-error' },
-    { label: 'Expiring (30 days)', value: stats?.expiring_30_days || 0, icon: CalendarClock, color: 'bg-warning' },
-  ];
+  // Calculate workforce readiness counts
+  const readyToWork = employees.filter(e => 
+    e.work_readiness?.status === 'work_ready' || e.work_readiness?.status === 'fully_compliant'
+  ).length;
+  const supervisedStart = employees.filter(e => 
+    e.work_readiness?.status === 'almost_ready' || e.work_readiness?.status === 'supervised_start'
+  ).length;
+  const notReady = employees.filter(e => 
+    !e.work_readiness || 
+    (e.work_readiness?.status !== 'work_ready' && 
+     e.work_readiness?.status !== 'fully_compliant' && 
+     e.work_readiness?.status !== 'almost_ready' &&
+     e.work_readiness?.status !== 'supervised_start')
+  ).length;
+
+  // Calculate onboarding stats
+  const onboarding = employees.filter(e => e.status === 'onboarding').length;
+  const avgCompletion = employees.length > 0 
+    ? Math.round(employees.reduce((sum, e) => sum + (e.completion_percentage || 0), 0) / employees.length)
+    : 0;
+
+  // Calculate attention items
+  const expiredDocs = expiryAlerts?.total_expired || stats?.expired_documents || 0;
+  const expiringSoon = expiryAlerts?.total_expiring_soon || stats?.expiring_30_days || 0;
+  const policiesNotAcknowledged = stats?.unsigned_policies || 0;
+  const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged;
 
   return (
     <div className="space-y-8" data-testid="dashboard-page">
+      {/* Header with microcopy */}
       <div>
         <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">
           Compliance Dashboard
         </h1>
-        <p className="text-text-muted mt-1">Overview of employee compliance status</p>
+        <p className="text-text-muted mt-1">
+          This dashboard highlights what needs attention today. Start with expired items and required checks.
+        </p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((stat, idx) => (
-          <Card key={idx} className="border-[#E4E8EB] shadow-sm" data-testid={`stat-card-${idx}`}>
-            <CardContent className="p-4 lg:p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-sm text-text-muted">{stat.label}</p>
-                  <p className={`text-2xl lg:text-3xl font-heading font-bold mt-1 ${stat.alert && stat.value > 0 ? 'text-warning' : 'text-text-primary'}`}>
-                    {stat.value}
-                  </p>
-                </div>
-                <div className={`w-10 h-10 ${stat.color} rounded-xl flex items-center justify-center`}>
-                  <stat.icon className="h-5 w-5 text-white" />
+      {/* PRIMARY: Needs Attention */}
+      <Card className={`border-2 ${needsAttentionTotal > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'} shadow-sm`}>
+        <CardHeader className="pb-3">
+          <CardTitle className="font-heading text-lg flex items-center gap-2">
+            {needsAttentionTotal > 0 ? (
+              <>
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                <span className="text-red-700">Needs Attention</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle className="h-5 w-5 text-green-600" />
+                <span className="text-green-700">All Clear</span>
+              </>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {needsAttentionTotal > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className={`p-4 rounded-xl ${expiredDocs > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiredDocs > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
+                    <FileX className={`h-5 w-5 ${expiredDocs > 0 ? 'text-red-600' : 'text-gray-400'}`} />
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-heading font-bold ${expiredDocs > 0 ? 'text-red-700' : 'text-gray-400'}`}>{expiredDocs}</p>
+                    <p className={`text-sm ${expiredDocs > 0 ? 'text-red-600' : 'text-gray-500'}`}>Expired Documents</p>
+                  </div>
                 </div>
               </div>
-              {stat.highlight && stat.value > 0 && (
-                <p className="text-xs text-success mt-2">Ready for audit</p>
-              )}
-            </CardContent>
-          </Card>
-        ))}
+              <div className={`p-4 rounded-xl ${expiringSoon > 0 ? 'bg-amber-100 border border-amber-200' : 'bg-white border border-gray-200'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiringSoon > 0 ? 'bg-amber-200' : 'bg-gray-100'}`}>
+                    <CalendarClock className={`h-5 w-5 ${expiringSoon > 0 ? 'text-amber-600' : 'text-gray-400'}`} />
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-heading font-bold ${expiringSoon > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{expiringSoon}</p>
+                    <p className={`text-sm ${expiringSoon > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Expiring Soon</p>
+                  </div>
+                </div>
+              </div>
+              <div className={`p-4 rounded-xl ${policiesNotAcknowledged > 0 ? 'bg-blue-100 border border-blue-200' : 'bg-white border border-gray-200'}`}>
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${policiesNotAcknowledged > 0 ? 'bg-blue-200' : 'bg-gray-100'}`}>
+                    <FileCheck className={`h-5 w-5 ${policiesNotAcknowledged > 0 ? 'text-blue-600' : 'text-gray-400'}`} />
+                  </div>
+                  <div>
+                    <p className={`text-2xl font-heading font-bold ${policiesNotAcknowledged > 0 ? 'text-blue-700' : 'text-gray-400'}`}>{policiesNotAcknowledged}</p>
+                    <p className={`text-sm ${policiesNotAcknowledged > 0 ? 'text-blue-600' : 'text-gray-500'}`}>Policies Not Yet Acknowledged</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-green-700">No expired documents, no items expiring soon, and all policies acknowledged. Great work!</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* SECONDARY: Workforce Readiness + Onboarding Progress */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Workforce Readiness */}
+        <Card className="border-[#E4E8EB] shadow-sm">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              <Shield className="h-5 w-5 text-primary" />
+              Workforce Readiness
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200">
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="h-5 w-5 text-green-600" />
+                  <span className="font-medium text-green-700">Ready to Work</span>
+                </div>
+                <span className="text-2xl font-heading font-bold text-green-700">{readyToWork}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-amber-50 rounded-xl border border-amber-200">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-amber-600" />
+                  <span className="font-medium text-amber-700">Supervised Start</span>
+                </div>
+                <span className="text-2xl font-heading font-bold text-amber-700">{supervisedStart}</span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-200">
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="h-5 w-5 text-red-600" />
+                  <span className="font-medium text-red-700">Not Ready</span>
+                </div>
+                <span className="text-2xl font-heading font-bold text-red-700">{notReady}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Onboarding Progress */}
+        <Card className="border-[#E4E8EB] shadow-sm">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              <Clock className="h-5 w-5 text-primary" />
+              Onboarding Progress
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-3">
+                  <Users className="h-5 w-5 text-blue-600" />
+                  <span className="font-medium text-blue-700">In Progress</span>
+                </div>
+                <span className="text-2xl font-heading font-bold text-blue-700">{onboarding}</span>
+              </div>
+              <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-text-muted">Average Progress to Full Compliance</span>
+                  <span className="font-semibold text-text-primary">{avgCompletion}%</span>
+                </div>
+                <Progress value={avgCompletion} className="h-3" />
+              </div>
+              <div className="flex justify-between items-center p-3 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+                <span className="text-text-muted">Total Employees</span>
+                <span className="text-xl font-heading font-bold text-text-primary">{employees.length}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Quick Actions & Recent Employees */}
@@ -102,11 +232,16 @@ export default function DashboardPage() {
                 Add New Employee
               </Button>
             </Link>
-            {/* Form Templates hidden for Audit Mode */}
-            <Link to="/portal/compliance-centre" className="block">
-              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-compliance">
-                <FileCheck className="mr-2 h-4 w-4" />
-                Compliance Centre
+            <Link to="/portal/compliance-centre?tab=policies" className="block">
+              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-upload-policy">
+                <Upload className="mr-2 h-4 w-4" />
+                Upload Policy
+              </Button>
+            </Link>
+            <Link to="/portal/employees" className="block">
+              <Button variant="outline" className="w-full justify-start rounded-xl border-[#E4E8EB]" data-testid="quick-upload-document">
+                <FileText className="mr-2 h-4 w-4" />
+                Upload Document
               </Button>
             </Link>
           </CardContent>
@@ -136,81 +271,52 @@ export default function DashboardPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {employees.map((emp) => (
-                  <Link
-                    key={emp.id}
-                    to={`/portal/employees/${emp.id}`}
-                    className="flex items-center justify-between p-3 rounded-xl hover:bg-[#F8FAFA] transition-colors"
-                    data-testid={`employee-row-${emp.id}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <EmployeeAvatar
-                        employeeId={emp.id}
-                        firstName={emp.first_name}
-                        lastName={emp.last_name}
-                        hasPhoto={!!emp.profile_photo_url}
-                        token={token}
-                        size="md"
-                      />
-                      <div>
-                        <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
-                        <p className="text-sm text-text-muted">{emp.employee_code} · {emp.role}</p>
+                {employees.slice(0, 5).map((emp) => {
+                  const isReady = emp.work_readiness?.status === 'work_ready' || emp.work_readiness?.status === 'fully_compliant';
+                  const isSupervisedStart = emp.work_readiness?.status === 'almost_ready' || emp.work_readiness?.status === 'supervised_start';
+                  
+                  return (
+                    <Link
+                      key={emp.id}
+                      to={`/portal/employees/${emp.id}`}
+                      className="flex items-center justify-between p-3 rounded-xl hover:bg-[#F8FAFA] transition-colors"
+                      data-testid={`employee-row-${emp.id}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <EmployeeAvatar
+                          employeeId={emp.id}
+                          firstName={emp.first_name}
+                          lastName={emp.last_name}
+                          hasPhoto={!!emp.profile_photo_url}
+                          token={token}
+                          size="md"
+                        />
+                        <div>
+                          <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
+                          <p className="text-sm text-text-muted">{emp.role}</p>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right hidden sm:block">
-                        <p className="text-sm font-medium text-text-primary">{emp.completion_percentage}%</p>
-                        <p className="text-xs text-text-muted">Complete</p>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right hidden sm:block">
+                          <p className="text-sm font-medium text-text-primary">{emp.completion_percentage}%</p>
+                          <p className="text-xs text-text-muted">Progress</p>
+                        </div>
+                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                          isReady ? 'bg-green-100 text-green-700' :
+                          isSupervisedStart ? 'bg-amber-100 text-amber-700' :
+                          'bg-red-100 text-red-700'
+                        }`}>
+                          {isReady ? 'Ready to Work' : isSupervisedStart ? 'Supervised Start' : 'Not Ready'}
+                        </span>
                       </div>
-                      <span className={`status-chip ${
-                        emp.status === 'active' ? 'status-success' :
-                        emp.status === 'onboarding' ? 'status-info' :
-                        'status-neutral'
-                      }`}>
-                        {emp.status}
-                      </span>
-                    </div>
-                  </Link>
-                ))}
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </CardContent>
         </Card>
       </div>
-
-      {/* Alerts Section */}
-      {(stats?.missing_urgent_documents > 0 || stats?.unsigned_policies > 0 || stats?.expiring_30_days > 0) && (
-        <Card className="border-warning/30 bg-warning/5 shadow-sm">
-          <CardHeader>
-            <CardTitle className="font-heading text-lg flex items-center gap-2 text-warning">
-              <AlertTriangle className="h-5 w-5" />
-              Items Requiring Attention
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid sm:grid-cols-3 gap-4">
-              {stats?.missing_urgent_documents > 0 && (
-                <div className="p-4 bg-white rounded-xl border border-[#E4E8EB]">
-                  <p className="font-medium text-text-primary">{stats.missing_urgent_documents} missing documents</p>
-                  <p className="text-sm text-text-muted">Require immediate action</p>
-                </div>
-              )}
-              {stats?.unsigned_policies > 0 && (
-                <div className="p-4 bg-white rounded-xl border border-[#E4E8EB]">
-                  <p className="font-medium text-text-primary">{stats.unsigned_policies} unsigned policies</p>
-                  <p className="text-sm text-text-muted">Awaiting acknowledgement</p>
-                </div>
-              )}
-              {stats?.expiring_30_days > 0 && (
-                <div className="p-4 bg-white rounded-xl border border-[#E4E8EB]">
-                  <p className="font-medium text-text-primary">{stats.expiring_30_days} expiring soon</p>
-                  <p className="text-sm text-text-muted">Within next 30 days</p>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

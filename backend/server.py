@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import re
 import logging
 import uuid
 import asyncio
@@ -1506,16 +1507,18 @@ class OrgSettingsResponse(BaseModel):
 class TrainingRecordCreate(BaseModel):
     employee_id: str
     training_name: str
+    requirement_id: Optional[str] = None
     mandatory: bool = True
     completion_date: Optional[str] = None
     expiry_date: Optional[str] = None
-    status: str = "not_started"
+    status: str = "not_started"  # not_started, in_progress, completed, expiring, expired
 
 class TrainingRecordResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     employee_id: str
     training_name: str
+    requirement_id: Optional[str] = None
     mandatory: bool = True
     completion_date: Optional[str] = None
     expiry_date: Optional[str] = None
@@ -1526,9 +1529,135 @@ class TrainingRecordResponse(BaseModel):
     verified_by: Optional[str] = None
     verified_at: Optional[str] = None
     completion_method: Optional[str] = None  # "certificate" or "manual" 
-    requirement_id: Optional[str] = None
-    status: str
+    record_status: str = "active"  # active, superseded, deleted (distinct from completion status)
+    status: str  # completion status: not_started, in_progress, completed, expiring, expired
+    evidence_files: Optional[List[dict]] = []
     created_at: str
+    updated_at: Optional[str] = None
+
+
+# Training validity periods (in days) - CQC requirements
+TRAINING_VALIDITY_PERIODS = {
+    "safeguarding": 365,  # Annual
+    "safeguarding_of_vulnerable_adults": 365,
+    "moving_and_handling": 365,
+    "manual_handling": 365,
+    "health_and_safety": 365,
+    "infection_control": 365,
+    "infection_control_and_hygiene": 365,
+    "medication_administration": 365,
+    "food_hygiene_nutrition_and_hydration": 365,
+    "food_hygiene": 365,
+    "first_aid_awareness": 1095,  # 3 years
+    "first_aid": 1095,
+    "fire_safety": 365,
+    "covid_19": 365,
+    "default": 365  # Default to annual
+}
+
+
+def get_training_validity_days(requirement_id: str) -> int:
+    """Get validity period in days for a training requirement."""
+    req_lower = requirement_id.lower().replace(' ', '_').replace('-', '_')
+    return TRAINING_VALIDITY_PERIODS.get(req_lower, TRAINING_VALIDITY_PERIODS['default'])
+
+
+def calculate_training_expiry(completion_date: str, requirement_id: str) -> str:
+    """Calculate expiry date based on completion date and requirement validity period."""
+    validity_days = get_training_validity_days(requirement_id)
+    completion = datetime.fromisoformat(completion_date.replace('Z', '+00:00')) if 'T' in completion_date else datetime.strptime(completion_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+    expiry = completion + timedelta(days=validity_days)
+    return expiry.isoformat()
+
+
+async def get_or_create_training_record(
+    employee_id: str, 
+    requirement_id: str, 
+    training_name: str,
+    create_if_missing: bool = True
+) -> Optional[dict]:
+    """
+    Get the SINGLE ACTIVE training record for an employee+requirement.
+    Creates one if missing and create_if_missing=True.
+    Enforces single source of truth.
+    """
+    # Find active record (NOT superseded or deleted)
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0})
+    
+    if record:
+        return record
+    
+    # Try by training name if not found by requirement_id
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "training_name": {"$regex": f"^{re.escape(training_name)}$", "$options": "i"},
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0})
+    
+    if record:
+        # Update requirement_id if missing
+        if not record.get('requirement_id'):
+            await db.training_records.update_one(
+                {"id": record['id']},
+                {"$set": {"requirement_id": requirement_id}}
+            )
+            record['requirement_id'] = requirement_id
+        return record
+    
+    if not create_if_missing:
+        return None
+    
+    # Create new record
+    now = datetime.now(timezone.utc).isoformat()
+    new_record = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "training_name": training_name,
+        "mandatory": True,
+        "status": "not_started",
+        "record_status": "active",
+        "completion_date": None,
+        "expiry_date": None,
+        "certificate_url": None,
+        "evidence_files": [],
+        "verified": False,
+        "created_at": now,
+        "updated_at": now
+    }
+    await db.training_records.insert_one(new_record)
+    return new_record
+
+
+async def supersede_training_record(record_id: str, user_id: str, reason: str = None):
+    """Mark a training record as superseded (replaced by a newer one)."""
+    now = datetime.now(timezone.utc).isoformat()
+    
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        return False
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "record_status": "superseded",
+            "superseded_at": now,
+            "superseded_by": user_id,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(user_id, "training_superseded", "training_record", record_id, {
+        "training_name": record.get('training_name'),
+        "employee_id": record.get('employee_id'),
+        "reason": reason or "Replaced with newer record"
+    })
+    
+    return True
 
 # Contact/Application Form Models
 class ContactForm(BaseModel):
@@ -3237,21 +3366,33 @@ async def upload_requirement_evidence(
     
     # Handle based on requirement type
     if req_type == 'training':
-        # For training, update training_records collection
+        # For training, use SINGLE SOURCE OF TRUTH - training_records collection
         training_name = requirement.get('training_name', requirement['name'])
         
-        # Find or create training record
+        # Get or create the SINGLE ACTIVE training record for this employee+requirement
         existing = await db.training_records.find_one({
             "employee_id": employee_id,
-            "$or": [
-                {"requirement_id": requirement_id},
-                {"training_name": {"$regex": training_name, "$options": "i"}}
-            ]
+            "requirement_id": requirement_id,
+            "record_status": {"$nin": ["superseded", "deleted"]}
         }, {"_id": 0})
         
+        # Also check by training name if not found by requirement_id
+        if not existing:
+            existing = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "training_name": {"$regex": f"^{re.escape(training_name)}$", "$options": "i"},
+                "record_status": {"$nin": ["superseded", "deleted"]}
+            }, {"_id": 0})
+        
+        # Calculate expiry from completion date if not provided
+        calculated_expiry = expiry_date
+        if not calculated_expiry:
+            calculated_expiry = calculate_training_expiry(now, requirement_id)
+        
         if existing:
-            # Add to existing evidence files
+            # Add to existing evidence files (SINGLE record, multiple evidence files OK)
             evidence_files = existing.get('evidence_files', [])
+            
             # Migrate old certificate_url to evidence_files if needed
             if existing.get('certificate_url') and not evidence_files:
                 evidence_files.append({
@@ -3259,10 +3400,13 @@ async def upload_requirement_evidence(
                     "file_url": existing['certificate_url'],
                     "original_filename": existing.get('original_filename', 'certificate'),
                     "uploaded_at": existing.get('uploaded_at', existing.get('created_at')),
-                    "source_type": "migrated"
+                    "source_type": "migrated",
+                    "status": "active"
                 })
+            
             evidence_files.append(evidence_file)
             
+            # Update the SINGLE training record
             await db.training_records.update_one(
                 {"id": existing['id']},
                 {"$set": {
@@ -3271,16 +3415,26 @@ async def upload_requirement_evidence(
                     "original_filename": file.filename,
                     "uploaded_at": now,
                     "status": "completed",
+                    "record_status": "active",  # Ensure active
                     "completion_date": now,
                     "completion_method": "certificate",
                     "requirement_id": requirement_id,
                     "updated_at": now,
-                    "expiry_date": expiry_date
+                    "expiry_date": calculated_expiry
                 }}
             )
             record_id = existing['id']
+            
+            # Log the update
+            await log_audit_action(user['user_id'], "training_evidence_added", "training_record", record_id, {
+                "training_name": training_name,
+                "requirement_id": requirement_id,
+                "filename": file.filename,
+                "expiry_date": calculated_expiry,
+                "action": "added_evidence"
+            })
         else:
-            # Create new training record
+            # Create new training record (SINGLE ACTIVE record)
             record_id = str(uuid.uuid4())
             new_record = {
                 "id": record_id,
@@ -3288,8 +3442,9 @@ async def upload_requirement_evidence(
                 "training_name": training_name,
                 "mandatory": True,
                 "status": "completed",
+                "record_status": "active",  # SINGLE ACTIVE record
                 "completion_date": now,
-                "expiry_date": expiry_date,
+                "expiry_date": calculated_expiry,
                 "certificate_url": result["path"],
                 "original_filename": file.filename,
                 "uploaded_at": now,
@@ -3297,12 +3452,22 @@ async def upload_requirement_evidence(
                 "verified": False,
                 "completion_method": "certificate",
                 "requirement_id": requirement_id,
-                "created_at": now
+                "created_at": now,
+                "updated_at": now
             }
             await db.training_records.insert_one(new_record)
+            
+            # Log the creation
+            await log_audit_action(user['user_id'], "training_record_created", "training_record", record_id, {
+                "training_name": training_name,
+                "requirement_id": requirement_id,
+                "filename": file.filename,
+                "expiry_date": calculated_expiry,
+                "action": "created_with_evidence"
+            })
         
-        await log_audit_action(user['user_id'], "upload_evidence", "training_record", record_id, 
-                               {"requirement_id": requirement_id, "filename": file.filename})
+        # Update compliance for this employee
+        await update_employee_compliance(employee_id)
     
     else:
         # For documents/form-generated, create/update employee_documents
@@ -6183,8 +6348,14 @@ async def get_training_records(
     status: Optional[str] = None,
     mandatory: Optional[bool] = None,
     include_test: Optional[bool] = False,
+    include_superseded: Optional[bool] = False,
+    include_deleted: Optional[bool] = False,
     user: dict = Depends(get_current_user)
 ):
+    """
+    Get training records.
+    By default, only returns ACTIVE records (excludes superseded/deleted/test).
+    """
     query = {}
     if employee_id:
         query["employee_id"] = employee_id
@@ -6196,6 +6367,14 @@ async def get_training_records(
     # Exclude TEST records by default (unless explicitly requested)
     if not include_test:
         query["training_name"] = {"$not": {"$regex": "^TEST", "$options": "i"}}
+    
+    # Exclude superseded/deleted records by default - SINGLE SOURCE OF TRUTH
+    if not include_superseded and not include_deleted:
+        query["record_status"] = {"$nin": ["superseded", "deleted"]}
+    elif not include_superseded:
+        query["record_status"] = {"$ne": "superseded"}
+    elif not include_deleted:
+        query["record_status"] = {"$ne": "deleted"}
     
     records = await db.training_records.find(query, {"_id": 0}).to_list(1000)
     return [TrainingRecordResponse(**r) for r in records]
@@ -6262,8 +6441,16 @@ async def delete_training_record(
         }
     )
     
-    # Delete the record
-    await db.training_records.delete_one({"id": record_id})
+    # SOFT DELETE - set record_status to "deleted" instead of hard delete
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "record_status": "deleted",
+            "deleted_at": now,
+            "deleted_by": user_name,
+            "updated_at": now
+        }}
+    )
     
     # Update employee compliance
     if employee_id:
@@ -6330,12 +6517,19 @@ async def bulk_delete_training_records(
             }
         )
         
-        # Delete the record
-        result = await db.training_records.delete_one({"id": record_id})
-        if result.deleted_count > 0:
-            deleted_count += 1
-            if employee_id:
-                affected_employees.add(employee_id)
+        # SOFT DELETE - set record_status to "deleted"
+        await db.training_records.update_one(
+            {"id": record_id},
+            {"$set": {
+                "record_status": "deleted",
+                "deleted_at": now,
+                "deleted_by": user_name,
+                "updated_at": now
+            }}
+        )
+        deleted_count += 1
+        if employee_id:
+            affected_employees.add(employee_id)
     
     # Update compliance for affected employees
     for emp_id in affected_employees:
@@ -6357,6 +6551,154 @@ async def update_training_record(record_id: str, update: TrainingRecordCreate, u
     
     record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
     return TrainingRecordResponse(**record)
+
+
+class TrainingRecordUpdateRequest(BaseModel):
+    """Request to update a training record - SINGLE SOURCE OF TRUTH"""
+    completion_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    status: Optional[str] = None  # not_started, in_progress, completed, expiring, expired
+    verified: Optional[bool] = None
+    notes: Optional[str] = None
+    reason: str  # Required for audit
+
+
+@api_router.patch("/employees/{employee_id}/training/{requirement_id}")
+async def update_employee_training_record(
+    employee_id: str,
+    requirement_id: str,
+    update: TrainingRecordUpdateRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update a training record directly - SINGLE SOURCE OF TRUTH.
+    This endpoint should be used from "What's Needed" modal to edit training.
+    All training edits go through this endpoint to ensure consistency.
+    """
+    # Validate reason
+    if not update.reason or len(update.reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason is required (minimum 3 characters)")
+    
+    # Find the SINGLE ACTIVE training record
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0})
+    
+    if not record:
+        # Try by training name pattern
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "training_name": {"$regex": requirement_id, "$options": "i"},
+            "record_status": {"$nin": ["superseded", "deleted"]}
+        }, {"_id": 0})
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    # Build update data
+    update_data = {"updated_at": now}
+    changes = {}
+    
+    if update.completion_date is not None:
+        changes["completion_date"] = {"old": record.get('completion_date'), "new": update.completion_date}
+        update_data["completion_date"] = update.completion_date
+        # Auto-calculate expiry if completion date changes
+        if update.completion_date and not update.expiry_date:
+            update_data["expiry_date"] = calculate_training_expiry(update.completion_date, requirement_id)
+            changes["expiry_date"] = {"old": record.get('expiry_date'), "new": update_data["expiry_date"]}
+    
+    if update.expiry_date is not None:
+        changes["expiry_date"] = {"old": record.get('expiry_date'), "new": update.expiry_date}
+        update_data["expiry_date"] = update.expiry_date
+    
+    if update.status is not None:
+        changes["status"] = {"old": record.get('status'), "new": update.status}
+        update_data["status"] = update.status
+    
+    if update.verified is not None:
+        changes["verified"] = {"old": record.get('verified'), "new": update.verified}
+        update_data["verified"] = update.verified
+        if update.verified:
+            update_data["verified_at"] = now
+            update_data["verified_by"] = user_name
+        else:
+            update_data["verified_at"] = None
+            update_data["verified_by"] = None
+    
+    # Apply update
+    await db.training_records.update_one(
+        {"id": record['id']},
+        {"$set": update_data}
+    )
+    
+    # Create audit log
+    await log_audit_action(user['user_id'], "training_record_updated", "training_record", record['id'], {
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "training_name": record.get('training_name'),
+        "changes": changes,
+        "reason": update.reason.strip(),
+        "updated_by": user_name,
+        "updated_at": now
+    })
+    
+    # Update employee compliance
+    await update_employee_compliance(employee_id)
+    
+    # Return updated record
+    updated_record = await db.training_records.find_one({"id": record['id']}, {"_id": 0})
+    return {
+        "success": True,
+        "training_record": updated_record,
+        "changes": changes
+    }
+
+
+@api_router.get("/employees/{employee_id}/training/{requirement_id}")
+async def get_employee_training_record(
+    employee_id: str,
+    requirement_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get the SINGLE ACTIVE training record for an employee+requirement.
+    This is the source of truth for training status.
+    """
+    # Find the active record
+    record = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0})
+    
+    if not record:
+        # Try by training name pattern
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "training_name": {"$regex": requirement_id, "$options": "i"},
+            "record_status": {"$nin": ["superseded", "deleted"]}
+        }, {"_id": 0})
+    
+    if not record:
+        return {"exists": False, "training_record": None}
+    
+    # Calculate current expiry status
+    expiry_status = None
+    if record.get('expiry_date'):
+        expiry_status = calculate_expiry_status(record.get('expiry_date'))
+    
+    return {
+        "exists": True,
+        "training_record": record,
+        "expiry_status": expiry_status
+    }
+
 
 @api_router.post("/training-records/{record_id}/upload-certificate")
 async def upload_training_certificate(

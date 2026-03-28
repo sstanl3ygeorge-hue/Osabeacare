@@ -579,21 +579,16 @@ export default function EmployeeProfilePage() {
     setRemoveDialogOpen(true);
   };
 
-  // Handle soft-remove file
-  const handleRemoveFile = async () => {
-    if (!removeReason.trim() || removeReason.trim().length < 3) {
-      toast.error('Please provide a reason (minimum 3 characters)');
-      return;
-    }
-
+  // Handle permanent delete file (removes from active use, keeps audit trail)
+  const handleDeleteFile = async () => {
     setIsRemoving(true);
     try {
       await axios.post(
-        `${API}/employees/${employeeId}/requirements/${selectedRequirementForAction}/evidence/${selectedFileForAction.file_id}/remove`,
-        { reason: removeReason.trim() },
+        `${API}/employees/${employeeId}/requirements/${selectedRequirementForAction}/evidence/${selectedFileForAction.file_id}/delete`,
+        { reason: removeReason.trim() || null },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('File removed successfully');
+      toast.success('File deleted successfully');
       setRemoveDialogOpen(false);
       setSelectedFileForAction(null);
       setSelectedRequirementForAction(null);
@@ -602,7 +597,7 @@ export default function EmployeeProfilePage() {
       await fetchData();
       await fetchCompliance();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to remove file');
+      toast.error(error.response?.data?.detail || 'Failed to delete file');
     } finally {
       setIsRemoving(false);
     }
@@ -2958,7 +2953,7 @@ export default function EmployeeProfilePage() {
                                           data-testid={`remove-file-${req.id}`}
                                         >
                                           <Trash2 className="h-4 w-4 mr-2" />
-                                          Remove File
+                                          Delete File
                                         </DropdownMenuItem>
                                       )}
                                       
@@ -3127,21 +3122,27 @@ export default function EmployeeProfilePage() {
                           {/* Files List - Using evidence_files structure */}
                           {docs.length > 0 && (
                             <div className="mt-3 space-y-2">
-                              {docs.map((doc, idx) => (
+                              {docs.map((doc, idx) => {
+                                // File error state is tracked via failed requests
+                                const isFileBroken = doc.file_error === true;
+                                
+                                return (
                                 <div 
                                   key={doc.file_id || idx} 
                                   className={`flex items-center justify-between p-3 rounded-lg border ${
+                                    isFileBroken ? 'border-red-200 bg-red-50' :
                                     doc.verified ? 'border-success/30 bg-success/5' : 'border-[#E4E8EB] bg-white'
                                   }`}
+                                  data-testid={`file-row-${doc.file_id}`}
                                 >
                                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <FileText className="h-5 w-5 text-text-muted flex-shrink-0" />
+                                    <FileText className={`h-5 w-5 flex-shrink-0 ${isFileBroken ? 'text-red-400' : 'text-text-muted'}`} />
                                     <div className="min-w-0">
-                                      <p className="text-sm font-medium text-text-primary truncate">
-                                        {doc.file_label || doc.original_filename || 'Document'}
+                                      <p className={`text-sm font-medium truncate ${isFileBroken ? 'text-red-600' : 'text-text-primary'}`}>
+                                        {isFileBroken ? 'File unavailable' : (doc.file_label || doc.original_filename || 'Document')}
                                       </p>
                                       <div className="flex items-center gap-2 text-xs text-text-muted">
-                                        {doc.source_type && (
+                                        {!isFileBroken && doc.source_type && (
                                           <span>
                                             {doc.source_type === 'form_submission' ? 'From Form' : 
                                              doc.source_type === 'imported' ? 'Imported' : 
@@ -3151,40 +3152,53 @@ export default function EmployeeProfilePage() {
                                         {doc.uploaded_at && (
                                           <span>{new Date(doc.uploaded_at).toLocaleDateString()}</span>
                                         )}
-                                        {doc.verified && (
+                                        {doc.verified && !isFileBroken && (
                                           <span className="flex items-center gap-1 text-success">
                                             <Shield className="h-3 w-3" />
                                             Verified
                                           </span>
                                         )}
+                                        {isFileBroken && (
+                                          <span className="text-red-500">Cannot access file</span>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
                                   
-                                  {/* File Actions - using evidence file endpoint */}
+                                  {/* File Actions: View, Download, Replace, Delete */}
                                   <div className="flex items-center gap-1">
+                                    {/* View - disabled if file is broken */}
                                     <Button 
                                       size="sm" 
                                       variant="ghost"
                                       className="h-8 w-8 p-0 rounded-lg"
-                                      onClick={() => {
-                                        const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${doc.file_id}/view`;
-                                        setPreviewFile({
-                                          url: viewUrl,
-                                          name: doc.file_label || doc.original_filename || 'Document',
-                                          filename: doc.original_filename
-                                        });
-                                        setPreviewFiles([]);
-                                        setPreviewOpen(true);
+                                      disabled={isFileBroken}
+                                      onClick={async () => {
+                                        try {
+                                          const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${doc.file_id}/view`;
+                                          setPreviewFile({
+                                            url: viewUrl,
+                                            name: doc.file_label || doc.original_filename || 'Document',
+                                            filename: doc.original_filename
+                                          });
+                                          setPreviewFiles([]);
+                                          setPreviewOpen(true);
+                                        } catch (e) {
+                                          toast.error('File unavailable');
+                                        }
                                       }}
-                                      title="View"
+                                      title={isFileBroken ? 'File unavailable' : 'View'}
+                                      data-testid={`view-file-${doc.file_id}`}
                                     >
-                                      <Eye className="h-4 w-4" />
+                                      <Eye className={`h-4 w-4 ${isFileBroken ? 'text-gray-300' : ''}`} />
                                     </Button>
+                                    
+                                    {/* Download - disabled if file is broken */}
                                     <Button 
                                       size="sm" 
                                       variant="ghost"
                                       className="h-8 w-8 p-0 rounded-lg"
+                                      disabled={isFileBroken}
                                       onClick={async () => {
                                         try {
                                           const downloadUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${doc.file_id}/view`;
@@ -3201,27 +3215,60 @@ export default function EmployeeProfilePage() {
                                           URL.revokeObjectURL(url);
                                           toast.success('Downloaded');
                                         } catch (error) {
-                                          toast.error('Failed to download');
+                                          toast.error('File unavailable');
                                         }
                                       }}
-                                      title="Download"
+                                      title={isFileBroken ? 'File unavailable' : 'Download'}
+                                      data-testid={`download-file-${doc.file_id}`}
                                     >
-                                      <Download className="h-4 w-4" />
+                                      <Download className={`h-4 w-4 ${isFileBroken ? 'text-gray-300' : ''}`} />
                                     </Button>
-                                    {!isAuditor() && !doc.verified && (
+                                    
+                                    {/* Replace - always available (works for broken files too) */}
+                                    {!isAuditor() && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0 rounded-lg text-blue-600 hover:bg-blue-50"
+                                        onClick={() => openReplaceDialog(doc, req.id)}
+                                        title="Replace"
+                                        data-testid={`replace-file-${doc.file_id}`}
+                                      >
+                                        <RefreshCw className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    
+                                    {/* Delete - always available (works for broken files too) */}
+                                    {!isAuditor() && (
+                                      <Button 
+                                        size="sm" 
+                                        variant="ghost"
+                                        className="h-8 w-8 p-0 rounded-lg text-red-600 hover:bg-red-50"
+                                        onClick={() => openRemoveDialog(doc, req.id)}
+                                        title="Delete"
+                                        data-testid={`delete-file-${doc.file_id}`}
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                      </Button>
+                                    )}
+                                    
+                                    {/* Verify - only for non-broken files */}
+                                    {!isAuditor() && !doc.verified && !isFileBroken && (
                                       <Button 
                                         size="sm" 
                                         variant="ghost"
                                         className="h-8 w-8 p-0 rounded-lg text-success hover:bg-success/10"
                                         onClick={() => handleVerifyRequirement(req.id)}
                                         title="Approve"
+                                        data-testid={`verify-file-${doc.file_id}`}
                                       >
                                         <Shield className="h-4 w-4" />
                                       </Button>
                                     )}
                                   </div>
                                 </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                           
@@ -3538,7 +3585,7 @@ export default function EmployeeProfilePage() {
                     const categorizeLog = (action) => {
                       if (action?.includes('policy')) return 'policies';
                       if (action?.includes('training') || action?.includes('certificate')) return 'training';
-                      if (action?.includes('document') || action?.includes('evidence') || action?.includes('verify') || action?.includes('upload')) return 'documents';
+                      if (action?.includes('document') || action?.includes('evidence') || action?.includes('verify') || action?.includes('upload') || action?.includes('file_deleted')) return 'documents';
                       return 'profile';
                     };
                     
@@ -3572,6 +3619,8 @@ export default function EmployeeProfilePage() {
                         'document_uploaded': 'Document Uploaded',
                         'document_replaced': 'Document Replaced',
                         'document_removed': 'Document Removed',
+                        'file_deleted': 'File Deleted',
+                        'delete_evidence': 'Evidence Deleted',
                         'status_change': 'Status Changed',
                         'refresh_status': 'Status Refreshed',
                         'update_employee': 'Employee Updated',
@@ -3609,11 +3658,13 @@ export default function EmployeeProfilePage() {
                                     {log.metadata && (
                                       <div className="text-text-muted mt-0.5 text-xs space-y-0.5">
                                         {log.metadata.requirement_name && <p>• {log.metadata.requirement_name}</p>}
+                                        {log.metadata.filename && <p>• File: {log.metadata.filename}</p>}
                                         {log.metadata.policy_title && <p>• {log.metadata.policy_title}</p>}
                                         {log.metadata.training_name && <p>• {log.metadata.training_name}</p>}
                                         {log.metadata.field_changed && (
                                           <p>• {log.metadata.field_changed}: {log.metadata.old_value || '(empty)'} → {log.metadata.new_value}</p>
                                         )}
+                                        {log.metadata.deleted_by && <p>• Deleted by: {log.metadata.deleted_by}</p>}
                                         {log.metadata.reason && <p className="italic">Reason: {log.metadata.reason}</p>}
                                       </div>
                                     )}
@@ -4208,50 +4259,54 @@ export default function EmployeeProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Remove File Dialog */}
+      {/* Delete File Dialog */}
       <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-error">
+            <DialogTitle className="flex items-center gap-2 text-red-600">
               <Trash2 className="h-5 w-5" />
-              Remove File
+              Delete File
             </DialogTitle>
             <DialogDescription>
-              This will mark the file as removed. The file will remain in the history for audit purposes but will no longer count as evidence.
+              This will permanently remove the file from active use. The file will no longer count towards compliance. An audit record will be kept.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             {selectedFileForAction && (
-              <div className="p-3 bg-muted rounded-lg">
-                <p className="text-sm font-medium">{selectedFileForAction.file_label || selectedFileForAction.original_filename}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Uploaded: {new Date(selectedFileForAction.uploaded_at).toLocaleDateString()}
-                </p>
+              <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                <p className="text-sm font-medium text-red-800">{selectedFileForAction.file_label || selectedFileForAction.original_filename || 'File'}</p>
+                {selectedFileForAction.uploaded_at && (
+                  <p className="text-xs text-red-600 mt-1">
+                    Uploaded: {new Date(selectedFileForAction.uploaded_at).toLocaleDateString()}
+                  </p>
+                )}
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="remove-reason">Reason for removal <span className="text-error">*</span></Label>
+              <Label htmlFor="delete-reason">Reason for deletion (optional)</Label>
               <Textarea
-                id="remove-reason"
-                placeholder="Enter the reason for removing this file (required for audit trail)"
+                id="delete-reason"
+                placeholder="Enter an optional reason for deleting this file"
                 value={removeReason}
                 onChange={(e) => setRemoveReason(e.target.value)}
-                className="min-h-[100px]"
+                className="min-h-[80px] rounded-xl"
               />
-              <p className="text-xs text-muted-foreground">This reason will be recorded in the audit trail.</p>
+              <p className="text-xs text-text-muted">This reason will be recorded in the audit trail if provided.</p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoveDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setRemoveDialogOpen(false)} className="rounded-xl">
               Cancel
             </Button>
             <Button 
               variant="destructive" 
-              onClick={handleRemoveFile}
-              disabled={isRemoving || !removeReason.trim()}
+              onClick={handleDeleteFile}
+              disabled={isRemoving}
+              className="rounded-xl"
+              data-testid="confirm-delete-file"
             >
               {isRemoving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
-              Remove File
+              Delete File
             </Button>
           </DialogFooter>
         </DialogContent>

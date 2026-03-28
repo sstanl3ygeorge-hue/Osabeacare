@@ -37,6 +37,7 @@ export default function EmployeesPage() {
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [onboardingStatusFilter, setOnboardingStatusFilter] = useState(searchParams.get('onboarding') || '');
   const [workReadinessFilter, setWorkReadinessFilter] = useState(searchParams.get('work_readiness') || '');
+  const [requirementFilter, setRequirementFilter] = useState(searchParams.get('requirement') || '');
   const [showArchived, setShowArchived] = useState(searchParams.get('archived') === 'true');
   const [onboardingStatuses, setOnboardingStatuses] = useState([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -53,6 +54,7 @@ export default function EmployeesPage() {
     if (statusFilter) newParams.set('status', statusFilter);
     if (onboardingStatusFilter) newParams.set('onboarding', onboardingStatusFilter);
     if (workReadinessFilter) newParams.set('work_readiness', workReadinessFilter);
+    if (requirementFilter) newParams.set('requirement', requirementFilter);
     if (showArchived) newParams.set('archived', 'true');
     
     // Only update URL if params changed (avoid infinite loop)
@@ -61,7 +63,7 @@ export default function EmployeesPage() {
     if (currentString !== newString) {
       setSearchParams(newParams, { replace: true });
     }
-  }, [search, statusFilter, onboardingStatusFilter, workReadinessFilter, showArchived]);
+  }, [search, statusFilter, onboardingStatusFilter, workReadinessFilter, requirementFilter, showArchived]);
 
   const [newEmployee, setNewEmployee] = useState({
     first_name: '',
@@ -409,9 +411,9 @@ export default function EmployeesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              {/* Filter employees by work readiness */}
+              {/* Filter employees by work readiness and requirement */}
               {(() => {
-                const filteredEmployees = workReadinessFilter 
+                let filteredEmployees = workReadinessFilter 
                   ? employees.filter(emp => {
                       const status = emp.work_readiness?.status;
                       if (workReadinessFilter === 'ready_to_work') {
@@ -425,12 +427,52 @@ export default function EmployeesPage() {
                     })
                   : employees;
                 
+                // Additional filter by requirement type (DBS, RTW, References)
+                if (requirementFilter) {
+                  filteredEmployees = filteredEmployees.filter(emp => {
+                    const requirements = emp.compliance_requirements?.statuses?.requirements || [];
+                    if (requirementFilter === 'dbs') {
+                      // Find DBS requirement that is not complete
+                      return requirements.some(r => 
+                        r.name?.toLowerCase().includes('dbs') && 
+                        (r.status === 'missing' || r.status === 'pending' || r.status === 'expired')
+                      );
+                    } else if (requirementFilter === 'rtw') {
+                      // Find Right to Work requirement that is not complete
+                      return requirements.some(r => 
+                        (r.name?.toLowerCase().includes('right to work') || r.name?.toLowerCase().includes('rtw')) && 
+                        (r.status === 'missing' || r.status === 'pending' || r.status === 'expired')
+                      );
+                    } else if (requirementFilter === 'references') {
+                      // Find References requirement that is not complete
+                      return requirements.some(r => 
+                        r.name?.toLowerCase().includes('reference') && 
+                        (r.status === 'missing' || r.status === 'pending' || r.status === 'expired')
+                      );
+                    }
+                    return true;
+                  });
+                }
+                
                 if (filteredEmployees.length === 0) {
                   return (
                     <div className="text-center py-12 text-text-muted">
                       <Shield className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                      <p>No employees match this work readiness filter</p>
+                      <p>No employees match the current filter</p>
                       <p className="text-sm mt-1">Try selecting a different filter</p>
+                      {(workReadinessFilter || requirementFilter) && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="mt-3 rounded-xl"
+                          onClick={() => {
+                            setWorkReadinessFilter('');
+                            setRequirementFilter('');
+                          }}
+                        >
+                          Clear Filters
+                        </Button>
+                      )}
                     </div>
                   );
                 }

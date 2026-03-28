@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -9,12 +9,13 @@ import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
-  Clock, AlertCircle, CheckCircle
+  Clock, AlertCircle, CheckCircle, ExternalLink
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
@@ -112,56 +113,84 @@ export default function DashboardPage() {
         <CardContent>
           {needsAttentionTotal > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Expired Documents - Critical */}
-              <div className={`p-4 rounded-xl ${expiredDocs > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
+              {/* Expired Documents - Critical → Training Matrix filtered to expired */}
+              <div 
+                onClick={() => expiredDocs > 0 && navigate('/portal/training?filter=expired')}
+                className={`p-4 rounded-xl transition-all ${expiredDocs > 0 ? 'bg-red-100 border border-red-200 cursor-pointer hover:bg-red-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={expiredDocs > 0 ? 'View expired items' : ''}
+                data-testid="card-expired"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiredDocs > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
                     <FileX className={`h-5 w-5 ${expiredDocs > 0 ? 'text-red-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${expiredDocs > 0 ? 'text-red-700' : 'text-gray-400'}`}>{expiredDocs}</p>
                     <p className={`text-sm ${expiredDocs > 0 ? 'text-red-600' : 'text-gray-500'}`}>Expired</p>
                   </div>
+                  {expiredDocs > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
+                {expiredDocs > 0 && <p className="text-xs text-red-500 mt-2">Review now →</p>}
               </div>
               
-              {/* Expiring Soon */}
-              <div className={`p-4 rounded-xl ${expiringSoon > 0 ? 'bg-amber-100 border border-amber-200' : 'bg-white border border-gray-200'}`}>
+              {/* Expiring Soon → Training Matrix filtered to expiring_soon */}
+              <div 
+                onClick={() => expiringSoon > 0 && navigate('/portal/training?filter=expiring_soon')}
+                className={`p-4 rounded-xl transition-all ${expiringSoon > 0 ? 'bg-amber-100 border border-amber-200 cursor-pointer hover:bg-amber-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={expiringSoon > 0 ? 'View items needing renewal' : ''}
+                data-testid="card-expiring"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiringSoon > 0 ? 'bg-amber-200' : 'bg-gray-100'}`}>
                     <CalendarClock className={`h-5 w-5 ${expiringSoon > 0 ? 'text-amber-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${expiringSoon > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{expiringSoon}</p>
                     <p className={`text-sm ${expiringSoon > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Needs Renewal</p>
                   </div>
+                  {expiringSoon > 0 && <ArrowRight className="h-4 w-4 text-amber-400" />}
                 </div>
+                {expiringSoon > 0 && <p className="text-xs text-amber-600 mt-2">See items →</p>}
               </div>
               
-              {/* Staff Not Ready */}
-              <div className={`p-4 rounded-xl ${staffNotReady > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
+              {/* Staff Not Ready → Employees filtered to not_ready */}
+              <div 
+                onClick={() => staffNotReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+                className={`p-4 rounded-xl transition-all ${staffNotReady > 0 ? 'bg-red-100 border border-red-200 cursor-pointer hover:bg-red-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={staffNotReady > 0 ? 'View affected staff' : ''}
+                data-testid="card-not-ready"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${staffNotReady > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
                     <AlertTriangle className={`h-5 w-5 ${staffNotReady > 0 ? 'text-red-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${staffNotReady > 0 ? 'text-red-700' : 'text-gray-400'}`}>{staffNotReady}</p>
                     <p className={`text-sm ${staffNotReady > 0 ? 'text-red-600' : 'text-gray-500'}`}>Not Ready to Work</p>
                   </div>
+                  {staffNotReady > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
+                {staffNotReady > 0 && <p className="text-xs text-red-500 mt-2">View staff →</p>}
               </div>
               
-              {/* Policies Not Acknowledged */}
-              <div className={`p-4 rounded-xl ${policiesNotAcknowledged > 0 ? 'bg-blue-100 border border-blue-200' : 'bg-white border border-gray-200'}`}>
+              {/* Policies Not Acknowledged → Compliance Centre policies tab */}
+              <div 
+                onClick={() => policiesNotAcknowledged > 0 && navigate('/portal/compliance-centre?tab=policies')}
+                className={`p-4 rounded-xl transition-all ${policiesNotAcknowledged > 0 ? 'bg-blue-100 border border-blue-200 cursor-pointer hover:bg-blue-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={policiesNotAcknowledged > 0 ? 'Review policy acknowledgements' : ''}
+                data-testid="card-policies"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${policiesNotAcknowledged > 0 ? 'bg-blue-200' : 'bg-gray-100'}`}>
                     <FileCheck className={`h-5 w-5 ${policiesNotAcknowledged > 0 ? 'text-blue-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${policiesNotAcknowledged > 0 ? 'text-blue-700' : 'text-gray-400'}`}>{policiesNotAcknowledged}</p>
                     <p className={`text-sm ${policiesNotAcknowledged > 0 ? 'text-blue-600' : 'text-gray-500'}`}>Policies Not Yet Acknowledged</p>
                   </div>
+                  {policiesNotAcknowledged > 0 && <ArrowRight className="h-4 w-4 text-blue-400" />}
                 </div>
+                {policiesNotAcknowledged > 0 && <p className="text-xs text-blue-500 mt-2">Open list →</p>}
               </div>
             </div>
           ) : (
@@ -182,26 +211,55 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200">
+              {/* Ready to Work → Employees filtered to ready_to_work */}
+              <div 
+                onClick={() => readyToWork > 0 && navigate('/portal/employees?work_readiness=ready_to_work')}
+                className={`flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200 transition-all ${readyToWork > 0 ? 'cursor-pointer hover:bg-green-100 hover:shadow-sm' : ''}`}
+                title={readyToWork > 0 ? 'View ready staff' : ''}
+                data-testid="card-ready-to-work"
+              >
                 <div className="flex items-center gap-3">
                   <ShieldCheck className="h-5 w-5 text-green-600" />
                   <span className="font-medium text-green-700">Ready to Work</span>
                 </div>
-                <span className="text-2xl font-heading font-bold text-green-700">{readyToWork}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-heading font-bold text-green-700">{readyToWork}</span>
+                  {readyToWork > 0 && <ArrowRight className="h-4 w-4 text-green-400" />}
+                </div>
               </div>
-              <div className="flex items-center justify-between p-3 bg-amber-50 rounded-xl border border-amber-200">
+              
+              {/* Supervised Start → Employees filtered to supervised_start */}
+              <div 
+                onClick={() => supervisedStart > 0 && navigate('/portal/employees?work_readiness=supervised_start')}
+                className={`flex items-center justify-between p-3 bg-amber-50 rounded-xl border border-amber-200 transition-all ${supervisedStart > 0 ? 'cursor-pointer hover:bg-amber-100 hover:shadow-sm' : ''}`}
+                title={supervisedStart > 0 ? 'View staff on supervised start' : ''}
+                data-testid="card-supervised-start"
+              >
                 <div className="flex items-center gap-3">
                   <AlertCircle className="h-5 w-5 text-amber-600" />
                   <span className="font-medium text-amber-700">Supervised Start</span>
                 </div>
-                <span className="text-2xl font-heading font-bold text-amber-700">{supervisedStart}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-heading font-bold text-amber-700">{supervisedStart}</span>
+                  {supervisedStart > 0 && <ArrowRight className="h-4 w-4 text-amber-400" />}
+                </div>
               </div>
-              <div className="flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-200">
+              
+              {/* Not Ready → Employees filtered to not_ready */}
+              <div 
+                onClick={() => notReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+                className={`flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-200 transition-all ${notReady > 0 ? 'cursor-pointer hover:bg-red-100 hover:shadow-sm' : ''}`}
+                title={notReady > 0 ? 'View affected staff' : ''}
+                data-testid="card-not-ready-workforce"
+              >
                 <div className="flex items-center gap-3">
                   <AlertTriangle className="h-5 w-5 text-red-600" />
                   <span className="font-medium text-red-700">Not Ready</span>
                 </div>
-                <span className="text-2xl font-heading font-bold text-red-700">{notReady}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-heading font-bold text-red-700">{notReady}</span>
+                  {notReady > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
+                </div>
               </div>
             </div>
           </CardContent>

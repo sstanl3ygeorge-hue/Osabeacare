@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Progress } from '../../components/ui/progress';
 import { 
   AlertTriangle, Users, FileCheck, GraduationCap, CheckCircle, 
-  Loader2, Clock, Shield, FileX, CalendarClock, ShieldCheck, AlertCircle
+  Loader2, Clock, Shield, FileX, CalendarClock, ShieldCheck, AlertCircle, ArrowRight
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function AuditViewPage() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [policies, setPolicies] = useState([]);
@@ -126,38 +128,64 @@ export default function AuditViewPage() {
         <CardContent>
           {(expiredItems > 0 || expiringItems > 0 || notReady > 0) ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className={`p-4 rounded-xl ${expiredItems > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
+              {/* Expired Items → Training Matrix filtered to expired */}
+              <div 
+                onClick={() => expiredItems > 0 && navigate('/portal/training?filter=expired')}
+                className={`p-4 rounded-xl transition-all ${expiredItems > 0 ? 'bg-red-100 border border-red-200 cursor-pointer hover:bg-red-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={expiredItems > 0 ? 'View expired items' : ''}
+                data-testid="audit-card-expired"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiredItems > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
                     <FileX className={`h-5 w-5 ${expiredItems > 0 ? 'text-red-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${expiredItems > 0 ? 'text-red-700' : 'text-gray-400'}`}>{expiredItems}</p>
                     <p className={`text-sm ${expiredItems > 0 ? 'text-red-600' : 'text-gray-500'}`}>Expired Items</p>
                   </div>
+                  {expiredItems > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
+                {expiredItems > 0 && <p className="text-xs text-red-500 mt-2">Review now →</p>}
               </div>
-              <div className={`p-4 rounded-xl ${expiringItems > 0 ? 'bg-amber-100 border border-amber-200' : 'bg-white border border-gray-200'}`}>
+              
+              {/* Needs Renewal → Training Matrix filtered to expiring_soon */}
+              <div 
+                onClick={() => expiringItems > 0 && navigate('/portal/training?filter=expiring_soon')}
+                className={`p-4 rounded-xl transition-all ${expiringItems > 0 ? 'bg-amber-100 border border-amber-200 cursor-pointer hover:bg-amber-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={expiringItems > 0 ? 'View items needing renewal' : ''}
+                data-testid="audit-card-expiring"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${expiringItems > 0 ? 'bg-amber-200' : 'bg-gray-100'}`}>
                     <CalendarClock className={`h-5 w-5 ${expiringItems > 0 ? 'text-amber-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${expiringItems > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{expiringItems}</p>
                     <p className={`text-sm ${expiringItems > 0 ? 'text-amber-600' : 'text-gray-500'}`}>Needs Renewal</p>
                   </div>
+                  {expiringItems > 0 && <ArrowRight className="h-4 w-4 text-amber-400" />}
                 </div>
+                {expiringItems > 0 && <p className="text-xs text-amber-600 mt-2">See items →</p>}
               </div>
-              <div className={`p-4 rounded-xl ${notReady > 0 ? 'bg-red-100 border border-red-200' : 'bg-white border border-gray-200'}`}>
+              
+              {/* Staff Not Ready → Employees filtered to not_ready */}
+              <div 
+                onClick={() => notReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+                className={`p-4 rounded-xl transition-all ${notReady > 0 ? 'bg-red-100 border border-red-200 cursor-pointer hover:bg-red-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={notReady > 0 ? 'View affected staff' : ''}
+                data-testid="audit-card-not-ready"
+              >
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${notReady > 0 ? 'bg-red-200' : 'bg-gray-100'}`}>
                     <AlertTriangle className={`h-5 w-5 ${notReady > 0 ? 'text-red-600' : 'text-gray-400'}`} />
                   </div>
-                  <div>
+                  <div className="flex-1">
                     <p className={`text-2xl font-heading font-bold ${notReady > 0 ? 'text-red-700' : 'text-gray-400'}`}>{notReady}</p>
                     <p className={`text-sm ${notReady > 0 ? 'text-red-600' : 'text-gray-500'}`}>Staff Not Ready</p>
                   </div>
+                  {notReady > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
+                {notReady > 0 && <p className="text-xs text-red-500 mt-2">View staff →</p>}
               </div>
             </div>
           ) : (
@@ -176,30 +204,69 @@ export default function AuditViewPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-            <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+            {/* Total Staff → Employees page (all) */}
+            <div 
+              onClick={() => totalEmployees > 0 && navigate('/portal/employees')}
+              className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${totalEmployees > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
+              title={totalEmployees > 0 ? 'View all staff' : ''}
+              data-testid="audit-card-total-staff"
+            >
               <p className="text-3xl font-heading font-bold text-text-primary">{totalEmployees}</p>
-              <p className="text-sm text-text-muted">Total Staff</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-text-muted">Total Staff</p>
+                {totalEmployees > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
+              </div>
             </div>
-            <div className="p-4 bg-green-50 rounded-xl border border-green-200">
+            
+            {/* Ready to Work → Employees filtered */}
+            <div 
+              onClick={() => readyToWork > 0 && navigate('/portal/employees?work_readiness=ready_to_work')}
+              className={`p-4 bg-green-50 rounded-xl border border-green-200 transition-all ${readyToWork > 0 ? 'cursor-pointer hover:bg-green-100 hover:shadow-sm' : ''}`}
+              title={readyToWork > 0 ? 'View ready staff' : ''}
+              data-testid="audit-card-ready"
+            >
               <div className="flex items-center gap-2 mb-1">
                 <ShieldCheck className="h-4 w-4 text-green-600" />
                 <p className="text-sm text-green-600">Ready to Work</p>
               </div>
-              <p className="text-3xl font-heading font-bold text-green-700">{readyToWork}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-3xl font-heading font-bold text-green-700">{readyToWork}</p>
+                {readyToWork > 0 && <ArrowRight className="h-3 w-3 text-green-400" />}
+              </div>
             </div>
-            <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
+            
+            {/* Supervised Start → Employees filtered */}
+            <div 
+              onClick={() => supervisedStart > 0 && navigate('/portal/employees?work_readiness=supervised_start')}
+              className={`p-4 bg-amber-50 rounded-xl border border-amber-200 transition-all ${supervisedStart > 0 ? 'cursor-pointer hover:bg-amber-100 hover:shadow-sm' : ''}`}
+              title={supervisedStart > 0 ? 'View staff on supervised start' : ''}
+              data-testid="audit-card-supervised"
+            >
               <div className="flex items-center gap-2 mb-1">
                 <AlertCircle className="h-4 w-4 text-amber-600" />
                 <p className="text-sm text-amber-600">Supervised Start</p>
               </div>
-              <p className="text-3xl font-heading font-bold text-amber-700">{supervisedStart}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-3xl font-heading font-bold text-amber-700">{supervisedStart}</p>
+                {supervisedStart > 0 && <ArrowRight className="h-3 w-3 text-amber-400" />}
+              </div>
             </div>
-            <div className="p-4 bg-red-50 rounded-xl border border-red-200">
+            
+            {/* Not Ready → Employees filtered */}
+            <div 
+              onClick={() => notReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+              className={`p-4 bg-red-50 rounded-xl border border-red-200 transition-all ${notReady > 0 ? 'cursor-pointer hover:bg-red-100 hover:shadow-sm' : ''}`}
+              title={notReady > 0 ? 'View affected staff' : ''}
+              data-testid="audit-card-not-ready-workforce"
+            >
               <div className="flex items-center gap-2 mb-1">
                 <AlertTriangle className="h-4 w-4 text-red-600" />
                 <p className="text-sm text-red-600">Not Ready</p>
               </div>
-              <p className="text-3xl font-heading font-bold text-red-700">{notReady}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-3xl font-heading font-bold text-red-700">{notReady}</p>
+                {notReady > 0 && <ArrowRight className="h-3 w-3 text-red-400" />}
+              </div>
             </div>
           </div>
           
@@ -224,9 +291,18 @@ export default function AuditViewPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-            <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+            {/* Active Policies → Compliance Centre */}
+            <div 
+              onClick={() => policies.length > 0 && navigate('/portal/compliance-centre?tab=policies')}
+              className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${policies.length > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
+              title={policies.length > 0 ? 'View all policies' : ''}
+              data-testid="audit-card-policies"
+            >
               <p className="text-3xl font-heading font-bold text-text-primary">{policies.length}</p>
-              <p className="text-sm text-text-muted">Active Policies</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-text-muted">Active Policies</p>
+                {policies.length > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
+              </div>
             </div>
             <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
               <p className="text-3xl font-heading font-bold text-text-primary">{totalPolicyAssignments}</p>
@@ -248,10 +324,18 @@ export default function AuditViewPage() {
           </div>
           
           {stats?.unsigned_policies > 0 && (
-            <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-              <p className="text-sm text-blue-700">
-                <span className="font-medium">{stats.unsigned_policies}</span> policies not yet acknowledged by assigned staff
-              </p>
+            <div 
+              onClick={() => navigate('/portal/compliance-centre?tab=policies')}
+              className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200 cursor-pointer hover:bg-blue-100 transition-all"
+              title="Review policy acknowledgements"
+              data-testid="audit-card-unsigned-policies"
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-blue-700">
+                  <span className="font-medium">{stats.unsigned_policies}</span> policies not yet acknowledged by assigned staff
+                </p>
+                <ArrowRight className="h-4 w-4 text-blue-400" />
+              </div>
             </div>
           )}
         </CardContent>
@@ -267,21 +351,60 @@ export default function AuditViewPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+            {/* Still Needed → Training Matrix */}
+            <div 
+              onClick={() => (stats?.missing_urgent_documents || 0) > 0 && navigate('/portal/training')}
+              className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${(stats?.missing_urgent_documents || 0) > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
+              title={(stats?.missing_urgent_documents || 0) > 0 ? 'View training records' : ''}
+              data-testid="audit-card-still-needed"
+            >
               <p className="text-3xl font-heading font-bold text-text-primary">{stats?.missing_urgent_documents || 0}</p>
-              <p className="text-sm text-text-muted">Still Needed</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-text-muted">Still Needed</p>
+                {(stats?.missing_urgent_documents || 0) > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
+              </div>
             </div>
-            <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+            
+            {/* DBS Pending → Employees (would filter by DBS requirement) */}
+            <div 
+              onClick={() => (stats?.dbs_pending || 0) > 0 && navigate('/portal/employees?requirement=dbs')}
+              className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${(stats?.dbs_pending || 0) > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
+              title={(stats?.dbs_pending || 0) > 0 ? 'View staff with pending DBS' : ''}
+              data-testid="audit-card-dbs"
+            >
               <p className="text-3xl font-heading font-bold text-text-primary">{stats?.dbs_pending || 0}</p>
-              <p className="text-sm text-text-muted">DBS Pending</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-text-muted">DBS Pending</p>
+                {(stats?.dbs_pending || 0) > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
+              </div>
             </div>
-            <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+            
+            {/* RTW Documents → Employees (would filter by RTW requirement) */}
+            <div 
+              onClick={() => (stats?.rtw_missing || 0) > 0 && navigate('/portal/employees?requirement=rtw')}
+              className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${(stats?.rtw_missing || 0) > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
+              title={(stats?.rtw_missing || 0) > 0 ? 'View staff with missing RTW' : ''}
+              data-testid="audit-card-rtw"
+            >
               <p className="text-3xl font-heading font-bold text-text-primary">{stats?.rtw_missing || 0}</p>
-              <p className="text-sm text-text-muted">RTW Documents</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-text-muted">RTW Documents</p>
+                {(stats?.rtw_missing || 0) > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
+              </div>
             </div>
-            <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+            
+            {/* References Outstanding → Employees (would filter by references requirement) */}
+            <div 
+              onClick={() => (stats?.references_outstanding || 0) > 0 && navigate('/portal/employees?requirement=references')}
+              className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${(stats?.references_outstanding || 0) > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
+              title={(stats?.references_outstanding || 0) > 0 ? 'View staff with outstanding references' : ''}
+              data-testid="audit-card-references"
+            >
               <p className="text-3xl font-heading font-bold text-text-primary">{stats?.references_outstanding || 0}</p>
-              <p className="text-sm text-text-muted">References Outstanding</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-text-muted">References Outstanding</p>
+                {(stats?.references_outstanding || 0) > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
+              </div>
             </div>
           </div>
         </CardContent>

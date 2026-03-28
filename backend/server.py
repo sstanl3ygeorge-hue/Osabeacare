@@ -3548,6 +3548,166 @@ async def delete_requirement_evidence(
     return {"success": True, "message": "Evidence file removed"}
 
 
+class DeleteFileRequest(BaseModel):
+    """Request to permanently delete a file with audit trail"""
+    reason: Optional[str] = None  # Optional reason for deletion
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/delete")
+async def delete_requirement_evidence_permanently(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    request: DeleteFileRequest = DeleteFileRequest(),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Permanently delete an evidence file from active use.
+    - Removes from active requirement immediately
+    - Removes from compliance calculation
+    - Removes from verification flow
+    - Keeps audit trail with file details
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    req_type = requirement.get('type', 'document')
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get user name for audit
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    deleted_file_info = None
+    
+    if req_type == 'training':
+        # Find training record
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if record:
+            # Get file info before deletion for audit
+            for f in record.get('evidence_files', []):
+                if f.get('file_id') == file_id:
+                    deleted_file_info = {
+                        "filename": f.get('original_filename') or f.get('filename'),
+                        "file_id": file_id,
+                        "uploaded_at": f.get('uploaded_at'),
+                        "file_url": f.get('url')
+                    }
+                    break
+            
+            evidence_files = [f for f in record.get('evidence_files', []) if f.get('file_id') != file_id]
+            update_data = {"evidence_files": evidence_files, "updated_at": now}
+            
+            # If no more evidence files, reset the record
+            if not evidence_files:
+                update_data["certificate_url"] = None
+                update_data["completion_method"] = "manual"
+                update_data["verified"] = False
+                update_data["status"] = "not_started"
+            
+            await db.training_records.update_one(
+                {"id": record['id']},
+                {"$set": update_data}
+            )
+    else:
+        # Find document record
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            # Get file info before deletion for audit
+            for f in doc.get('evidence_files', []):
+                if f.get('file_id') == file_id:
+                    deleted_file_info = {
+                        "filename": f.get('original_filename') or f.get('filename'),
+                        "file_id": file_id,
+                        "uploaded_at": f.get('uploaded_at'),
+                        "file_url": f.get('url')
+                    }
+                    break
+            
+            # If no file info found, it might be the main document
+            if not deleted_file_info:
+                deleted_file_info = {
+                    "filename": doc.get('original_filename') or doc.get('file_name'),
+                    "file_id": file_id,
+                    "uploaded_at": doc.get('uploaded_at'),
+                    "file_url": doc.get('file_url')
+                }
+            
+            evidence_files = [f for f in doc.get('evidence_files', []) if f.get('file_id') != file_id]
+            
+            if not evidence_files and (doc['id'] == file_id or len(doc.get('evidence_files', [])) <= 1):
+                # Delete the entire document record if this was the only file
+                await db.employee_documents.delete_one({"id": doc['id']})
+            else:
+                # Just remove the file from evidence_files
+                update_data = {
+                    "evidence_files": evidence_files, 
+                    "updated_at": now,
+                    "verified": False  # Reset verification when file is deleted
+                }
+                await db.employee_documents.update_one(
+                    {"id": doc['id']},
+                    {"$set": update_data}
+                )
+    
+    # Create detailed audit log entry
+    audit_metadata = {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "requirement_id": requirement_id,
+        "requirement_name": requirement.get('name', requirement_id),
+        "deleted_by": user_name,
+        "deleted_at": now,
+        "action_type": "permanent_delete"
+    }
+    
+    if deleted_file_info:
+        audit_metadata["filename"] = deleted_file_info.get("filename")
+        audit_metadata["original_file_id"] = deleted_file_info.get("file_id")
+        audit_metadata["original_uploaded_at"] = deleted_file_info.get("uploaded_at")
+    
+    if request.reason:
+        audit_metadata["reason"] = request.reason.strip()
+    
+    await log_audit_action(
+        user['user_id'], 
+        "file_deleted", 
+        "requirement", 
+        requirement_id,
+        audit_metadata
+    )
+    
+    # Update compliance calculation
+    await update_employee_compliance(employee_id)
+    
+    return {
+        "success": True, 
+        "message": "File permanently deleted",
+        "deleted_file": deleted_file_info
+    }
+
+
 class RemoveFileRequest(BaseModel):
     reason: str  # Required reason for removing file
 
@@ -7068,9 +7228,10 @@ async def get_audit_logs(
     
     # Enrich with user names and transform metadata to details for frontend compatibility
     for log in logs:
-        user_doc = await db.users.find_one({"user_id": log['user_id']}, {"_id": 0})
-        if user_doc:
-            log['user_name'] = user_doc.get('name', 'Unknown')
+        if log.get('user_id'):
+            user_doc = await db.users.find_one({"user_id": log['user_id']}, {"_id": 0})
+            if user_doc:
+                log['user_name'] = user_doc.get('name', 'Unknown')
         # Copy metadata to details for frontend compatibility
         if 'metadata' in log and 'details' not in log:
             log['details'] = log['metadata']

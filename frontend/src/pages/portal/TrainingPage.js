@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -58,13 +59,28 @@ const getExpiryStatus = (expiryDate) => {
 };
 
 export default function TrainingPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [training, setTraining] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [filter, setFilter] = useState('all'); // all, expired, expiring_soon, valid
+  
+  // Initialize filter from URL params
+  const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
   const { token, isAuditor } = useAuth();
+
+  // Sync filter to URL
+  useEffect(() => {
+    const newParams = new URLSearchParams(searchParams);
+    if (filter && filter !== 'all') {
+      newParams.set('filter', filter);
+    } else {
+      newParams.delete('filter');
+    }
+    setSearchParams(newParams, { replace: true });
+  }, [filter]);
+
 
   // Correction modal state
   const [editOpen, setEditOpen] = useState(false);

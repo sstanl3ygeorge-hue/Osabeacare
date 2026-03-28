@@ -2,9 +2,9 @@ import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { 
-  Shield, ShieldCheck, ShieldAlert, ShieldX,
+  Shield, ShieldCheck, ShieldAlert,
   GraduationCap, FileCheck, Fingerprint, BadgeCheck,
-  ClipboardCheck, Pill, Calendar, RefreshCw, CheckCircle
+  ClipboardCheck, Pill, Calendar, Upload, Eye
 } from 'lucide-react';
 
 // Define the key compliance items
@@ -15,7 +15,7 @@ const COMPLIANCE_ITEMS = [
     icon: Shield,
     trainingType: 'safeguarding',
     documentType: null,
-    roleRequired: null // Required for all
+    roleRequired: null
   },
   { 
     id: 'manual_handling', 
@@ -47,7 +47,7 @@ const COMPLIANCE_ITEMS = [
     icon: Pill,
     trainingType: 'medication',
     documentType: null,
-    roleRequired: 'Nurse' // Only required for Nurses
+    roleRequired: 'Nurse'
   },
   { 
     id: 'dbs', 
@@ -67,7 +67,7 @@ const COMPLIANCE_ITEMS = [
   },
   { 
     id: 'induction', 
-    name: 'Induction Completed', 
+    name: 'Induction', 
     icon: ClipboardCheck,
     trainingType: 'induction',
     documentType: null,
@@ -85,42 +85,47 @@ const COMPLIANCE_ITEMS = [
   }
 ];
 
-// Status configuration
+// AUDIT-READY STATUS CONFIG - Only 4 statuses
 const STATUS_CONFIG = {
-  complete: {
-    label: 'Complete',
+  verified: {
+    label: 'Verified',
     bgColor: 'bg-success/10',
     textColor: 'text-success',
     borderColor: 'border-success/20',
-    dotColor: 'bg-success'
+    dotColor: 'bg-success',
+    priority: 1
   },
-  expiring: {
-    label: 'Expiring',
-    bgColor: 'bg-warning/10',
-    textColor: 'text-warning',
-    borderColor: 'border-warning/20',
-    dotColor: 'bg-warning'
-  },
-  pending: {
-    label: 'Pending',
+  evidence_uploaded: {
+    label: 'Evidence Uploaded',
     bgColor: 'bg-info/10',
     textColor: 'text-info',
     borderColor: 'border-info/20',
-    dotColor: 'bg-info'
+    dotColor: 'bg-info',
+    priority: 2
+  },
+  expired: {
+    label: 'Expired',
+    bgColor: 'bg-warning/10',
+    textColor: 'text-warning',
+    borderColor: 'border-warning/20',
+    dotColor: 'bg-warning',
+    priority: 3
   },
   missing: {
     label: 'Missing',
     bgColor: 'bg-error/10',
     textColor: 'text-error',
     borderColor: 'border-error/20',
-    dotColor: 'bg-error'
+    dotColor: 'bg-error',
+    priority: 4
   },
   not_applicable: {
     label: 'N/A',
     bgColor: 'bg-gray-100',
     textColor: 'text-text-muted',
     borderColor: 'border-gray-200',
-    dotColor: 'bg-gray-400'
+    dotColor: 'bg-gray-400',
+    priority: 5
   }
 };
 
@@ -134,10 +139,9 @@ export default function ComplianceOverview({
   isAuditor = false,
   className = "" 
 }) {
-  // Calculate compliance status for each item
+  // Calculate compliance status for each item using AUDIT-READY logic
   const complianceStatus = useMemo(() => {
     const now = new Date();
-    const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     
     return COMPLIANCE_ITEMS.map(item => {
       // Check if role-dependent item applies
@@ -147,58 +151,59 @@ export default function ComplianceOverview({
           status: 'not_applicable',
           expiryDate: null,
           lastUpdated: null,
-          details: `Only required for ${item.roleRequired}s`
+          hasEvidence: false,
+          isVerified: false,
+          details: `Only for ${item.roleRequired}s`
         };
       }
       
       let status = 'missing';
       let expiryDate = null;
       let lastUpdated = null;
+      let hasEvidence = false;
+      let isVerified = false;
       let details = null;
       
       // Check training records
       if (item.trainingType) {
-        // Improved matching logic - matches various training name formats
         const searchTerms = [
-          item.trainingType.replace(/_/g, ' '),  // basic_life_support -> "basic life support"
-          item.trainingType.replace(/_/g, ''),   // basic_life_support -> "basiclifesupport"
-          item.name.toLowerCase()                 // "Basic Life Support (BLS)" -> "basic life support (bls)"
+          item.trainingType.replace(/_/g, ' '),
+          item.trainingType.replace(/_/g, ''),
+          item.name.toLowerCase()
         ];
         
         const trainingRecord = training.find(t => {
           const trainingName = (t.training_name || '').toLowerCase();
           const trainingType = (t.training_type || '').toLowerCase();
-          
           return searchTerms.some(term => {
             const normalizedTerm = term.toLowerCase();
             return trainingName.includes(normalizedTerm) || 
                    normalizedTerm.includes(trainingName) ||
-                   trainingType.includes(normalizedTerm) ||
-                   normalizedTerm.includes(trainingType);
+                   trainingType.includes(normalizedTerm);
           });
         });
         
         if (trainingRecord) {
-          if (trainingRecord.status === 'completed') {
-            status = 'complete';
-            lastUpdated = trainingRecord.completion_date || trainingRecord.updated_at;
-            expiryDate = trainingRecord.expiry_date;
-            
-            // Check if expiring soon
-            if (expiryDate) {
-              const expiry = new Date(expiryDate);
-              if (expiry < now) {
-                status = 'missing';
-                details = 'Training expired';
-              } else if (expiry < thirtyDaysFromNow) {
-                status = 'expiring';
-                details = 'Expires within 30 days';
-              }
-            }
-          } else if (trainingRecord.status === 'in_progress' || trainingRecord.status === 'scheduled') {
-            status = 'pending';
-            details = trainingRecord.status === 'scheduled' ? 'Scheduled' : 'In progress';
-            lastUpdated = trainingRecord.updated_at;
+          // Check if has certificate (evidence)
+          hasEvidence = !!trainingRecord.certificate_url;
+          isVerified = trainingRecord.verified === true;
+          expiryDate = trainingRecord.expiry_date;
+          lastUpdated = trainingRecord.completion_date || trainingRecord.updated_at;
+          
+          // Determine status based on evidence-first rules
+          if (expiryDate && new Date(expiryDate) < now) {
+            status = 'expired';
+            details = 'Expired - renewal required';
+          } else if (isVerified && hasEvidence) {
+            status = 'verified';
+          } else if (hasEvidence) {
+            status = 'evidence_uploaded';
+            details = 'Awaiting verification';
+          } else if (trainingRecord.status === 'completed') {
+            status = 'evidence_uploaded';
+            details = 'Certificate needed';
+          } else {
+            status = 'missing';
           }
         }
       }
@@ -211,30 +216,22 @@ export default function ComplianceOverview({
         );
         
         if (doc) {
-          if (doc.status === 'approved') {
-            status = 'complete';
-            lastUpdated = doc.reviewed_at || doc.uploaded_at;
-            expiryDate = doc.expiry_date;
-            
-            // Check if expiring soon
-            if (expiryDate) {
-              const expiry = new Date(expiryDate);
-              if (expiry < now) {
-                status = 'missing';
-                details = 'Document expired';
-              } else if (expiry < thirtyDaysFromNow) {
-                status = 'expiring';
-                details = 'Expires within 30 days';
-              }
-            }
-          } else if (doc.status === 'uploaded' || doc.status === 'under_review') {
-            status = 'pending';
-            details = 'Under review';
-            lastUpdated = doc.uploaded_at;
-          } else if (doc.status === 'rejected') {
+          hasEvidence = !!doc.file_url;
+          isVerified = doc.status === 'approved' || doc.verified === true;
+          expiryDate = doc.expiry_date;
+          lastUpdated = doc.reviewed_at || doc.uploaded_at;
+          
+          // Determine status
+          if (expiryDate && new Date(expiryDate) < now) {
+            status = 'expired';
+            details = 'Document expired';
+          } else if (isVerified && hasEvidence) {
+            status = 'verified';
+          } else if (hasEvidence) {
+            status = 'evidence_uploaded';
+            details = 'Awaiting verification';
+          } else {
             status = 'missing';
-            details = 'Document rejected';
-            lastUpdated = doc.reviewed_at;
           }
         }
       }
@@ -246,17 +243,20 @@ export default function ComplianceOverview({
         );
         
         if (form) {
-          if (form.status === 'signed_off') {
-            status = 'complete';
-            lastUpdated = form.signed_off_at || form.updated_at;
-          } else if (form.status === 'completed' || form.status === 'reviewed') {
-            status = 'pending';
-            details = 'Awaiting sign-off';
-            lastUpdated = form.updated_at;
-          } else if (['draft', 'sent', 'in_progress'].includes(form.status)) {
-            status = 'pending';
-            details = form.status === 'draft' ? 'Not started' : 'In progress';
-            lastUpdated = form.updated_at;
+          hasEvidence = !!form.pdf_url;
+          isVerified = form.verified === true || form.status === 'signed_off';
+          lastUpdated = form.signed_off_at || form.updated_at;
+          
+          if (isVerified && hasEvidence) {
+            status = 'verified';
+          } else if (hasEvidence) {
+            status = 'evidence_uploaded';
+            details = 'Awaiting verification';
+          } else if (['completed', 'completed_imported', 'reviewed'].includes(form.status)) {
+            status = 'evidence_uploaded';
+            details = 'PDF needed';
+          } else {
+            status = 'missing';
           }
         }
       }
@@ -269,19 +269,26 @@ export default function ComplianceOverview({
         if (totalPolicies === 0) {
           status = 'not_applicable';
           details = 'No policies assigned';
-        } else if (signedPolicies === totalPolicies) {
-          status = 'complete';
-          const lastSigned = policies.filter(p => p.status === 'signed')
-            .sort((a, b) => new Date(b.signed_at) - new Date(a.signed_at))[0];
-          lastUpdated = lastSigned?.signed_at;
-          details = `${signedPolicies}/${totalPolicies} signed`;
-        } else if (signedPolicies > 0) {
-          status = 'pending';
-          details = `${signedPolicies}/${totalPolicies} signed`;
-          lastUpdated = policies.find(p => p.status === 'signed')?.signed_at;
         } else {
-          status = 'missing';
-          details = `0/${totalPolicies} signed`;
+          hasEvidence = signedPolicies > 0;
+          isVerified = signedPolicies === totalPolicies;
+          
+          if (isVerified) {
+            status = 'verified';
+            details = `${signedPolicies}/${totalPolicies} signed`;
+          } else if (hasEvidence) {
+            status = 'evidence_uploaded';
+            details = `${signedPolicies}/${totalPolicies} signed`;
+          } else {
+            status = 'missing';
+            details = `0/${totalPolicies} signed`;
+          }
+          
+          if (policies?.length > 0) {
+            const lastSigned = policies.filter(p => p.status === 'signed')
+              .sort((a, b) => new Date(b.signed_at) - new Date(a.signed_at))[0];
+            lastUpdated = lastSigned?.signed_at;
+          }
         }
       }
       
@@ -290,20 +297,33 @@ export default function ComplianceOverview({
         status,
         expiryDate,
         lastUpdated,
+        hasEvidence,
+        isVerified,
         details
       };
     });
   }, [employee, documents, training, policies, generatedForms]);
   
-  // Calculate summary counts
+  // Calculate audit summary counts
   const summary = useMemo(() => {
     const applicable = complianceStatus.filter(c => c.status !== 'not_applicable');
     return {
       total: applicable.length,
-      complete: complianceStatus.filter(c => c.status === 'complete').length,
-      expiring: complianceStatus.filter(c => c.status === 'expiring').length,
-      pending: complianceStatus.filter(c => c.status === 'pending').length,
+      verified: complianceStatus.filter(c => c.status === 'verified').length,
+      evidence_uploaded: complianceStatus.filter(c => c.status === 'evidence_uploaded').length,
+      expired: complianceStatus.filter(c => c.status === 'expired').length,
       missing: complianceStatus.filter(c => c.status === 'missing').length
+    };
+  }, [complianceStatus]);
+
+  // Group items by status for audit view
+  const groupedItems = useMemo(() => {
+    return {
+      verified: complianceStatus.filter(c => c.status === 'verified'),
+      needs_verification: complianceStatus.filter(c => c.status === 'evidence_uploaded'),
+      missing: complianceStatus.filter(c => c.status === 'missing'),
+      expired: complianceStatus.filter(c => c.status === 'expired'),
+      not_applicable: complianceStatus.filter(c => c.status === 'not_applicable')
     };
   }, [complianceStatus]);
   
@@ -320,132 +340,179 @@ export default function ComplianceOverview({
     }
   };
 
+  const renderItem = (item) => {
+    const config = STATUS_CONFIG[item.status];
+    const Icon = item.icon;
+    
+    return (
+      <div 
+        key={item.id}
+        className={`flex items-center justify-between p-3 rounded-xl border ${config.bgColor} ${config.borderColor}`}
+        data-testid={`compliance-item-${item.id}`}
+      >
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-lg ${config.bgColor}`}>
+            <Icon className={`h-4 w-4 ${config.textColor}`} />
+          </div>
+          <div>
+            <p className="font-medium text-text-primary text-sm">{item.name}</p>
+            {item.details && (
+              <p className={`text-xs ${config.textColor}`}>{item.details}</p>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          {/* Expiry date */}
+          {item.expiryDate && item.status !== 'not_applicable' && (
+            <div className="hidden sm:flex items-center gap-1 text-xs text-text-muted">
+              <Calendar className="h-3 w-3" />
+              <span>{formatDate(item.expiryDate)}</span>
+            </div>
+          )}
+          
+          {/* Action for missing training */}
+          {item.trainingType && item.status === 'missing' && !isAuditor && onCompleteTraining && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onCompleteTraining(item)}
+              className="text-xs h-7 rounded-lg"
+              data-testid={`upload-training-${item.id}`}
+            >
+              <Upload className="h-3 w-3 mr-1" />
+              Upload
+            </Button>
+          )}
+          
+          {/* Status Badge */}
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${config.bgColor} min-w-[90px] justify-center`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`}></span>
+            <span className={`text-xs font-medium ${config.textColor}`}>
+              {config.label}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <Card className={`border-[#E4E8EB] shadow-sm ${className}`} data-testid="compliance-overview">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="font-heading text-lg flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
-            Training & Compliance Overview
+            Audit Summary
           </CardTitle>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-success"></span>
-              {summary.complete}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-warning"></span>
-              {summary.expiring}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-info"></span>
-              {summary.pending}
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-error"></span>
-              {summary.missing}
-            </span>
-          </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          {complianceStatus.map((item) => {
-            const config = STATUS_CONFIG[item.status];
-            const Icon = item.icon;
-            
-            return (
-              <div 
-                key={item.id}
-                className={`flex items-center justify-between p-3 rounded-xl border ${config.bgColor} ${config.borderColor} transition-colors`}
-                data-testid={`compliance-item-${item.id}`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${config.bgColor}`}>
-                    <Icon className={`h-4 w-4 ${config.textColor}`} />
-                  </div>
-                  <div>
-                    <p className="font-medium text-text-primary text-sm">{item.name}</p>
-                    {item.details && (
-                      <p className={`text-xs ${config.textColor}`}>{item.details}</p>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-4">
-                  {/* Dates */}
-                  <div className="text-right hidden sm:block">
-                    {item.expiryDate && item.status !== 'not_applicable' && (
-                      <div className="flex items-center gap-1 text-xs text-text-muted">
-                        <Calendar className="h-3 w-3" />
-                        <span>Exp: {formatDate(item.expiryDate)}</span>
-                      </div>
-                    )}
-                    {item.lastUpdated && item.status !== 'not_applicable' && (
-                      <div className="flex items-center gap-1 text-xs text-text-muted">
-                        <RefreshCw className="h-3 w-3" />
-                        <span>{formatDate(item.lastUpdated)}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Action Button for training items */}
-                  {item.trainingType && item.status === 'missing' && !isAuditor && onCompleteTraining && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onCompleteTraining(item)}
-                      className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
-                      data-testid={`complete-training-overview-${item.id}`}
-                    >
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      Complete
-                    </Button>
-                  )}
-                  
-                  {/* Status Badge */}
-                  <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${config.bgColor} min-w-[85px] justify-center`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`}></span>
-                    <span className={`text-xs font-medium ${config.textColor}`}>
-                      {config.label}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      <CardContent className="space-y-6">
+        {/* Audit Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3 bg-success/10 border border-success/20 rounded-xl text-center">
+            <p className="text-2xl font-bold text-success">{summary.verified}</p>
+            <p className="text-xs text-success font-medium">Verified</p>
+          </div>
+          <div className="p-3 bg-info/10 border border-info/20 rounded-xl text-center">
+            <p className="text-2xl font-bold text-info">{summary.evidence_uploaded}</p>
+            <p className="text-xs text-info font-medium">Needs Verification</p>
+          </div>
+          <div className="p-3 bg-error/10 border border-error/20 rounded-xl text-center">
+            <p className="text-2xl font-bold text-error">{summary.missing}</p>
+            <p className="text-xs text-error font-medium">Missing</p>
+          </div>
+          <div className="p-3 bg-warning/10 border border-warning/20 rounded-xl text-center">
+            <p className="text-2xl font-bold text-warning">{summary.expired}</p>
+            <p className="text-xs text-warning font-medium">Expired</p>
+          </div>
         </div>
-        
-        {/* Quick Summary Bar */}
-        <div className="mt-4 pt-4 border-t border-[#E4E8EB]">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-text-muted">Overall Compliance</span>
+
+        {/* Items grouped by status */}
+        <div className="space-y-4">
+          {/* Verified Items */}
+          {groupedItems.verified.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-success mb-2 flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                Verified ({groupedItems.verified.length})
+              </h4>
+              <div className="space-y-2">
+                {groupedItems.verified.map(renderItem)}
+              </div>
+            </div>
+          )}
+
+          {/* Needs Verification Items */}
+          {groupedItems.needs_verification.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-info mb-2 flex items-center gap-2">
+                <Eye className="h-4 w-4" />
+                Needs Verification ({groupedItems.needs_verification.length})
+              </h4>
+              <div className="space-y-2">
+                {groupedItems.needs_verification.map(renderItem)}
+              </div>
+            </div>
+          )}
+
+          {/* Missing Items */}
+          {groupedItems.missing.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-error mb-2 flex items-center gap-2">
+                <Upload className="h-4 w-4" />
+                Missing ({groupedItems.missing.length})
+              </h4>
+              <div className="space-y-2">
+                {groupedItems.missing.map(renderItem)}
+              </div>
+            </div>
+          )}
+
+          {/* Expired Items */}
+          {groupedItems.expired.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-warning mb-2 flex items-center gap-2">
+                <Calendar className="h-4 w-4" />
+                Expired ({groupedItems.expired.length})
+              </h4>
+              <div className="space-y-2">
+                {groupedItems.expired.map(renderItem)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Progress Bar */}
+        <div className="pt-4 border-t border-[#E4E8EB]">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span className="text-text-muted">Audit Progress</span>
             <span className="font-medium text-text-primary">
-              {summary.complete}/{summary.total} items complete
+              {summary.verified}/{summary.total} verified
             </span>
           </div>
-          <div className="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden flex">
-            {summary.complete > 0 && (
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex">
+            {summary.verified > 0 && (
               <div 
-                className="h-full bg-success transition-all"
-                style={{ width: `${(summary.complete / summary.total) * 100}%` }}
+                className="h-full bg-success"
+                style={{ width: `${(summary.verified / summary.total) * 100}%` }}
               />
             )}
-            {summary.expiring > 0 && (
+            {summary.evidence_uploaded > 0 && (
               <div 
-                className="h-full bg-warning transition-all"
-                style={{ width: `${(summary.expiring / summary.total) * 100}%` }}
+                className="h-full bg-info"
+                style={{ width: `${(summary.evidence_uploaded / summary.total) * 100}%` }}
               />
             )}
-            {summary.pending > 0 && (
+            {summary.expired > 0 && (
               <div 
-                className="h-full bg-info transition-all"
-                style={{ width: `${(summary.pending / summary.total) * 100}%` }}
+                className="h-full bg-warning"
+                style={{ width: `${(summary.expired / summary.total) * 100}%` }}
               />
             )}
             {summary.missing > 0 && (
               <div 
-                className="h-full bg-error transition-all"
+                className="h-full bg-error"
                 style={{ width: `${(summary.missing / summary.total) * 100}%` }}
               />
             )}

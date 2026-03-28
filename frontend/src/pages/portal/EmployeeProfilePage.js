@@ -1990,32 +1990,32 @@ export default function EmployeeProfilePage() {
 
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader>
-                <CardTitle className="font-heading text-lg">Compliance Summary</CardTitle>
+                <CardTitle className="font-heading text-lg">Audit Status</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Requirements Complete</p>
-                    <p className="text-2xl font-heading font-bold text-text-primary">
-                      {complianceRequirements?.summary?.completed || 0}/{complianceRequirements?.summary?.total || 0}
+                  <div className="p-4 bg-success/10 border border-success/20 rounded-xl">
+                    <p className="text-sm text-success font-medium">Verified</p>
+                    <p className="text-2xl font-heading font-bold text-success">
+                      {complianceRequirements?.summary?.verified || 0}/{complianceRequirements?.summary?.total || 0}
                     </p>
                   </div>
-                  <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Verified</p>
-                    <p className="text-2xl font-heading font-bold text-success">
-                      {complianceRequirements?.summary?.verified || 0}/{complianceRequirements?.summary?.completed || 0}
+                  <div className="p-4 bg-info/10 border border-info/20 rounded-xl">
+                    <p className="text-sm text-info font-medium">Evidence Uploaded</p>
+                    <p className="text-2xl font-heading font-bold text-info">
+                      {(complianceRequirements?.summary?.completed || 0) - (complianceRequirements?.summary?.verified || 0)}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-error/10 border border-error/20 rounded-xl">
+                    <p className="text-sm text-error font-medium">Missing</p>
+                    <p className="text-2xl font-heading font-bold text-error">
+                      {complianceRequirements?.summary?.missing || 0}
                     </p>
                   </div>
                   <div className="p-4 bg-[#F8FAFA] rounded-xl">
                     <p className="text-sm text-text-muted">Policies Signed</p>
                     <p className="text-2xl font-heading font-bold text-text-primary">
                       {policies.filter(p => p.status === 'signed').length}/{policies.length}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Missing Requirements</p>
-                    <p className="text-2xl font-heading font-bold text-warning">
-                      {complianceRequirements?.summary?.missing || 0}
                     </p>
                   </div>
                 </div>
@@ -2060,8 +2060,7 @@ export default function EmployeeProfilePage() {
                 <CardTitle className="font-heading text-lg">Mandatory Compliance Items</CardTitle>
                 {complianceRequirements && (
                   <p className="text-sm text-text-muted mt-1">
-                    {complianceRequirements.summary.completed} of {complianceRequirements.summary.total} items complete 
-                    ({complianceRequirements.summary.verified} verified)
+                    {complianceRequirements.summary.verified} verified · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} awaiting verification · {complianceRequirements.summary.missing} missing
                   </p>
                 )}
               </div>

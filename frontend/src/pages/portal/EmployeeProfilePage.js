@@ -2152,34 +2152,54 @@ export default function EmployeeProfilePage() {
               ) : (
                 <div className="space-y-6">
                   {/* Group requirements by category */}
-                  {['A_Application_Form', 'B_Recruitment_Checklist', 'C_Personal_Information', 'D_Interview', 
-                    'E_Equal_Opportunities', 'F_Health_Screening', 'G_Identity_RTW', 'H_References', 'I_DBS',
-                    'J_Induction_Shadowing_Observations', 'L_Contract', 'N_Training', 'O_Other'].map((category) => {
-                    const categoryItems = complianceRequirements.requirements.filter(req => req.category === category);
-                    if (categoryItems.length === 0) return null;
+                  {/* Care-focused category order - highest risk first */}
+                  {(() => {
+                    // Category display names (care-focused)
+                    const CATEGORY_DISPLAY = {
+                      "1_Legal_Safety": "Legal & Safety",
+                      "2_Core_Training": "Core Training",
+                      "3_Role_Readiness": "Role Readiness",
+                      "4_Employment": "Employment",
+                      "5_Agreements": "Agreements",
+                      "6_Admin": "Admin / Other"
+                    };
                     
-                    const categoryLabel = category.replace(/_/g, ' ').replace(/^[A-Z]_/, '');
-                    const withEvidenceCount = categoryItems.filter(i => i.has_evidence || (i.evidence_files && i.evidence_files.length > 0)).length;
-                    const verifiedInCategory = categoryItems.filter(i => i.verified).length;
+                    // Priority order
+                    const categoryOrder = [
+                      "1_Legal_Safety",
+                      "2_Core_Training",
+                      "3_Role_Readiness",
+                      "4_Employment",
+                      "5_Agreements",
+                      "6_Admin"
+                    ];
                     
-                    return (
-                      <div key={category}>
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="font-semibold text-text-primary">{categoryLabel}</h3>
-                          <span className="text-xs text-text-muted">
-                            {verifiedInCategory}/{categoryItems.length} approved
-                            {withEvidenceCount > verifiedInCategory && ` · ${withEvidenceCount - verifiedInCategory} ready for review`}
-                          </span>
-                        </div>
-                        <div className="space-y-2">
-                          {categoryItems.map((req) => {
-                            // Use new evidence_files array if available, fallback to documents
-                            const evidenceFiles = req.evidence_files || [];
-                            const docs = req.documents || [];
-                            const hasEvidence = req.has_evidence || evidenceFiles.length > 0 || docs.some(d => d.file_url);
-                            const isVerified = req.verified || (hasEvidence && req.all_verified);
-                            const canVerify = req.can_verify || (hasEvidence && !isVerified);
-                            const isNoEvidence = req.status === 'completed_no_evidence';
+                    return categoryOrder.map((category) => {
+                      const categoryItems = complianceRequirements.requirements.filter(req => req.category === category);
+                      if (categoryItems.length === 0) return null;
+                      
+                      const categoryLabel = CATEGORY_DISPLAY[category] || category.replace(/_/g, ' ').replace(/^\d_/, '');
+                      const withEvidenceCount = categoryItems.filter(i => i.has_evidence || (i.evidence_files && i.evidence_files.length > 0)).length;
+                      const verifiedInCategory = categoryItems.filter(i => i.verified).length;
+                      
+                      return (
+                        <div key={category}>
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-semibold text-text-primary">{categoryLabel}</h3>
+                            <span className="text-xs text-text-muted">
+                              {verifiedInCategory}/{categoryItems.length} approved
+                              {withEvidenceCount > verifiedInCategory && ` · ${withEvidenceCount - verifiedInCategory} ready for review`}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {categoryItems.map((req) => {
+                              // Use new evidence_files array if available, fallback to documents
+                              const evidenceFiles = req.evidence_files || [];
+                              const docs = req.documents || [];
+                              const hasEvidence = req.has_evidence || evidenceFiles.length > 0 || docs.some(d => d.file_url);
+                              const isVerified = req.verified || (hasEvidence && req.all_verified);
+                              const canVerify = req.can_verify || (hasEvidence && !isVerified);
+                              const isNoEvidence = req.status === 'completed_no_evidence';
                             
                             // Determine row styling based on evidence
                             const getRowStyle = () => {

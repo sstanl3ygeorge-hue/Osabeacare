@@ -154,171 +154,178 @@ class OnboardingStatus:
 #   - Verification requires at least one viewable file
 #
 MANDATORY_ITEMS = {
-    "base": [  # Common to all roles
-        # ======== A. Application & CV ========
-        {"id": "application_form", "name": "Application Form", "category": "A_Application", 
-         "type": "form-generated", "template_name": "Application Form", 
-         "allow_multiple_files": False, "source": "form",
-         "description": "Completed application form"},
+    "base": [  # Common to all roles - ordered by audit priority
         
-        {"id": "cv", "name": "CV / Resume", "category": "A_Application", 
-         "type": "document", "source": "employee",
-         "document_types": ["cv", "resume"], 
-         "allow_multiple_files": True,
-         "description": "CV and supporting documents (cover letter, portfolio)"},
-        
-        # ======== B. Recruitment Checklist ========
-        {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", 
-         "category": "B_Recruitment_Checklist", "type": "form-generated", 
-         "template_name": "Recruitment Compliance Checklist",
-         "allow_multiple_files": True, "source": "internal",
-         "description": "Internal recruitment tracking checklist"},
-        
-        # ======== C. Personal Information ========
-        {"id": "personal_info", "name": "Personal Information Form", 
-         "category": "C_Personal_Information", "type": "form-generated", 
-         "template_name": "Personal Information Form",
-         "allow_multiple_files": True, "source": "form",
-         "description": "Personal details form with supporting docs"},
-        
-        # ======== D. Interview ========
-        {"id": "interview_record", "name": "Interview Record", 
-         "category": "D_Interview", "type": "form-generated",
-         "template_name": "Interview Record Form",
-         "allow_multiple_files": True, "source": "internal",
-         "description": "Interview notes, assessment, and supporting documents"},
-        
-        # ======== E. Equal Opportunities ========
-        {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", 
-         "category": "E_Equal_Opportunities", "type": "form-generated",
-         "template_name": "Equal Opportunities Monitoring Form",
-         "allow_multiple_files": False, "source": "form",
-         "description": "Diversity monitoring form"},
-        
-        # ======== F. Health Screening ========
-        {"id": "health_screening", "name": "Health Screening Questionnaire", 
-         "category": "F_Health_Screening", "type": "form-generated",
-         "template_name": "Health Screening Questionnaire",
-         "allow_multiple_files": True, "source": "form",
-         "description": "Health questionnaire and medical attachments"},
-        
-        # ======== G. Identity & Right to Work (SPLIT INTO 3) ========
-        {"id": "identity_documents", "name": "Identity Documents", 
-         "category": "G_Identity_RTW", "type": "document", "source": "employee",
-         "document_types": ["passport", "driving_licence", "national_id"],
-         "allow_multiple_files": True, "min_files": 1,
-         "description": "Passport, driving licence, or other photo ID"},
-        
+        # ======== 1. LEGAL & SAFETY (TOP PRIORITY) ========
         {"id": "right_to_work_documents", "name": "Right to Work Documents", 
-         "category": "G_Identity_RTW", "type": "document", "source": "employee",
+         "category": "1_Legal_Safety", "type": "document", "source": "employee",
          "document_types": ["visa", "brp", "share_code", "settled_status"],
          "allow_multiple_files": True, "min_files": 1,
          "description": "Visa, BRP, share code evidence, settled status proof"},
         
         {"id": "right_to_work_check", "name": "Right to Work Verification", 
-         "category": "G_Identity_RTW", "type": "document", "source": "internal",
+         "category": "1_Legal_Safety", "type": "document", "source": "internal",
          "document_types": ["rtw_check", "share_code_check"],
          "allow_multiple_files": True,
-         "description": "Internal RTW verification - share code check result, employer checking service screenshot"},
+         "description": "Internal RTW verification - share code check result"},
         
-        # ======== H. References ========
-        {"id": "reference_1", "name": "Reference 1", "category": "H_References",
-         "type": "document", "source": "employee",
-         "document_types": ["reference"],
-         "allow_multiple_files": True,
-         "description": "First reference letter and attachments"},
+        {"id": "identity_documents", "name": "Identity Documents", 
+         "category": "1_Legal_Safety", "type": "document", "source": "employee",
+         "document_types": ["passport", "driving_licence", "national_id"],
+         "allow_multiple_files": True, "min_files": 1,
+         "description": "Passport, driving licence, or other photo ID"},
         
-        {"id": "reference_2", "name": "Reference 2", "category": "H_References",
-         "type": "document", "source": "employee",
-         "document_types": ["reference"],
-         "allow_multiple_files": True,
-         "description": "Second reference letter and attachments"},
-        
-        # ======== I. DBS (SPLIT INTO 2) ========
-        {"id": "dbs_certificate", "name": "DBS Certificate", "category": "I_DBS",
+        {"id": "dbs_certificate", "name": "DBS Certificate", "category": "1_Legal_Safety",
          "type": "document", "source": "employee",
          "document_types": ["dbs", "dbs_certificate"],
          "allow_multiple_files": True,
          "description": "DBS certificate from employee"},
         
-        {"id": "dbs_check", "name": "DBS Update Service Check", "category": "I_DBS",
+        {"id": "dbs_check", "name": "DBS Update Service Check", "category": "1_Legal_Safety",
          "type": "document", "source": "internal",
          "document_types": ["dbs_check", "dbs_update_service"],
          "allow_multiple_files": True,
-         "description": "Internal DBS verification - update service check result, validation screenshot"},
+         "description": "Internal DBS verification - update service check result"},
         
-        # ======== J. Induction ========
+        # ======== 2. CORE TRAINING ========
+        # (Defined in "training" section below)
+        
+        # ======== 3. ROLE READINESS ========
+        {"id": "health_screening", "name": "Health Screening Questionnaire", 
+         "category": "3_Role_Readiness", "type": "form-generated",
+         "template_name": "Health Screening Questionnaire",
+         "allow_multiple_files": True, "source": "form",
+         "description": "Health questionnaire and medical attachments"},
+        
         {"id": "induction", "name": "Induction & Competency Assessment", 
-         "category": "J_Induction", "type": "form-generated",
+         "category": "3_Role_Readiness", "type": "form-generated",
          "template_name": "Induction & Competency Assessment",
          "allow_multiple_files": True, "source": "internal",
          "description": "Induction checklist, shadowing records, competency sign-offs"},
         
-        # ======== L. Contract ========
+        {"id": "interview_record", "name": "Interview Record", 
+         "category": "3_Role_Readiness", "type": "form-generated",
+         "template_name": "Interview Record Form",
+         "allow_multiple_files": True, "source": "internal",
+         "description": "Interview notes, assessment, and supporting documents"},
+        
+        # ======== 4. EMPLOYMENT ========
+        {"id": "reference_1", "name": "Reference 1", "category": "4_Employment",
+         "type": "document", "source": "employee",
+         "document_types": ["reference"],
+         "allow_multiple_files": True,
+         "description": "First reference letter and attachments"},
+        
+        {"id": "reference_2", "name": "Reference 2", "category": "4_Employment",
+         "type": "document", "source": "employee",
+         "document_types": ["reference"],
+         "allow_multiple_files": True,
+         "description": "Second reference letter and attachments"},
+        
+        {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", 
+         "category": "4_Employment", "type": "form-generated", 
+         "template_name": "Recruitment Compliance Checklist",
+         "allow_multiple_files": True, "source": "internal",
+         "description": "Internal recruitment tracking checklist"},
+        
+        {"id": "application_form", "name": "Application Form", "category": "4_Employment", 
+         "type": "form-generated", "template_name": "Application Form", 
+         "allow_multiple_files": False, "source": "form",
+         "description": "Completed application form"},
+        
+        {"id": "cv", "name": "CV / Resume", "category": "4_Employment", 
+         "type": "document", "source": "employee",
+         "document_types": ["cv", "resume"], 
+         "allow_multiple_files": True,
+         "description": "CV and supporting documents"},
+        
+        # ======== 5. AGREEMENTS ========
         {"id": "contract", "name": "Contract Acknowledgement", 
-         "category": "L_Contract", "type": "form-generated",
+         "category": "5_Agreements", "type": "form-generated",
          "template_name": "Contract Acknowledgement Form",
          "allow_multiple_files": True, "source": "form",
          "description": "Signed contract/offer letter and appendices"},
         
-        # ======== O. Handbook ========
         {"id": "handbook", "name": "Employee Handbook Acknowledgement", 
-         "category": "O_Handbook", "type": "form-generated",
+         "category": "5_Agreements", "type": "form-generated",
          "template_name": "Employee Handbook Acknowledgement",
          "allow_multiple_files": False, "source": "form",
          "description": "Signed handbook acknowledgement"},
+        
+        # ======== 6. ADMIN / OTHER ========
+        {"id": "personal_info", "name": "Personal Information Form", 
+         "category": "6_Admin", "type": "form-generated", 
+         "template_name": "Personal Information Form",
+         "allow_multiple_files": True, "source": "form",
+         "description": "Personal details form with supporting docs"},
+        
+        {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", 
+         "category": "6_Admin", "type": "form-generated",
+         "template_name": "Equal Opportunities Monitoring Form",
+         "allow_multiple_files": False, "source": "form",
+         "description": "Diversity monitoring form"},
     ],
     
-    "training": [  # Training requirements - all require certificate evidence
-        {"id": "safeguarding", "name": "Safeguarding Training", "category": "N_Training",
+    "training": [  # Core Training - Section 2 priority
+        {"id": "safeguarding", "name": "Safeguarding Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Safeguarding",
          "allow_multiple_files": True,
          "description": "Safeguarding certificate and transcript"},
         
-        {"id": "manual_handling", "name": "Manual Handling Training", "category": "N_Training",
+        {"id": "manual_handling", "name": "Manual Handling Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Manual Handling",
          "allow_multiple_files": True,
          "description": "Manual handling certificate"},
         
-        {"id": "infection_control", "name": "Infection Control Training", "category": "N_Training",
+        {"id": "infection_control", "name": "Infection Control Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Infection Control",
          "allow_multiple_files": True,
          "description": "Infection control certificate"},
         
-        {"id": "bls", "name": "Basic Life Support (BLS)", "category": "N_Training",
+        {"id": "bls", "name": "Basic Life Support (BLS)", "category": "2_Core_Training",
          "type": "training", "training_name": "Basic Life Support",
          "allow_multiple_files": True,
          "description": "BLS certificate, renewal card"},
         
-        {"id": "fire_safety", "name": "Fire Safety Training", "category": "N_Training",
+        {"id": "fire_safety", "name": "Fire Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Fire Safety",
          "allow_multiple_files": True,
          "description": "Fire safety certificate"},
         
-        {"id": "health_safety", "name": "Health & Safety Training", "category": "N_Training",
+        {"id": "health_safety", "name": "Health & Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Health & Safety",
          "allow_multiple_files": True,
          "description": "Health & Safety certificate"},
     ],
     
     "nurse_specific": [  # Additional items for Nurses only
-        {"id": "nmc_registration", "name": "NMC Registration", "category": "O_Professional",
+        {"id": "nmc_registration", "name": "NMC Registration", "category": "1_Legal_Safety",
          "type": "document", "source": "employee",
          "document_types": ["nmc_registration", "professional_registration"],
          "allow_multiple_files": True, "min_files": 1,
          "description": "NMC PIN card, registration letter"},
         
         {"id": "clinical_competency", "name": "Clinical Competency Evidence", 
-         "category": "N_Training", "type": "document", "source": "employee",
+         "category": "2_Core_Training", "type": "document", "source": "employee",
          "document_types": ["clinical_competency", "competency_assessment"],
          "allow_multiple_files": True, "min_files": 1,
          "description": "Clinical competency assessments, skill sign-offs"},
         
         {"id": "medication_competency", "name": "Medication Competency", 
-         "category": "N_Training", "type": "training", "training_name": "Medication",
+         "category": "2_Core_Training", "type": "training", "training_name": "Medication",
          "allow_multiple_files": True,
          "description": "Medication administration competency certificate"},
     ]
+}
+
+# Category display names (care-focused)
+CATEGORY_DISPLAY_NAMES = {
+    "1_Legal_Safety": "Legal & Safety",
+    "2_Core_Training": "Core Training",
+    "3_Role_Readiness": "Role Readiness",
+    "4_Employment": "Employment",
+    "5_Agreements": "Agreements",
+    "6_Admin": "Admin / Other"
 }
 
 # Legacy ID mapping for data migration

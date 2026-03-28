@@ -21,6 +21,32 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 
 ### Completed Features ✅
 
+#### Work Readiness System (Completed 2026-03-28)
+- [x] **Defined Work Readiness Requirements (CQC Standards)**:
+  - **MANDATORY (Blocks work)**: Right to Work Documents, RTW Verification, Identity Documents, DBS Certificate, DBS Update Service Check, Safeguarding Training, Manual Handling Training, Infection Control Training
+  - **Nurse-specific mandatory**: NMC Registration (only for nurses)
+  - **Required Soon**: BLS, Fire Safety, Health & Safety, References 1 & 2, Health Screening
+  - **Secondary**: All other compliance items
+- [x] **Weighted Compliance Scoring**:
+  - Mandatory items = 80% of score
+  - Required Soon items = 15% of score
+  - Secondary items = 5% of score
+- [x] **Work Ready Status Badges** on Employees List:
+  - "Work Ready" (green) - All mandatory items verified
+  - "Almost Ready" (amber) - Most mandatory items complete
+  - "Not Ready" (red) - Missing mandatory items
+  - "Fully Compliant" (green) - Everything complete & verified
+- [x] **Work Readiness Alert Panel** on What's Needed tab:
+  - Shows status with colored background (green/amber/red)
+  - Displays weighted compliance score with progress bar
+  - Lists missing mandatory items
+- [x] **Priority Badges on Requirements**:
+  - 🔴 "Required" badge on mandatory items
+  - 🟠 "Soon" badge on required_soon items
+  - "⚠ Required before employee can start work" hint on mandatory items
+- [x] **Sorted Requirements**: Mandatory items always shown first (priority_order)
+- [x] **Backend API**: `work_readiness` object returned in compliance-requirements endpoint
+
 #### Phase 1: Foundation (Completed 2026-03-27)
 - [x] React + FastAPI + MongoDB full-stack architecture
 - [x] JWT + Google OAuth authentication via Emergent Auth

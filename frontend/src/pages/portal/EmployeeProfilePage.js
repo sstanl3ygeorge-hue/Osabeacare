@@ -2499,11 +2499,13 @@ export default function EmployeeProfilePage() {
                                 )}
                               </div>
                             </div>
-                          )})}
+                          );
+                        })}
                         </div>
                       </div>
                     );
-                  })}
+                  });
+                  })()}
                 </div>
               )}
             </CardContent>

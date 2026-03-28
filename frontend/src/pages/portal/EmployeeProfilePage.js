@@ -116,6 +116,12 @@ export default function EmployeeProfilePage() {
   const [trainingHistoryDialogOpen, setTrainingHistoryDialogOpen] = useState(false);
   const [trainingHistory, setTrainingHistory] = useState([]);
   
+  // Delete training record states
+  const [deleteTrainingDialogOpen, setDeleteTrainingDialogOpen] = useState(false);
+  const [deletingTrainingRecord, setDeletingTrainingRecord] = useState(null);
+  const [deleteTrainingReason, setDeleteTrainingReason] = useState('');
+  const [isDeletingTraining, setIsDeletingTraining] = useState(false);
+  
   // Profile photo upload state
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [profilePhotoBlob, setProfilePhotoBlob] = useState(null);
@@ -1007,6 +1013,29 @@ export default function EmployeeProfilePage() {
       await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to correct training record');
+    }
+  };
+
+  // Delete training record handler
+  const handleDeleteTrainingRecord = async () => {
+    setIsDeletingTraining(true);
+    try {
+      await axios.delete(
+        `${API}/training-records/${deletingTrainingRecord.id}`,
+        { 
+          headers: { Authorization: `Bearer ${token}` },
+          params: { reason: deleteTrainingReason.trim() || undefined }
+        }
+      );
+      toast.success('Training record deleted');
+      setDeleteTrainingDialogOpen(false);
+      setDeletingTrainingRecord(null);
+      setDeleteTrainingReason('');
+      await fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to delete training record');
+    } finally {
+      setIsDeletingTraining(false);
     }
   };
 
@@ -3699,6 +3728,16 @@ export default function EmployeeProfilePage() {
                                     <History className="h-4 w-4 mr-2" />
                                     View History
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem 
+                                    className="text-red-600"
+                                    onClick={() => {
+                                      setDeletingTrainingRecord(record);
+                                      setDeleteTrainingDialogOpen(true);
+                                    }}
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Record
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             )}
@@ -4760,6 +4799,55 @@ export default function EmployeeProfilePage() {
               ))
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Delete Training Record Dialog */}
+      <Dialog open={deleteTrainingDialogOpen} onOpenChange={setDeleteTrainingDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-5 w-5" />
+              Delete Training Record
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently remove this training record. An audit trail will be kept.
+            </DialogDescription>
+          </DialogHeader>
+          {deletingTrainingRecord && (
+            <div className="space-y-4 py-4">
+              <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                <p className="font-medium text-red-800">{deletingTrainingRecord.training_name}</p>
+                <p className="text-sm text-red-600 mt-1">
+                  Status: {deletingTrainingRecord.status?.replace('_', ' ')}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="delete-training-reason">Reason for deletion (optional)</Label>
+                <Textarea
+                  id="delete-training-reason"
+                  placeholder="Enter an optional reason for deleting this record"
+                  value={deleteTrainingReason}
+                  onChange={(e) => setDeleteTrainingReason(e.target.value)}
+                  className="min-h-[80px] rounded-xl"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTrainingDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteTrainingRecord}
+              disabled={isDeletingTraining}
+              className="rounded-xl"
+            >
+              {isDeletingTraining ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Delete Record
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

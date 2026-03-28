@@ -1933,6 +1933,7 @@ async def generate_employee_code():
 async def calculate_completion_percentage(employee_id: str) -> int:
     """Calculate completion percentage based on evidence-backed requirements.
     MUST match the same logic used in /compliance-requirements endpoint.
+    Excludes deleted/superseded/archived records.
     """
     # Get employee role
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
@@ -1955,11 +1956,12 @@ async def calculate_completion_percentage(employee_id: str) -> int:
         has_evidence = False
         
         if item_type == 'training':
-            # Check training records with evidence
+            # Check training records with evidence - exclude deleted/superseded
             record = await db.training_records.find_one({
                 "employee_id": employee_id,
                 "requirement_id": item_id,
                 "status": {"$in": ["completed", "expiring"]},
+                "training_name": {"$not": {"$regex": "^TEST", "$options": "i"}},  # Exclude TEST
                 "$or": [
                     {"certificate_url": {"$exists": True, "$ne": None}},
                     {"evidence_files": {"$exists": True, "$ne": []}}
@@ -1967,10 +1969,11 @@ async def calculate_completion_percentage(employee_id: str) -> int:
             }, {"_id": 0})
             has_evidence = record is not None
         else:
-            # Check employee documents with evidence
+            # Check employee documents with evidence - exclude deleted/superseded
             doc = await db.employee_documents.find_one({
                 "employee_id": employee_id,
                 "requirement_id": item_id,
+                "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
                 "$or": [
                     {"file_url": {"$exists": True, "$ne": None}},
                     {"evidence_files": {"$exists": True, "$ne": []}}
@@ -1991,7 +1994,9 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": {"$in": list(work_ready_ids)},
-        "verified": True
+        "verified": True,
+        # Exclude deleted/replaced/archived records
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
     }, {"_id": 0, "requirement_id": 1}).to_list(100)
     
     # Get verified training for mandatory items
@@ -1999,7 +2004,9 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     training = await db.training_records.find({
         "employee_id": employee_id,
         "requirement_id": {"$in": list(training_ids)},
-        "verified": True
+        "verified": True,
+        # Exclude deleted records (though they shouldn't exist after delete)
+        "status": {"$nin": ["deleted", "superseded", "archived"]}
     }, {"_id": 0, "requirement_id": 1}).to_list(100)
     
     verified_ids = {d['requirement_id'] for d in docs}
@@ -6206,6 +6213,139 @@ async def cleanup_test_training_records(user: dict = Depends(require_admin)):
     return {
         "deleted_count": result.deleted_count,
         "message": f"Deleted {result.deleted_count} TEST training records"
+    }
+
+
+class DeleteTrainingRequest(BaseModel):
+    """Request to delete a training record with audit trail"""
+    reason: Optional[str] = None
+
+
+@api_router.delete("/training-records/{record_id}")
+async def delete_training_record(
+    record_id: str,
+    reason: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Delete a single training record.
+    - Removes from active use
+    - Keeps audit trail
+    - Updates employee compliance
+    """
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    employee_id = record.get('employee_id')
+    training_name = record.get('training_name')
+    
+    # Get user name for audit
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    # Create audit log entry before deletion
+    now = datetime.now(timezone.utc).isoformat()
+    await log_audit_action(
+        user['user_id'],
+        "training_deleted",
+        "training_record",
+        record_id,
+        {
+            "training_name": training_name,
+            "employee_id": employee_id,
+            "deleted_by": user_name,
+            "deleted_at": now,
+            "reason": reason,
+            "original_status": record.get('status'),
+            "had_evidence": bool(record.get('certificate_url') or record.get('evidence_files'))
+        }
+    )
+    
+    # Delete the record
+    await db.training_records.delete_one({"id": record_id})
+    
+    # Update employee compliance
+    if employee_id:
+        await update_employee_compliance(employee_id)
+    
+    return {
+        "success": True,
+        "message": f"Training record '{training_name}' deleted",
+        "deleted_record_id": record_id
+    }
+
+
+class BulkDeleteTrainingRequest(BaseModel):
+    """Request to bulk delete training records"""
+    record_ids: List[str]
+    reason: Optional[str] = None
+
+
+@api_router.post("/training-records/bulk-delete")
+async def bulk_delete_training_records(
+    request: BulkDeleteTrainingRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Bulk delete multiple training records.
+    - Removes from active use
+    - Keeps audit trail for each
+    - Updates affected employees' compliance
+    """
+    if not request.record_ids:
+        raise HTTPException(status_code=400, detail="No record IDs provided")
+    
+    # Get user name for audit
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    now = datetime.now(timezone.utc).isoformat()
+    deleted_count = 0
+    affected_employees = set()
+    
+    for record_id in request.record_ids:
+        record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+        if not record:
+            continue
+        
+        employee_id = record.get('employee_id')
+        training_name = record.get('training_name')
+        
+        # Create audit log entry
+        await log_audit_action(
+            user['user_id'],
+            "training_deleted",
+            "training_record",
+            record_id,
+            {
+                "training_name": training_name,
+                "employee_id": employee_id,
+                "deleted_by": user_name,
+                "deleted_at": now,
+                "reason": request.reason,
+                "bulk_delete": True,
+                "original_status": record.get('status'),
+                "had_evidence": bool(record.get('certificate_url') or record.get('evidence_files'))
+            }
+        )
+        
+        # Delete the record
+        result = await db.training_records.delete_one({"id": record_id})
+        if result.deleted_count > 0:
+            deleted_count += 1
+            if employee_id:
+                affected_employees.add(employee_id)
+    
+    # Update compliance for affected employees
+    for emp_id in affected_employees:
+        await update_employee_compliance(emp_id)
+    
+    return {
+        "success": True,
+        "deleted_count": deleted_count,
+        "affected_employees": len(affected_employees),
+        "message": f"Deleted {deleted_count} training records"
     }
 
 

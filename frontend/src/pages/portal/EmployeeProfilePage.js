@@ -4814,26 +4814,66 @@ export default function EmployeeProfilePage() {
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Issue Date</Label>
-                <Input
-                  type="date"
-                  value={editForm.issue_date}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, issue_date: e.target.value }))}
-                  className="rounded-xl"
-                />
+            {/* DBS Update Service Check - Special labels and auto-calculation */}
+            {editEvidenceData?.requirementId === 'dbs_check' ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Last DBS Check Date</Label>
+                  <Input
+                    type="date"
+                    value={editForm.issue_date}
+                    onChange={(e) => {
+                      const checkDate = e.target.value;
+                      // Auto-calculate Next Review Due = Check Date + 12 months
+                      let nextReviewDate = '';
+                      if (checkDate) {
+                        const date = new Date(checkDate);
+                        date.setFullYear(date.getFullYear() + 1);
+                        nextReviewDate = date.toISOString().split('T')[0];
+                      }
+                      setEditForm(prev => ({ 
+                        ...prev, 
+                        issue_date: checkDate,
+                        expiry_date: nextReviewDate
+                      }));
+                    }}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Next DBS Review Due</Label>
+                  <Input
+                    type="date"
+                    value={editForm.expiry_date}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, expiry_date: e.target.value }))}
+                    className="rounded-xl bg-gray-50"
+                    title="Auto-calculated as 12 months from Last DBS Check Date"
+                  />
+                  <p className="text-xs text-text-muted">Auto-calculated (+12 months)</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Expiry Date</Label>
-                <Input
-                  type="date"
-                  value={editForm.expiry_date}
-                  onChange={(e) => setEditForm(prev => ({ ...prev, expiry_date: e.target.value }))}
-                  className="rounded-xl"
-                />
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Issue Date</Label>
+                  <Input
+                    type="date"
+                    value={editForm.issue_date}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, issue_date: e.target.value }))}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Expiry Date</Label>
+                  <Input
+                    type="date"
+                    value={editForm.expiry_date}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, expiry_date: e.target.value }))}
+                    className="rounded-xl"
+                  />
+                </div>
               </div>
-            </div>
+            )}
             
             <div className="space-y-2">
               <Label>Notes</Label>

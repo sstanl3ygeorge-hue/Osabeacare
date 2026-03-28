@@ -2330,8 +2330,26 @@ class EvidenceFileResponse(BaseModel):
     uploaded_by: Optional[str] = None
     uploaded_by_name: Optional[str] = None
     file_label: Optional[str] = None
-    source_type: str  # "manual_upload", "form_submission", "imported"
+    source_type: str  # "manual_upload", "form_submission", "imported", "replacement"
     content_type: Optional[str] = None
+    # Status for soft-delete/replace
+    status: Optional[str] = "active"  # active, superseded, removed
+    # Metadata
+    issue_date: Optional[str] = None
+    expiry_date: Optional[str] = None
+    notes: Optional[str] = None
+    # Removal info
+    removed_at: Optional[str] = None
+    removed_by: Optional[str] = None
+    removed_by_name: Optional[str] = None
+    removal_reason: Optional[str] = None
+    # Supersede info
+    superseded_at: Optional[str] = None
+    superseded_by: Optional[str] = None
+    superseded_by_name: Optional[str] = None
+    superseded_by_file_id: Optional[str] = None
+    supersede_reason: Optional[str] = None
+    replaces_file_id: Optional[str] = None
 
 
 class RequirementEvidenceResponse(BaseModel):
@@ -2421,7 +2439,11 @@ async def upload_requirement_evidence(
         "uploaded_by_name": uploaded_by_name,
         "file_label": file_label or requirement['name'],
         "source_type": "manual_upload",
-        "content_type": file.content_type
+        "content_type": file.content_type,
+        "status": "active",  # active, superseded, removed
+        "issue_date": None,
+        "expiry_date": expiry_date,
+        "notes": None
     }
     
     # Handle based on requirement type
@@ -2698,7 +2720,16 @@ async def get_requirement_evidence(
         elif linked_form_id and linked_form_status in ['draft', 'in_progress']:
             status = "in_progress"
     
-    has_evidence = len(evidence_files) > 0
+    # Separate active files from all files (for history)
+    all_evidence_files = evidence_files.copy()
+    active_evidence_files = [f for f in evidence_files if f.get('status', 'active') == 'active']
+    
+    # Only active files count for compliance
+    has_evidence = len(active_evidence_files) > 0
+    
+    # If no active evidence, reset status
+    if not has_evidence and status == "completed":
+        status = "missing"
     
     return RequirementEvidenceResponse(
         requirement_id=requirement_id,
@@ -2708,9 +2739,9 @@ async def get_requirement_evidence(
         source=requirement.get('source'),
         description=requirement.get('description'),
         allow_multiple_files=requirement.get('allow_multiple_files', True),
-        evidence_files=evidence_files,
-        has_evidence=has_evidence,
-        evidence_count=len(evidence_files),
+        evidence_files=all_evidence_files,  # Return all files including removed/superseded for history
+        has_evidence=has_evidence,  # Only true if active files exist
+        evidence_count=len(active_evidence_files),  # Only count active files
         status=status,
         completed_at=completed_at,
         verified=verified and has_evidence,
@@ -2802,6 +2833,389 @@ async def delete_requirement_evidence(
     await update_employee_compliance(employee_id)
     
     return {"success": True, "message": "Evidence file removed"}
+
+
+class RemoveFileRequest(BaseModel):
+    reason: str  # Required reason for removing file
+
+
+class ReplaceFileRequest(BaseModel):
+    reason: str  # Required reason for replacing file
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/remove")
+async def remove_requirement_evidence_soft(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    request: RemoveFileRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Soft-remove an evidence file (mark as 'removed', don't delete).
+    Requires a reason for audit trail. File remains in history.
+    """
+    if not request.reason or len(request.reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason is required (minimum 3 characters)")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    req_type = requirement.get('type', 'document')
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get user name for audit
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    file_found = False
+    original_file = None
+    
+    if req_type == 'training':
+        # Find training record
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if record:
+            evidence_files = record.get('evidence_files', [])
+            for f in evidence_files:
+                if f.get('file_id') == file_id:
+                    original_file = f.copy()
+                    f['status'] = 'removed'
+                    f['removed_at'] = now
+                    f['removed_by'] = user['user_id']
+                    f['removed_by_name'] = user_name
+                    f['removal_reason'] = request.reason.strip()
+                    file_found = True
+                    break
+            
+            if file_found:
+                # Check if any active files remain
+                active_files = [f for f in evidence_files if f.get('status', 'active') == 'active']
+                update_data = {"evidence_files": evidence_files, "updated_at": now}
+                
+                if not active_files:
+                    update_data["verified"] = False
+                    update_data["completion_method"] = "manual"
+                
+                await db.training_records.update_one(
+                    {"id": record['id']},
+                    {"$set": update_data}
+                )
+    else:
+        # Find document
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            evidence_files = doc.get('evidence_files', [])
+            for f in evidence_files:
+                if f.get('file_id') == file_id:
+                    original_file = f.copy()
+                    f['status'] = 'removed'
+                    f['removed_at'] = now
+                    f['removed_by'] = user['user_id']
+                    f['removed_by_name'] = user_name
+                    f['removal_reason'] = request.reason.strip()
+                    file_found = True
+                    break
+            
+            if file_found:
+                active_files = [f for f in evidence_files if f.get('status', 'active') == 'active']
+                update_data = {"evidence_files": evidence_files, "updated_at": now}
+                
+                if not active_files:
+                    update_data["verified"] = False
+                    update_data["status"] = "not_started"
+                
+                await db.employee_documents.update_one(
+                    {"id": doc['id']},
+                    {"$set": update_data}
+                )
+    
+    if not file_found:
+        raise HTTPException(status_code=404, detail="Evidence file not found")
+    
+    # Create detailed audit log entry
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action_type": "remove_evidence",
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "file_id": file_id,
+        "user_id": user['user_id'],
+        "user_name": user_name,
+        "reason": request.reason.strip(),
+        "original_file": original_file,
+        "timestamp": now
+    })
+    
+    # Update compliance
+    await update_employee_compliance(employee_id)
+    
+    return {
+        "success": True, 
+        "message": "File marked as removed",
+        "file_id": file_id,
+        "status": "removed"
+    }
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/replace")
+async def replace_requirement_evidence(
+    employee_id: str,
+    requirement_id: str,
+    file_id: str,
+    file: UploadFile = File(...),
+    reason: str = Form(...),
+    file_label: Optional[str] = Form(None),
+    expiry_date: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Replace an evidence file with a new one.
+    Old file is marked as 'superseded', new file becomes active.
+    Requires a reason for audit trail.
+    """
+    if not reason or len(reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason is required (minimum 3 characters)")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_id), None)
+    
+    if not requirement:
+        raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
+    
+    req_type = requirement.get('type', 'document')
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get user name
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    
+    # Upload new file
+    ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
+    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    req_slug = requirement_id.replace('_', '-')
+    storage_filename = f"{employee_name}_{req_slug}_{uuid.uuid4().hex[:8]}.{ext}"
+    path = f"{APP_NAME}/evidence/{employee_id}/{requirement_id}/{storage_filename}"
+    
+    data = await file.read()
+    result = put_object(path, data, file.content_type or "application/octet-stream")
+    
+    # Create new evidence file record
+    new_file_id = str(uuid.uuid4())
+    new_evidence_file = {
+        "file_id": new_file_id,
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "uploaded_at": now,
+        "uploaded_by": user['user_id'],
+        "uploaded_by_name": user_name,
+        "file_label": file_label or requirement['name'],
+        "source_type": "replacement",
+        "content_type": file.content_type,
+        "status": "active",
+        "issue_date": None,
+        "expiry_date": expiry_date,
+        "notes": None,
+        "replaces_file_id": file_id  # Reference to superseded file
+    }
+    
+    file_found = False
+    original_file = None
+    
+    if req_type == 'training':
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if record:
+            evidence_files = record.get('evidence_files', [])
+            for f in evidence_files:
+                if f.get('file_id') == file_id:
+                    original_file = f.copy()
+                    f['status'] = 'superseded'
+                    f['superseded_at'] = now
+                    f['superseded_by'] = user['user_id']
+                    f['superseded_by_name'] = user_name
+                    f['superseded_by_file_id'] = new_file_id
+                    f['supersede_reason'] = reason.strip()
+                    file_found = True
+                    break
+            
+            if file_found:
+                evidence_files.append(new_evidence_file)
+                await db.training_records.update_one(
+                    {"id": record['id']},
+                    {"$set": {
+                        "evidence_files": evidence_files,
+                        "updated_at": now,
+                        "certificate_url": result["path"],
+                        "original_filename": file.filename
+                    }}
+                )
+    else:
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"id": file_id},
+                {"evidence_files.file_id": file_id}
+            ]
+        }, {"_id": 0})
+        
+        if doc:
+            evidence_files = doc.get('evidence_files', [])
+            for f in evidence_files:
+                if f.get('file_id') == file_id:
+                    original_file = f.copy()
+                    f['status'] = 'superseded'
+                    f['superseded_at'] = now
+                    f['superseded_by'] = user['user_id']
+                    f['superseded_by_name'] = user_name
+                    f['superseded_by_file_id'] = new_file_id
+                    f['supersede_reason'] = reason.strip()
+                    file_found = True
+                    break
+            
+            if file_found:
+                evidence_files.append(new_evidence_file)
+                await db.employee_documents.update_one(
+                    {"id": doc['id']},
+                    {"$set": {
+                        "evidence_files": evidence_files,
+                        "updated_at": now,
+                        "file_url": result["path"],
+                        "original_filename": file.filename
+                    }}
+                )
+    
+    if not file_found:
+        raise HTTPException(status_code=404, detail="Evidence file not found")
+    
+    # Create detailed audit log entry
+    await db.audit_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "action_type": "replace_evidence",
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "old_file_id": file_id,
+        "new_file_id": new_file_id,
+        "user_id": user['user_id'],
+        "user_name": user_name,
+        "reason": reason.strip(),
+        "original_file": original_file,
+        "new_file": new_evidence_file,
+        "timestamp": now
+    })
+    
+    # Update compliance
+    await update_employee_compliance(employee_id)
+    
+    return {
+        "success": True,
+        "message": "File replaced successfully",
+        "old_file_id": file_id,
+        "new_file_id": new_file_id,
+        "new_file_url": result["path"]
+    }
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_id}/history")
+async def get_requirement_history(
+    employee_id: str,
+    requirement_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get full history of all file operations for a requirement.
+    Includes uploads, replacements, removals, edits, and verifications.
+    """
+    # Get all audit logs for this requirement
+    audit_logs = await db.audit_logs.find({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id
+    }, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    
+    # Also get file history from audit_logs collection for edits
+    edit_logs = await db.audit_logs.find({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": requirement_id},
+            {"entity_id": requirement_id}
+        ]
+    }, {"_id": 0}).sort("timestamp", -1).to_list(100)
+    
+    # Combine and dedupe
+    all_logs = {log.get('id', str(i)): log for i, log in enumerate(audit_logs + edit_logs)}
+    combined = sorted(all_logs.values(), key=lambda x: x.get('timestamp', ''), reverse=True)
+    
+    # Format for display
+    history = []
+    for log in combined:
+        entry = {
+            "id": log.get('id'),
+            "action": log.get('action_type') or log.get('action'),
+            "timestamp": log.get('timestamp') or log.get('created_at'),
+            "user_id": log.get('user_id'),
+            "user_name": log.get('user_name'),
+            "reason": log.get('reason'),
+            "details": {}
+        }
+        
+        if log.get('action_type') == 'replace_evidence':
+            entry['details'] = {
+                "old_file_id": log.get('old_file_id'),
+                "new_file_id": log.get('new_file_id'),
+                "old_filename": log.get('original_file', {}).get('original_filename'),
+                "new_filename": log.get('new_file', {}).get('original_filename')
+            }
+        elif log.get('action_type') == 'remove_evidence':
+            entry['details'] = {
+                "file_id": log.get('file_id'),
+                "filename": log.get('original_file', {}).get('original_filename')
+            }
+        elif log.get('action_type') == 'edit_evidence':
+            entry['details'] = {
+                "field": log.get('field_changed'),
+                "old_value": log.get('old_value'),
+                "new_value": log.get('new_value')
+            }
+        elif log.get('details'):
+            entry['details'] = log.get('details')
+        
+        history.append(entry)
+    
+    return {
+        "requirement_id": requirement_id,
+        "employee_id": employee_id,
+        "history": history
+    }
 
 
 @api_router.get("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/view")

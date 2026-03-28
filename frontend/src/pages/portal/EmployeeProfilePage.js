@@ -22,7 +22,7 @@ import {
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
-  Camera
+  Camera, Replace, FileX
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -125,6 +125,20 @@ export default function EmployeeProfilePage() {
     file_label: '',
     reason: ''
   });
+  
+  // File management state
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [replaceDialogOpen, setReplaceDialogOpen] = useState(false);
+  const [requirementHistoryOpen, setRequirementHistoryOpen] = useState(false);
+  const [selectedFileForAction, setSelectedFileForAction] = useState(null);
+  const [selectedRequirementForAction, setSelectedRequirementForAction] = useState(null);
+  const [removeReason, setRemoveReason] = useState('');
+  const [replaceReason, setReplaceReason] = useState('');
+  const [replaceFile, setReplaceFile] = useState(null);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [isReplacing, setIsReplacing] = useState(false);
+  const [requirementHistory, setRequirementHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   
   const { token, isAuditor, user } = useAuth();
   
@@ -532,6 +546,117 @@ export default function EmployeeProfilePage() {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete document');
     }
+  };
+
+  // Open remove file dialog
+  const openRemoveDialog = (file, requirementId) => {
+    setSelectedFileForAction(file);
+    setSelectedRequirementForAction(requirementId);
+    setRemoveReason('');
+    setRemoveDialogOpen(true);
+  };
+
+  // Handle soft-remove file
+  const handleRemoveFile = async () => {
+    if (!removeReason.trim() || removeReason.trim().length < 3) {
+      toast.error('Please provide a reason (minimum 3 characters)');
+      return;
+    }
+
+    setIsRemoving(true);
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/requirements/${selectedRequirementForAction}/evidence/${selectedFileForAction.file_id}/remove`,
+        { reason: removeReason.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('File removed successfully');
+      setRemoveDialogOpen(false);
+      setSelectedFileForAction(null);
+      setSelectedRequirementForAction(null);
+      setRemoveReason('');
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to remove file');
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
+  // Open replace file dialog
+  const openReplaceDialog = (file, requirementId) => {
+    setSelectedFileForAction(file);
+    setSelectedRequirementForAction(requirementId);
+    setReplaceReason('');
+    setReplaceFile(null);
+    setReplaceDialogOpen(true);
+  };
+
+  // Handle replace file
+  const handleReplaceFile = async () => {
+    if (!replaceReason.trim() || replaceReason.trim().length < 3) {
+      toast.error('Please provide a reason (minimum 3 characters)');
+      return;
+    }
+    if (!replaceFile) {
+      toast.error('Please select a replacement file');
+      return;
+    }
+
+    setIsReplacing(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', replaceFile);
+      formData.append('reason', replaceReason.trim());
+      
+      await axios.post(
+        `${API}/employees/${employeeId}/requirements/${selectedRequirementForAction}/evidence/${selectedFileForAction.file_id}/replace`,
+        formData,
+        { 
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      toast.success('File replaced successfully');
+      setReplaceDialogOpen(false);
+      setSelectedFileForAction(null);
+      setSelectedRequirementForAction(null);
+      setReplaceReason('');
+      setReplaceFile(null);
+      fetchData();
+      fetchCompliance();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to replace file');
+    } finally {
+      setIsReplacing(false);
+    }
+  };
+
+  // Fetch requirement history
+  const fetchRequirementHistory = async (requirementId) => {
+    setLoadingHistory(true);
+    try {
+      const response = await axios.get(
+        `${API}/employees/${employeeId}/requirements/${requirementId}/history`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setRequirementHistory(response.data.history || []);
+    } catch (error) {
+      console.error('Failed to fetch history:', error);
+      setRequirementHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  // Open requirement history dialog
+  const openHistoryDialog = (requirementId) => {
+    setSelectedRequirementForAction(requirementId);
+    setRequirementHistoryOpen(true);
+    fetchRequirementHistory(requirementId);
   };
 
   const handleBulkUpload = async () => {
@@ -2269,7 +2394,11 @@ export default function EmployeeProfilePage() {
                           <div className="space-y-2">
                             {categoryItems.map((req) => {
                               // Use new evidence_files array if available, fallback to documents
-                              const evidenceFiles = req.evidence_files || [];
+                              const allEvidenceFiles = req.evidence_files || [];
+                              // Filter to only show active files (exclude removed/superseded)
+                              const evidenceFiles = allEvidenceFiles.filter(f => !f.status || f.status === 'active');
+                              // Keep removed/superseded files for history reference
+                              const inactiveFiles = allEvidenceFiles.filter(f => f.status && f.status !== 'active');
                               const docs = req.documents || [];
                               const hasEvidence = req.has_evidence || evidenceFiles.length > 0 || docs.some(d => d.file_url);
                               const isVerified = req.verified || (hasEvidence && req.all_verified);
@@ -2329,22 +2458,45 @@ export default function EmployeeProfilePage() {
                                     <p className="text-xs text-text-muted mt-0.5">{req.description}</p>
                                   )}
                                   
-                                  {/* Evidence files list - compact */}
+                                  {/* Evidence files list - compact with status indicators */}
                                   {evidenceFiles.length > 0 && (
                                     <div className="text-xs text-text-muted space-y-0.5 mt-1">
                                       {evidenceFiles.slice(0, 2).map((file, idx) => (
-                                        <div key={file.file_id || idx} className="flex items-center gap-1">
+                                        <div key={file.file_id || idx} className="flex items-center gap-1 group">
                                           <FileText className="h-3 w-3 flex-shrink-0" />
                                           <span className="truncate max-w-[200px]">
                                             {file.file_label || file.original_filename || 'Document'}
                                           </span>
                                           {file.verified && <Shield className="h-3 w-3 text-success flex-shrink-0" />}
+                                          {/* Per-file quick actions - show on hover for multi-file */}
+                                          {evidenceFiles.length > 1 && !isAuditor() && (
+                                            <div className="hidden group-hover:flex items-center gap-1 ml-1">
+                                              <button
+                                                onClick={(e) => { e.stopPropagation(); openRemoveDialog(file, req.id); }}
+                                                className="p-0.5 hover:bg-error/10 rounded text-error/70 hover:text-error"
+                                                title="Remove this file"
+                                              >
+                                                <XCircle className="h-3 w-3" />
+                                              </button>
+                                            </div>
+                                          )}
                                         </div>
                                       ))}
                                       {evidenceFiles.length > 2 && (
-                                        <p className="text-primary">+{evidenceFiles.length - 2} more</p>
+                                        <p className="text-primary">+{evidenceFiles.length - 2} more files</p>
                                       )}
                                     </div>
+                                  )}
+                                  
+                                  {/* Show count of removed/superseded files if any exist */}
+                                  {inactiveFiles.length > 0 && (
+                                    <button 
+                                      onClick={() => openHistoryDialog(req.id)}
+                                      className="text-xs text-muted-foreground hover:text-primary mt-1 flex items-center gap-1"
+                                    >
+                                      <History className="h-3 w-3" />
+                                      {inactiveFiles.length} previous file{inactiveFiles.length > 1 ? 's' : ''} in history
+                                    </button>
                                   )}
                                   
                                   {/* Warning for form without PDF */}
@@ -2515,8 +2667,8 @@ export default function EmployeeProfilePage() {
                                   </Button>
                                 )}
                                 
-                                {/* ACTION 5: Edit Details & History (when evidence exists) */}
-                                {evidenceFiles.length > 0 && !isAuditor() && (
+                                {/* ACTION 5: File Management Menu (when evidence exists) */}
+                                {evidenceFiles.length > 0 && (
                                   <DropdownMenu>
                                     <DropdownMenuTrigger asChild>
                                       <Button 
@@ -2528,16 +2680,52 @@ export default function EmployeeProfilePage() {
                                         <MoreHorizontal className="h-3 w-3" />
                                       </Button>
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
+                                    <DropdownMenuContent align="end" className="w-48">
+                                      {/* Edit Details */}
+                                      {!isAuditor() && (
+                                        <DropdownMenuItem 
+                                          onClick={() => openEditEvidence(req.id, evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0])}
+                                          data-testid={`edit-details-${req.id}`}
+                                        >
+                                          <Edit className="h-4 w-4 mr-2" />
+                                          Edit Details
+                                        </DropdownMenuItem>
+                                      )}
+                                      
+                                      {/* Replace File */}
+                                      {!isAuditor() && (
+                                        <DropdownMenuItem 
+                                          onClick={() => openReplaceDialog(
+                                            evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
+                                            req.id
+                                          )}
+                                          data-testid={`replace-file-${req.id}`}
+                                        >
+                                          <RefreshCw className="h-4 w-4 mr-2" />
+                                          Replace File
+                                        </DropdownMenuItem>
+                                      )}
+                                      
+                                      {/* Remove File */}
+                                      {!isAuditor() && (
+                                        <DropdownMenuItem 
+                                          onClick={() => openRemoveDialog(
+                                            evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
+                                            req.id
+                                          )}
+                                          className="text-red-600"
+                                          data-testid={`remove-file-${req.id}`}
+                                        >
+                                          <Trash2 className="h-4 w-4 mr-2" />
+                                          Remove File
+                                        </DropdownMenuItem>
+                                      )}
+                                      
+                                      <DropdownMenuSeparator />
+                                      
+                                      {/* View History - available to all */}
                                       <DropdownMenuItem 
-                                        onClick={() => openEditEvidence(req.id, evidenceFiles[0])}
-                                        data-testid={`edit-details-${req.id}`}
-                                      >
-                                        <Edit className="h-4 w-4 mr-2" />
-                                        Edit Details
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem 
-                                        onClick={() => loadEditHistory(req.id, evidenceFiles[0].file_id)}
+                                        onClick={() => openHistoryDialog(req.id)}
                                         data-testid={`view-history-${req.id}`}
                                       >
                                         <History className="h-4 w-4 mr-2" />
@@ -3508,6 +3696,192 @@ export default function EmployeeProfilePage() {
               onClick={() => setHistoryOpen(false)}
               className="rounded-xl"
             >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove File Dialog */}
+      <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-error">
+              <Trash2 className="h-5 w-5" />
+              Remove File
+            </DialogTitle>
+            <DialogDescription>
+              This will mark the file as removed. The file will remain in the history for audit purposes but will no longer count as evidence.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {selectedFileForAction && (
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-sm font-medium">{selectedFileForAction.file_label || selectedFileForAction.original_filename}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Uploaded: {new Date(selectedFileForAction.uploaded_at).toLocaleDateString()}
+                </p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="remove-reason">Reason for removal <span className="text-error">*</span></Label>
+              <Textarea
+                id="remove-reason"
+                placeholder="Enter the reason for removing this file (required for audit trail)"
+                value={removeReason}
+                onChange={(e) => setRemoveReason(e.target.value)}
+                className="min-h-[100px]"
+              />
+              <p className="text-xs text-muted-foreground">This reason will be recorded in the audit trail.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemoveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleRemoveFile}
+              disabled={isRemoving || !removeReason.trim()}
+            >
+              {isRemoving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+              Remove File
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Replace File Dialog */}
+      <Dialog open={replaceDialogOpen} onOpenChange={setReplaceDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-primary" />
+              Replace File
+            </DialogTitle>
+            <DialogDescription>
+              Upload a new file to replace the existing one. The old file will be marked as "superseded" and kept in history.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {selectedFileForAction && (
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-sm text-muted-foreground">Replacing:</p>
+                <p className="text-sm font-medium">{selectedFileForAction.file_label || selectedFileForAction.original_filename}</p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="replace-file">New File <span className="text-error">*</span></Label>
+              <Input
+                id="replace-file"
+                type="file"
+                onChange={(e) => setReplaceFile(e.target.files?.[0] || null)}
+                className="cursor-pointer"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="replace-reason">Reason for replacement <span className="text-error">*</span></Label>
+              <Textarea
+                id="replace-reason"
+                placeholder="Enter the reason for replacing this file (required for audit trail)"
+                value={replaceReason}
+                onChange={(e) => setReplaceReason(e.target.value)}
+                className="min-h-[100px]"
+              />
+              <p className="text-xs text-muted-foreground">This reason will be recorded in the audit trail.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReplaceDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleReplaceFile}
+              disabled={isReplacing || !replaceReason.trim() || !replaceFile}
+              className="bg-primary hover:bg-primary-hover"
+            >
+              {isReplacing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Replace File
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Requirement History Dialog */}
+      <Dialog open={requirementHistoryOpen} onOpenChange={setRequirementHistoryOpen}>
+        <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5 text-primary" />
+              File History
+            </DialogTitle>
+            <DialogDescription>
+              Complete timeline of all file operations for this requirement.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto py-4">
+            {loadingHistory ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : requirementHistory.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No history recorded yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {requirementHistory.map((entry, idx) => (
+                  <div key={entry.id || idx} className="p-3 border rounded-lg">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {entry.action === 'replace_evidence' && <RefreshCw className="h-4 w-4 text-blue-500" />}
+                        {entry.action === 'remove_evidence' && <Trash2 className="h-4 w-4 text-red-500" />}
+                        {entry.action === 'edit_evidence' && <Edit className="h-4 w-4 text-amber-500" />}
+                        {entry.action === 'upload_evidence' && <Upload className="h-4 w-4 text-green-500" />}
+                        {entry.action === 'verify_evidence' && <Shield className="h-4 w-4 text-green-600" />}
+                        {!['replace_evidence', 'remove_evidence', 'edit_evidence', 'upload_evidence', 'verify_evidence'].includes(entry.action) && (
+                          <FileText className="h-4 w-4 text-gray-500" />
+                        )}
+                        <span className="font-medium text-sm capitalize">
+                          {entry.action?.replace(/_/g, ' ')}
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'Unknown'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      By: {entry.user_name || 'Unknown'}
+                    </p>
+                    {entry.reason && (
+                      <p className="text-sm mt-2 p-2 bg-muted rounded">
+                        <span className="font-medium">Reason:</span> {entry.reason}
+                      </p>
+                    )}
+                    {entry.details && Object.keys(entry.details).length > 0 && (
+                      <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                        {entry.details.old_filename && (
+                          <p>Old file: {entry.details.old_filename}</p>
+                        )}
+                        {entry.details.new_filename && (
+                          <p>New file: {entry.details.new_filename}</p>
+                        )}
+                        {entry.details.filename && (
+                          <p>File: {entry.details.filename}</p>
+                        )}
+                        {entry.details.field && (
+                          <p>Changed: {entry.details.field} from "{entry.details.old_value || 'empty'}" to "{entry.details.new_value}"</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequirementHistoryOpen(false)}>
               Close
             </Button>
           </DialogFooter>

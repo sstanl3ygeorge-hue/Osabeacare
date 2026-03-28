@@ -2,17 +2,18 @@ import { useMemo } from 'react';
 import { Card, CardContent } from '../ui/card';
 import { 
   Shield, ShieldCheck, FileCheck, CheckCircle,
-  BookOpen, AlertTriangle, Clock, Users
+  BookOpen, AlertTriangle, Clock, Users, CalendarClock
 } from 'lucide-react';
 
 /**
  * ComplianceOverview - Simplified Separated Status Model
  * 
  * Displays:
- * 1. Start Status - Can the employee safely start work?
+ * 1. Work Status - Can the employee safely start work?
  * 2. Recruitment File - Is the pre-employment record complete?
  * 3. Policies - Have assigned policies been acknowledged?
- * 4. Overall Compliance - Percentage (supporting info)
+ * 4. Document Status - Are documents valid or expiring?
+ * 5. Progress - Percentage (supporting info)
  */
 export default function ComplianceOverview({ 
   employee, 
@@ -27,6 +28,7 @@ export default function ComplianceOverview({
         start_status: { status: 'loading', label: 'Loading...', color: 'neutral' },
         recruitment_file: { status: 'loading', label: 'Loading...', color: 'neutral' },
         policies: { status: 'loading', label: 'Loading...', color: 'neutral' },
+        document_status: { status: 'loading', label: 'Loading...', color: 'neutral' },
         overall_compliance: { percentage: 0 }
       };
     }
@@ -67,6 +69,7 @@ export default function ComplianceOverview({
   const startColors = getStatusColorClasses(statuses.start_status?.color);
   const recruitmentColors = getStatusColorClasses(statuses.recruitment_file?.color);
   const policiesColors = getStatusColorClasses(statuses.policies?.color);
+  const docStatusColors = getStatusColorClasses(statuses.document_status?.color);
 
   return (
     <div className={`space-y-6 ${className}`}>
@@ -171,6 +174,49 @@ export default function ComplianceOverview({
           </CardContent>
         </Card>
       </div>
+
+      {/* Document Status Card */}
+      {statuses.document_status && statuses.document_status.status !== 'no_expiry_tracked' && (
+        <Card className={`rounded-2xl border ${docStatusColors.border} shadow-sm ${docStatusColors.bg}`}>
+          <CardContent className="p-5">
+            <div className="flex items-start gap-4">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${docStatusColors.bg} border ${docStatusColors.border}`}>
+                <CalendarClock className={`h-6 w-6 ${docStatusColors.icon}`} />
+              </div>
+              <div className="flex-1">
+                <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Document Status</p>
+                <p className={`text-lg font-semibold ${docStatusColors.text} mt-0.5`}>
+                  {statuses.document_status?.status === 'all_valid' ? 'All Valid' :
+                   statuses.document_status?.status === 'expired' ? `${statuses.document_status?.expired_count} Expired` :
+                   statuses.document_status?.status === 'expiring_soon' ? `${statuses.document_status?.expiring_soon_count} Expiring Soon` :
+                   'No Expiry Dates'}
+                </p>
+                <p className="text-xs text-text-muted mt-1">
+                  Shows expiry status of documents with tracked dates.
+                </p>
+                {(statuses.document_status?.expired_count > 0 || statuses.document_status?.expiring_soon_count > 0) && (
+                  <div className="flex gap-3 mt-2 text-xs">
+                    {statuses.document_status?.expired_count > 0 && (
+                      <span className="text-red-600">{statuses.document_status.expired_count} expired</span>
+                    )}
+                    {statuses.document_status?.expiring_soon_count > 0 && (
+                      <span className="text-amber-600">{statuses.document_status.expiring_soon_count} expiring soon</span>
+                    )}
+                    {statuses.document_status?.valid_count > 0 && (
+                      <span className="text-green-600">{statuses.document_status.valid_count} valid</span>
+                    )}
+                  </div>
+                )}
+                {statuses.document_status?.has_critical_expired && (
+                  <p className="text-xs text-red-600 mt-2 font-medium">
+                    Critical document expired - employee cannot work
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Progress - Supporting Info */}
       <Card className="rounded-2xl border-[#E4E8EB] shadow-sm">

@@ -609,6 +609,14 @@ def get_competency_health_items(role: str) -> set:
         items.add("medication_competency")
     return items
 
+# Critical documents that override work readiness if expired
+CRITICAL_EXPIRY_DOCS = {
+    "right_to_work_documents",
+    "right_to_work_check",
+    "dbs_certificate",
+    "dbs_check"
+}
+
 def calculate_separated_statuses(requirements: List[dict], role: str, policies_data: dict = None) -> dict:
     """
     Calculate the three separated status types:
@@ -628,9 +636,34 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
     competency_items = []
     other_items = []
     
+    # Track expiry status
+    expired_docs = []
+    expiring_soon_docs = []
+    valid_docs = []
+    
     for req in requirements:
         req_id = req.get('id')
         status_group = req.get('status_group', 'other')
+        
+        # Track document expiry
+        if req.get('has_evidence'):
+            evidence_files = req.get('evidence_files', [])
+            for ef in evidence_files:
+                if ef.get('status') == 'active' and ef.get('expiry_date'):
+                    exp_status = calculate_expiry_status(ef.get('expiry_date'))
+                    doc_info = {
+                        "req_id": req_id,
+                        "req_name": req.get('name'),
+                        "file_name": ef.get('original_filename'),
+                        "expiry_date": ef.get('expiry_date'),
+                        "expiry_status": exp_status
+                    }
+                    if exp_status.get('status') == 'expired':
+                        expired_docs.append(doc_info)
+                    elif exp_status.get('status') == 'expiring_soon':
+                        expiring_soon_docs.append(doc_info)
+                    else:
+                        valid_docs.append(doc_info)
         
         if req_id in work_ready_ids or status_group == 'start_status':
             start_items.append(req)
@@ -641,6 +674,10 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
         else:
             other_items.append(req)
     
+    # Check for critical expired documents (override work readiness)
+    critical_expired = [d for d in expired_docs if d['req_id'] in CRITICAL_EXPIRY_DOCS]
+    has_critical_expired = len(critical_expired) > 0
+    
     # Calculate Start Status
     start_complete = sum(1 for r in start_items if r.get('status') == 'completed' and r.get('has_evidence'))
     start_verified = sum(1 for r in start_items if r.get('verified', False))
@@ -648,26 +685,36 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
     start_missing = [{"id": r['id'], "name": r['name']} for r in start_items 
                      if not (r.get('status') == 'completed' and r.get('has_evidence'))]
     
-    # Determine Start Status
-    if start_verified == start_total and start_total > 0:
+    # Determine Start Status - with expiry override
+    if has_critical_expired:
+        # Critical document expired - cannot work
+        start_status = "not_ready"
+        start_label = "Not Ready"
+        start_color = "error"
+        start_reason = f"Critical document expired: {critical_expired[0]['req_name']}"
+    elif start_verified == start_total and start_total > 0:
         start_status = "ready_to_work"
         start_label = "Ready to Work"
         start_color = "success"
+        start_reason = "All required checks are complete. This employee can safely start work."
     elif start_complete == start_total and start_total > 0:
         # All start items complete but not all verified - check competency/health
         competency_complete = sum(1 for r in competency_items if r.get('status') == 'completed' and r.get('has_evidence'))
         if competency_complete < len(competency_items):
             start_status = "supervised_start_only"
-            start_label = "Supervised Start Only"
+            start_label = "Supervised Start"
             start_color = "warning"
+            start_reason = "Employee can start with supervision. Some training is still needed."
         else:
             start_status = "supervised_start_only"
-            start_label = "Supervised Start Only"
+            start_label = "Supervised Start"
             start_color = "warning"
+            start_reason = "Employee can start with supervision. Some training is still needed."
     else:
         start_status = "not_ready"
         start_label = "Not Ready"
         start_color = "error"
+        start_reason = "Essential checks are missing. This employee cannot start work."
     
     # Calculate Recruitment File Status
     recruitment_complete = sum(1 for r in recruitment_items if r.get('status') == 'completed' and r.get('has_evidence'))
@@ -708,6 +755,25 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
         policies_assigned = 0
         policies_acknowledged = 0
     
+    # Calculate Document Status (Expiry)
+    total_docs_with_expiry = len(expired_docs) + len(expiring_soon_docs) + len(valid_docs)
+    if len(expired_docs) > 0:
+        doc_status = "expired"
+        doc_label = f"{len(expired_docs)} Expired"
+        doc_color = "error"
+    elif len(expiring_soon_docs) > 0:
+        doc_status = "expiring_soon"
+        doc_label = f"{len(expiring_soon_docs)} Expiring Soon"
+        doc_color = "warning"
+    elif total_docs_with_expiry > 0:
+        doc_status = "all_valid"
+        doc_label = "All Valid"
+        doc_color = "success"
+    else:
+        doc_status = "no_expiry_tracked"
+        doc_label = "No Expiry Dates"
+        doc_color = "neutral"
+    
     # Calculate Overall Compliance Percentage
     total_items = len(requirements)
     total_complete = sum(1 for r in requirements if r.get('status') == 'completed' and r.get('has_evidence'))
@@ -722,7 +788,8 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
             "complete": start_complete,
             "verified": start_verified,
             "total": start_total,
-            "missing": start_missing
+            "missing": start_missing,
+            "reason": start_reason
         },
         "recruitment_file": {
             "status": recruitment_status,
@@ -738,6 +805,17 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
             "color": policies_color,
             "assigned": policies_assigned if policies_data else 0,
             "acknowledged": policies_acknowledged if policies_data else 0
+        },
+        "document_status": {
+            "status": doc_status,
+            "label": doc_label,
+            "color": doc_color,
+            "expired_count": len(expired_docs),
+            "expiring_soon_count": len(expiring_soon_docs),
+            "valid_count": len(valid_docs),
+            "expired_docs": expired_docs,
+            "expiring_soon_docs": expiring_soon_docs,
+            "has_critical_expired": has_critical_expired
         },
         "overall_compliance": {
             "percentage": overall_percentage,

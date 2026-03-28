@@ -1360,7 +1360,7 @@ class PolicyAssignmentResponse(BaseModel):
     assigned_at: str
     assigned_by: Optional[str] = None
     assigned_by_name: Optional[str] = None
-    status: str  # assigned -> viewed -> acknowledged
+    status: str  # assigned -> viewed -> acknowledged -> unassigned -> withdrawn
     viewed_at: Optional[str] = None
     acknowledged_at: Optional[str] = None
     acknowledged_by_employee_name: Optional[str] = None
@@ -1369,6 +1369,28 @@ class PolicyAssignmentResponse(BaseModel):
     admin_reviewed_at: Optional[str] = None
     admin_reviewed_by: Optional[str] = None
     admin_reviewed_by_name: Optional[str] = None
+    # Reversal fields
+    unassigned_at: Optional[str] = None
+    unassigned_by: Optional[str] = None
+    unassigned_by_name: Optional[str] = None
+    unassigned_reason: Optional[str] = None
+    withdrawn_at: Optional[str] = None
+    withdrawn_by: Optional[str] = None
+    withdrawn_by_name: Optional[str] = None
+    withdrawn_reason: Optional[str] = None
+
+# Organisation Settings Models
+class OrgSettingsUpdate(BaseModel):
+    service_type: Optional[str] = None  # adults_only, children_only, mixed
+    organisation_name: Optional[str] = None
+
+class OrgSettingsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    service_type: str = "adults_only"  # Default to adults_only
+    organisation_name: str = "Osabea Healthcare Solutions"
+    created_at: str
+    updated_at: str
 
 # Training Record Models
 class TrainingRecordCreate(BaseModel):
@@ -4840,8 +4862,10 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     verification_percentage = int((verified_count / evidence_backed_count) * 100) if evidence_backed_count > 0 else 0
     
     # Fetch policies data for the employee - using policy_assignments collection
+    # Only count active assignments (not unassigned or withdrawn)
     assigned_policies = await db.policy_assignments.find({
-        "employee_id": employee_id
+        "employee_id": employee_id,
+        "status": {"$nin": ["unassigned", "withdrawn"]}
     }, {"_id": 0, "status": 1, "acknowledged_at": 1}).to_list(100)
     
     policies_assigned = len(assigned_policies)
@@ -5439,6 +5463,7 @@ async def get_policy_assignments(
     employee_id: Optional[str] = None,
     policy_id: Optional[str] = None,
     status: Optional[str] = None,
+    include_inactive: bool = False,
     user: dict = Depends(get_current_user)
 ):
     query = {}
@@ -5448,6 +5473,9 @@ async def get_policy_assignments(
         query["policy_id"] = policy_id
     if status:
         query["status"] = status
+    elif not include_inactive:
+        # By default, exclude unassigned and withdrawn
+        query["status"] = {"$nin": ["unassigned", "withdrawn"]}
     
     assignments = await db.policy_assignments.find(query, {"_id": 0}).to_list(1000)
     
@@ -5592,6 +5620,210 @@ async def admin_review_policy(assignment_id: str, user: dict = Depends(require_a
     
     updated = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return PolicyAssignmentResponse(**updated)
+
+
+class PolicyReversalRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+@api_router.put("/policy-assignments/{assignment_id}/unassign")
+async def unassign_policy(
+    assignment_id: str, 
+    request: PolicyReversalRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Unassign a policy BEFORE it has been acknowledged.
+    For policies not yet acknowledged, simply marks as unassigned.
+    """
+    assignment = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Can only unassign if not yet acknowledged
+    if assignment.get('status') in ['acknowledged', 'signed']:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cannot unassign acknowledged policy. Use 'Withdraw' action instead."
+        )
+    
+    if assignment.get('status') == 'unassigned':
+        raise HTTPException(status_code=400, detail="Policy is already unassigned")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Admin')) if user_doc else user.get('email', 'Admin')
+    
+    previous_status = assignment.get('status')
+    
+    update_data = {
+        "status": "unassigned",
+        "unassigned_at": now,
+        "unassigned_by": user['user_id'],
+        "unassigned_by_name": user_name,
+        "unassigned_reason": request.reason.strip() if request.reason else None
+    }
+    
+    await db.policy_assignments.update_one({"id": assignment_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'], 
+        "policy_unassigned", 
+        "policy_assignment", 
+        assignment_id, 
+        {
+            "policy_id": assignment['policy_id'],
+            "policy_title": assignment.get('policy_title'),
+            "policy_version": assignment.get('policy_version'),
+            "employee_id": assignment['employee_id'],
+            "employee_name": assignment.get('employee_name'),
+            "previous_status": previous_status,
+            "new_status": "unassigned",
+            "unassigned_by_name": user_name,
+            "reason": request.reason.strip() if request.reason else None
+        }
+    )
+    
+    updated = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return PolicyAssignmentResponse(**updated)
+
+
+@api_router.put("/policy-assignments/{assignment_id}/withdraw")
+async def withdraw_policy(
+    assignment_id: str, 
+    request: PolicyReversalRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Withdraw a policy AFTER it has been acknowledged.
+    Preserves the acknowledgement history but marks as withdrawn.
+    Only admins can withdraw acknowledged policies.
+    """
+    assignment = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Can only withdraw if acknowledged
+    if assignment.get('status') not in ['acknowledged', 'signed']:
+        raise HTTPException(
+            status_code=400, 
+            detail="Can only withdraw acknowledged policies. Use 'Unassign' for pending policies."
+        )
+    
+    if assignment.get('status') == 'withdrawn':
+        raise HTTPException(status_code=400, detail="Policy is already withdrawn")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
+    user_name = user_doc.get('name', user.get('email', 'Admin')) if user_doc else user.get('email', 'Admin')
+    
+    previous_status = assignment.get('status')
+    
+    update_data = {
+        "status": "withdrawn",
+        "withdrawn_at": now,
+        "withdrawn_by": user['user_id'],
+        "withdrawn_by_name": user_name,
+        "withdrawn_reason": request.reason.strip() if request.reason else None
+    }
+    
+    await db.policy_assignments.update_one({"id": assignment_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'], 
+        "policy_withdrawn", 
+        "policy_assignment", 
+        assignment_id, 
+        {
+            "policy_id": assignment['policy_id'],
+            "policy_title": assignment.get('policy_title'),
+            "policy_version": assignment.get('policy_version'),
+            "employee_id": assignment['employee_id'],
+            "employee_name": assignment.get('employee_name'),
+            "previous_status": previous_status,
+            "new_status": "withdrawn",
+            "acknowledged_at": assignment.get('acknowledged_at'),
+            "acknowledged_by": assignment.get('acknowledged_by_employee_name'),
+            "withdrawn_by_name": user_name,
+            "reason": request.reason.strip() if request.reason else None
+        }
+    )
+    
+    updated = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return PolicyAssignmentResponse(**updated)
+
+
+# ==================== ORGANISATION SETTINGS ====================
+
+@api_router.get("/org-settings")
+async def get_org_settings(user: dict = Depends(get_current_user)):
+    """Get organisation settings including service type"""
+    settings = await db.org_settings.find_one({}, {"_id": 0})
+    if not settings:
+        # Create default settings
+        now = datetime.now(timezone.utc).isoformat()
+        settings = {
+            "id": str(uuid.uuid4()),
+            "service_type": "adults_only",
+            "organisation_name": "Osabea Healthcare Solutions",
+            "created_at": now,
+            "updated_at": now
+        }
+        await db.org_settings.insert_one(settings)
+    return OrgSettingsResponse(**settings)
+
+
+@api_router.put("/org-settings")
+async def update_org_settings(
+    update_data: OrgSettingsUpdate,
+    user: dict = Depends(require_admin)
+):
+    """Update organisation settings"""
+    settings = await db.org_settings.find_one({}, {"_id": 0})
+    now = datetime.now(timezone.utc).isoformat()
+    
+    if not settings:
+        settings = {
+            "id": str(uuid.uuid4()),
+            "service_type": update_data.service_type or "adults_only",
+            "organisation_name": update_data.organisation_name or "Osabea Healthcare Solutions",
+            "created_at": now,
+            "updated_at": now
+        }
+        await db.org_settings.insert_one(settings)
+    else:
+        changes = {}
+        if update_data.service_type and update_data.service_type != settings.get('service_type'):
+            changes['service_type'] = {
+                'old': settings.get('service_type'),
+                'new': update_data.service_type
+            }
+        if update_data.organisation_name and update_data.organisation_name != settings.get('organisation_name'):
+            changes['organisation_name'] = {
+                'old': settings.get('organisation_name'),
+                'new': update_data.organisation_name
+            }
+        
+        update_fields = {"updated_at": now}
+        if update_data.service_type:
+            update_fields["service_type"] = update_data.service_type
+        if update_data.organisation_name:
+            update_fields["organisation_name"] = update_data.organisation_name
+        
+        await db.org_settings.update_one({}, {"$set": update_fields})
+        
+        if changes:
+            await log_audit_action(
+                user['user_id'],
+                "org_settings_updated",
+                "org_settings",
+                settings['id'],
+                changes
+            )
+    
+    updated = await db.org_settings.find_one({}, {"_id": 0})
+    return OrgSettingsResponse(**updated)
+
 
 # ==================== TRAINING ROUTES ====================
 
@@ -6559,16 +6791,18 @@ async def log_audit_action(user_id: str, action: str, entity_type: str, entity_i
 COMPLIANCE_AUDIT_ACTIONS = {
     # Document actions
     "upload_evidence", "document_uploaded", "document_replaced", "document_removed", "document_verified",
-    "verify_requirement", "unverify_requirement",
+    "verify_requirement", "unverify_requirement", "delete_evidence", "remove_evidence",
     # Policy actions
     "policy_assigned", "policy_viewed", "policy_acknowledged", "policy_admin_reviewed",
-    "policy_uploaded",
+    "policy_uploaded", "policy_unassigned", "policy_withdrawn",
     # Status changes
     "status_change", "refresh_status", "update_employee",
     # Form actions (if they generate evidence)
     "signoff_form", "complete_form",
     # Training
-    "upload_training_certificate", "verify_training"
+    "upload_training_certificate", "verify_training",
+    # Organisation settings
+    "org_settings_updated"
 }
 
 @api_router.get("/audit-logs")

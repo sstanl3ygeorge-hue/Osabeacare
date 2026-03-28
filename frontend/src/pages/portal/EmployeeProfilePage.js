@@ -140,7 +140,7 @@ export default function EmployeeProfilePage() {
   const [requirementHistory, setRequirementHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   
-  const { token, isAuditor, user } = useAuth();
+  const { token, isAuditor, isAdmin, user } = useAuth();
   
   // Document preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -598,8 +598,9 @@ export default function EmployeeProfilePage() {
       setSelectedFileForAction(null);
       setSelectedRequirementForAction(null);
       setRemoveReason('');
-      fetchData();
-      fetchCompliance();
+      // CRITICAL: await fetchData to ensure UI syncs immediately
+      await fetchData();
+      await fetchCompliance();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to remove file');
     } finally {
@@ -649,8 +650,9 @@ export default function EmployeeProfilePage() {
       setSelectedRequirementForAction(null);
       setReplaceReason('');
       setReplaceFile(null);
-      fetchData();
-      fetchCompliance();
+      // CRITICAL: await fetchData to ensure UI syncs immediately
+      await fetchData();
+      await fetchCompliance();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to replace file');
     } finally {
@@ -1327,7 +1329,10 @@ export default function EmployeeProfilePage() {
               <div className="flex items-center gap-3">
                 <div className="text-right">
                   <p className="text-sm text-text-muted">Compliance Score</p>
-                  <p className="text-3xl font-heading font-bold text-text-primary">{employee.completion_percentage}%</p>
+                  {/* Use single source of truth from complianceRequirements */}
+                  <p className="text-3xl font-heading font-bold text-text-primary">
+                    {complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0}%
+                  </p>
                 </div>
                 {!isAuditor() && (
                   <DropdownMenu>
@@ -1389,7 +1394,10 @@ export default function EmployeeProfilePage() {
                   </DropdownMenu>
                 )}
               </div>
-              <Progress value={employee.completion_percentage} className="w-32 h-2" />
+              <Progress 
+                value={complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0} 
+                className="w-32 h-2" 
+              />
             </div>
           </div>
 
@@ -3468,6 +3476,59 @@ export default function EmployeeProfilePage() {
                               >
                                 <Shield className="w-3 h-3 mr-1" />
                                 Reviewed and Approved
+                              </Button>
+                            )}
+                            
+                            {/* Unassign Button - only for unacknowledged policies (admin/manager only) */}
+                            {policy.status !== 'acknowledged' && policy.status !== 'signed' && 
+                             policy.status !== 'unassigned' && policy.status !== 'withdrawn' && 
+                             isAdmin() && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                                onClick={async () => {
+                                  if (!window.confirm('Remove this policy from the employee\'s active policy list?')) return;
+                                  try {
+                                    await axios.put(`${API}/policy-assignments/${policy.id}/unassign`, {}, {
+                                      headers: { Authorization: `Bearer ${token}` }
+                                    });
+                                    toast.success('Policy unassigned');
+                                    await fetchData();
+                                  } catch (error) {
+                                    toast.error(error.response?.data?.detail || 'Failed to unassign policy');
+                                  }
+                                }}
+                                data-testid={`unassign-policy-${policy.id}`}
+                              >
+                                <XCircle className="w-3 h-3 mr-1" />
+                                Unassign
+                              </Button>
+                            )}
+                            
+                            {/* Withdraw Button - only for acknowledged policies (admin only) */}
+                            {(policy.status === 'acknowledged' || policy.status === 'signed') && 
+                             policy.status !== 'withdrawn' && isAdmin() && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg text-xs border-red-300 text-red-700 hover:bg-red-50"
+                                onClick={async () => {
+                                  if (!window.confirm('Withdraw this policy? The acknowledgement history will be preserved for audit purposes.')) return;
+                                  try {
+                                    await axios.put(`${API}/policy-assignments/${policy.id}/withdraw`, {}, {
+                                      headers: { Authorization: `Bearer ${token}` }
+                                    });
+                                    toast.success('Policy assignment withdrawn');
+                                    await fetchData();
+                                  } catch (error) {
+                                    toast.error(error.response?.data?.detail || 'Failed to withdraw policy');
+                                  }
+                                }}
+                                data-testid={`withdraw-policy-${policy.id}`}
+                              >
+                                <RotateCcw className="w-3 h-3 mr-1" />
+                                Withdraw
                               </Button>
                             )}
                           </div>

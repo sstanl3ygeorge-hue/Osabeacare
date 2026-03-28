@@ -5480,7 +5480,20 @@ async def get_policy_file(policy_id: str, user: dict = Depends(get_current_user)
 
 @api_router.post("/policies/assign")
 async def assign_policies(assignment: PolicyAssignmentCreate, user: dict = Depends(require_admin)):
+    # Check both policies and org_policies collections (Compliance Centre uses org_policies)
     policy = await db.policies.find_one({"id": assignment.policy_id}, {"_id": 0})
+    if not policy:
+        # Try org_policies collection (used by Compliance Centre)
+        policy = await db.org_policies.find_one({"id": assignment.policy_id}, {"_id": 0})
+        if policy:
+            # Map org_policies fields to expected format
+            policy = {
+                "id": policy.get("id"),
+                "title": policy.get("name"),  # org_policies uses 'name', policies uses 'title'
+                "version": policy.get("version", "1.0"),
+                "file_url": policy.get("file_url")
+            }
+    
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     
@@ -5488,8 +5501,12 @@ async def assign_policies(assignment: PolicyAssignmentCreate, user: dict = Depen
     assignments = []
     
     for emp_id in assignment.employee_ids:
-        # Check if already assigned
-        existing = await db.policy_assignments.find_one({"policy_id": assignment.policy_id, "employee_id": emp_id})
+        # Check if already assigned (not unassigned or withdrawn)
+        existing = await db.policy_assignments.find_one({
+            "policy_id": assignment.policy_id, 
+            "employee_id": emp_id,
+            "status": {"$nin": ["unassigned", "withdrawn"]}
+        })
         if existing:
             continue
         

@@ -4,6 +4,15 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2026-03-28)
+**Policy System Simplification - COMPLETE**
+- REMOVED: Policy Assignments page (consolidated into Compliance Centre)
+- ADDED: "Assign to Employees" button on each policy row in Compliance Centre
+- ADDED: Assignment modal with multi-select employee list
+- UPDATED: Employee Policies tab uses Not Read/Acknowledged status
+- VALIDATION: Disabled Assign button if no document uploaded
+- MICROCOPY: Help text on all tabs (What's Needed, Documents, Policies)
+
+## Previous Updates (2026-03-28)
 **CQC-Ready Expiry System & Work Readiness Validation - COMPLETE**
 - Document expiry tracking per file (issue_date, expiry_date)
 - Dynamic expiry status: Valid (>30 days), Expiring Soon (<=30 days), Expired
@@ -11,7 +20,6 @@
 - Critical expiry override: RTW/DBS expired = Not Ready
 - Work readiness microcopy: Clear explanations for each status
 
-## Previous Updates (2026-03-28)
 **UI Language Standardization - COMPLETE**
 - Employee list columns simplified: Employee, Role, Work Status, File Status, Progress, Actions
 - Work Status labels standardized: Ready to Work, Supervised Start, Not Ready
@@ -32,7 +40,6 @@
 - Admin review functionality after employee acknowledgement
 - Signature information display with names and timestamps
 - Comprehensive audit logging with compliance filter
-- New Policy Assignments page in sidebar navigation
 
 ## Original Problem Statement
 Build a comprehensive compliance management portal for a UK care recruitment agency to:

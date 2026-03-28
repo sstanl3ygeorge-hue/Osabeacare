@@ -4,6 +4,14 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2026-03-28)
+**Critical Bug Fixes & Policy Reversal System - COMPLETE**
+- Fixed document removal sync (await fetchData for immediate UI update)
+- Fixed scoring inconsistency (single source of truth for compliance %)
+- Added Policy Unassign/Withdraw functionality with audit trail
+- Added Organisation Settings with service_type (adults_only/children_only/mixed)
+- All changes preserve audit history
+
+## Previous Update (2026-03-28)
 **Policy Acknowledgement & Document Verification System - COMPLETE**
 - Two-layer policy system (Org policies + Employee assignments)
 - Full acknowledgement workflow: Assigned → Viewed → Acknowledged
@@ -41,6 +49,11 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Admin Review Flow**:
   - "Reviewed and Approved" button (after employee acknowledges)
   - Stores: admin_id, admin_reviewed_at, admin_reviewed_by_name
+- [x] **Policy Unassign/Withdraw** (Completed 2026-03-28):
+  - Unassign: For pending policies (before acknowledgement)
+  - Withdraw: For acknowledged policies (preserves history)
+  - Both actions log to audit trail with reason
+  - Status transitions: assigned/viewed → unassigned OR acknowledged → withdrawn
 - [x] **Signature Information Display**:
   - Employee Acknowledgement section: Name + Date/Time
   - Admin Review section: Name + Date/Time
@@ -49,6 +62,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Stores: admin_id, verified_at, verified_by_name
 - [x] **Audit Logging**:
   - policy_assigned, policy_viewed, policy_acknowledged, policy_admin_reviewed
+  - policy_unassigned, policy_withdrawn
   - document_verified, document_uploaded, document_replaced
   - compliance_only filter for focused audit trail
 - [x] **Policy Assignments Page**:
@@ -58,6 +72,20 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Simple, Audit-Safe Design**:
   - Timestamps, identity, clarity, audit trail
   - No drawn signatures or complex PDF editing
+
+#### Document Control & Scoring Fixes (Completed 2026-03-28)
+- [x] **Document Removal Sync**:
+  - Fixed: await fetchData() after remove/replace actions
+  - UI syncs immediately across all tabs
+  - No stale data after document operations
+- [x] **Scoring Consistency**:
+  - Single source of truth: complianceRequirements.statuses.overall_compliance.percentage
+  - Top card, What's Needed, Overview all show same percentage
+  - Formula: (approved requirements / total requirements) * 100
+- [x] **Organisation Settings**:
+  - Service type: adults_only, children_only, mixed
+  - Endpoint: GET/PUT /api/org-settings
+  - Settings logged to audit trail on change
 
 #### Separated Status Model (Completed 2026-03-28)
 - [x] **Three Separate Status Types**:

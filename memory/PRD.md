@@ -450,7 +450,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - File Preview Reliability Fixes + Checklist Reordering
+2026-03-28 - File Management Controls (Replace/Remove/History) + File Preview Reliability Fixes
 
 ### Checklist Reordering by Audit Priority (Completed 2026-03-28)
 - [x] **Reorganized categories by real-world care audit priority**:
@@ -482,6 +482,34 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Profile photo now fetched via authenticated endpoint, not raw storage URL
   - Photos display immediately after upload refresh
   - Updated Dashboard, EmployeesPage, and EmployeeProfilePage to use EmployeeAvatar
+
+### Document Control & File Management (Completed 2026-03-28)
+- [x] **File Management Actions** - Every requirement with evidence now has:
+  - Edit Details (issue date, expiry date, notes, label)
+  - Replace File (marks old as superseded, uploads new)
+  - Remove File (soft-delete with mandatory reason)
+  - View History (full audit trail)
+- [x] **Soft-Delete Architecture**:
+  - Files are never permanently deleted
+  - Remove marks file as `status: "removed"` with removal_reason
+  - Replace marks old file as `status: "superseded"` with supersede_reason
+  - Only `active` files count for compliance scoring
+- [x] **Audit Trail (CQC-compliant)**:
+  - Every action logs: user_id, user_name, action_type, timestamp, mandatory reason
+  - Stored in `audit_logs` collection
+  - View History shows complete timeline per requirement
+- [x] **Safety Rules**:
+  - Requirements revert to "Still Needed" when all files removed
+  - Verification blocked if no active files exist
+- [x] **Backend Endpoints**:
+  - `POST /api/employees/{id}/requirements/{req_id}/evidence/{file_id}/remove` - Soft delete
+  - `POST /api/employees/{id}/requirements/{req_id}/evidence/{file_id}/replace` - Replace with audit
+  - `GET /api/employees/{id}/requirements/{req_id}/history` - Full audit trail
+- [x] **Frontend UI**:
+  - Three-dot dropdown menu on each requirement with evidence
+  - Remove dialog with mandatory reason textarea
+  - Replace dialog with file upload + reason
+  - History dialog with timeline view
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

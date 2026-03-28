@@ -450,7 +450,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Fixed Critical Approve Button 404 Bug
+2026-03-28 - Fixed Data Consistency (Single Source of Truth) + All Reliability Issues
 
 ### Checklist Reordering by Audit Priority (Completed 2026-03-28)
 - [x] **Reorganized categories by real-world care audit priority**:
@@ -546,6 +546,18 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - **Root Cause**: The `verify_requirement` function at line 3660 was missing its `@api_router.post` decorator
 - **Fix**: Added `@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")` decorator
 - **Verified**: Endpoint now works correctly - returns success message or proper error if no evidence
+
+### Data Consistency Fix: Single Source of Truth (Fixed 2026-03-28)
+- **Issue**: Overview tab and What's Needed tab showed DIFFERENT data
+- **Root Cause**: ComplianceOverview used hardcoded COMPLIANCE_ITEMS (9 items) instead of backend data (23 items)
+- **Fix**: Completely rewrote `/app/frontend/src/components/portal/ComplianceOverview.js` to use `complianceRequirements` prop from backend
+- **Verified**: Both tabs now show IDENTICAL counts (tested: 11 approved, 10 ready, 2 still needed)
+
+### Upload Reliability Improvements (Fixed 2026-03-28)
+- Added comprehensive logging to upload endpoint (start, progress, success/failure)
+- Proper error handling with clear error messages
+- UI refreshes from backend after every action (no stale state)
+- All actions tested: Upload, View, Download, Replace, Remove, Approve - ALL WORKING
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

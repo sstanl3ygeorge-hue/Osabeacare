@@ -4,6 +4,78 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**CQC-Aligned Compliance Centre Upgrade - COMPLETE**
+
+### Summary
+Upgraded the Compliance Centre to align with CQC audit expectations, adding comprehensive summary dashboards, review tracking, and staff compliance monitoring.
+
+### New Features
+
+#### 1. Compliance Summary Dashboard
+- **Overall Status Banner**: OK / Needs Attention / Critical
+- **4 Summary Cards**:
+  - Policies Active (X/Y)
+  - Certificates Valid (X/Y)
+  - Staff DBS Valid (X/Y)
+  - Training (12 months) (X/Y)
+- **Missing Items Panel**: Lists required policies and certificates not uploaded
+
+#### 2. Three-Section Split
+| Section | Contents |
+|---------|----------|
+| **Policies** | 32 CQC-aligned policies with REQUIRED/CONDITIONAL tags, review tracking |
+| **Certificates** | Insurance, Regulatory, Safety certificates with expiry tracking |
+| **Staff Compliance** | DBS Register, Training coverage, Staff list completeness |
+
+#### 3. Review Tracking for Policies
+Each policy now has:
+- `last_reviewed_at` - Last review date
+- `next_review_due` (review_date) - When review is due
+- `review_status`:
+  - **current** - No action needed
+  - **due_soon** - Review due within 30 days
+  - **overdue** - Past review date
+
+#### 4. Certificate Categories
+| Category | Items |
+|----------|-------|
+| **Insurance** | Public Liability, Employer's Liability, Professional Indemnity |
+| **Regulatory** | CQC Registration, ICO Registration, Company Registration |
+| **Safety** | Fire Safety, Electrical (EICR), Gas Safety, PAT Testing, Legionella, Food Hygiene |
+
+#### 5. Staff Compliance Tab
+- **DBS Register Status**: Valid/Missing/Expiring counts with progress bar
+- **Training (Last 12 Months)**: Staff training coverage percentage
+- **Staff List Completeness**: Total/Work Ready/Pending compliance
+
+### API Endpoints
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/compliance/centre-summary` | Full CQC compliance dashboard data |
+| `GET /api/compliance/policies` | Policies with review_status and assigned_staff_count |
+| `GET /api/compliance/insurance` | Certificates with category grouping |
+
+### Rules Followed
+- ✅ Existing policy upload logic unchanged
+- ✅ Assignment functionality intact
+- ✅ Employee compliance calculations unaffected
+- ✅ Organisation-level compliance only
+
+### Test Status
+| Test | Status |
+|------|--------|
+| Backend: centre-summary endpoint | ✅ PASS |
+| Backend: review_status computation | ✅ PASS |
+| Backend: certificate categories | ✅ PASS |
+| Frontend: CQC banner and cards | ✅ PASS |
+| Frontend: Missing items panel | ✅ PASS |
+| Frontend: Staff Compliance tab | ✅ PASS |
+| Frontend: Policy REQUIRED/CONDITIONAL tags | ✅ PASS |
+| Regression: Upload/Assignment | ✅ PASS |
+
+---
+
+## Previous Update (2025-12-28)
 **Care-Sector Structured Forms & Auto-Fill - COMPLETE**
 
 ### Summary

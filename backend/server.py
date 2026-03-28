@@ -2399,9 +2399,12 @@ async def upload_requirement_evidence(
     Upload evidence file for any requirement type.
     Supports multi-file: adds to existing evidence rather than replacing.
     """
+    logger.info(f"Upload started: employee={employee_id}, requirement={requirement_id}, file={file.filename}, size={file.size if hasattr(file, 'size') else 'unknown'}")
+    
     # Verify employee exists
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
+        logger.error(f"Upload failed: Employee not found {employee_id}")
         raise HTTPException(status_code=404, detail="Employee not found")
     
     # Get requirement definition
@@ -2409,6 +2412,7 @@ async def upload_requirement_evidence(
     requirement = next((item for item in all_items if item['id'] == requirement_id), None)
     
     if not requirement:
+        logger.error(f"Upload failed: Invalid requirement_id {requirement_id}")
         raise HTTPException(status_code=400, detail=f"Invalid requirement_id: {requirement_id}")
     
     now = datetime.now(timezone.utc).isoformat()
@@ -2421,8 +2425,14 @@ async def upload_requirement_evidence(
     storage_filename = f"{employee_name}_{req_slug}_{uuid.uuid4().hex[:8]}.{ext}"
     path = f"{APP_NAME}/evidence/{employee_id}/{requirement_id}/{storage_filename}"
     
-    data = await file.read()
-    result = put_object(path, data, file.content_type or "application/octet-stream")
+    try:
+        data = await file.read()
+        logger.info(f"Uploading to storage: path={path}, size={len(data)} bytes, type={file.content_type}")
+        result = put_object(path, data, file.content_type or "application/octet-stream")
+        logger.info(f"Storage upload successful: {result}")
+    except Exception as e:
+        logger.error(f"Storage upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
     
     # Get user name
     user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
@@ -2584,6 +2594,8 @@ async def upload_requirement_evidence(
     
     # Update employee compliance
     await update_employee_compliance(employee_id)
+    
+    logger.info(f"Upload completed successfully: employee={employee_id}, requirement={requirement_id}, file_id={file_id}")
     
     return {
         "success": True,

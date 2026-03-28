@@ -2,539 +2,258 @@ import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { 
-  Shield, ShieldCheck, ShieldAlert,
+  Shield, ShieldCheck, ShieldAlert, CheckCircle,
   GraduationCap, FileCheck, Fingerprint, BadgeCheck,
-  ClipboardCheck, Pill, Calendar, Upload, Eye
+  ClipboardCheck, Calendar, Upload, Eye, AlertTriangle,
+  FileText, Clock, XCircle
 } from 'lucide-react';
 
-// Define the key compliance items
-const COMPLIANCE_ITEMS = [
-  { 
-    id: 'safeguarding', 
-    name: 'Safeguarding Training', 
-    icon: Shield,
-    trainingType: 'safeguarding',
-    documentType: null,
-    roleRequired: null
-  },
-  { 
-    id: 'manual_handling', 
-    name: 'Manual Handling', 
-    icon: GraduationCap,
-    trainingType: 'manual_handling',
-    documentType: null,
-    roleRequired: null
-  },
-  { 
-    id: 'infection_control', 
-    name: 'Infection Control', 
-    icon: ShieldCheck,
-    trainingType: 'infection_control',
-    documentType: null,
-    roleRequired: null
-  },
-  { 
-    id: 'basic_life_support', 
-    name: 'Basic Life Support (BLS)', 
-    icon: ShieldAlert,
-    trainingType: 'basic_life_support',
-    documentType: null,
-    roleRequired: null
-  },
-  { 
-    id: 'medication', 
-    name: 'Medication Training', 
-    icon: Pill,
-    trainingType: 'medication',
-    documentType: null,
-    roleRequired: 'Nurse'
-  },
-  { 
-    id: 'dbs', 
-    name: 'DBS Check', 
-    icon: Fingerprint,
-    trainingType: null,
-    documentType: 'DBS',
-    roleRequired: null
-  },
-  { 
-    id: 'right_to_work', 
-    name: 'Right to Work', 
-    icon: BadgeCheck,
-    trainingType: null,
-    documentType: 'Right to Work',
-    roleRequired: null
-  },
-  { 
-    id: 'induction', 
-    name: 'Induction', 
-    icon: ClipboardCheck,
-    trainingType: 'induction',
-    documentType: null,
-    formTemplate: 'Induction',
-    roleRequired: null
-  },
-  { 
-    id: 'policies', 
-    name: 'Policies Acknowledgement', 
-    icon: FileCheck,
-    trainingType: null,
-    documentType: null,
-    policyBased: true,
-    roleRequired: null
-  }
-];
-
-// CARE-FOCUSED STATUS CONFIG - Supportive language for healthcare context
-const STATUS_CONFIG = {
-  verified: {
-    label: 'Checked & Approved',
-    bgColor: 'bg-success/10',
-    textColor: 'text-success',
-    borderColor: 'border-success/20',
-    dotColor: 'bg-success',
-    priority: 1
-  },
-  evidence_uploaded: {
-    label: 'Ready for Review',
-    bgColor: 'bg-info/10',
-    textColor: 'text-info',
-    borderColor: 'border-info/20',
-    dotColor: 'bg-info',
-    priority: 2
-  },
-  expired: {
-    label: 'Needs Updating',
-    bgColor: 'bg-warning/10',
-    textColor: 'text-warning',
-    borderColor: 'border-warning/20',
-    dotColor: 'bg-warning',
-    priority: 3
-  },
-  missing: {
-    label: 'Still Needed',
-    bgColor: 'bg-error/10',
-    textColor: 'text-error',
-    borderColor: 'border-error/20',
-    dotColor: 'bg-error',
-    priority: 4
-  },
-  not_applicable: {
-    label: 'N/A',
-    bgColor: 'bg-gray-100',
-    textColor: 'text-text-muted',
-    borderColor: 'border-gray-200',
-    dotColor: 'bg-gray-400',
-    priority: 5
-  }
-};
-
+/**
+ * ComplianceOverview - SINGLE SOURCE OF TRUTH
+ * 
+ * This component now uses complianceRequirements data directly from the backend.
+ * No more hardcoded items - ensures Overview and What's Needed show the same data.
+ */
 export default function ComplianceOverview({ 
   employee, 
   documents, 
   training, 
   policies,
   generatedForms,
-  complianceRequirements,  // Full requirements from backend
+  complianceRequirements,  // SINGLE SOURCE OF TRUTH from backend
   onCompleteTraining,
   isAuditor = false,
   className = "" 
 }) {
-  // Use backend complianceRequirements summary if available for accurate counts
-  const backendSummary = complianceRequirements?.summary;
-  
-  // Calculate compliance status for each item using AUDIT-READY logic
-  const complianceStatus = useMemo(() => {
-    const now = new Date();
-    
-    return COMPLIANCE_ITEMS.map(item => {
-      // Check if role-dependent item applies
-      if (item.roleRequired && employee?.role !== item.roleRequired) {
-        return {
-          ...item,
-          status: 'not_applicable',
-          expiryDate: null,
-          lastUpdated: null,
-          hasEvidence: false,
-          isVerified: false,
-          details: `Only for ${item.roleRequired}s`
-        };
-      }
-      
-      let status = 'missing';
-      let expiryDate = null;
-      let lastUpdated = null;
-      let hasEvidence = false;
-      let isVerified = false;
-      let details = null;
-      
-      // Check training records
-      if (item.trainingType) {
-        const searchTerms = [
-          item.trainingType.replace(/_/g, ' '),
-          item.trainingType.replace(/_/g, ''),
-          item.name.toLowerCase()
-        ];
-        
-        const trainingRecord = training.find(t => {
-          const trainingName = (t.training_name || '').toLowerCase();
-          const trainingType = (t.training_type || '').toLowerCase();
-          return searchTerms.some(term => {
-            const normalizedTerm = term.toLowerCase();
-            return trainingName.includes(normalizedTerm) || 
-                   normalizedTerm.includes(trainingName) ||
-                   trainingType.includes(normalizedTerm);
-          });
-        });
-        
-        if (trainingRecord) {
-          // Check if has certificate (evidence)
-          hasEvidence = !!trainingRecord.certificate_url;
-          isVerified = trainingRecord.verified === true;
-          expiryDate = trainingRecord.expiry_date;
-          lastUpdated = trainingRecord.completion_date || trainingRecord.updated_at;
-          
-          // Determine status based on evidence-first rules
-          if (expiryDate && new Date(expiryDate) < now) {
-            status = 'expired';
-            details = 'Expired - renewal required';
-          } else if (isVerified && hasEvidence) {
-            status = 'verified';
-          } else if (hasEvidence) {
-            status = 'evidence_uploaded';
-            details = 'Awaiting verification';
-          } else if (trainingRecord.status === 'completed') {
-            status = 'evidence_uploaded';
-            details = 'Certificate needed';
-          } else {
-            status = 'missing';
-          }
-        }
-      }
-      
-      // Check document types (DBS, Right to Work)
-      if (item.documentType) {
-        const doc = documents.find(d => 
-          d.document_type_name?.toLowerCase().includes(item.documentType.toLowerCase()) ||
-          d.category?.toLowerCase().includes(item.documentType.toLowerCase())
-        );
-        
-        if (doc) {
-          hasEvidence = !!doc.file_url;
-          isVerified = doc.status === 'approved' || doc.verified === true;
-          expiryDate = doc.expiry_date;
-          lastUpdated = doc.reviewed_at || doc.uploaded_at;
-          
-          // Determine status
-          if (expiryDate && new Date(expiryDate) < now) {
-            status = 'expired';
-            details = 'Document expired';
-          } else if (isVerified && hasEvidence) {
-            status = 'verified';
-          } else if (hasEvidence) {
-            status = 'evidence_uploaded';
-            details = 'Awaiting verification';
-          } else {
-            status = 'missing';
-          }
-        }
-      }
-      
-      // Check generated forms (for Induction)
-      if (item.formTemplate) {
-        const form = generatedForms?.find(f => 
-          f.template_name?.toLowerCase().includes(item.formTemplate.toLowerCase())
-        );
-        
-        if (form) {
-          hasEvidence = !!form.pdf_url;
-          isVerified = form.verified === true || form.status === 'signed_off';
-          lastUpdated = form.signed_off_at || form.updated_at;
-          
-          if (isVerified && hasEvidence) {
-            status = 'verified';
-          } else if (hasEvidence) {
-            status = 'evidence_uploaded';
-            details = 'Awaiting verification';
-          } else if (['completed', 'completed_imported', 'reviewed'].includes(form.status)) {
-            status = 'evidence_uploaded';
-            details = 'PDF needed';
-          } else {
-            status = 'missing';
-          }
-        }
-      }
-      
-      // Check policies acknowledgement
-      if (item.policyBased) {
-        const totalPolicies = policies?.length || 0;
-        const signedPolicies = policies?.filter(p => p.status === 'signed').length || 0;
-        
-        if (totalPolicies === 0) {
-          status = 'not_applicable';
-          details = 'No policies assigned';
-        } else {
-          hasEvidence = signedPolicies > 0;
-          isVerified = signedPolicies === totalPolicies;
-          
-          if (isVerified) {
-            status = 'verified';
-            details = `${signedPolicies}/${totalPolicies} signed`;
-          } else if (hasEvidence) {
-            status = 'evidence_uploaded';
-            details = `${signedPolicies}/${totalPolicies} signed`;
-          } else {
-            status = 'missing';
-            details = `0/${totalPolicies} signed`;
-          }
-          
-          if (policies?.length > 0) {
-            const lastSigned = policies.filter(p => p.status === 'signed')
-              .sort((a, b) => new Date(b.signed_at) - new Date(a.signed_at))[0];
-            lastUpdated = lastSigned?.signed_at;
-          }
-        }
-      }
-      
-      return {
-        ...item,
-        status,
-        expiryDate,
-        lastUpdated,
-        hasEvidence,
-        isVerified,
-        details
-      };
-    });
-  }, [employee, documents, training, policies, generatedForms]);
-  
-  // Calculate audit summary counts - USE BACKEND DATA if available for accuracy
+  // Use backend summary for accurate counts
   const summary = useMemo(() => {
-    // If we have backend complianceRequirements, use it for accurate counts
-    if (backendSummary) {
+    if (!complianceRequirements?.summary) {
       return {
-        total: backendSummary.total || 0,
-        verified: backendSummary.verified || 0,
-        evidence_uploaded: (backendSummary.completed || 0) - (backendSummary.verified || 0), // Ready for review
-        expired: 0, // TODO: Get from backend
-        missing: backendSummary.missing || 0
+        total: 0,
+        verified: 0,
+        completed: 0,
+        missing: 0,
+        readyForReview: 0
       };
     }
     
-    // Fallback to local calculation for backward compatibility
-    const applicable = complianceStatus.filter(c => c.status !== 'not_applicable');
+    const s = complianceRequirements.summary;
     return {
-      total: applicable.length,
-      verified: complianceStatus.filter(c => c.status === 'verified').length,
-      evidence_uploaded: complianceStatus.filter(c => c.status === 'evidence_uploaded').length,
-      expired: complianceStatus.filter(c => c.status === 'expired').length,
-      missing: complianceStatus.filter(c => c.status === 'missing').length
+      total: s.total || 0,
+      verified: s.verified || 0,
+      completed: s.completed || 0,
+      missing: s.missing || 0,
+      readyForReview: (s.completed || 0) - (s.verified || 0)
     };
-  }, [complianceStatus, backendSummary]);
+  }, [complianceRequirements?.summary]);
 
-  // Group items by status for audit view
-  const groupedItems = useMemo(() => {
-    return {
-      verified: complianceStatus.filter(c => c.status === 'verified'),
-      needs_verification: complianceStatus.filter(c => c.status === 'evidence_uploaded'),
-      missing: complianceStatus.filter(c => c.status === 'missing'),
-      expired: complianceStatus.filter(c => c.status === 'expired'),
-      not_applicable: complianceStatus.filter(c => c.status === 'not_applicable')
-    };
-  }, [complianceStatus]);
-  
-  const formatDate = (dateStr) => {
-    if (!dateStr) return null;
-    try {
-      return new Date(dateStr).toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      });
-    } catch {
-      return null;
-    }
+  // Group requirements by category from backend data
+  const categorizedRequirements = useMemo(() => {
+    if (!complianceRequirements?.requirements) return {};
+    
+    const grouped = {};
+    complianceRequirements.requirements.forEach(req => {
+      const category = req.category || 'Other';
+      if (!grouped[category]) {
+        grouped[category] = [];
+      }
+      grouped[category].push(req);
+    });
+    
+    return grouped;
+  }, [complianceRequirements?.requirements]);
+
+  // Category display names and order
+  const CATEGORY_DISPLAY = {
+    '1_Legal_Safety': { name: 'Legal & Safety', icon: Shield, color: 'text-red-600' },
+    '2_Core_Training': { name: 'Core Training', icon: GraduationCap, color: 'text-blue-600' },
+    '3_Role_Readiness': { name: 'Role Readiness', icon: ClipboardCheck, color: 'text-purple-600' },
+    '4_Employment': { name: 'Employment', icon: FileCheck, color: 'text-green-600' },
+    '5_Agreements': { name: 'Agreements', icon: BadgeCheck, color: 'text-amber-600' },
+    '6_Admin': { name: 'Admin / Other', icon: FileText, color: 'text-gray-600' }
   };
 
-  const renderItem = (item) => {
-    const config = STATUS_CONFIG[item.status];
-    const Icon = item.icon;
-    
+  const categoryOrder = ['1_Legal_Safety', '2_Core_Training', '3_Role_Readiness', '4_Employment', '5_Agreements', '6_Admin'];
+
+  // Get status badge for a requirement
+  const getStatusBadge = (req) => {
+    if (req.verified) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+          <CheckCircle className="h-3 w-3" />
+          Approved
+        </span>
+      );
+    }
+    if (req.has_evidence) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+          <Clock className="h-3 w-3" />
+          Ready for Review
+        </span>
+      );
+    }
     return (
-      <div 
-        key={item.id}
-        className={`flex items-center justify-between p-3 rounded-xl border ${config.bgColor} ${config.borderColor}`}
-        data-testid={`compliance-item-${item.id}`}
-      >
-        <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${config.bgColor}`}>
-            <Icon className={`h-4 w-4 ${config.textColor}`} />
-          </div>
-          <div>
-            <p className="font-medium text-text-primary text-sm">{item.name}</p>
-            {item.details && (
-              <p className={`text-xs ${config.textColor}`}>{item.details}</p>
-            )}
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          {/* Expiry date */}
-          {item.expiryDate && item.status !== 'not_applicable' && (
-            <div className="hidden sm:flex items-center gap-1 text-xs text-text-muted">
-              <Calendar className="h-3 w-3" />
-              <span>{formatDate(item.expiryDate)}</span>
-            </div>
-          )}
-          
-          {/* Action for missing training */}
-          {item.trainingType && item.status === 'missing' && !isAuditor && onCompleteTraining && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onCompleteTraining(item)}
-              className="text-xs h-7 rounded-lg"
-              data-testid={`upload-training-${item.id}`}
-            >
-              <Upload className="h-3 w-3 mr-1" />
-              Upload
-            </Button>
-          )}
-          
-          {/* Status Badge */}
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${config.bgColor} min-w-[90px] justify-center`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`}></span>
-            <span className={`text-xs font-medium ${config.textColor}`}>
-              {config.label}
-            </span>
-          </div>
-        </div>
-      </div>
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+        <AlertTriangle className="h-3 w-3" />
+        Still Needed
+      </span>
     );
   };
 
+  // Calculate category stats
+  const getCategoryStats = (categoryReqs) => {
+    if (!categoryReqs || categoryReqs.length === 0) return { approved: 0, ready: 0, missing: 0 };
+    
+    return {
+      approved: categoryReqs.filter(r => r.verified).length,
+      ready: categoryReqs.filter(r => r.has_evidence && !r.verified).length,
+      missing: categoryReqs.filter(r => !r.has_evidence).length
+    };
+  };
+
+  if (!complianceRequirements) {
+    return (
+      <Card className={`rounded-2xl border-0 shadow-sm ${className}`}>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-center h-32 text-text-muted">
+            Loading compliance data...
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className={`border-[#E4E8EB] shadow-sm ${className}`} data-testid="compliance-overview">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="font-heading text-lg flex items-center gap-2">
-            <Shield className="h-5 w-5 text-primary" />
-            Care Status
-          </CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {/* Care Status Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3 bg-success/10 border border-success/20 rounded-xl text-center">
-            <p className="text-2xl font-bold text-success">{summary.verified}</p>
-            <p className="text-xs text-success font-medium">Checked & Approved</p>
-          </div>
-          <div className="p-3 bg-info/10 border border-info/20 rounded-xl text-center">
-            <p className="text-2xl font-bold text-info">{summary.evidence_uploaded}</p>
-            <p className="text-xs text-info font-medium">Ready for Review</p>
-          </div>
-          <div className="p-3 bg-error/10 border border-error/20 rounded-xl text-center">
-            <p className="text-2xl font-bold text-error">{summary.missing}</p>
-            <p className="text-xs text-error font-medium">Still Needed</p>
-          </div>
-          <div className="p-3 bg-warning/10 border border-warning/20 rounded-xl text-center">
-            <p className="text-2xl font-bold text-warning">{summary.expired}</p>
-            <p className="text-xs text-warning font-medium">Needs Updating</p>
-          </div>
-        </div>
+    <div className={`space-y-6 ${className}`}>
+      {/* Summary Cards - SINGLE SOURCE OF TRUTH from backend */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="rounded-2xl border-0 shadow-sm bg-green-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-green-700 font-medium">Checked & Approved</p>
+                <p className="text-2xl font-bold text-green-800">{summary.verified}/{summary.total}</p>
+              </div>
+              <ShieldCheck className="h-8 w-8 text-green-600 opacity-70" />
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="rounded-2xl border-0 shadow-sm bg-amber-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-amber-700 font-medium">Ready for Review</p>
+                <p className="text-2xl font-bold text-amber-800">{summary.readyForReview}</p>
+              </div>
+              <Clock className="h-8 w-8 text-amber-600 opacity-70" />
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="rounded-2xl border-0 shadow-sm bg-gray-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-700 font-medium">Still Needed</p>
+                <p className="text-2xl font-bold text-gray-800">{summary.missing}</p>
+              </div>
+              <AlertTriangle className="h-8 w-8 text-gray-500 opacity-70" />
+            </div>
+          </CardContent>
+        </Card>
+        
+        <Card className="rounded-2xl border-0 shadow-sm bg-blue-50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-blue-700 font-medium">Policies Signed</p>
+                <p className="text-2xl font-bold text-blue-800">
+                  {policies?.filter(p => p.signed).length || 0}/{policies?.length || 0}
+                </p>
+              </div>
+              <BadgeCheck className="h-8 w-8 text-blue-600 opacity-70" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-        {/* Items grouped by status */}
-        <div className="space-y-4">
-          {/* Checked & Approved Items */}
-          {groupedItems.verified.length > 0 && (
-            <div>
-              <h4 className="text-sm font-medium text-success mb-2 flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                Checked & Approved ({groupedItems.verified.length})
-              </h4>
-              <div className="space-y-2">
-                {groupedItems.verified.map(renderItem)}
+      {/* Category Overview - Using backend data */}
+      <Card className="rounded-2xl border-0 shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="font-heading text-lg">Compliance by Category</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {categoryOrder.map(categoryKey => {
+            const categoryReqs = categorizedRequirements[categoryKey] || [];
+            if (categoryReqs.length === 0) return null;
+            
+            const categoryInfo = CATEGORY_DISPLAY[categoryKey] || { name: categoryKey, icon: FileText, color: 'text-gray-600' };
+            const CategoryIcon = categoryInfo.icon;
+            const stats = getCategoryStats(categoryReqs);
+            
+            return (
+              <div key={categoryKey} className="border rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <CategoryIcon className={`h-5 w-5 ${categoryInfo.color}`} />
+                    <span className="font-medium">{categoryInfo.name}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-green-600">{stats.approved} approved</span>
+                    <span className="text-amber-600">{stats.ready} ready</span>
+                    <span className="text-gray-500">{stats.missing} needed</span>
+                  </div>
+                </div>
+                
+                {/* Progress bar */}
+                <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full flex">
+                    <div 
+                      className="bg-green-500 h-full transition-all" 
+                      style={{ width: `${(stats.approved / categoryReqs.length) * 100}%` }}
+                    />
+                    <div 
+                      className="bg-amber-400 h-full transition-all" 
+                      style={{ width: `${(stats.ready / categoryReqs.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+                
+                {/* Requirement list - compact */}
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {categoryReqs.map(req => (
+                    <div key={req.id} className="flex items-center justify-between py-1 px-2 bg-gray-50 rounded-lg text-sm">
+                      <span className="truncate flex-1">{req.name}</span>
+                      {getStatusBadge(req)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {/* Quick Actions */}
+      {!isAuditor && summary.missing > 0 && (
+        <Card className="rounded-2xl border-0 shadow-sm bg-amber-50 border-amber-200">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              <div className="flex-1">
+                <p className="font-medium text-amber-800">
+                  {summary.missing} requirement{summary.missing !== 1 ? 's' : ''} still needed
+                </p>
+                <p className="text-sm text-amber-700">
+                  Use the "What's Needed" tab to upload documents and complete requirements.
+                </p>
               </div>
             </div>
-          )}
-
-          {/* Ready for Review Items */}
-          {groupedItems.needs_verification.length > 0 && (
-            <div>
-              <h4 className="text-sm font-medium text-info mb-2 flex items-center gap-2">
-                <Eye className="h-4 w-4" />
-                Ready for Review ({groupedItems.needs_verification.length})
-              </h4>
-              <div className="space-y-2">
-                {groupedItems.needs_verification.map(renderItem)}
-              </div>
-            </div>
-          )}
-
-          {/* Still Needed Items */}
-          {groupedItems.missing.length > 0 && (
-            <div>
-              <h4 className="text-sm font-medium text-error mb-2 flex items-center gap-2">
-                <Upload className="h-4 w-4" />
-                Still Needed ({groupedItems.missing.length})
-              </h4>
-              <div className="space-y-2">
-                {groupedItems.missing.map(renderItem)}
-              </div>
-            </div>
-          )}
-
-          {/* Needs Updating Items */}
-          {groupedItems.expired.length > 0 && (
-            <div>
-              <h4 className="text-sm font-medium text-warning mb-2 flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                Needs Updating ({groupedItems.expired.length})
-              </h4>
-              <div className="space-y-2">
-                {groupedItems.expired.map(renderItem)}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Progress Bar */}
-        <div className="pt-4 border-t border-[#E4E8EB]">
-          <div className="flex items-center justify-between text-sm mb-2">
-            <span className="text-text-muted">Profile Progress</span>
-            <span className="font-medium text-text-primary">
-              {summary.verified}/{summary.total} approved
-            </span>
-          </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex">
-            {summary.verified > 0 && (
-              <div 
-                className="h-full bg-success"
-                style={{ width: `${(summary.verified / summary.total) * 100}%` }}
-              />
-            )}
-            {summary.evidence_uploaded > 0 && (
-              <div 
-                className="h-full bg-info"
-                style={{ width: `${(summary.evidence_uploaded / summary.total) * 100}%` }}
-              />
-            )}
-            {summary.expired > 0 && (
-              <div 
-                className="h-full bg-warning"
-                style={{ width: `${(summary.expired / summary.total) * 100}%` }}
-              />
-            )}
-            {summary.missing > 0 && (
-              <div 
-                className="h-full bg-error"
-                style={{ width: `${(summary.missing / summary.total) * 100}%` }}
-              />
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }

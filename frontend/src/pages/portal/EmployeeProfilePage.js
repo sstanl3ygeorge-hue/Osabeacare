@@ -388,7 +388,7 @@ export default function EmployeeProfilePage() {
   const handleUploadDocument = async (e) => {
     e.preventDefault();
     if (!selectedRequirement || !uploadFile) {
-      toast.error('Please select a requirement and file');
+      toast.error('Please select a requirement and choose a file to upload');
       return;
     }
     
@@ -409,7 +409,11 @@ export default function EmployeeProfilePage() {
         }
       });
       
-      toast.success('Evidence uploaded successfully');
+      // POST-UPLOAD FEEDBACK - Clear guidance on next step
+      toast.success('Document uploaded — please review and approve', {
+        duration: 5000,
+        description: 'Check the document is clear and correct, then mark as approved.'
+      });
       setUploadDialogOpen(false);
       setSelectedRequirement('');
       setSelectedDocType('');
@@ -418,7 +422,7 @@ export default function EmployeeProfilePage() {
       fetchData();
       fetchCompliance();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to upload evidence');
+      toast.error(error.response?.data?.detail || 'Upload failed — please try again');
     } finally {
       setIsUploading(false);
     }
@@ -2341,11 +2345,69 @@ export default function EmployeeProfilePage() {
               {complianceRequirements && complianceRequirements.summary.missing > 0 && (
                 <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
                   <AlertTriangle className="h-4 w-4" />
-                  {complianceRequirements.summary.missing} missing
+                  {complianceRequirements.summary.missing} still needed
                 </div>
               )}
             </CardHeader>
             <CardContent>
+              {/* GLOBAL INSTRUCTION PANEL - CQC Guidance */}
+              <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+                <h3 className="font-semibold text-blue-900 mb-2">Getting an Employee Ready</h3>
+                <p className="text-sm text-blue-800 mb-3">Complete each item below to get this employee ready.</p>
+                <div className="text-sm text-blue-700 space-y-1">
+                  <p>Start at the top and work down the list.</p>
+                  <p className="font-medium">For each item:</p>
+                  <ul className="list-disc list-inside ml-2 space-y-0.5">
+                    <li>Upload the document</li>
+                    <li>Check it is clear and correct</li>
+                    <li>Mark as "Checked & Approved"</li>
+                  </ul>
+                  <p className="mt-2 text-blue-600">You can stop and return at any time — progress is saved automatically.</p>
+                </div>
+              </div>
+
+              {/* NEXT STEP HELPER - Shows what to do next */}
+              {complianceRequirements && complianceRequirements.summary.missing > 0 && (
+                <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-amber-900">Next Step</h4>
+                      <p className="text-sm text-amber-800 mt-1">
+                        Complete the next item marked "Still Needed" at the top of the list.
+                      </p>
+                      <p className="text-sm text-amber-700 mt-1">
+                        Once uploaded, review and approve before moving on.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SUCCESS STATE - All complete */}
+              {complianceRequirements && complianceRequirements.summary.missing === 0 && complianceRequirements.summary.completed === complianceRequirements.summary.verified && (
+                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                    </div>
+                    <div>
+                      <h4 className="font-semibold text-green-900">All Complete</h4>
+                      <p className="text-sm text-green-800 mt-1">
+                        This employee's compliance requirements are all checked and approved.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB CLARITY MESSAGE */}
+              <p className="text-xs text-text-muted mb-4 px-1">
+                Use "What's Needed" to complete compliance. Other tabs show records and history.
+              </p>
+
               {!complianceRequirements ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -2363,6 +2425,29 @@ export default function EmployeeProfilePage() {
                       "4_Employment": "Employment",
                       "5_Agreements": "Agreements",
                       "6_Admin": "Admin / Other"
+                    };
+                    
+                    // REQUIREMENT MICROCOPY - Helper text for each requirement
+                    const REQUIREMENT_HELP = {
+                      "right_to_work_documents": "Upload visa, passport, or share code proof",
+                      "right_to_work_check": "Upload share code verification or check confirmation",
+                      "identity_documents": "Upload passport or driving licence (photo or scan)",
+                      "dbs_certificate": "Upload DBS certificate (front page with reference number)",
+                      "dbs_check": "Upload DBS update service check confirmation",
+                      "safeguarding_training": "Upload training certificate or proof of completion",
+                      "manual_handling_training": "Upload training certificate or proof of completion",
+                      "infection_control_training": "Upload training certificate or proof of completion",
+                      "basic_life_support_training": "Upload BLS certificate or proof of completion",
+                      "fire_safety_training": "Upload training certificate or proof of completion",
+                      "health_safety_training": "Upload training certificate or proof of completion",
+                      "health_questionnaire": "Complete and upload health questionnaire",
+                      "induction_completed": "Upload signed induction checklist or confirmation",
+                      "references": "Upload reference letter or confirmation email",
+                      "employment_contract": "Upload signed employment contract",
+                      "job_application": "Upload original job application form",
+                      "interview_record": "Upload interview notes or assessment form",
+                      "employee_handbook": "Confirm employee has received and read handbook",
+                      "policies_signed": "Upload signed policy acknowledgement forms"
                     };
                     
                     // Priority order
@@ -2394,6 +2479,9 @@ export default function EmployeeProfilePage() {
                           </div>
                           <div className="space-y-2">
                             {categoryItems.map((req) => {
+                              // Get microcopy for this requirement
+                              const helpText = REQUIREMENT_HELP[req.id] || req.description || "";
+                              
                               // Use new evidence_files array if available, fallback to documents
                               const allEvidenceFiles = req.evidence_files || [];
                               // Filter to only show active files (exclude removed/superseded)
@@ -2454,9 +2542,16 @@ export default function EmployeeProfilePage() {
                                     )}
                                   </div>
                                   
-                                  {/* Description - only show when no evidence */}
-                                  {req.description && !hasEvidence && (
-                                    <p className="text-xs text-text-muted mt-0.5">{req.description}</p>
+                                  {/* MICROCOPY HELPER TEXT - Shows guidance for each requirement */}
+                                  {helpText && !hasEvidence && (
+                                    <p className="text-xs text-text-muted mt-0.5">{helpText}</p>
+                                  )}
+                                  
+                                  {/* Multi-file guidance - only show when no evidence */}
+                                  {!hasEvidence && (
+                                    <p className="text-[10px] text-text-muted/70 mt-1">
+                                      You can upload more than one file if needed (e.g. front and back)
+                                    </p>
                                   )}
                                   
                                   {/* Evidence files list - compact with status indicators */}
@@ -2562,7 +2657,7 @@ export default function EmployeeProfilePage() {
                                         data-testid={`upload-evidence-${req.id}`}
                                       >
                                         <Upload className="h-3 w-3 mr-1" />
-                                        Add Document
+                                        Upload Document
                                       </Button>
                                     ) : req.allow_multiple_files ? (
                                       <Button 
@@ -2580,7 +2675,7 @@ export default function EmployeeProfilePage() {
                                         data-testid={`add-file-${req.id}`}
                                       >
                                         <Upload className="h-3 w-3 mr-1" />
-                                        Add File
+                                        Add Another File
                                       </Button>
                                     ) : null}
                                   </>
@@ -2653,18 +2748,19 @@ export default function EmployeeProfilePage() {
                                           {},
                                           { headers: { Authorization: `Bearer ${token}` } }
                                         );
-                                        toast.success(`${req.name} approved`);
+                                        toast.success(`${req.name} marked as Checked & Approved`);
                                         fetchData();
+                                        fetchCompliance();
                                       } catch (e) {
-                                        toast.error(e.response?.data?.detail || 'Approval failed');
+                                        toast.error(e.response?.data?.detail || 'Could not approve - please try again');
                                       }
                                     }}
                                     className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
                                     data-testid={`verify-${req.id}`}
-                                    title="Approve this document"
+                                    title="Mark as Checked & Approved"
                                   >
                                     <Shield className="h-3 w-3 mr-1" />
-                                    Approve
+                                    Mark as Approved
                                   </Button>
                                 )}
                                 
@@ -3761,7 +3857,7 @@ export default function EmployeeProfilePage() {
               Replace File
             </DialogTitle>
             <DialogDescription>
-              Upload a new file to replace the existing one. The old file will be marked as "superseded" and kept in history.
+              Uploading a new file will replace the existing one. The old file will be kept in history for audit purposes.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -3776,20 +3872,21 @@ export default function EmployeeProfilePage() {
               <Input
                 id="replace-file"
                 type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
                 onChange={(e) => setReplaceFile(e.target.files?.[0] || null)}
                 className="cursor-pointer"
               />
+              <p className="text-xs text-muted-foreground">Upload PDF or photo (JPG, PNG)</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="replace-reason">Reason for replacement <span className="text-error">*</span></Label>
               <Textarea
                 id="replace-reason"
-                placeholder="Enter the reason for replacing this file (required for audit trail)"
+                placeholder="Why is this file being replaced? (e.g. clearer scan, updated document)"
                 value={replaceReason}
                 onChange={(e) => setReplaceReason(e.target.value)}
-                className="min-h-[100px]"
+                className="min-h-[80px]"
               />
-              <p className="text-xs text-muted-foreground">This reason will be recorded in the audit trail.</p>
             </div>
           </div>
           <DialogFooter>

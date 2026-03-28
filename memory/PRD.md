@@ -450,7 +450,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Fixed Data Consistency (Single Source of Truth) + All Reliability Issues
+2026-03-28 - CQC Audit Readiness: User Guidance & Microcopy Overhaul
 
 ### Checklist Reordering by Audit Priority (Completed 2026-03-28)
 - [x] **Reorganized categories by real-world care audit priority**:
@@ -558,6 +558,46 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Proper error handling with clear error messages
 - UI refreshes from backend after every action (no stale state)
 - All actions tested: Upload, View, Download, Replace, Remove, Approve - ALL WORKING
+
+### CQC Audit Readiness: User Guidance & Microcopy (Completed 2026-03-28)
+**Goal:** Make system impossible to misuse by non-technical care staff
+
+**1. Global Instruction Panel** - Added at top of "What's Needed":
+- "Getting an Employee Ready" heading
+- Step-by-step instructions: Upload → Check → Mark as Approved
+- "You can stop and return at any time — progress is saved automatically"
+
+**2. Next Step Guidance** - Persistent helper panel:
+- Shows when items still needed
+- "Complete the next item marked 'Still Needed' at the top of the list"
+- "Once uploaded, review and approve before moving on"
+
+**3. Standardized Status Labels** - Only these 3 allowed:
+- Still Needed (red)
+- Ready for Review (amber)
+- Checked & Approved (green)
+
+**4. Requirement Microcopy** - Helper text for each requirement:
+- Right to Work: "Upload visa, passport, or share code proof"
+- ID Documents: "Upload passport or driving licence (photo or scan)"
+- DBS: "Upload DBS certificate (front page with reference number)"
+- Training: "Upload training certificate or proof of completion"
+
+**5. Clear Button Text**:
+- "Upload Document" (not "Add Document")
+- "Mark as Approved" (not just "Approve")
+- "Add Another File" (for multi-file requirements)
+
+**6. Multi-file Guidance**:
+- "You can upload more than one file if needed (e.g. front and back)"
+
+**7. Post-Upload Feedback**:
+- "Document uploaded — please review and approve"
+
+**8. Tab Clarity Message**:
+- "Use 'What's Needed' to complete compliance. Other tabs show records and history."
+
+**Design Principle:** "Follow the list. Everything gets done."
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

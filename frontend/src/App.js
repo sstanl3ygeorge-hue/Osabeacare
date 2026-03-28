@@ -25,6 +25,7 @@ import DocumentsPage from "./pages/portal/DocumentsPage";
 // DocumentsPage kept for backward compatibility but route disabled
 import TrainingPage from "./pages/portal/TrainingPage";
 import AuditViewPage from "./pages/portal/AuditViewPage";
+import DBSRegisterPage from "./pages/portal/DBSRegisterPage";
 import SettingsPage from "./pages/portal/SettingsPage";
 import TemplatesPage from "./pages/portal/TemplatesPage";
 import FormEditorPage from "./pages/portal/FormEditorPage";
@@ -73,6 +74,7 @@ function AppRouter() {
         {/* Policies route removed - policy management consolidated in Compliance Centre */}
         {/* <Route path="policies" element={<PoliciesPage />} /> */}
         <Route path="training" element={<TrainingPage />} />
+        <Route path="dbs-register" element={<DBSRegisterPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="compliance-centre" element={<ComplianceCentrePage />} />
         <Route path="forms/:formId" element={<FormEditorPage />} />

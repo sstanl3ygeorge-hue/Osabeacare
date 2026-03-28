@@ -1365,6 +1365,156 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
         "verification_percentage": verification_percentage
     }
 
+
+async def get_employee_dbs_summary(employee_id: str) -> dict:
+    """
+    SINGLE SOURCE OF TRUTH for DBS status across all views.
+    
+    Derives DBS summary from existing evidence:
+    - DBS Certificate (requirement_id: dbs_certificate)
+    - DBS Update Service Check (requirement_id: dbs_check)
+    
+    Returns computed status, dates, and review schedule.
+    """
+    DBS_REVIEW_INTERVAL_DAYS = 365  # 12 months for DBS Update Service checks
+    
+    # Initialize summary
+    summary = {
+        "dbs_status": "missing",
+        "dbs_status_label": "Missing",
+        "dbs_status_color": "red",
+        "last_dbs_check_date": None,
+        "next_dbs_review_due": None,
+        "days_until_review": None,
+        "certificate_on_file": False,
+        "certificate_verified": False,
+        "certificate_date": None,
+        "update_service_active": False,
+        "update_service_verified": False,
+        "update_service_date": None,
+        "needs_attention": False
+    }
+    
+    # Get DBS Certificate record (most recent active)
+    dbs_cert = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "requirement_id": "dbs_certificate",
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "$or": [
+            {"active": {"$exists": False}},
+            {"active": True}
+        ],
+        "file_url": {"$exists": True, "$ne": None}
+    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+    
+    # Get DBS Update Service Check record (most recent active)
+    dbs_update = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "requirement_id": "dbs_check",
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "$or": [
+            {"active": {"$exists": False}},
+            {"active": True}
+        ],
+        "file_url": {"$exists": True, "$ne": None}
+    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+    
+    now = datetime.now(timezone.utc)
+    
+    # Process DBS Certificate
+    if dbs_cert:
+        summary["certificate_on_file"] = True
+        summary["certificate_verified"] = dbs_cert.get("verified", False)
+        
+        # Use uploaded_at as the certificate date
+        cert_date = dbs_cert.get("uploaded_at") or dbs_cert.get("issue_date")
+        if cert_date:
+            if isinstance(cert_date, str):
+                try:
+                    cert_date = datetime.fromisoformat(cert_date.replace('Z', '+00:00'))
+                except:
+                    cert_date = None
+            if cert_date:
+                summary["certificate_date"] = cert_date.isoformat()
+    
+    # Process DBS Update Service Check
+    if dbs_update:
+        summary["update_service_active"] = True
+        summary["update_service_verified"] = dbs_update.get("verified", False)
+        
+        # Use uploaded_at or issue_date as the check date
+        check_date = dbs_update.get("uploaded_at") or dbs_update.get("issue_date")
+        if isinstance(check_date, str):
+            try:
+                check_date = datetime.fromisoformat(check_date.replace('Z', '+00:00'))
+            except:
+                check_date = None
+        
+        if check_date:
+            summary["update_service_date"] = check_date.isoformat()
+            summary["last_dbs_check_date"] = check_date.isoformat()
+            
+            # Calculate next review due (12 months from last check)
+            next_review = check_date + timedelta(days=DBS_REVIEW_INTERVAL_DAYS)
+            summary["next_dbs_review_due"] = next_review.isoformat()
+            
+            # Calculate days until review
+            days_until = (next_review - now).days
+            summary["days_until_review"] = days_until
+    
+    # Determine overall DBS status
+    if summary["update_service_active"] and summary["update_service_verified"]:
+        # Update Service is the gold standard
+        days_until = summary["days_until_review"]
+        if days_until is not None:
+            if days_until < 0:
+                summary["dbs_status"] = "review_overdue"
+                summary["dbs_status_label"] = "Review Overdue"
+                summary["dbs_status_color"] = "red"
+                summary["needs_attention"] = True
+            elif days_until <= 30:
+                summary["dbs_status"] = "review_due_soon"
+                summary["dbs_status_label"] = f"Review Due in {days_until}d"
+                summary["dbs_status_color"] = "amber"
+                summary["needs_attention"] = True
+            else:
+                summary["dbs_status"] = "current"
+                summary["dbs_status_label"] = "Current"
+                summary["dbs_status_color"] = "green"
+        else:
+            summary["dbs_status"] = "current"
+            summary["dbs_status_label"] = "Current"
+            summary["dbs_status_color"] = "green"
+    elif summary["update_service_active"]:
+        # Has update service but not verified
+        summary["dbs_status"] = "pending_verification"
+        summary["dbs_status_label"] = "Pending Verification"
+        summary["dbs_status_color"] = "blue"
+        summary["needs_attention"] = True
+    elif summary["certificate_on_file"] and summary["certificate_verified"]:
+        # Has certificate only (no update service)
+        summary["dbs_status"] = "certificate_only"
+        summary["dbs_status_label"] = "Certificate Only"
+        summary["dbs_status_color"] = "amber"
+        # Use certificate date as last check for display purposes
+        if summary["certificate_date"]:
+            summary["last_dbs_check_date"] = summary["certificate_date"]
+    elif summary["certificate_on_file"]:
+        # Has certificate but not verified
+        summary["dbs_status"] = "pending_verification"
+        summary["dbs_status_label"] = "Pending Verification"
+        summary["dbs_status_color"] = "blue"
+        summary["needs_attention"] = True
+    else:
+        # No DBS evidence at all
+        summary["dbs_status"] = "missing"
+        summary["dbs_status_label"] = "Missing"
+        summary["dbs_status_color"] = "red"
+        summary["needs_attention"] = True
+    
+    return summary
+
+
 async def derive_onboarding_status(employee_id: str, role: str, current_status: str = None) -> str:
     """Auto-derive onboarding status based on compliance progress"""
     # Don't change archived status
@@ -2296,6 +2446,66 @@ async def get_onboarding_statuses(user: dict = Depends(get_current_user)):
         OnboardingStatus.ACTIVE,
         OnboardingStatus.ARCHIVED
     ]
+
+
+@api_router.get("/dbs-register")
+async def get_dbs_register(
+    status_filter: Optional[str] = None,
+    needs_attention: bool = False,
+    user: dict = Depends(get_current_user)
+):
+    """
+    DBS Register - Single source of truth for DBS status across all employees.
+    Uses get_employee_dbs_summary() to compute all values.
+    """
+    # Get all non-archived employees
+    employees = await db.employees.find(
+        {"status": {"$ne": EmployeeStatus.ARCHIVED}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "email": 1}
+    ).to_list(1000)
+    
+    register = []
+    for emp in employees:
+        # Use the SINGLE computed DBS summary function
+        dbs_summary = await get_employee_dbs_summary(emp["id"])
+        
+        # Apply filters
+        if status_filter and dbs_summary["dbs_status"] != status_filter:
+            continue
+        if needs_attention and not dbs_summary["needs_attention"]:
+            continue
+        
+        register.append({
+            "employee_id": emp["id"],
+            "employee_name": f"{emp['first_name']} {emp['last_name']}",
+            "role": emp.get("role", ""),
+            "email": emp.get("email", ""),
+            **dbs_summary
+        })
+    
+    # Sort: needs_attention first, then by next_dbs_review_due
+    register.sort(key=lambda x: (
+        not x["needs_attention"],  # needs_attention=True first
+        x["next_dbs_review_due"] or "9999"  # earliest review due first
+    ))
+    
+    # Summary stats
+    stats = {
+        "total": len(register),
+        "current": len([r for r in register if r["dbs_status"] == "current"]),
+        "certificate_only": len([r for r in register if r["dbs_status"] == "certificate_only"]),
+        "pending_verification": len([r for r in register if r["dbs_status"] == "pending_verification"]),
+        "review_due_soon": len([r for r in register if r["dbs_status"] == "review_due_soon"]),
+        "review_overdue": len([r for r in register if r["dbs_status"] == "review_overdue"]),
+        "missing": len([r for r in register if r["dbs_status"] == "missing"]),
+        "needs_attention": len([r for r in register if r["needs_attention"]])
+    }
+    
+    return {
+        "register": register,
+        "stats": stats
+    }
+
 
 @api_router.get("/employees/{employee_id}", response_model=EmployeeResponse)
 async def get_employee(employee_id: str, user: dict = Depends(get_current_user)):
@@ -5582,7 +5792,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "expiring_soon_count": len(expiring_soon_items),
             "expired_count": len(expired_items),
             "has_alerts": len(expiring_soon_items) > 0 or len(expired_items) > 0
-        }
+        },
+        # DBS Summary - computed from single source
+        "dbs_summary": await get_employee_dbs_summary(employee_id)
     }
 
 @api_router.post("/employees/{employee_id}/upload-document")

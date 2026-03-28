@@ -13,7 +13,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield
 } from 'lucide-react';
 
 const navigation = [
@@ -24,6 +24,7 @@ const navigation = [
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
   // Policy Assignments removed - consolidated into Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
+  { name: 'DBS Register', href: '/portal/dbs-register', icon: Shield },
   { name: 'Audit View', href: '/portal/audit', icon: History },
   { name: 'Settings', href: '/portal/settings', icon: Settings },
 ];

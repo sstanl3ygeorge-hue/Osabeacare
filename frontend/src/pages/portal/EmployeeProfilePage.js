@@ -1515,25 +1515,13 @@ export default function EmployeeProfilePage() {
             // Extract key compliance data for audit visibility
             const reqs = complianceRequirements?.requirements || [];
             
-            // DBS Status
-            const dbsReq = reqs.find(r => r.id === 'dbs_certificate' || r.id === 'dbs_check');
-            const dbsUpdateReq = reqs.find(r => r.id === 'dbs_update_service');
-            const dbsHasEvidence = dbsReq?.has_evidence || false;
-            const dbsVerified = dbsReq?.is_verified || false;
-            const dbsExpiry = dbsReq?.expiry_date;
-            const dbsExpiryStatus = dbsExpiry ? (() => {
-              const now = new Date();
-              const exp = new Date(dbsExpiry);
-              const days = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
-              if (days < 0) return { status: 'expired', label: 'Expired', color: 'red' };
-              if (days <= 30) return { status: 'expiring', label: `${days}d left`, color: 'amber' };
-              return { status: 'valid', label: 'Valid', color: 'green' };
-            })() : null;
-            
             // RTW Status
             const rtwReq = reqs.find(r => r.id === 'right_to_work_documents' || r.id === 'right_to_work_check');
             const rtwHasEvidence = rtwReq?.has_evidence || false;
             const rtwVerified = rtwReq?.is_verified || false;
+            
+            // DBS Summary - USE COMPUTED DATA FROM API (single source of truth)
+            const dbsSummary = complianceRequirements?.dbs_summary || {};
             
             // Training Status (from training array)
             const completedTraining = training.filter(t => t.status === 'completed').length;
@@ -1558,35 +1546,30 @@ export default function EmployeeProfilePage() {
                 
                 {/* Quick Status Cards */}
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="audit-quick-view">
-                  {/* DBS Status */}
+                  {/* DBS Status - Uses computed dbs_summary from API */}
                   <div className={`p-3 rounded-xl border ${
-                    !dbsHasEvidence ? 'border-red-200 bg-red-50' :
-                    dbsExpiryStatus?.status === 'expired' ? 'border-red-200 bg-red-50' :
-                    dbsExpiryStatus?.status === 'expiring' ? 'border-amber-200 bg-amber-50' :
-                    dbsVerified ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
+                    dbsSummary.dbs_status_color === 'red' ? 'border-red-200 bg-red-50' :
+                    dbsSummary.dbs_status_color === 'amber' ? 'border-amber-200 bg-amber-50' :
+                    dbsSummary.dbs_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
                   }`} data-testid="dbs-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <Shield className={`h-4 w-4 ${
-                        !dbsHasEvidence || dbsExpiryStatus?.status === 'expired' ? 'text-red-600' :
-                        dbsExpiryStatus?.status === 'expiring' ? 'text-amber-600' :
-                        dbsVerified ? 'text-green-600' : 'text-blue-600'
+                        dbsSummary.dbs_status_color === 'red' ? 'text-red-600' :
+                        dbsSummary.dbs_status_color === 'amber' ? 'text-amber-600' :
+                        dbsSummary.dbs_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">DBS</span>
                     </div>
                     <p className={`text-sm font-medium ${
-                      !dbsHasEvidence ? 'text-red-700' :
-                      dbsExpiryStatus?.status === 'expired' ? 'text-red-700' :
-                      dbsExpiryStatus?.status === 'expiring' ? 'text-amber-700' :
-                      dbsVerified ? 'text-green-700' : 'text-blue-700'
+                      dbsSummary.dbs_status_color === 'red' ? 'text-red-700' :
+                      dbsSummary.dbs_status_color === 'amber' ? 'text-amber-700' :
+                      dbsSummary.dbs_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
                     }`}>
-                      {!dbsHasEvidence ? 'Missing' :
-                       dbsExpiryStatus?.status === 'expired' ? 'Expired' :
-                       dbsExpiryStatus?.status === 'expiring' ? dbsExpiryStatus.label :
-                       dbsVerified ? 'Verified' : 'Pending Review'}
+                      {dbsSummary.dbs_status_label || 'Unknown'}
                     </p>
-                    {dbsExpiry && dbsHasEvidence && (
+                    {dbsSummary.next_dbs_review_due && (
                       <p className="text-xs text-text-muted mt-0.5">
-                        Exp: {new Date(dbsExpiry).toLocaleDateString()}
+                        Review: {new Date(dbsSummary.next_dbs_review_due).toLocaleDateString()}
                       </p>
                     )}
                   </div>

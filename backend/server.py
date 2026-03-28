@@ -346,6 +346,17 @@ MANDATORY_ITEMS = {
          "description": "Personal details form with supporting docs",
          "work_ready_hint": "Complete after employee starts"},
         
+        {"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", 
+         "category": "6_Admin", "type": "form-generated",
+         "template_name": "HMRC Starter Checklist",
+         "allow_multiple_files": False, "source": "form",
+         "priority": "secondary", "priority_order": 43,
+         "status_group": "other",
+         "conditional_on": "p45",  # Only required if no P45 on file
+         "conditional_inverse": True,  # Required when p45 is ABSENT
+         "description": "Complete if employee does not have a P45. Used for payroll/tax setup.",
+         "work_ready_hint": "Complete if no P45 provided"},
+        
         {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", 
          "category": "6_Admin", "type": "form-generated",
          "template_name": "Equal Opportunities Monitoring Form",
@@ -2061,6 +2072,35 @@ FORM_BASED_REQUIREMENTS = {
                 "Prefer not to say"
             ]},
             {"id": "consent", "label": "I understand this information is voluntary and will be used for equal opportunities monitoring only", "type": "checkbox"},
+        ]
+    },
+    "hmrc_starter_checklist": {
+        "name": "HMRC Starter Checklist",
+        "form_type": "hmrc_starter_checklist",
+        "is_conditional": True,  # Only required if no P45
+        "condition_field": "p45",  # If P45 exists, this is not required
+        "fields": [
+            {"id": "intro_note", "label": "Complete this form if the employee does not have a P45 from a previous employer. This is used for payroll/tax setup. Do not send to HMRC - retain for your records.", "type": "info"},
+            {"id": "employee_statement", "label": "Employee Statement (select one)", "type": "select", "options": [
+                "A - This is my first job since 6 April and I have not been receiving taxable Jobseeker's Allowance, Employment and Support Allowance, taxable Incapacity Benefit, State or Occupational Pension",
+                "B - This is now my only job, but since 6 April I have had another job, or received taxable Jobseeker's Allowance, Employment and Support Allowance or taxable Incapacity Benefit. I do not receive a State or Occupational Pension",
+                "C - I have another job or receive a State or Occupational Pension"
+            ]},
+            {"id": "has_student_loan", "label": "Do you have a student loan?", "type": "select", "options": ["Yes", "No"]},
+            {"id": "student_loan_plan", "label": "If yes, which plan type?", "type": "select", "options": [
+                "Plan 1 (started before 1 September 2012)",
+                "Plan 2 (started on or after 1 September 2012)",
+                "Plan 4 (Scottish students from April 2021)",
+                "Postgraduate Loan",
+                "Not applicable"
+            ]},
+            {"id": "has_postgrad_loan", "label": "Do you have a Postgraduate Loan?", "type": "select", "options": ["Yes", "No", "Not applicable"]},
+            {"id": "national_insurance_number", "label": "National Insurance Number", "type": "text"},
+            {"id": "date_of_birth", "label": "Date of Birth", "type": "date"},
+            {"id": "full_name", "label": "Full Name (as shown on official documents)", "type": "text"},
+            {"id": "address", "label": "Current Address", "type": "textarea"},
+            {"id": "signature_date", "label": "Date Signed", "type": "date"},
+            {"id": "declaration", "label": "I confirm the information provided is correct to the best of my knowledge", "type": "checkbox"},
         ]
     }
 }

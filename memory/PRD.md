@@ -4,6 +4,63 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Conditional HMRC Starter Checklist - COMPLETE**
+
+### Summary
+Implemented the HMRC Starter Checklist as a conditional structured form that is only required when no P45 document exists for the employee.
+
+### How It Works
+- `conditional_on: "p45"` - Depends on P45 document
+- `conditional_inverse: True` - Required when P45 is ABSENT (not when present)
+- Backend evaluates condition per-employee in compliance-requirements endpoint
+- Dynamically excludes HMRC form when P45 exists
+
+### Backend Implementation
+```python
+# MANDATORY_ITEMS configuration (lines 349-358)
+{"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", 
+ "category": "6_Admin", "type": "form-generated",
+ "conditional_on": "p45",       # Depends on P45
+ "conditional_inverse": True,   # Required when P45 is ABSENT
+ ...}
+
+# Conditional logic evaluation (lines 5892-5937)
+- Checks if conditional_on document exists
+- Uses conditional_inverse to determine include/exclude
+- Excluded items go to conditional_not_required array
+```
+
+### API Response Changes
+```javascript
+// GET /api/employees/{id}/compliance-requirements
+{
+  "requirements": [...],  // HMRC included only if no P45
+  "conditional_not_required": [
+    // Items excluded due to conditions met
+    {"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", 
+     "reason": "Not required because P45 document exists"}
+  ]
+}
+```
+
+### Frontend Display
+- **HMRC Starter Checklist** appears in Admin/Other section
+- **Purple helper text**: "Required because no P45 is on file"
+- **Conditional panel**: Shows excluded items when conditions are met
+- **Form template**: Full HMRC Starter Checklist with employee statement, student loan, NI number fields
+
+### Test Status
+| Test | Status |
+|------|--------|
+| Backend: HMRC in requirements when no P45 | ✅ PASS |
+| Backend: HMRC excluded when P45 exists | ✅ PASS |
+| Backend: conditional_not_required populated | ✅ PASS |
+| Frontend: HMRC visible with helper text | ✅ PASS |
+| Frontend: Conditional panel shows/hides | ✅ PASS |
+
+---
+
+## Previous Update (2025-12-28)
 **Equal Opportunities Monitoring Form - COMPLETE**
 
 ### Summary

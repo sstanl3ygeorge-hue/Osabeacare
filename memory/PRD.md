@@ -450,7 +450,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - File Management Controls (Replace/Remove/History) + File Preview Reliability Fixes
+2026-03-28 - Full E2E Audit Complete + Count Discrepancy Fixed
 
 ### Checklist Reordering by Audit Priority (Completed 2026-03-28)
 - [x] **Reorganized categories by real-world care audit priority**:
@@ -510,6 +510,36 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Remove dialog with mandatory reason textarea
   - Replace dialog with file upload + reason
   - History dialog with timeline view
+
+### ComplianceOverview Count Fix (Completed 2026-03-28)
+- [x] Fixed count discrepancy between Overview and What's Needed tabs
+- [x] ComplianceOverview now uses backend `complianceRequirements` data for accurate counts
+- [x] Verified: Overview "Care Status" cards match checklist header counts exactly
+
+### Full E2E Onboarding Audit (Completed 2026-03-28)
+**Audit Test Employee created and tested through full compliance workflow**
+
+✅ **What Works Perfectly:**
+- Employee creation with auto-generated employee code
+- All 6 compliance categories displayed (Legal & Safety, Core Training, Role Readiness, Employment, Agreements, Admin/Other)
+- Upload Document dialog with categorized dropdown
+- View/Download buttons on requirements with evidence
+- Three-dot menu with document control options
+- Status badges (Checked & Approved, Ready for Review, Still Needed)
+- Internal vs Employee document distinction
+- Multi-file support with file counts
+- Training certificate upload with expiry dates
+- Compliance score calculation (0% → 39% after uploads)
+- Count consistency between Overview and Checklist tabs
+
+⚠️ **Minor Issues Addressed:**
+- Overview Care Status counts now match What's Needed checklist ✓ FIXED
+
+🔴 **Critical Issues:** None
+
+🔁 **Confusing Flows:** None identified
+
+📊 **System Ready for Onboarding Multiple Employees:** YES
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

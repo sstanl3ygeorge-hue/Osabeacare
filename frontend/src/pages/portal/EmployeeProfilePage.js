@@ -2303,6 +2303,7 @@ export default function EmployeeProfilePage() {
             training={training}
             policies={policies}
             generatedForms={generatedForms}
+            complianceRequirements={complianceRequirements}
             isAuditor={isAuditor()}
             onCompleteTraining={(item) => {
               // Map the ComplianceOverview item format to requirement format

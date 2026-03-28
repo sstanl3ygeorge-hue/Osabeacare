@@ -135,10 +135,14 @@ export default function ComplianceOverview({
   training, 
   policies,
   generatedForms,
+  complianceRequirements,  // Full requirements from backend
   onCompleteTraining,
   isAuditor = false,
   className = "" 
 }) {
+  // Use backend complianceRequirements summary if available for accurate counts
+  const backendSummary = complianceRequirements?.summary;
+  
   // Calculate compliance status for each item using AUDIT-READY logic
   const complianceStatus = useMemo(() => {
     const now = new Date();
@@ -304,8 +308,20 @@ export default function ComplianceOverview({
     });
   }, [employee, documents, training, policies, generatedForms]);
   
-  // Calculate audit summary counts
+  // Calculate audit summary counts - USE BACKEND DATA if available for accuracy
   const summary = useMemo(() => {
+    // If we have backend complianceRequirements, use it for accurate counts
+    if (backendSummary) {
+      return {
+        total: backendSummary.total || 0,
+        verified: backendSummary.verified || 0,
+        evidence_uploaded: (backendSummary.completed || 0) - (backendSummary.verified || 0), // Ready for review
+        expired: 0, // TODO: Get from backend
+        missing: backendSummary.missing || 0
+      };
+    }
+    
+    // Fallback to local calculation for backward compatibility
     const applicable = complianceStatus.filter(c => c.status !== 'not_applicable');
     return {
       total: applicable.length,
@@ -314,7 +330,7 @@ export default function ComplianceOverview({
       expired: complianceStatus.filter(c => c.status === 'expired').length,
       missing: complianceStatus.filter(c => c.status === 'missing').length
     };
-  }, [complianceStatus]);
+  }, [complianceStatus, backendSummary]);
 
   // Group items by status for audit view
   const groupedItems = useMemo(() => {

@@ -448,7 +448,28 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Compliance Centre Datetime Bug Fix
+2026-03-28 - Audit Mode Enabled + Profile Photo Feature
+
+### Audit Mode Implementation (Completed 2026-03-28)
+- [x] **Hidden Forms System from UI**:
+  - Templates removed from sidebar navigation
+  - Form Templates removed from Dashboard Quick Actions
+  - Internal Forms (Admin) tab hidden from employee profile
+  - Generate Forms button hidden from profile header
+  - Backend retained for data integrity
+- [x] **Employee Profile Simplification**:
+  - Tabs: Overview, Checklist, Documents, Policies, Training, Audit Log
+  - Clean workflow: Upload → View → Verify → Done
+- [x] **Profile Photo Feature**:
+  - Upload button on avatar hover (camera icon)
+  - Remove photo option
+  - Auto-display in employee list and dashboard
+  - Non-compliance (doesn't affect checklist/scoring)
+- [x] **Dashboard Audit View**:
+  - Fully Verified metric
+  - Missing Documents
+  - Expiring (30 days)
+  - DBS/RTW status
 
 ### Compliance Centre Datetime Bug Fix (Completed 2026-03-28)
 - [x] **Root Cause Identified**: Datetime comparison errors (offset-naive vs offset-aware) causing API failures

@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Label } from '../../components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle } from 'lucide-react';
+import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle, Shield, CheckCircle } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -382,6 +382,7 @@ export default function EmployeesPage() {
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden lg:table-cell">Onboarding Status</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Status</th>
+                    <th className="text-left p-4 font-medium text-text-muted text-sm">Work Ready</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Compliance</th>
                     {!isAuditor() && <th className="text-left p-4 font-medium text-text-muted text-sm w-16">Actions</th>}
                   </tr>
@@ -416,6 +417,29 @@ export default function EmployeesPage() {
                         <span className={`status-chip ${statusColors[emp.status] || 'status-neutral'}`}>
                           {emp.status?.replace('_', ' ')}
                         </span>
+                      </td>
+                      <td className="p-4">
+                        {/* Work Readiness Badge */}
+                        {emp.work_readiness ? (
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                            emp.work_readiness.status === 'work_ready' || emp.work_readiness.status === 'fully_compliant'
+                              ? 'bg-success/10 text-success'
+                              : emp.work_readiness.status === 'almost_ready'
+                              ? 'bg-warning/10 text-warning'
+                              : 'bg-error/10 text-error'
+                          }`}>
+                            {emp.work_readiness.status === 'work_ready' || emp.work_readiness.status === 'fully_compliant' ? (
+                              <Shield className="h-3.5 w-3.5" />
+                            ) : emp.work_readiness.status === 'almost_ready' ? (
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                            ) : (
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                            )}
+                            {emp.work_readiness.label}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-text-muted">—</span>
+                        )}
                       </td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">

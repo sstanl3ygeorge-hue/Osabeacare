@@ -153,169 +153,286 @@ class OnboardingStatus:
 #   - Only evidence-backed completions count toward compliance score
 #   - Verification requires at least one viewable file
 #
+# ============================================================================
+# WORK READINESS REQUIREMENTS - CQC Standards
+# ============================================================================
+# Priority Levels:
+#   - "mandatory": Required to start work (BLOCKS work readiness)
+#   - "required_soon": Required within first weeks (does NOT block work)
+#   - "secondary": For full compliance (does NOT block work)
+# ============================================================================
+
+# Items that BLOCK work readiness if not completed & verified
+WORK_READY_REQUIREMENTS = {
+    # LEGAL (MANDATORY) - Cannot start without these
+    "right_to_work_documents",
+    "right_to_work_check", 
+    "identity_documents",
+    
+    # SAFETY (MANDATORY) - Cannot start without these
+    "dbs_certificate",
+    "dbs_check",
+    
+    # CORE TRAINING (MANDATORY) - Cannot start without these
+    "safeguarding",
+    "manual_handling",
+    "infection_control",
+    
+    # NOTE: nmc_registration is added dynamically for Nurses via get_work_ready_items_for_role()
+}
+
+# Items required soon after starting (within first weeks)
+REQUIRED_SOON = {
+    "bls",
+    "fire_safety",
+    "health_safety",
+    "reference_1",
+    "reference_2",
+    "health_screening",
+}
+
 MANDATORY_ITEMS = {
-    "base": [  # Common to all roles - ordered by audit priority
+    "base": [  # Common to all roles - ordered by work readiness priority
         
-        # ======== 1. LEGAL & SAFETY (TOP PRIORITY) ========
+        # ======== MANDATORY: LEGAL (Required to Start Work) ========
         {"id": "right_to_work_documents", "name": "Right to Work Documents", 
          "category": "1_Legal_Safety", "type": "document", "source": "employee",
          "document_types": ["visa", "brp", "share_code", "settled_status"],
          "allow_multiple_files": True, "min_files": 1,
-         "description": "Visa, BRP, share code evidence, settled status proof"},
+         "priority": "mandatory", "priority_order": 1,
+         "description": "Visa, BRP, share code evidence, settled status proof",
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "right_to_work_check", "name": "Right to Work Verification", 
          "category": "1_Legal_Safety", "type": "document", "source": "internal",
          "document_types": ["rtw_check", "share_code_check"],
          "allow_multiple_files": True,
-         "description": "Internal RTW verification - share code check result"},
+         "priority": "mandatory", "priority_order": 2,
+         "description": "Internal RTW verification - share code check result",
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "identity_documents", "name": "Identity Documents", 
          "category": "1_Legal_Safety", "type": "document", "source": "employee",
          "document_types": ["passport", "driving_licence", "national_id"],
          "allow_multiple_files": True, "min_files": 1,
-         "description": "Passport, driving licence, or other photo ID"},
+         "priority": "mandatory", "priority_order": 3,
+         "description": "Passport, driving licence, or other photo ID",
+         "work_ready_hint": "Required before employee can start work"},
         
+        # ======== MANDATORY: SAFETY (Required to Start Work) ========
         {"id": "dbs_certificate", "name": "DBS Certificate", "category": "1_Legal_Safety",
          "type": "document", "source": "employee",
          "document_types": ["dbs", "dbs_certificate"],
          "allow_multiple_files": True,
-         "description": "DBS certificate from employee"},
+         "priority": "mandatory", "priority_order": 4,
+         "description": "DBS certificate from employee",
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "dbs_check", "name": "DBS Update Service Check", "category": "1_Legal_Safety",
          "type": "document", "source": "internal",
          "document_types": ["dbs_check", "dbs_update_service"],
          "allow_multiple_files": True,
-         "description": "Internal DBS verification - update service check result"},
+         "priority": "mandatory", "priority_order": 5,
+         "description": "Internal DBS verification - update service check result",
+         "work_ready_hint": "Required before employee can start work"},
         
-        # ======== 2. CORE TRAINING ========
-        # (Defined in "training" section below)
+        # ======== REQUIRED SOON: Additional Training ========
+        # (Core training defined in "training" section below)
         
-        # ======== 3. ROLE READINESS ========
+        # ======== REQUIRED SOON: Role Readiness ========
         {"id": "health_screening", "name": "Health Screening Questionnaire", 
          "category": "3_Role_Readiness", "type": "form-generated",
          "template_name": "Health Screening Questionnaire",
          "allow_multiple_files": True, "source": "form",
-         "description": "Health questionnaire and medical attachments"},
+         "priority": "required_soon", "priority_order": 20,
+         "description": "Health questionnaire and medical attachments",
+         "work_ready_hint": "Complete within first 2 weeks"},
         
         {"id": "induction", "name": "Induction & Competency Assessment", 
          "category": "3_Role_Readiness", "type": "form-generated",
          "template_name": "Induction & Competency Assessment",
          "allow_multiple_files": True, "source": "internal",
-         "description": "Induction checklist, shadowing records, competency sign-offs"},
+         "priority": "secondary", "priority_order": 30,
+         "description": "Induction checklist, shadowing records, competency sign-offs",
+         "work_ready_hint": "Complete after employee starts"},
         
         {"id": "interview_record", "name": "Interview Record", 
          "category": "3_Role_Readiness", "type": "form-generated",
          "template_name": "Interview Record Form",
          "allow_multiple_files": True, "source": "internal",
-         "description": "Interview notes, assessment, and supporting documents"},
+         "priority": "secondary", "priority_order": 31,
+         "description": "Interview notes, assessment, and supporting documents",
+         "work_ready_hint": "Complete after employee starts"},
         
-        # ======== 4. EMPLOYMENT ========
+        # ======== REQUIRED SOON: References ========
         {"id": "reference_1", "name": "Reference 1", "category": "4_Employment",
          "type": "document", "source": "employee",
          "document_types": ["reference"],
          "allow_multiple_files": True,
-         "description": "First reference letter and attachments"},
+         "priority": "required_soon", "priority_order": 21,
+         "description": "First reference letter and attachments",
+         "work_ready_hint": "Complete within first 2 weeks"},
         
         {"id": "reference_2", "name": "Reference 2", "category": "4_Employment",
          "type": "document", "source": "employee",
          "document_types": ["reference"],
          "allow_multiple_files": True,
-         "description": "Second reference letter and attachments"},
+         "priority": "required_soon", "priority_order": 22,
+         "description": "Second reference letter and attachments",
+         "work_ready_hint": "Complete within first 2 weeks"},
         
+        # ======== SECONDARY: Employment Records ========
         {"id": "recruitment_checklist", "name": "Recruitment Compliance Checklist", 
          "category": "4_Employment", "type": "form-generated", 
          "template_name": "Recruitment Compliance Checklist",
          "allow_multiple_files": True, "source": "internal",
-         "description": "Internal recruitment tracking checklist"},
+         "priority": "secondary", "priority_order": 32,
+         "description": "Internal recruitment tracking checklist",
+         "work_ready_hint": "Complete after employee starts"},
         
         {"id": "application_form", "name": "Application Form", "category": "4_Employment", 
          "type": "form-generated", "template_name": "Application Form", 
          "allow_multiple_files": False, "source": "form",
-         "description": "Completed application form"},
+         "priority": "secondary", "priority_order": 33,
+         "description": "Completed application form",
+         "work_ready_hint": "Complete after employee starts"},
         
         {"id": "cv", "name": "CV / Resume", "category": "4_Employment", 
          "type": "document", "source": "employee",
          "document_types": ["cv", "resume"], 
          "allow_multiple_files": True,
-         "description": "CV and supporting documents"},
+         "priority": "secondary", "priority_order": 34,
+         "description": "CV and supporting documents",
+         "work_ready_hint": "Complete after employee starts"},
         
-        # ======== 5. AGREEMENTS ========
+        # ======== SECONDARY: Agreements ========
         {"id": "contract", "name": "Contract Acknowledgement", 
          "category": "5_Agreements", "type": "form-generated",
          "template_name": "Contract Acknowledgement Form",
          "allow_multiple_files": True, "source": "form",
-         "description": "Signed contract/offer letter and appendices"},
+         "priority": "secondary", "priority_order": 35,
+         "description": "Signed contract/offer letter and appendices",
+         "work_ready_hint": "Complete after employee starts"},
         
         {"id": "handbook", "name": "Employee Handbook Acknowledgement", 
          "category": "5_Agreements", "type": "form-generated",
          "template_name": "Employee Handbook Acknowledgement",
          "allow_multiple_files": False, "source": "form",
-         "description": "Signed handbook acknowledgement"},
+         "priority": "secondary", "priority_order": 36,
+         "description": "Signed handbook acknowledgement",
+         "work_ready_hint": "Complete after employee starts"},
         
-        # ======== 6. ADMIN / OTHER ========
+        # ======== SECONDARY: Admin / Other ========
         {"id": "personal_info", "name": "Personal Information Form", 
          "category": "6_Admin", "type": "form-generated", 
          "template_name": "Personal Information Form",
          "allow_multiple_files": True, "source": "form",
-         "description": "Personal details form with supporting docs"},
+         "priority": "secondary", "priority_order": 37,
+         "description": "Personal details form with supporting docs",
+         "work_ready_hint": "Complete after employee starts"},
         
         {"id": "equal_opportunities", "name": "Equal Opportunities Monitoring", 
          "category": "6_Admin", "type": "form-generated",
          "template_name": "Equal Opportunities Monitoring Form",
          "allow_multiple_files": False, "source": "form",
-         "description": "Diversity monitoring form"},
+         "priority": "secondary", "priority_order": 38,
+         "description": "Diversity monitoring form",
+         "work_ready_hint": "Complete after employee starts"},
     ],
     
-    "training": [  # Core Training - Section 2 priority
+    "training": [  # Training items with priority
+        # ======== MANDATORY: Core Training (Required to Start Work) ========
         {"id": "safeguarding", "name": "Safeguarding Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Safeguarding",
          "allow_multiple_files": True,
-         "description": "Safeguarding certificate and transcript"},
+         "priority": "mandatory", "priority_order": 6,
+         "description": "Safeguarding certificate and transcript",
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "manual_handling", "name": "Manual Handling Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Manual Handling",
          "allow_multiple_files": True,
-         "description": "Manual handling certificate"},
+         "priority": "mandatory", "priority_order": 7,
+         "description": "Manual handling certificate",
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "infection_control", "name": "Infection Control Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Infection Control",
          "allow_multiple_files": True,
-         "description": "Infection control certificate"},
+         "priority": "mandatory", "priority_order": 8,
+         "description": "Infection control certificate",
+         "work_ready_hint": "Required before employee can start work"},
         
+        # ======== REQUIRED SOON: Additional Training ========
         {"id": "bls", "name": "Basic Life Support (BLS)", "category": "2_Core_Training",
          "type": "training", "training_name": "Basic Life Support",
          "allow_multiple_files": True,
-         "description": "BLS certificate, renewal card"},
+         "priority": "required_soon", "priority_order": 23,
+         "description": "BLS certificate, renewal card",
+         "work_ready_hint": "Complete within first 2 weeks"},
         
         {"id": "fire_safety", "name": "Fire Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Fire Safety",
          "allow_multiple_files": True,
-         "description": "Fire safety certificate"},
+         "priority": "required_soon", "priority_order": 24,
+         "description": "Fire safety certificate",
+         "work_ready_hint": "Complete within first 2 weeks"},
         
         {"id": "health_safety", "name": "Health & Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Health & Safety",
          "allow_multiple_files": True,
-         "description": "Health & Safety certificate"},
+         "priority": "required_soon", "priority_order": 25,
+         "description": "Health & Safety certificate",
+         "work_ready_hint": "Complete within first 2 weeks"},
     ],
     
     "nurse_specific": [  # Additional items for Nurses only
+        # ======== MANDATORY for Nurses ========
         {"id": "nmc_registration", "name": "NMC Registration", "category": "1_Legal_Safety",
          "type": "document", "source": "employee",
          "document_types": ["nmc_registration", "professional_registration"],
          "allow_multiple_files": True, "min_files": 1,
-         "description": "NMC PIN card, registration letter"},
+         "priority": "mandatory", "priority_order": 9,
+         "description": "NMC PIN card, registration letter",
+         "work_ready_hint": "Required before nurse can start work"},
         
         {"id": "clinical_competency", "name": "Clinical Competency Evidence", 
          "category": "2_Core_Training", "type": "document", "source": "employee",
          "document_types": ["clinical_competency", "competency_assessment"],
          "allow_multiple_files": True, "min_files": 1,
-         "description": "Clinical competency assessments, skill sign-offs"},
+         "priority": "required_soon", "priority_order": 26,
+         "description": "Clinical competency assessments, skill sign-offs",
+         "work_ready_hint": "Complete within first 2 weeks"},
         
         {"id": "medication_competency", "name": "Medication Competency", 
          "category": "2_Core_Training", "type": "training", "training_name": "Medication",
          "allow_multiple_files": True,
-         "description": "Medication administration competency certificate"},
+         "priority": "required_soon", "priority_order": 27,
+         "description": "Medication administration competency certificate",
+         "work_ready_hint": "Complete within first 2 weeks"},
     ]
+}
+
+# Priority display configuration
+PRIORITY_CONFIG = {
+    "mandatory": {
+        "label": "Required to Start Work",
+        "color": "red",
+        "weight": 0.8,  # 80% of score
+        "emoji": "🔴"
+    },
+    "required_soon": {
+        "label": "Required Soon",
+        "color": "orange",
+        "weight": 0.15,  # 15% of score
+        "emoji": "🟠"
+    },
+    "secondary": {
+        "label": "Complete After Start",
+        "color": "yellow",
+        "weight": 0.05,  # 5% of score
+        "emoji": "🟡"
+    }
 }
 
 # Category display names (care-focused)
@@ -335,14 +452,133 @@ LEGACY_REQUIREMENT_MAPPING = {
 }
 
 def get_mandatory_items_for_role(role: str) -> List[dict]:
-    """Get all mandatory items for a specific role"""
+    """Get all mandatory items for a specific role, sorted by priority"""
     items = MANDATORY_ITEMS["base"].copy() + MANDATORY_ITEMS["training"].copy()
     
     # Add nurse-specific items
     if role and "nurse" in role.lower():
         items.extend(MANDATORY_ITEMS["nurse_specific"])
     
+    # Sort by priority_order (mandatory items first, then required_soon, then secondary)
+    items.sort(key=lambda x: x.get('priority_order', 99))
+    
     return items
+
+def get_work_ready_items_for_role(role: str) -> set:
+    """Get the set of requirement IDs that are mandatory for work readiness"""
+    work_ready = WORK_READY_REQUIREMENTS.copy()
+    
+    # Add nurse-specific mandatory item
+    if role and "nurse" in role.lower():
+        work_ready.add("nmc_registration")
+    
+    return work_ready
+
+def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
+    """
+    Calculate work readiness status based on mandatory items.
+    Returns work_ready_status and detailed breakdown.
+    """
+    work_ready_ids = get_work_ready_items_for_role(role)
+    
+    mandatory_items = []
+    required_soon_items = []
+    secondary_items = []
+    
+    mandatory_complete = 0
+    mandatory_verified = 0
+    required_soon_complete = 0
+    secondary_complete = 0
+    
+    missing_mandatory = []
+    
+    for req in requirements:
+        req_id = req.get('id')
+        is_complete = req.get('status') == 'completed' and req.get('has_evidence', False)
+        is_verified = req.get('verified', False)
+        priority = req.get('priority', 'secondary')
+        
+        if req_id in work_ready_ids or priority == 'mandatory':
+            mandatory_items.append(req)
+            if is_complete:
+                mandatory_complete += 1
+                if is_verified:
+                    mandatory_verified += 1
+            else:
+                missing_mandatory.append({
+                    "id": req_id,
+                    "name": req.get('name'),
+                    "status": req.get('status')
+                })
+        elif priority == 'required_soon':
+            required_soon_items.append(req)
+            if is_complete:
+                required_soon_complete += 1
+        else:
+            secondary_items.append(req)
+            if is_complete:
+                secondary_complete += 1
+    
+    total_mandatory = len(mandatory_items)
+    total_required_soon = len(required_soon_items)
+    total_secondary = len(secondary_items)
+    total_all = total_mandatory + total_required_soon + total_secondary
+    
+    # Calculate weighted score (80% mandatory, 15% required_soon, 5% secondary)
+    mandatory_score = (mandatory_complete / total_mandatory * 80) if total_mandatory > 0 else 0
+    required_soon_score = (required_soon_complete / total_required_soon * 15) if total_required_soon > 0 else 0
+    secondary_score = (secondary_complete / total_secondary * 5) if total_secondary > 0 else 0
+    weighted_score = int(mandatory_score + required_soon_score + secondary_score)
+    
+    # Determine work ready status
+    all_mandatory_complete = mandatory_complete == total_mandatory
+    all_mandatory_verified = mandatory_verified == total_mandatory
+    all_complete = (mandatory_complete + required_soon_complete + secondary_complete) == total_all
+    all_verified = all([req.get('verified', False) for req in requirements if req.get('has_evidence')])
+    
+    if all_verified and all_complete:
+        status = "fully_compliant"
+        status_label = "Fully Compliant"
+        status_color = "success"
+    elif all_mandatory_verified:
+        status = "work_ready"
+        status_label = "Work Ready"
+        status_color = "success"
+    elif all_mandatory_complete:
+        status = "almost_ready"
+        status_label = "Almost Ready"
+        status_color = "warning"
+    elif mandatory_complete > 0:
+        status = "in_progress"
+        status_label = "Not Ready"
+        status_color = "error"
+    else:
+        status = "not_started"
+        status_label = "Not Ready"
+        status_color = "error"
+    
+    return {
+        "status": status,
+        "status_label": status_label,
+        "status_color": status_color,
+        "weighted_score": weighted_score,
+        "mandatory": {
+            "total": total_mandatory,
+            "complete": mandatory_complete,
+            "verified": mandatory_verified,
+            "missing": missing_mandatory
+        },
+        "required_soon": {
+            "total": total_required_soon,
+            "complete": required_soon_complete
+        },
+        "secondary": {
+            "total": total_secondary,
+            "complete": secondary_complete
+        },
+        "is_work_ready": all_mandatory_verified,
+        "is_fully_compliant": all_verified and all_complete
+    }
 
 # Folder mapping for form types to document folders
 FORM_TO_FOLDER_MAP = {
@@ -694,6 +930,7 @@ class EmployeeResponse(BaseModel):
     notes: Optional[str] = None
     completion_percentage: int = 0
     profile_photo_url: Optional[str] = None
+    work_readiness: Optional[dict] = None  # Work readiness status for list view
     created_at: str
     updated_at: str
 
@@ -1247,6 +1484,40 @@ async def calculate_completion_percentage(employee_id: str) -> int:
     
     return compliance.get('completion_percentage', 0)
 
+async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
+    """Quick work readiness calculation for list views"""
+    work_ready_ids = get_work_ready_items_for_role(role)
+    
+    # Get documents for mandatory items
+    docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": list(work_ready_ids)},
+        "verified": True
+    }, {"_id": 0, "requirement_id": 1}).to_list(100)
+    
+    # Get verified training for mandatory items
+    training_ids = {r for r in work_ready_ids if r in ["safeguarding", "manual_handling", "infection_control"]}
+    training = await db.training_records.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": list(training_ids)},
+        "verified": True
+    }, {"_id": 0, "requirement_id": 1}).to_list(100)
+    
+    verified_ids = {d['requirement_id'] for d in docs}
+    verified_ids.update({t['requirement_id'] for t in training})
+    
+    mandatory_complete = len(verified_ids.intersection(work_ready_ids))
+    total_mandatory = len(work_ready_ids)
+    
+    if mandatory_complete == total_mandatory:
+        return {"status": "work_ready", "label": "Work Ready", "color": "success"}
+    elif mandatory_complete >= total_mandatory - 2:
+        return {"status": "almost_ready", "label": "Almost Ready", "color": "warning"}
+    elif mandatory_complete > 0:
+        return {"status": "in_progress", "label": "Not Ready", "color": "error"}
+    else:
+        return {"status": "not_started", "label": "Not Ready", "color": "error"}
+
 @api_router.post("/employees", response_model=EmployeeResponse)
 async def create_employee(employee: EmployeeCreate, user: dict = Depends(require_manager_or_admin)):
     employee_id = str(uuid.uuid4())
@@ -1306,9 +1577,10 @@ async def get_employees(
     
     employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
     
-    # Calculate completion percentages
+    # Calculate completion percentages and work readiness
     for emp in employees:
         emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
+        emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
     
     return [EmployeeResponse(**emp) for emp in employees]
 
@@ -3917,6 +4189,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         allow_multiple = item.get('allow_multiple_files', True)  # Default to True now
         min_files = item.get('min_files', 1)
         source = item.get('source', 'employee')
+        priority = item.get('priority', 'secondary')
+        priority_order = item.get('priority_order', 99)
+        work_ready_hint = item.get('work_ready_hint', '')
         
         req = {
             "id": req_id,
@@ -3940,7 +4215,14 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "verified_at": None,
             "all_verified": False,
             "can_verify": False,  # NEW: True only when evidence exists
-            "completion_method": None  # NEW: "evidence" or "manual" or "form"
+            "completion_method": None,  # NEW: "evidence" or "manual" or "form"
+            # Work Readiness fields
+            "priority": priority,
+            "priority_order": priority_order,
+            "priority_label": PRIORITY_CONFIG.get(priority, {}).get('label', 'Complete After Start'),
+            "priority_color": PRIORITY_CONFIG.get(priority, {}).get('color', 'yellow'),
+            "work_ready_hint": work_ready_hint,
+            "is_mandatory_for_work": req_id in WORK_READY_REQUIREMENTS or priority == 'mandatory'
         }
         
         evidence_files = []
@@ -4160,6 +4442,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     completion_percentage = int((evidence_backed_count / total_count) * 100) if total_count > 0 else 0
     verification_percentage = int((verified_count / evidence_backed_count) * 100) if evidence_backed_count > 0 else 0
     
+    # Calculate Work Readiness
+    work_readiness = calculate_work_readiness(requirements, role)
+    
     return {
         "employee_id": employee_id,
         "employee_name": f"{employee['first_name']} {employee['last_name']}",
@@ -4174,7 +4459,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "completion_percentage": completion_percentage,
             "verification_percentage": verification_percentage,
             "audit_ready": verified_count == evidence_backed_count and evidence_backed_count == total_count
-        }
+        },
+        "work_readiness": work_readiness
     }
 
 @api_router.post("/employees/{employee_id}/upload-document")

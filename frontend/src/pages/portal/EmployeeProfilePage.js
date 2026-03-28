@@ -2361,66 +2361,144 @@ export default function EmployeeProfilePage() {
                   </p>
                 )}
               </div>
-              {complianceRequirements && complianceRequirements.summary.missing > 0 && (
-                <div className="flex items-center gap-2 text-sm text-error bg-error/10 px-3 py-1.5 rounded-lg">
-                  <AlertTriangle className="h-4 w-4" />
-                  {complianceRequirements.summary.missing} still needed
+              {complianceRequirements?.work_readiness && (
+                <div className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg font-medium ${
+                  complianceRequirements.work_readiness.status === 'fully_compliant' ? 'bg-success/10 text-success' :
+                  complianceRequirements.work_readiness.status === 'work_ready' ? 'bg-success/10 text-success' :
+                  complianceRequirements.work_readiness.status === 'almost_ready' ? 'bg-warning/10 text-warning' :
+                  'bg-error/10 text-error'
+                }`}>
+                  {complianceRequirements.work_readiness.status === 'fully_compliant' ? (
+                    <CheckCircle className="h-4 w-4" />
+                  ) : complianceRequirements.work_readiness.status === 'work_ready' ? (
+                    <Shield className="h-4 w-4" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4" />
+                  )}
+                  {complianceRequirements.work_readiness.status_label}
                 </div>
               )}
             </CardHeader>
             <CardContent>
+              {/* WORK READINESS ALERT PANEL */}
+              {complianceRequirements?.work_readiness && (
+                <div className={`mb-6 p-4 rounded-xl border ${
+                  complianceRequirements.work_readiness.is_fully_compliant ? 'bg-green-50 border-green-200' :
+                  complianceRequirements.work_readiness.is_work_ready ? 'bg-emerald-50 border-emerald-200' :
+                  complianceRequirements.work_readiness.status === 'almost_ready' ? 'bg-amber-50 border-amber-200' :
+                  'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      complianceRequirements.work_readiness.is_fully_compliant ? 'bg-green-100' :
+                      complianceRequirements.work_readiness.is_work_ready ? 'bg-emerald-100' :
+                      complianceRequirements.work_readiness.status === 'almost_ready' ? 'bg-amber-100' :
+                      'bg-red-100'
+                    }`}>
+                      {complianceRequirements.work_readiness.is_fully_compliant ? (
+                        <CheckCircle className="h-5 w-5 text-green-600" />
+                      ) : complianceRequirements.work_readiness.is_work_ready ? (
+                        <Shield className="h-5 w-5 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="h-5 w-5 text-red-600" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <h4 className={`font-semibold ${
+                        complianceRequirements.work_readiness.is_fully_compliant ? 'text-green-900' :
+                        complianceRequirements.work_readiness.is_work_ready ? 'text-emerald-900' :
+                        complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-900' :
+                        'text-red-900'
+                      }`}>
+                        Work Readiness Status: {complianceRequirements.work_readiness.status_label}
+                      </h4>
+                      <p className={`text-sm mt-1 ${
+                        complianceRequirements.work_readiness.is_fully_compliant ? 'text-green-800' :
+                        complianceRequirements.work_readiness.is_work_ready ? 'text-emerald-800' :
+                        complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-800' :
+                        'text-red-800'
+                      }`}>
+                        {complianceRequirements.work_readiness.is_fully_compliant ? (
+                          "All compliance requirements are complete and verified. This employee is fully compliant."
+                        ) : complianceRequirements.work_readiness.is_work_ready ? (
+                          "All mandatory items are verified. This employee can start work."
+                        ) : (
+                          <>
+                            <strong>{complianceRequirements.work_readiness.mandatory?.complete || 0} of {complianceRequirements.work_readiness.mandatory?.total || 0}</strong> required items complete
+                          </>
+                        )}
+                      </p>
+                      
+                      {/* Missing Mandatory Items */}
+                      {complianceRequirements.work_readiness.mandatory?.missing?.length > 0 && (
+                        <div className="mt-3">
+                          <p className={`text-sm font-medium ${
+                            complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-900' : 'text-red-900'
+                          }`}>
+                            Missing items (required to start work):
+                          </p>
+                          <ul className={`mt-1 space-y-1 text-sm ${
+                            complianceRequirements.work_readiness.status === 'almost_ready' ? 'text-amber-800' : 'text-red-800'
+                          }`}>
+                            {complianceRequirements.work_readiness.mandatory.missing.map((item, idx) => (
+                              <li key={idx} className="flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                                {item.name}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Weighted Score */}
+                      <div className="mt-3 flex items-center gap-3">
+                        <div className={`text-sm font-medium ${
+                          complianceRequirements.work_readiness.weighted_score >= 80 ? 'text-green-700' :
+                          complianceRequirements.work_readiness.weighted_score >= 50 ? 'text-amber-700' :
+                          'text-red-700'
+                        }`}>
+                          Compliance Score: {complianceRequirements.work_readiness.weighted_score}%
+                        </div>
+                        <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all ${
+                              complianceRequirements.work_readiness.weighted_score >= 80 ? 'bg-green-500' :
+                              complianceRequirements.work_readiness.weighted_score >= 50 ? 'bg-amber-500' :
+                              'bg-red-500'
+                            }`}
+                            style={{ width: `${complianceRequirements.work_readiness.weighted_score}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* GLOBAL INSTRUCTION PANEL - CQC Guidance */}
               <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl">
-                <h3 className="font-semibold text-blue-900 mb-2">Getting an Employee Ready</h3>
-                <p className="text-sm text-blue-800 mb-3">Complete each item below to get this employee ready.</p>
+                <h3 className="font-semibold text-blue-900 mb-2">Complete Required Items First</h3>
+                <p className="text-sm text-blue-800 mb-3">
+                  Items marked with <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">🔴 Required</span> must be completed and verified before the employee can start work.
+                </p>
                 <div className="text-sm text-blue-700 space-y-1">
-                  <p>Start at the top and work down the list.</p>
-                  <p className="font-medium">For each item:</p>
-                  <ul className="list-disc list-inside ml-2 space-y-0.5">
-                    <li>Upload the document</li>
-                    <li>Check it is clear and correct</li>
-                    <li>Mark as "Checked & Approved"</li>
+                  <p className="font-medium">Priority guide:</p>
+                  <ul className="space-y-1 ml-2">
+                    <li className="flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+                      <span><strong>Required to Start Work</strong> — Complete these first</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 rounded-full bg-orange-500"></span>
+                      <span><strong>Required Soon</strong> — Complete within first 2 weeks</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="inline-block w-3 h-3 rounded-full bg-yellow-500"></span>
+                      <span><strong>Complete After Start</strong> — For full compliance</span>
+                    </li>
                   </ul>
-                  <p className="mt-2 text-blue-600">You can stop and return at any time — progress is saved automatically.</p>
                 </div>
               </div>
-
-              {/* NEXT STEP HELPER - Shows what to do next */}
-              {complianceRequirements && complianceRequirements.summary.missing > 0 && (
-                <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-amber-900">Next Step</h4>
-                      <p className="text-sm text-amber-800 mt-1">
-                        Complete the next item marked "Still Needed" at the top of the list.
-                      </p>
-                      <p className="text-sm text-amber-700 mt-1">
-                        Once uploaded, review and approve before moving on.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* SUCCESS STATE - All complete */}
-              {complianceRequirements && complianceRequirements.summary.missing === 0 && complianceRequirements.summary.completed === complianceRequirements.summary.verified && (
-                <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-green-900">All Complete</h4>
-                      <p className="text-sm text-green-800 mt-1">
-                        This employee's compliance requirements are all checked and approved.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* TAB CLARITY MESSAGE */}
               <p className="text-xs text-text-muted mb-4 px-1">
@@ -2546,6 +2624,19 @@ export default function EmployeeProfilePage() {
                                 )}
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2 flex-wrap">
+                                    {/* PRIORITY BADGE - Shows work readiness priority */}
+                                    {req.priority === 'mandatory' && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 font-medium flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                                        Required
+                                      </span>
+                                    )}
+                                    {req.priority === 'required_soon' && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium flex items-center gap-1">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span>
+                                        Soon
+                                      </span>
+                                    )}
                                     <p className="font-medium text-text-primary">{req.name}</p>
                                     {/* Source badge - cleaner */}
                                     {req.source === 'internal' && (
@@ -2561,8 +2652,15 @@ export default function EmployeeProfilePage() {
                                     )}
                                   </div>
                                   
+                                  {/* WORK READY HINT - Shows when item blocks work */}
+                                  {req.is_mandatory_for_work && !isVerified && (
+                                    <p className="text-[10px] text-red-600 font-medium mt-0.5">
+                                      ⚠ Required before employee can start work
+                                    </p>
+                                  )}
+                                  
                                   {/* MICROCOPY HELPER TEXT - Shows guidance for each requirement */}
-                                  {helpText && !hasEvidence && (
+                                  {helpText && !hasEvidence && !req.is_mandatory_for_work && (
                                     <p className="text-xs text-text-muted mt-0.5">{helpText}</p>
                                   )}
                                   

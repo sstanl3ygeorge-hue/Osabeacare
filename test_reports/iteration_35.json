@@ -1,0 +1,98 @@
+{
+  "summary": "Tested policy system simplification. Navigation and UI changes verified. Policy Assignments page removed from navigation. Compliance Centre has 'Assign to Employees' button with modal. Employee Policies tab shows correct status labels. Help text added to all tabs. Found backend issue with policy assignment API.",
+
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/policies/assign",
+        "issue": "Returns 404 - endpoint looks up policy in 'policies' collection but Compliance Centre sends org_policy_id from 'org_policies' collection",
+        "priority": "HIGH",
+        "details": "Frontend sends policyToAssign.id from org_policies, but backend line 5483 queries db.policies.find_one() which is a different collection"
+      }
+    ],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Assign Policy to Employees",
+        "issue": "Policy assignment fails with 404 due to backend collection mismatch",
+        "affected_selectors": ["[data-testid='assign-policy-submit']"]
+      }
+    ],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ Policy Assignments page REMOVED from navigation (verified: nav items are Dashboard, Employees, Compliance Centre, Training, Audit View, Settings)",
+    "✅ /portal/policies route does NOT exist (shows blank page - route removed from App.js)",
+    "✅ Compliance Centre shows 'Assign to Employees' button on policies WITH documents (4 buttons found)",
+    "✅ Compliance Centre shows disabled 'Assign' button on policies WITHOUT documents (28 disabled buttons found)",
+    "✅ Assignment modal opens with employee list and checkboxes (7 employees shown)",
+    "✅ Assignment modal has 'Select All Unassigned' button",
+    "✅ Assignment modal has 'Assign Policy' submit button",
+    "✅ Employee Policies tab shows 'Not Read' status badge",
+    "✅ Employee Policies tab shows 'Acknowledged' status badge",
+    "✅ Employee Policies tab shows 'Reviewed & Approved' status for admin-reviewed policies",
+    "✅ What's Needed tab has help text: 'Start here. Upload each required document, then check and approve it.'",
+    "✅ Documents tab has help text: 'View and manage uploaded documents.'",
+    "✅ Policies tab has help text: 'Employees must read and acknowledge assigned policies.'",
+    "✅ Compliance Centre header has help text: 'Upload and manage your organisation's policies here. Assign them to employees once uploaded.'"
+  ],
+
+  "failed_tests": [
+    "❌ Policy assignment API returns 404 - cannot assign policies from Compliance Centre"
+  ],
+
+  "test_report_links": [
+    "/app/test_reports/iteration_35.json"
+  ],
+
+  "action_items": [
+    "FIX: Backend /api/policies/assign endpoint needs to query org_policies collection instead of policies collection, OR create a mapping between org_policies and policies",
+    "The endpoint at line 5483 in server.py queries db.policies but should query db.org_policies since Compliance Centre sends org_policy_id"
+  ],
+
+  "critical_code_review_comments": [
+    "Backend has two separate policy collections: 'policies' and 'org_policies' - this causes the assignment to fail",
+    "Frontend correctly sends policy.id from Compliance Centre (org_policies), but backend expects id from 'policies' collection",
+    "All UI changes for policy system simplification are correctly implemented",
+    "Help text microcopy matches specification"
+  ],
+
+  "updated_files": [],
+
+  "success_rate": {
+    "backend": "0% (policy assignment fails)",
+    "frontend": "100% (all UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123",
+    "role": "super_admin"
+  },
+
+  "seed_data_creation": "",
+
+  "retest_needed": true,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Policy system simplification UI is complete. Navigation updated, Compliance Centre has Assign button, Employee Policies tab shows correct statuses. CRITICAL: Backend /api/policies/assign endpoint returns 404 because it queries wrong collection (policies vs org_policies). Main agent needs to fix backend to use org_policies collection or create proper mapping.",
+
+  "rca_of_the_issue": {
+    "root_cause": "Collection mismatch between frontend and backend",
+    "details": "Compliance Centre fetches policies from /api/compliance/policies which returns org_policies collection. When assigning, frontend sends org_policy.id to /api/policies/assign, but backend line 5483 queries db.policies.find_one() which is a different collection with different IDs.",
+    "reproduction_steps": [
+      "1. Login as admin",
+      "2. Go to Compliance Centre → Policies tab",
+      "3. Click 'Assign to Employees' on a policy with document",
+      "4. Select an employee and click 'Assign Policy'",
+      "5. Observe 404 error in console"
+    ],
+    "suggested_fix": "Change line 5483 in server.py from 'db.policies.find_one' to 'db.org_policies.find_one' and update the field mappings (title→name, etc.)"
+  }
+}

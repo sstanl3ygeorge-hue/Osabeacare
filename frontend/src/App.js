@@ -20,7 +20,8 @@ import DashboardPage from "./pages/portal/DashboardPage";
 import EmployeesPage from "./pages/portal/EmployeesPage";
 import EmployeeProfilePage from "./pages/portal/EmployeeProfilePage";
 import DocumentsPage from "./pages/portal/DocumentsPage";
-import PoliciesPage from "./pages/portal/PoliciesPage";
+// PoliciesPage removed - policy management consolidated in Compliance Centre
+// import PoliciesPage from "./pages/portal/PoliciesPage";
 // DocumentsPage kept for backward compatibility but route disabled
 import TrainingPage from "./pages/portal/TrainingPage";
 import AuditViewPage from "./pages/portal/AuditViewPage";
@@ -69,7 +70,8 @@ function AppRouter() {
         <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
         {/* Documents route removed - all document management is now per-employee in Employee Profile → Documents tab */}
         {/* <Route path="documents" element={<DocumentsPage />} /> */}
-        <Route path="policies" element={<PoliciesPage />} />
+        {/* Policies route removed - policy management consolidated in Compliance Centre */}
+        {/* <Route path="policies" element={<PoliciesPage />} /> */}
         <Route path="training" element={<TrainingPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="compliance-centre" element={<ComplianceCentrePage />} />

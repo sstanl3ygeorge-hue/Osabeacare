@@ -15,7 +15,7 @@ import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
-  RefreshCw, Download, Plus, Search, Filter, Eye, XCircle
+  RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -118,6 +118,14 @@ export default function ComplianceCentrePage() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Employee Assignment state
+  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
+  const [policyToAssign, setPolicyToAssign] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [policyAssignments, setPolicyAssignments] = useState([]);
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [isAssigning, setIsAssigning] = useState(false);
+
   useEffect(() => {
     fetchData();
   }, [token]);
@@ -125,17 +133,21 @@ export default function ComplianceCentrePage() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [dashRes, policiesRes, insuranceRes, incidentsRes] = await Promise.all([
+      const [dashRes, policiesRes, insuranceRes, incidentsRes, employeesRes, assignmentsRes] = await Promise.all([
         axios.get(`${API}/compliance/dashboard`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/policies`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/compliance/insurance`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/compliance/incidents`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API}/compliance/incidents`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/policy-assignments?include_inactive=true`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       
       setDashboard(dashRes.data);
       setPolicies(policiesRes.data);
       setInsurance(insuranceRes.data);
       setIncidents(incidentsRes.data);
+      setEmployees(employeesRes.data.filter(e => e.status !== 'archived'));
+      setPolicyAssignments(assignmentsRes.data);
     } catch (error) {
       console.error('Failed to fetch compliance data:', error);
     } finally {
@@ -156,6 +168,62 @@ export default function ComplianceCentrePage() {
     } catch (error) {
       toast.error('Failed to seed compliance items');
     }
+  };
+
+  // Handle assigning policy to employees
+  const handleAssignPolicy = async () => {
+    if (!policyToAssign || selectedEmployees.length === 0) {
+      toast.error('Please select at least one employee');
+      return;
+    }
+    
+    setIsAssigning(true);
+    try {
+      // Create assignments for each selected employee using the policy assignments API
+      // Note: We use the policy-assignments endpoint which expects policy_id from employee policies collection
+      // But the Compliance Centre uses org_policy_id - need to create linking
+      const response = await axios.post(`${API}/policies/assign`, {
+        policy_id: policyToAssign.id,
+        employee_ids: selectedEmployees
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      
+      toast.success(response.data.message || `Policy assigned to ${selectedEmployees.length} employees`);
+      setAssignDialogOpen(false);
+      setPolicyToAssign(null);
+      setSelectedEmployees([]);
+      await fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to assign policy');
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // Toggle employee selection
+  const toggleEmployeeSelection = (empId) => {
+    setSelectedEmployees(prev => 
+      prev.includes(empId) 
+        ? prev.filter(id => id !== empId)
+        : [...prev, empId]
+    );
+  };
+
+  // Select all unassigned employees
+  const selectAllUnassigned = () => {
+    if (!policyToAssign) return;
+    const alreadyAssigned = policyAssignments
+      .filter(a => a.policy_id === policyToAssign.id && !['unassigned', 'withdrawn'].includes(a.status))
+      .map(a => a.employee_id);
+    const unassigned = employees.filter(e => !alreadyAssigned.includes(e.id)).map(e => e.id);
+    setSelectedEmployees(unassigned);
+  };
+
+  // Get assignment count for a policy
+  const getAssignmentStats = (policyId) => {
+    const assignments = policyAssignments.filter(a => a.policy_id === policyId && !['unassigned', 'withdrawn'].includes(a.status));
+    const total = assignments.length;
+    const acknowledged = assignments.filter(a => a.status === 'acknowledged' || a.status === 'signed').length;
+    return { total, acknowledged };
   };
 
   const handleUploadPolicy = async (e) => {
@@ -435,6 +503,9 @@ export default function ComplianceCentrePage() {
               <div>
                 <CardTitle className="font-heading text-lg">Organisation Policies</CardTitle>
                 <p className="text-sm text-text-muted mt-1">
+                  Upload and manage your organisation's policies here. Assign them to employees once uploaded.
+                </p>
+                <p className="text-xs text-text-muted mt-1">
                   {policies.filter(p => p.status === 'active').length} of {policies.length} policies uploaded
                 </p>
               </div>
@@ -545,34 +616,71 @@ export default function ComplianceCentrePage() {
                                       Download
                                     </Button>
                                     {isAdmin() && (
-                                      <Button 
-                                        size="sm"
-                                        variant="outline"
-                                        className="rounded-lg"
-                                        onClick={() => {
-                                          setSelectedPolicy(policy);
-                                          setSelectedInsurance(null);
-                                          setUploadDialogOpen(true);
-                                        }}
-                                      >
-                                        <RefreshCw className="h-4 w-4 mr-1" />
-                                        Replace
-                                      </Button>
+                                      <>
+                                        <Button 
+                                          size="sm"
+                                          variant="outline"
+                                          className="rounded-lg"
+                                          onClick={() => {
+                                            setSelectedPolicy(policy);
+                                            setSelectedInsurance(null);
+                                            setUploadDialogOpen(true);
+                                          }}
+                                        >
+                                          <RefreshCw className="h-4 w-4 mr-1" />
+                                          Replace
+                                        </Button>
+                                        {/* Assign to Employees Button */}
+                                        <Button 
+                                          size="sm"
+                                          className="bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                          onClick={() => {
+                                            setPolicyToAssign(policy);
+                                            setSelectedEmployees([]);
+                                            setAssignDialogOpen(true);
+                                          }}
+                                          data-testid={`assign-policy-${policy.id}`}
+                                        >
+                                          <UserPlus className="h-4 w-4 mr-1" />
+                                          Assign to Employees
+                                          {(() => {
+                                            const stats = getAssignmentStats(policy.id);
+                                            return stats.total > 0 ? (
+                                              <span className="ml-1 text-xs bg-white/20 px-1.5 py-0.5 rounded">
+                                                {stats.acknowledged}/{stats.total}
+                                              </span>
+                                            ) : null;
+                                          })()}
+                                        </Button>
+                                      </>
                                     )}
                                   </div>
                                 ) : isAdmin() && (
-                                  <Button 
-                                    size="sm"
-                                    className="bg-primary hover:bg-primary-hover text-white rounded-lg"
-                                    onClick={() => {
-                                      setSelectedPolicy(policy);
-                                      setSelectedInsurance(null);
-                                      setUploadDialogOpen(true);
-                                    }}
-                                  >
-                                    <Upload className="h-4 w-4 mr-1" />
-                                    Upload
-                                  </Button>
+                                  <div className="flex items-center gap-2">
+                                    <Button 
+                                      size="sm"
+                                      className="bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                      onClick={() => {
+                                        setSelectedPolicy(policy);
+                                        setSelectedInsurance(null);
+                                        setUploadDialogOpen(true);
+                                      }}
+                                    >
+                                      <Upload className="h-4 w-4 mr-1" />
+                                      Upload
+                                    </Button>
+                                    {/* Disabled Assign Button - no document yet */}
+                                    <Button 
+                                      size="sm"
+                                      variant="outline"
+                                      className="rounded-lg text-text-muted"
+                                      disabled
+                                      title="Upload policy document before assigning to employees"
+                                    >
+                                      <UserPlus className="h-4 w-4 mr-1" />
+                                      Assign
+                                    </Button>
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -1083,6 +1191,115 @@ export default function ComplianceCentrePage() {
           }
         } : undefined}
       />
+
+      {/* Policy Assignment Modal */}
+      <Dialog open={assignDialogOpen} onOpenChange={(open) => {
+        setAssignDialogOpen(open);
+        if (!open) {
+          setPolicyToAssign(null);
+          setSelectedEmployees([]);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Assign Policy to Employees</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {policyToAssign && (
+              <div className="p-3 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
+                <p className="font-medium text-text-primary">{policyToAssign.name}</p>
+                <p className="text-sm text-text-muted">Version {policyToAssign.version}</p>
+              </div>
+            )}
+            
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-medium">Select Employees</Label>
+              <Button 
+                type="button" 
+                variant="ghost" 
+                size="sm"
+                onClick={selectAllUnassigned}
+                className="text-primary"
+              >
+                Select All Unassigned
+              </Button>
+            </div>
+            
+            <div className="max-h-60 overflow-y-auto space-y-2 border border-[#E4E8EB] rounded-xl p-3">
+              {employees.length === 0 ? (
+                <p className="text-sm text-text-muted text-center py-4">No employees found</p>
+              ) : (
+                employees.map((emp) => {
+                  const isAlreadyAssigned = policyAssignments.some(
+                    a => a.policy_id === policyToAssign?.id && 
+                         a.employee_id === emp.id && 
+                         !['unassigned', 'withdrawn'].includes(a.status)
+                  );
+                  const assignment = policyAssignments.find(
+                    a => a.policy_id === policyToAssign?.id && 
+                         a.employee_id === emp.id && 
+                         !['unassigned', 'withdrawn'].includes(a.status)
+                  );
+                  
+                  return (
+                    <label 
+                      key={emp.id} 
+                      className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer ${
+                        isAlreadyAssigned ? 'bg-gray-100 opacity-60' : 'hover:bg-[#F8FAFA]'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedEmployees.includes(emp.id)}
+                        onChange={() => !isAlreadyAssigned && toggleEmployeeSelection(emp.id)}
+                        disabled={isAlreadyAssigned}
+                        className="rounded border-[#E4E8EB]"
+                      />
+                      <span className="text-text-primary flex-1">
+                        {emp.first_name} {emp.last_name}
+                      </span>
+                      {isAlreadyAssigned && (
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          assignment?.status === 'acknowledged' || assignment?.status === 'signed' 
+                            ? 'bg-green-100 text-green-700' 
+                            : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {assignment?.status === 'acknowledged' || assignment?.status === 'signed' 
+                            ? 'Acknowledged' 
+                            : 'Assigned'}
+                        </span>
+                      )}
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            
+            <p className="text-sm text-text-muted">
+              {selectedEmployees.length} employee(s) selected
+            </p>
+            
+            <div className="flex justify-end gap-3 pt-4">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => { setAssignDialogOpen(false); setSelectedEmployees([]); }} 
+                className="rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleAssignPolicy}
+                disabled={isAssigning || selectedEmployees.length === 0} 
+                className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                data-testid="assign-policy-submit"
+              >
+                {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Assign Policy'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

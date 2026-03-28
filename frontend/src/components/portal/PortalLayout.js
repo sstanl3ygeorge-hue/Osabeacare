@@ -22,8 +22,7 @@ const navigation = [
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
-  // Employee Policies - for assigning and tracking policy acknowledgements
-  { name: 'Policy Assignments', href: '/portal/policies', icon: FileCheck },
+  // Policy Assignments removed - consolidated into Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'Audit View', href: '/portal/audit', icon: History },
   { name: 'Settings', href: '/portal/settings', icon: Settings },

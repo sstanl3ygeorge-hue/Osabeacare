@@ -2298,6 +2298,9 @@ export default function EmployeeProfilePage() {
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="font-heading text-lg">What's Needed</CardTitle>
+                <p className="text-xs text-text-muted mt-1">
+                  Start here. Upload each required document, then check and approve it.
+                </p>
                 {complianceRequirements && (
                   <p className="text-sm text-text-muted mt-1">
                     {complianceRequirements.summary.verified} approved · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} ready for review · {complianceRequirements.summary.missing} still needed
@@ -3018,7 +3021,10 @@ export default function EmployeeProfilePage() {
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between border-b border-[#E4E8EB]">
               <div>
-                <CardTitle className="font-heading text-lg">Document Requirements</CardTitle>
+                <CardTitle className="font-heading text-lg">Documents</CardTitle>
+                <p className="text-xs text-text-muted mt-1">
+                  View and manage uploaded documents.
+                </p>
                 <p className="text-sm text-text-muted mt-1">
                   Upload documents for each requirement. Multi-file requirements accept multiple files.
                 </p>
@@ -3245,14 +3251,14 @@ export default function EmployeeProfilePage() {
                   <p className="text-sm text-text-muted">
                     {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} of {policies.length} acknowledged
                   </p>
+                  <p className="text-xs text-text-muted mt-1">
+                    Employees must read and acknowledge assigned policies.
+                  </p>
                 </div>
                 {policies.length > 0 && (
                   <div className="flex items-center gap-2 text-sm">
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-                      <Clock className="w-3 h-3" /> {policies.filter(p => p.status === 'assigned').length} Pending
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-blue-700">
-                      <Eye className="w-3 h-3" /> {policies.filter(p => p.status === 'viewed').length} Viewed
+                      <Clock className="w-3 h-3" /> {policies.filter(p => p.status === 'assigned' || p.status === 'viewed').length} Not Read
                     </span>
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-100 text-green-700">
                       <CheckCircle className="w-3 h-3" /> {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} Acknowledged
@@ -3265,7 +3271,7 @@ export default function EmployeeProfilePage() {
                 <div className="text-center py-12 text-text-muted">
                   <FileCheck className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No policies assigned yet</p>
-                  <p className="text-sm mt-1">Policies can be assigned from the Policy Centre</p>
+                  <p className="text-sm mt-1">Policies can be assigned from the Compliance Centre</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -3321,16 +3327,15 @@ export default function EmployeeProfilePage() {
                           <span className={`status-chip ${
                             policy.admin_reviewed ? 'status-success' :
                             (policy.status === 'acknowledged' || policy.status === 'signed') ? 'bg-green-100 text-green-700 border-green-200' :
-                            policy.status === 'viewed' ? 'bg-amber-100 text-amber-700 border-amber-200' :
                             'bg-gray-100 text-gray-600 border-gray-200'
                           }`}>
                             {policy.admin_reviewed ? 'Reviewed & Approved' :
                              (policy.status === 'acknowledged' || policy.status === 'signed') ? 'Acknowledged' :
-                             policy.status === 'viewed' ? 'Viewed' : 'Assigned'}
+                             'Not Read'}
                           </span>
                           
                           {/* Action Buttons */}
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
                             {/* View Policy Button */}
                             <Button
                               size="sm"
@@ -3385,7 +3390,7 @@ export default function EmployeeProfilePage() {
                                 data-testid={`acknowledge-policy-${policy.id}`}
                               >
                                 <CheckCircle className="w-3 h-3 mr-1" />
-                                I have read and understood this policy
+                                Mark as Read & Understood
                               </Button>
                             )}
                             

@@ -238,7 +238,9 @@ export default function TrainingPage() {
           <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">
             Training Matrix
           </h1>
-          <p className="text-text-muted mt-1">Track employee training, certifications and expiry dates</p>
+          <p className="text-text-muted mt-1">
+            Track staff training, expiry dates, and renewals. Use filters to find risks quickly.
+          </p>
         </div>
         
         {!isAuditor() && (

@@ -1480,7 +1480,179 @@ export default function EmployeeProfilePage() {
             </div>
           </div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-[#E4E8EB]">
+          {/* AUDIT QUICK VIEW - Key compliance items at a glance */}
+          {(() => {
+            // Extract key compliance data for audit visibility
+            const reqs = complianceRequirements?.requirements || [];
+            
+            // DBS Status
+            const dbsReq = reqs.find(r => r.id === 'dbs_certificate' || r.id === 'dbs_check');
+            const dbsUpdateReq = reqs.find(r => r.id === 'dbs_update_service');
+            const dbsHasEvidence = dbsReq?.has_evidence || false;
+            const dbsVerified = dbsReq?.is_verified || false;
+            const dbsExpiry = dbsReq?.expiry_date;
+            const dbsExpiryStatus = dbsExpiry ? (() => {
+              const now = new Date();
+              const exp = new Date(dbsExpiry);
+              const days = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+              if (days < 0) return { status: 'expired', label: 'Expired', color: 'red' };
+              if (days <= 30) return { status: 'expiring', label: `${days}d left`, color: 'amber' };
+              return { status: 'valid', label: 'Valid', color: 'green' };
+            })() : null;
+            
+            // RTW Status
+            const rtwReq = reqs.find(r => r.id === 'right_to_work_documents' || r.id === 'right_to_work_check');
+            const rtwHasEvidence = rtwReq?.has_evidence || false;
+            const rtwVerified = rtwReq?.is_verified || false;
+            
+            // Training Status (from training array)
+            const completedTraining = training.filter(t => t.status === 'completed').length;
+            const verifiedTraining = training.filter(t => t.verified).length;
+            const expiredTraining = training.filter(t => {
+              if (!t.expiry_date) return false;
+              return new Date(t.expiry_date) < new Date();
+            }).length;
+            const totalMandatory = training.filter(t => t.mandatory).length;
+            
+            // Documents pending
+            const pendingDocs = reqs.filter(r => r.type === 'document' && !r.has_evidence).length;
+            const unverifiedDocs = reqs.filter(r => r.type === 'document' && r.has_evidence && !r.is_verified).length;
+            
+            return (
+              <div className="mt-6 pt-6 border-t border-[#E4E8EB]">
+                {/* Audit Quick View Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Audit Quick View</h3>
+                  <p className="text-xs text-text-muted">Key compliance items for checker review</p>
+                </div>
+                
+                {/* Quick Status Cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="audit-quick-view">
+                  {/* DBS Status */}
+                  <div className={`p-3 rounded-xl border ${
+                    !dbsHasEvidence ? 'border-red-200 bg-red-50' :
+                    dbsExpiryStatus?.status === 'expired' ? 'border-red-200 bg-red-50' :
+                    dbsExpiryStatus?.status === 'expiring' ? 'border-amber-200 bg-amber-50' :
+                    dbsVerified ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
+                  }`} data-testid="dbs-status-card">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Shield className={`h-4 w-4 ${
+                        !dbsHasEvidence || dbsExpiryStatus?.status === 'expired' ? 'text-red-600' :
+                        dbsExpiryStatus?.status === 'expiring' ? 'text-amber-600' :
+                        dbsVerified ? 'text-green-600' : 'text-blue-600'
+                      }`} />
+                      <span className="text-xs font-semibold text-text-primary">DBS</span>
+                    </div>
+                    <p className={`text-sm font-medium ${
+                      !dbsHasEvidence ? 'text-red-700' :
+                      dbsExpiryStatus?.status === 'expired' ? 'text-red-700' :
+                      dbsExpiryStatus?.status === 'expiring' ? 'text-amber-700' :
+                      dbsVerified ? 'text-green-700' : 'text-blue-700'
+                    }`}>
+                      {!dbsHasEvidence ? 'Missing' :
+                       dbsExpiryStatus?.status === 'expired' ? 'Expired' :
+                       dbsExpiryStatus?.status === 'expiring' ? dbsExpiryStatus.label :
+                       dbsVerified ? 'Verified' : 'Pending Review'}
+                    </p>
+                    {dbsExpiry && dbsHasEvidence && (
+                      <p className="text-xs text-text-muted mt-0.5">
+                        Exp: {new Date(dbsExpiry).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* RTW Status */}
+                  <div className={`p-3 rounded-xl border ${
+                    !rtwHasEvidence ? 'border-red-200 bg-red-50' :
+                    rtwVerified ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
+                  }`} data-testid="rtw-status-card">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileCheck className={`h-4 w-4 ${
+                        !rtwHasEvidence ? 'text-red-600' :
+                        rtwVerified ? 'text-green-600' : 'text-blue-600'
+                      }`} />
+                      <span className="text-xs font-semibold text-text-primary">Right to Work</span>
+                    </div>
+                    <p className={`text-sm font-medium ${
+                      !rtwHasEvidence ? 'text-red-700' :
+                      rtwVerified ? 'text-green-700' : 'text-blue-700'
+                    }`}>
+                      {!rtwHasEvidence ? 'Missing' : rtwVerified ? 'Verified' : 'Pending Review'}
+                    </p>
+                  </div>
+                  
+                  {/* Training Status */}
+                  <div className={`p-3 rounded-xl border ${
+                    expiredTraining > 0 ? 'border-red-200 bg-red-50' :
+                    completedTraining < totalMandatory ? 'border-amber-200 bg-amber-50' :
+                    'border-green-200 bg-green-50'
+                  }`} data-testid="training-status-card">
+                    <div className="flex items-center gap-2 mb-1">
+                      <GraduationCap className={`h-4 w-4 ${
+                        expiredTraining > 0 ? 'text-red-600' :
+                        completedTraining < totalMandatory ? 'text-amber-600' : 'text-green-600'
+                      }`} />
+                      <span className="text-xs font-semibold text-text-primary">Training</span>
+                    </div>
+                    <p className={`text-sm font-medium ${
+                      expiredTraining > 0 ? 'text-red-700' :
+                      completedTraining < totalMandatory ? 'text-amber-700' : 'text-green-700'
+                    }`}>
+                      {expiredTraining > 0 ? `${expiredTraining} Expired` :
+                       completedTraining < totalMandatory ? `${completedTraining}/${totalMandatory} Complete` :
+                       `${verifiedTraining}/${completedTraining} Verified`}
+                    </p>
+                  </div>
+                  
+                  {/* Documents Status */}
+                  <div className={`p-3 rounded-xl border ${
+                    pendingDocs > 0 ? 'border-red-200 bg-red-50' :
+                    unverifiedDocs > 0 ? 'border-amber-200 bg-amber-50' :
+                    'border-green-200 bg-green-50'
+                  }`} data-testid="docs-status-card">
+                    <div className="flex items-center gap-2 mb-1">
+                      <FileText className={`h-4 w-4 ${
+                        pendingDocs > 0 ? 'text-red-600' :
+                        unverifiedDocs > 0 ? 'text-amber-600' : 'text-green-600'
+                      }`} />
+                      <span className="text-xs font-semibold text-text-primary">Documents</span>
+                    </div>
+                    <p className={`text-sm font-medium ${
+                      pendingDocs > 0 ? 'text-red-700' :
+                      unverifiedDocs > 0 ? 'text-amber-700' : 'text-green-700'
+                    }`}>
+                      {pendingDocs > 0 ? `${pendingDocs} Missing` :
+                       unverifiedDocs > 0 ? `${unverifiedDocs} Unverified` : 'All Verified'}
+                    </p>
+                  </div>
+                  
+                  {/* Progress */}
+                  <div className={`p-3 rounded-xl border ${
+                    (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 100 ? 'border-green-200 bg-green-50' :
+                    (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'border-amber-200 bg-amber-50' :
+                    'border-red-200 bg-red-50'
+                  }`} data-testid="progress-status-card">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CheckCircle className={`h-4 w-4 ${
+                        (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 100 ? 'text-green-600' :
+                        (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'text-amber-600' : 'text-red-600'
+                      }`} />
+                      <span className="text-xs font-semibold text-text-primary">Progress</span>
+                    </div>
+                    <p className={`text-sm font-medium ${
+                      (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 100 ? 'text-green-700' :
+                      (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'text-amber-700' : 'text-red-700'
+                    }`}>
+                      {complianceRequirements?.statuses?.overall_compliance?.percentage || 0}% Complete
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Contact Info Row */}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 pt-4 border-t border-[#E4E8EB]">
             <div className="flex items-center gap-3">
               <Mail className="h-5 w-5 text-text-muted" />
               <span className="text-sm text-text-primary">{employee.email}</span>
@@ -2376,7 +2548,7 @@ export default function EmployeeProfilePage() {
               <div>
                 <CardTitle className="font-heading text-lg">What's Needed</CardTitle>
                 <p className="text-xs text-text-muted mt-1">
-                  Start here. Upload each required document, then check and approve it.
+                  Upload each required document, then verify it. Only verified documents count towards compliance.
                 </p>
                 {complianceRequirements && (
                   <p className="text-sm text-text-muted mt-1">
@@ -2733,6 +2905,27 @@ export default function EmployeeProfilePage() {
                                         Recruitment
                                       </span>
                                     )}
+                                    
+                                    {/* HIGH RISK BADGE - DBS and RTW items get special visibility */}
+                                    {(req.id === 'dbs_certificate' || req.id === 'dbs_check' || req.id === 'dbs_update_service') && (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
+                                        !hasEvidence ? 'bg-red-600 text-white' :
+                                        isVerified ? 'bg-green-600 text-white' : 'bg-amber-500 text-white'
+                                      }`}>
+                                        <Shield className="h-2.5 w-2.5" />
+                                        DBS
+                                      </span>
+                                    )}
+                                    {(req.id === 'right_to_work_documents' || req.id === 'right_to_work_check') && (
+                                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex items-center gap-1 ${
+                                        !hasEvidence ? 'bg-red-600 text-white' :
+                                        isVerified ? 'bg-green-600 text-white' : 'bg-amber-500 text-white'
+                                      }`}>
+                                        <FileCheck className="h-2.5 w-2.5" />
+                                        RTW
+                                      </span>
+                                    )}
+                                    
                                     <p className="font-medium text-text-primary">{req.name}</p>
                                     {/* Source badge - cleaner */}
                                     {req.source === 'internal' && (
@@ -3289,10 +3482,7 @@ export default function EmployeeProfilePage() {
               <div>
                 <CardTitle className="font-heading text-lg">Documents</CardTitle>
                 <p className="text-xs text-text-muted mt-1">
-                  View and manage uploaded documents.
-                </p>
-                <p className="text-sm text-text-muted mt-1">
-                  Upload documents for each requirement. Multi-file requirements accept multiple files.
+                  Upload and verify documents. Only verified documents count towards compliance.
                 </p>
               </div>
               {complianceRequirements && (
@@ -3402,17 +3592,52 @@ export default function EmployeeProfilePage() {
                                   key={doc.file_id || idx} 
                                   className={`flex items-center justify-between p-3 rounded-lg border ${
                                     isFileBroken ? 'border-red-200 bg-red-50' :
+                                    doc.expiry_status?.status === 'expired' ? 'border-red-300 bg-red-50' :
+                                    doc.expiry_status?.status === 'expiring_soon' ? 'border-amber-300 bg-amber-50' :
                                     doc.verified ? 'border-success/30 bg-success/5' : 'border-[#E4E8EB] bg-white'
                                   }`}
                                   data-testid={`file-row-${doc.file_id}`}
                                 >
                                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                                    <FileText className={`h-5 w-5 flex-shrink-0 ${isFileBroken ? 'text-red-400' : 'text-text-muted'}`} />
-                                    <div className="min-w-0">
-                                      <p className={`text-sm font-medium truncate ${isFileBroken ? 'text-red-600' : 'text-text-primary'}`}>
-                                        {isFileBroken ? 'File unavailable' : (doc.file_label || doc.original_filename || 'Document')}
-                                      </p>
-                                      <div className="flex items-center gap-2 text-xs text-text-muted">
+                                    <FileText className={`h-5 w-5 flex-shrink-0 ${
+                                      isFileBroken ? 'text-red-400' : 
+                                      doc.expiry_status?.status === 'expired' ? 'text-red-500' :
+                                      doc.expiry_status?.status === 'expiring_soon' ? 'text-amber-500' :
+                                      'text-text-muted'
+                                    }`} />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <p className={`text-sm font-medium truncate ${isFileBroken ? 'text-red-600' : 'text-text-primary'}`}>
+                                          {isFileBroken ? 'File unavailable' : (doc.file_label || doc.original_filename || 'Document')}
+                                        </p>
+                                        {/* DBS/RTW highlight */}
+                                        {(req.id === 'dbs_certificate' || req.id === 'dbs_check') && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">DBS</span>
+                                        )}
+                                        {(req.id === 'right_to_work_documents' || req.id === 'right_to_work_check') && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-semibold">RTW</span>
+                                        )}
+                                        {/* Expiry Status Badge - Prominent */}
+                                        {doc.expiry_status && (
+                                          <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                                            doc.expiry_status.status === 'expired' 
+                                              ? 'bg-red-600 text-white' 
+                                              : doc.expiry_status.status === 'expiring_soon'
+                                              ? 'bg-amber-500 text-white'
+                                              : 'bg-green-600 text-white'
+                                          }`}>
+                                            {doc.expiry_status.label}
+                                          </span>
+                                        )}
+                                        {/* Verified badge */}
+                                        {doc.verified && !isFileBroken && (
+                                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-medium flex items-center gap-0.5">
+                                            <Shield className="h-2.5 w-2.5" />
+                                            Verified
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5">
                                         {!isFileBroken && doc.source_type && (
                                           <span>
                                             {doc.source_type === 'form_submission' ? 'From Form' : 
@@ -3421,12 +3646,12 @@ export default function EmployeeProfilePage() {
                                           </span>
                                         )}
                                         {doc.uploaded_at && (
-                                          <span>{new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                                          <span>Uploaded: {new Date(doc.uploaded_at).toLocaleDateString()}</span>
                                         )}
-                                        {doc.verified && !isFileBroken && (
-                                          <span className="flex items-center gap-1 text-success">
-                                            <Shield className="h-3 w-3" />
-                                            Verified
+                                        {/* Expiry Date - show actual date */}
+                                        {doc.expiry_date && (
+                                          <span className={doc.expiry_status?.status === 'expired' ? 'text-red-600 font-medium' : ''}>
+                                            Expires: {new Date(doc.expiry_date).toLocaleDateString()}
                                           </span>
                                         )}
                                         {isFileBroken && (
@@ -3805,7 +4030,7 @@ export default function EmployeeProfilePage() {
             <CardContent className="p-6">
               <div className="mb-4 pb-4 border-b border-[#E4E8EB]">
                 <h3 className="font-heading text-lg font-semibold text-text-primary">Training & Certifications</h3>
-                <p className="text-sm text-text-muted">Track completion status, expiry dates, and renewal status</p>
+                <p className="text-sm text-text-muted">Track completion status, expiry dates, and renewal status. Verified training counts toward work readiness.</p>
               </div>
               {training.length === 0 ? (
                 <div className="text-center py-12 text-text-muted">

@@ -448,7 +448,23 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Audit Mode Enabled + Profile Photo Feature
+2026-03-28 - Audit-Ready Status Overhaul
+
+### Audit-Ready Status Overhaul (Completed 2026-03-28)
+- [x] **Removed "Complete" status entirely** - No "complete" label anywhere in UI
+- [x] **Standardized to 4 statuses only**:
+  - Verified (green) - Has evidence + admin verified
+  - Evidence Uploaded (blue) - Has files but not verified
+  - Missing (red) - No evidence
+  - Expired (orange) - Evidence exists but past expiry date
+- [x] **ComplianceOverview redesigned**:
+  - Shows "Audit Summary" with 4 metric cards
+  - Groups items by status: Verified, Needs Verification, Missing, Expired
+  - Progress bar shows "X/Y verified" instead of "X/Y complete"
+- [x] **Summary Card renamed** to "Audit Status":
+  - Verified X/Y, Evidence Uploaded X, Missing X, Policies Signed X/Y
+- [x] **Category headers** now show "X/Y verified" instead of "X/Y complete"
+- [x] **Checklist header** shows: "X verified · Y awaiting verification · Z missing"
 
 ### Audit Mode Implementation (Completed 2026-03-28)
 - [x] **Hidden Forms System from UI**:

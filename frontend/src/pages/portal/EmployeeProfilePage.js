@@ -1462,7 +1462,7 @@ export default function EmployeeProfilePage() {
                   <DialogHeader>
                     <DialogTitle className="font-heading">Create from Existing Application</DialogTitle>
                     <DialogDescription>
-                      Upload a completed application form and optionally a CV. The form will be marked as "Completed (Imported)" and linked to the employee's compliance checklist.
+                      Upload a completed application form and optionally a CV. The form will be stored as uploaded evidence and linked to the employee's compliance checklist.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 mt-4">
@@ -1543,7 +1543,7 @@ export default function EmployeeProfilePage() {
                         </li>
                         <li className="flex items-start gap-2">
                           <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
-                          Checklist item automatically marked as complete
+                          Checklist item evidence uploaded automatically
                         </li>
                         <li className="flex items-start gap-2">
                           <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
@@ -1579,7 +1579,7 @@ export default function EmployeeProfilePage() {
                   <DialogHeader>
                     <DialogTitle className="font-heading">Import Existing Document</DialogTitle>
                     <DialogDescription>
-                      Upload an existing completed document (Reference letter, Health form, Contract, etc.) to mark the corresponding compliance requirement as complete.
+                      Upload an existing completed document (Reference letter, Health form, Contract, etc.) to add evidence to the corresponding compliance requirement.
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 mt-4">
@@ -1715,7 +1715,7 @@ export default function EmployeeProfilePage() {
                         </li>
                         <li className="flex items-start gap-2">
                           <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
-                          Checklist requirement marked complete
+                          Checklist requirement evidence uploaded
                         </li>
                         <li className="flex items-start gap-2">
                           <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
@@ -2086,7 +2086,7 @@ export default function EmployeeProfilePage() {
                     if (categoryItems.length === 0) return null;
                     
                     const categoryLabel = category.replace(/_/g, ' ').replace(/^[A-Z]_/, '');
-                    const completedInCategory = categoryItems.filter(i => i.status === 'completed').length;
+                    const withEvidenceCount = categoryItems.filter(i => i.has_evidence || (i.evidence_files && i.evidence_files.length > 0)).length;
                     const verifiedInCategory = categoryItems.filter(i => i.verified).length;
                     
                     return (
@@ -2094,8 +2094,8 @@ export default function EmployeeProfilePage() {
                         <div className="flex items-center justify-between mb-3">
                           <h3 className="font-semibold text-text-primary">{categoryLabel}</h3>
                           <span className="text-xs text-text-muted">
-                            {completedInCategory}/{categoryItems.length} complete
-                            {verifiedInCategory > 0 && ` (${verifiedInCategory} verified)`}
+                            {verifiedInCategory}/{categoryItems.length} verified
+                            {withEvidenceCount > verifiedInCategory && ` · ${withEvidenceCount - verifiedInCategory} awaiting`}
                           </span>
                         </div>
                         <div className="space-y-2">

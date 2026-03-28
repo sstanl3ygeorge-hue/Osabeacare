@@ -1343,7 +1343,7 @@ class PolicyResponse(BaseModel):
     assigned_count: int = 0
     signed_count: int = 0
 
-# Policy Assignment Models
+# Policy Assignment Models - Audit-Safe Acknowledgement System
 class PolicyAssignmentCreate(BaseModel):
     policy_id: str
     employee_ids: List[str]
@@ -1354,12 +1354,21 @@ class PolicyAssignmentResponse(BaseModel):
     id: str
     policy_id: str
     policy_title: Optional[str] = None
+    policy_version: Optional[str] = None
     employee_id: str
     employee_name: Optional[str] = None
     assigned_at: str
-    status: str
+    assigned_by: Optional[str] = None
+    assigned_by_name: Optional[str] = None
+    status: str  # assigned -> viewed -> acknowledged
     viewed_at: Optional[str] = None
-    signed_at: Optional[str] = None
+    acknowledged_at: Optional[str] = None
+    acknowledged_by_employee_name: Optional[str] = None
+    # Admin review fields
+    admin_reviewed: bool = False
+    admin_reviewed_at: Optional[str] = None
+    admin_reviewed_by: Optional[str] = None
+    admin_reviewed_by_name: Optional[str] = None
 
 # Training Record Models
 class TrainingRecordCreate(BaseModel):
@@ -4329,8 +4338,14 @@ async def verify_requirement(
             }}
         )
     
-    await log_audit_action(user['user_id'], "verify_requirement", "requirement", requirement_id,
-                           {"employee_id": employee_id})
+    await log_audit_action(user['user_id'], "document_verified", "requirement", requirement_id,
+                           {
+                               "employee_id": employee_id,
+                               "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+                               "requirement_name": requirement['name'],
+                               "verified_by_name": verified_by_name,
+                               "verified_at": now
+                           })
     
     await update_employee_compliance(employee_id)
     
@@ -4824,13 +4839,14 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     completion_percentage = int((evidence_backed_count / total_count) * 100) if total_count > 0 else 0
     verification_percentage = int((verified_count / evidence_backed_count) * 100) if evidence_backed_count > 0 else 0
     
-    # Fetch policies data for the employee
-    assigned_policies = await db.employee_policies.find({
+    # Fetch policies data for the employee - using policy_assignments collection
+    assigned_policies = await db.policy_assignments.find({
         "employee_id": employee_id
-    }, {"_id": 0, "acknowledged": 1, "acknowledged_at": 1}).to_list(100)
+    }, {"_id": 0, "status": 1, "acknowledged_at": 1}).to_list(100)
     
     policies_assigned = len(assigned_policies)
-    policies_acknowledged = sum(1 for p in assigned_policies if p.get('acknowledged', False))
+    # Count acknowledged - support both old 'signed' status and new 'acknowledged' status
+    policies_acknowledged = sum(1 for p in assigned_policies if p.get('status') in ['acknowledged', 'signed'])
     
     policies_data = {
         "assigned": policies_assigned,
@@ -5290,12 +5306,15 @@ async def get_policies(active: Optional[bool] = None, user: dict = Depends(get_c
         query["active"] = active
     policies = await db.policies.find(query, {"_id": 0}).to_list(100)
     
-    # Get counts
+    # Get counts - now using "acknowledged" status instead of "signed"
     for policy in policies:
         assigned_count = await db.policy_assignments.count_documents({"policy_id": policy['id']})
-        signed_count = await db.policy_assignments.count_documents({"policy_id": policy['id'], "status": "signed"})
+        acknowledged_count = await db.policy_assignments.count_documents({
+            "policy_id": policy['id'], 
+            "status": {"$in": ["acknowledged", "signed"]}  # Support both old and new status
+        })
         policy['assigned_count'] = assigned_count
-        policy['signed_count'] = signed_count
+        policy['signed_count'] = acknowledged_count  # This is acknowledged count for backwards compat
     
     return [PolicyResponse(**p) for p in policies]
 
@@ -5311,10 +5330,51 @@ async def upload_policy_file(policy_id: str, file: UploadFile = File(...), user:
     data = await file.read()
     result = put_object(path, data, file.content_type or "application/pdf")
     
-    await db.policies.update_one({"id": policy_id}, {"$set": {"file_url": result["path"]}})
+    now = datetime.now(timezone.utc).isoformat()
+    await db.policies.update_one({"id": policy_id}, {"$set": {
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "uploaded_at": now
+    }})
+    
+    # Audit log for policy upload
+    await log_audit_action(
+        user['user_id'],
+        "policy_uploaded",
+        "policy",
+        policy_id,
+        {
+            "policy_title": policy['title'],
+            "filename": file.filename,
+            "version": policy.get('version', '1.0')
+        }
+    )
     
     updated_policy = await db.policies.find_one({"id": policy_id}, {"_id": 0})
     return PolicyResponse(**updated_policy)
+
+
+@api_router.get("/policies/{policy_id}/file")
+async def get_policy_file(policy_id: str, user: dict = Depends(get_current_user)):
+    """Get policy file for viewing - used when employee views assigned policy"""
+    policy = await db.policies.find_one({"id": policy_id}, {"_id": 0})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    if not policy.get('file_url'):
+        raise HTTPException(status_code=404, detail="No file uploaded for this policy")
+    
+    try:
+        data, content_type = get_object(policy['file_url'])
+        filename = policy.get('original_filename', f"policy_{policy_id}.pdf")
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type=content_type,
+            headers={"Content-Disposition": f"inline; filename=\"{filename}\""}
+        )
+    except Exception as e:
+        logger.error(f"Error retrieving policy file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve policy file")
 
 @api_router.post("/policies/assign")
 async def assign_policies(assignment: PolicyAssignmentCreate, user: dict = Depends(require_admin)):
@@ -5331,20 +5391,46 @@ async def assign_policies(assignment: PolicyAssignmentCreate, user: dict = Depen
         if existing:
             continue
         
+        # Get employee name for audit trail
+        emp = await db.employees.find_one({"id": emp_id}, {"_id": 0})
+        emp_name = f"{emp['first_name']} {emp['last_name']}" if emp else "Unknown"
+        
         assignment_doc = {
             "id": str(uuid.uuid4()),
             "policy_id": assignment.policy_id,
             "policy_title": policy['title'],
+            "policy_version": policy.get('version', '1.0'),
             "employee_id": emp_id,
+            "employee_name": emp_name,
             "assigned_at": now,
+            "assigned_by": user['user_id'],
+            "assigned_by_name": user.get('name', user.get('email', 'Admin')),
             "status": "assigned",
             "viewed_at": None,
-            "signed_at": None
+            "acknowledged_at": None,
+            "acknowledged_by_employee_name": None,
+            "admin_reviewed": False,
+            "admin_reviewed_at": None,
+            "admin_reviewed_by": None,
+            "admin_reviewed_by_name": None
         }
         await db.policy_assignments.insert_one(assignment_doc)
         assignments.append(assignment_doc)
         
-        await log_audit_action(user['user_id'], "assign_policy", "policy_assignment", assignment_doc['id'], {"policy_id": assignment.policy_id, "employee_id": emp_id})
+        await log_audit_action(
+            user['user_id'], 
+            "policy_assigned", 
+            "policy_assignment", 
+            assignment_doc['id'], 
+            {
+                "policy_id": assignment.policy_id, 
+                "policy_title": policy['title'],
+                "policy_version": policy.get('version', '1.0'),
+                "employee_id": emp_id,
+                "employee_name": emp_name,
+                "assigned_by_name": user.get('name', user.get('email', 'Admin'))
+            }
+        )
     
     return {"assigned": len(assignments), "message": f"Policy assigned to {len(assignments)} employees"}
 
@@ -5365,28 +5451,144 @@ async def get_policy_assignments(
     
     assignments = await db.policy_assignments.find(query, {"_id": 0}).to_list(1000)
     
-    # Enrich with employee names
+    # Enrich with employee names and policy info if missing
     for a in assignments:
-        emp = await db.employees.find_one({"id": a['employee_id']}, {"_id": 0})
-        if emp:
-            a['employee_name'] = f"{emp['first_name']} {emp['last_name']}"
+        if not a.get('employee_name'):
+            emp = await db.employees.find_one({"id": a['employee_id']}, {"_id": 0})
+            if emp:
+                a['employee_name'] = f"{emp['first_name']} {emp['last_name']}"
+        # Ensure policy_version is present
+        if not a.get('policy_version'):
+            policy = await db.policies.find_one({"id": a['policy_id']}, {"_id": 0})
+            if policy:
+                a['policy_version'] = policy.get('version', '1.0')
     
     return [PolicyAssignmentResponse(**a) for a in assignments]
 
-@api_router.put("/policy-assignments/{assignment_id}/acknowledge")
-async def acknowledge_policy(assignment_id: str, user: dict = Depends(get_current_user)):
+
+@api_router.put("/policy-assignments/{assignment_id}/view")
+async def mark_policy_viewed(assignment_id: str, user: dict = Depends(get_current_user)):
+    """Mark a policy assignment as viewed by the employee"""
     assignment = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
     if not assignment:
         raise HTTPException(status_code=404, detail="Assignment not found")
     
     now = datetime.now(timezone.utc).isoformat()
-    update_data = {"status": "signed", "signed_at": now}
+    
+    # Only update viewed_at if not already viewed
+    if not assignment.get('viewed_at'):
+        update_data = {
+            "viewed_at": now,
+            "status": "viewed" if assignment.get('status') == 'assigned' else assignment.get('status')
+        }
+        await db.policy_assignments.update_one({"id": assignment_id}, {"$set": update_data})
+        
+        await log_audit_action(
+            user['user_id'], 
+            "policy_viewed", 
+            "policy_assignment", 
+            assignment_id, 
+            {
+                "policy_id": assignment['policy_id'],
+                "policy_title": assignment.get('policy_title'),
+                "employee_id": assignment['employee_id']
+            }
+        )
+    
+    updated = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return PolicyAssignmentResponse(**updated)
+
+@api_router.put("/policy-assignments/{assignment_id}/acknowledge")
+async def acknowledge_policy(assignment_id: str, user: dict = Depends(get_current_user)):
+    """
+    Employee acknowledges policy - "I have read and understood this policy"
+    Stores: employee_id, policy_id, policy_version, acknowledged_at
+    """
+    assignment = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Check if already acknowledged
+    if assignment.get('status') == 'acknowledged':
+        raise HTTPException(status_code=400, detail="Policy already acknowledged")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get employee name for audit trail
+    emp = await db.employees.find_one({"id": assignment['employee_id']}, {"_id": 0})
+    emp_name = f"{emp['first_name']} {emp['last_name']}" if emp else "Unknown"
+    
+    update_data = {
+        "status": "acknowledged",
+        "acknowledged_at": now,
+        "acknowledged_by_employee_name": emp_name
+    }
+    
+    # Also mark as viewed if not already
     if not assignment.get('viewed_at'):
         update_data['viewed_at'] = now
     
     await db.policy_assignments.update_one({"id": assignment_id}, {"$set": update_data})
     
-    await log_audit_action(user['user_id'], "acknowledge_policy", "policy_assignment", assignment_id, {"policy_id": assignment['policy_id']})
+    await log_audit_action(
+        user['user_id'], 
+        "policy_acknowledged", 
+        "policy_assignment", 
+        assignment_id, 
+        {
+            "policy_id": assignment['policy_id'],
+            "policy_title": assignment.get('policy_title'),
+            "policy_version": assignment.get('policy_version'),
+            "employee_id": assignment['employee_id'],
+            "employee_name": emp_name,
+            "acknowledged_at": now
+        }
+    )
+    
+    updated = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    return PolicyAssignmentResponse(**updated)
+
+
+@api_router.put("/policy-assignments/{assignment_id}/admin-review")
+async def admin_review_policy(assignment_id: str, user: dict = Depends(require_admin)):
+    """
+    Admin reviews and approves the policy acknowledgement
+    Stores: admin_id, reviewed_at, admin_name
+    """
+    assignment = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    
+    # Policy must be acknowledged before admin review
+    if assignment.get('status') != 'acknowledged':
+        raise HTTPException(status_code=400, detail="Policy must be acknowledged by employee first")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    admin_name = user.get('name', user.get('email', 'Admin'))
+    
+    update_data = {
+        "admin_reviewed": True,
+        "admin_reviewed_at": now,
+        "admin_reviewed_by": user['user_id'],
+        "admin_reviewed_by_name": admin_name
+    }
+    
+    await db.policy_assignments.update_one({"id": assignment_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'], 
+        "policy_admin_reviewed", 
+        "policy_assignment", 
+        assignment_id, 
+        {
+            "policy_id": assignment['policy_id'],
+            "policy_title": assignment.get('policy_title'),
+            "employee_id": assignment['employee_id'],
+            "employee_name": assignment.get('employee_name'),
+            "admin_name": admin_name,
+            "reviewed_at": now
+        }
+    )
     
     updated = await db.policy_assignments.find_one({"id": assignment_id}, {"_id": 0})
     return PolicyAssignmentResponse(**updated)
@@ -6353,29 +6555,73 @@ async def log_audit_action(user_id: str, action: str, entity_type: str, entity_i
     }
     await db.audit_logs.insert_one(audit_doc)
 
+# Define compliance-relevant audit actions
+COMPLIANCE_AUDIT_ACTIONS = {
+    # Document actions
+    "upload_evidence", "document_uploaded", "document_replaced", "document_removed", "document_verified",
+    "verify_requirement", "unverify_requirement",
+    # Policy actions
+    "policy_assigned", "policy_viewed", "policy_acknowledged", "policy_admin_reviewed",
+    "policy_uploaded",
+    # Status changes
+    "status_change", "refresh_status", "update_employee",
+    # Form actions (if they generate evidence)
+    "signoff_form", "complete_form",
+    # Training
+    "upload_training_certificate", "verify_training"
+}
+
 @api_router.get("/audit-logs")
 async def get_audit_logs(
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
+    employee_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    compliance_only: bool = False,
     limit: int = 100,
     user: dict = Depends(require_manager_or_admin)
 ):
     query = {}
     if entity_type:
         query["entity_type"] = entity_type
+    
+    # Search by entity_id OR metadata.employee_id
     if entity_id:
-        query["entity_id"] = entity_id
+        if employee_id:
+            query["$or"] = [
+                {"entity_id": entity_id},
+                {"metadata.employee_id": entity_id},
+                {"entity_id": employee_id},
+                {"metadata.employee_id": employee_id}
+            ]
+        else:
+            query["$or"] = [
+                {"entity_id": entity_id},
+                {"metadata.employee_id": entity_id}
+            ]
+    elif employee_id:
+        query["$or"] = [
+            {"entity_id": employee_id},
+            {"metadata.employee_id": employee_id}
+        ]
+    
     if user_id:
         query["user_id"] = user_id
     
+    # Filter to compliance-relevant actions only
+    if compliance_only:
+        query["action"] = {"$in": list(COMPLIANCE_AUDIT_ACTIONS)}
+    
     logs = await db.audit_logs.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
     
-    # Enrich with user names
+    # Enrich with user names and transform metadata to details for frontend compatibility
     for log in logs:
         user_doc = await db.users.find_one({"user_id": log['user_id']}, {"_id": 0})
         if user_doc:
             log['user_name'] = user_doc.get('name', 'Unknown')
+        # Copy metadata to details for frontend compatibility
+        if 'metadata' in log and 'details' not in log:
+            log['details'] = log['metadata']
     
     return logs
 
@@ -7348,7 +7594,7 @@ async def get_compliance_summary(employee_id: str, user: dict = Depends(get_curr
             "pending_documents": sum(1 for d in emp_docs if d['status'] in ['uploaded', 'under_review']),
             "missing_required": total_required - approved_required,
             "policies_assigned": len(policy_assignments),
-            "policies_signed": sum(1 for p in policy_assignments if p['status'] == 'signed'),
+            "policies_signed": sum(1 for p in policy_assignments if p.get('status') in ['acknowledged', 'signed']),
             "training_records": len(training_records),
             "training_completed": sum(1 for t in training_records if t['status'] == 'completed'),
             "forms_completed": sum(1 for f in generated_forms if f['status'] in ['completed', 'signed_off'])

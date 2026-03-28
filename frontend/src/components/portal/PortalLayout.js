@@ -13,7 +13,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck
 } from 'lucide-react';
 
 const navigation = [
@@ -22,8 +22,8 @@ const navigation = [
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
-  // Documents removed - all document management is now per-employee in Employee Profile → Documents tab
-  // Policies removed - all policy management is now in Compliance Centre
+  // Employee Policies - for assigning and tracking policy acknowledgements
+  { name: 'Policy Assignments', href: '/portal/policies', icon: FileCheck },
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'Audit View', href: '/portal/audit', icon: History },
   { name: 'Settings', href: '/portal/settings', icon: Settings },

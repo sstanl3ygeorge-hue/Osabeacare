@@ -218,7 +218,7 @@ export default function EmployeeProfilePage() {
         axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/policy-assignments?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/audit-logs?entity_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
         axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } })
@@ -3296,26 +3296,183 @@ export default function EmployeeProfilePage() {
         <TabsContent value="policies">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardContent className="p-6">
+              {/* Header with stats */}
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#E4E8EB]">
+                <div>
+                  <h3 className="font-heading text-lg font-semibold text-text-primary">Assigned Policies</h3>
+                  <p className="text-sm text-text-muted">
+                    {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} of {policies.length} acknowledged
+                  </p>
+                </div>
+                {policies.length > 0 && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                      <Clock className="w-3 h-3" /> {policies.filter(p => p.status === 'assigned').length} Pending
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                      <Eye className="w-3 h-3" /> {policies.filter(p => p.status === 'viewed').length} Viewed
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-100 text-green-700">
+                      <CheckCircle className="w-3 h-3" /> {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} Acknowledged
+                    </span>
+                  </div>
+                )}
+              </div>
+
               {policies.length === 0 ? (
                 <div className="text-center py-12 text-text-muted">
                   <FileCheck className="h-12 w-12 mx-auto mb-3 opacity-50" />
                   <p>No policies assigned yet</p>
+                  <p className="text-sm mt-1">Policies can be assigned from the Policy Centre</p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {policies.map((policy) => (
-                    <div key={policy.id} className="flex items-center justify-between p-4 bg-[#F8FAFA] rounded-xl">
-                      <div>
-                        <p className="font-medium text-text-primary">{policy.policy_title}</p>
-                        <p className="text-sm text-text-muted">Assigned: {new Date(policy.assigned_at).toLocaleDateString()}</p>
+                    <div key={policy.id} className={`p-4 rounded-xl border ${
+                      policy.admin_reviewed ? 'bg-green-50 border-green-200' :
+                      (policy.status === 'acknowledged' || policy.status === 'signed') ? 'bg-blue-50 border-blue-200' :
+                      policy.status === 'viewed' ? 'bg-amber-50 border-amber-200' :
+                      'bg-[#F8FAFA] border-[#E4E8EB]'
+                    }`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-text-primary">{policy.policy_title}</p>
+                            <span className="text-xs px-2 py-0.5 bg-gray-200 rounded text-gray-600">
+                              v{policy.policy_version || '1.0'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-text-muted mt-1">
+                            Assigned: {new Date(policy.assigned_at).toLocaleDateString()} 
+                            {policy.assigned_by_name && ` by ${policy.assigned_by_name}`}
+                          </p>
+                          
+                          {/* Signature Information Display */}
+                          {(policy.status === 'acknowledged' || policy.status === 'signed') && (
+                            <div className="mt-3 p-3 bg-white/80 rounded-lg border border-green-200">
+                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Employee Acknowledgement</p>
+                              <p className="text-sm font-medium text-green-800">
+                                {policy.acknowledged_by_employee_name || policy.employee_name || 'Employee'}
+                              </p>
+                              <p className="text-xs text-green-600">
+                                {policy.acknowledged_at ? new Date(policy.acknowledged_at).toLocaleString() : 
+                                 policy.signed_at ? new Date(policy.signed_at).toLocaleString() : ''}
+                              </p>
+                            </div>
+                          )}
+                          
+                          {policy.admin_reviewed && (
+                            <div className="mt-2 p-3 bg-white/80 rounded-lg border border-green-200">
+                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Admin Review</p>
+                              <p className="text-sm font-medium text-green-800">
+                                {policy.admin_reviewed_by_name || 'Admin'}
+                              </p>
+                              <p className="text-xs text-green-600">
+                                {policy.admin_reviewed_at ? new Date(policy.admin_reviewed_at).toLocaleString() : ''}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="flex flex-col items-end gap-2">
+                          {/* Status Badge */}
+                          <span className={`status-chip ${
+                            policy.admin_reviewed ? 'status-success' :
+                            (policy.status === 'acknowledged' || policy.status === 'signed') ? 'bg-green-100 text-green-700 border-green-200' :
+                            policy.status === 'viewed' ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                            'bg-gray-100 text-gray-600 border-gray-200'
+                          }`}>
+                            {policy.admin_reviewed ? 'Reviewed & Approved' :
+                             (policy.status === 'acknowledged' || policy.status === 'signed') ? 'Acknowledged' :
+                             policy.status === 'viewed' ? 'Viewed' : 'Assigned'}
+                          </span>
+                          
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-2">
+                            {/* View Policy Button */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg text-xs"
+                              onClick={async () => {
+                                try {
+                                  // Mark as viewed if not already
+                                  if (policy.status === 'assigned') {
+                                    await axios.put(`${API}/policy-assignments/${policy.id}/view`, {}, {
+                                      headers: { Authorization: `Bearer ${token}` }
+                                    });
+                                  }
+                                  // Open policy file
+                                  const response = await axios.get(`${API}/policies/${policy.policy_id}/file`, {
+                                    headers: { Authorization: `Bearer ${token}` },
+                                    responseType: 'blob'
+                                  });
+                                  const url = window.URL.createObjectURL(response.data);
+                                  window.open(url, '_blank');
+                                  await fetchData();
+                                } catch (error) {
+                                  if (error.response?.status === 404) {
+                                    toast.error('Policy document not found');
+                                  } else {
+                                    toast.error('Failed to open policy');
+                                  }
+                                }
+                              }}
+                              data-testid={`view-policy-${policy.id}`}
+                            >
+                              <Eye className="w-3 h-3 mr-1" />
+                              View Policy
+                            </Button>
+                            
+                            {/* Acknowledge Button - only if not yet acknowledged */}
+                            {policy.status !== 'acknowledged' && policy.status !== 'signed' && !isAuditor() && (
+                              <Button
+                                size="sm"
+                                className="rounded-lg text-xs bg-primary hover:bg-primary-hover text-white"
+                                onClick={async () => {
+                                  try {
+                                    await axios.put(`${API}/policy-assignments/${policy.id}/acknowledge`, {}, {
+                                      headers: { Authorization: `Bearer ${token}` }
+                                    });
+                                    toast.success('Policy acknowledged successfully');
+                                    await fetchData();
+                                  } catch (error) {
+                                    toast.error(error.response?.data?.detail || 'Failed to acknowledge policy');
+                                  }
+                                }}
+                                data-testid={`acknowledge-policy-${policy.id}`}
+                              >
+                                <CheckCircle className="w-3 h-3 mr-1" />
+                                I have read and understood this policy
+                              </Button>
+                            )}
+                            
+                            {/* Admin Review Button - only if acknowledged but not reviewed */}
+                            {(policy.status === 'acknowledged' || policy.status === 'signed') && !policy.admin_reviewed && isAdmin() && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg text-xs border-green-300 text-green-700 hover:bg-green-50"
+                                onClick={async () => {
+                                  try {
+                                    await axios.put(`${API}/policy-assignments/${policy.id}/admin-review`, {}, {
+                                      headers: { Authorization: `Bearer ${token}` }
+                                    });
+                                    toast.success('Policy reviewed and approved');
+                                    await fetchData();
+                                  } catch (error) {
+                                    toast.error(error.response?.data?.detail || 'Failed to review policy');
+                                  }
+                                }}
+                                data-testid={`admin-review-policy-${policy.id}`}
+                              >
+                                <Shield className="w-3 h-3 mr-1" />
+                                Reviewed and Approved
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <span className={`status-chip ${
-                        policy.status === 'signed' ? 'status-success' :
-                        policy.status === 'viewed' ? 'status-info' :
-                        'status-neutral'
-                      }`}>
-                        {policy.status}
-                      </span>
                     </div>
                   ))}
                 </div>
@@ -3364,28 +3521,73 @@ export default function EmployeeProfilePage() {
         <TabsContent value="audit">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardContent className="p-6">
+              <div className="mb-4 pb-4 border-b border-[#E4E8EB]">
+                <h3 className="font-heading text-lg font-semibold text-text-primary">Compliance Audit Trail</h3>
+                <p className="text-sm text-text-muted">Shows document uploads, verifications, policy acknowledgements, and status changes</p>
+              </div>
               {auditLogs.length === 0 ? (
                 <div className="text-center py-12 text-text-muted">
                   <History className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No activity recorded yet</p>
+                  <p>No compliance activity recorded yet</p>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {auditLogs.map((log) => (
-                    <div key={log.id} className="flex items-start gap-4 p-4 bg-[#F8FAFA] rounded-xl">
-                      <div className="w-10 h-10 bg-accent rounded-xl flex items-center justify-center flex-shrink-0">
-                        <History className="h-5 w-5 text-primary" />
+                <div className="space-y-3">
+                  {auditLogs.map((log, idx) => {
+                    // Format action for display
+                    const formatAction = (action) => {
+                      const actionMap = {
+                        'policy_assigned': 'Policy Assigned',
+                        'policy_viewed': 'Policy Viewed',
+                        'policy_acknowledged': 'Policy Acknowledged',
+                        'policy_admin_reviewed': 'Policy Reviewed by Admin',
+                        'document_verified': 'Document Verified',
+                        'verify_requirement': 'Requirement Verified',
+                        'unverify_requirement': 'Verification Removed',
+                        'upload_evidence': 'Evidence Uploaded',
+                        'document_uploaded': 'Document Uploaded',
+                        'document_replaced': 'Document Replaced',
+                        'document_removed': 'Document Removed',
+                        'status_change': 'Status Changed',
+                        'refresh_status': 'Status Refreshed',
+                        'update_employee': 'Employee Updated',
+                        'signoff_form': 'Form Signed Off',
+                        'complete_form': 'Form Completed'
+                      };
+                      return actionMap[action] || action?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    };
+                    
+                    // Get icon based on action type
+                    const getActionIcon = (action) => {
+                      if (action?.includes('policy')) return <FileCheck className="h-5 w-5 text-blue-600" />;
+                      if (action?.includes('verified') || action?.includes('verify')) return <CheckCircle className="h-5 w-5 text-green-600" />;
+                      if (action?.includes('upload') || action?.includes('evidence')) return <Upload className="h-5 w-5 text-primary" />;
+                      if (action?.includes('removed')) return <FileX className="h-5 w-5 text-red-600" />;
+                      return <History className="h-5 w-5 text-primary" />;
+                    };
+                    
+                    return (
+                      <div key={log.id || idx} className="flex items-start gap-4 p-4 bg-[#F8FAFA] rounded-xl">
+                        <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center flex-shrink-0 border border-[#E4E8EB]">
+                          {getActionIcon(log.action)}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-text-primary">
+                            {formatAction(log.action)}
+                          </p>
+                          {log.details && (
+                            <div className="text-sm text-text-muted mt-1">
+                              {log.details.requirement_name && <span>• {log.details.requirement_name}</span>}
+                              {log.details.policy_title && <span>• {log.details.policy_title}</span>}
+                              {log.details.employee_name && <span> for {log.details.employee_name}</span>}
+                            </div>
+                          )}
+                          <p className="text-xs text-text-muted mt-1">
+                            By {log.user_name || 'System'} · {new Date(log.created_at).toLocaleString()}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-text-primary">
-                          {log.action?.replace('_', ' ')}
-                        </p>
-                        <p className="text-sm text-text-muted">
-                          By {log.user_name || 'System'} · {new Date(log.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

@@ -4,6 +4,50 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Lightweight Acknowledgement Flow & Optional Items - COMPLETE**
+
+### Acknowledgement System (Contract/Handbook)
+Implemented lightweight acknowledgement flow for items that don't require file uploads:
+
+**How it works:**
+- "Confirm & Complete" button replaces "Upload Document" for acknowledgement-type requirements
+- Clicking opens dialog with confirmation checkbox
+- User must check: "I confirm I have received, read, and understood..."
+- Submitting marks item as **completed AND verified** (auto-verify)
+- No file upload required
+
+**Data stored:**
+- `acknowledged: true`
+- `acknowledged_at: timestamp`
+- `acknowledged_by: user_name`
+- `requirement_acknowledgements` collection in MongoDB
+
+**Items using acknowledgement flow:**
+- Contract Acknowledgement
+- Employee Handbook Acknowledgement
+
+**Audit logging:**
+- Action: `acknowledgement_completed`
+- Includes: employee_name, requirement_name, acknowledged_by, timestamp
+
+### Optional Items (Equal Opportunities)
+Equal Opportunities Monitoring is now optional:
+- Shows "Optional" badge in UI
+- Shows "Does not affect compliance score" text
+- Excluded from total requirement count
+- Employee can still submit if they choose
+
+**Technical details:**
+- `optional: true` flag in MANDATORY_ITEMS
+- `optional_count` tracked and subtracted from total in compliance calculation
+- Still allows form submission but doesn't affect % progress
+
+### Compliance Impact
+- Before acknowledging: 69% (with Contract/Handbook missing)
+- After acknowledging: 78% (+9% for completing Contract and Handbook)
+- Equal Opportunities no longer blocks 100% completion
+
+## Previous Update (2025-12-28)
 **Audit Day UI Visibility Improvements - COMPLETE**
 
 ### Audit Quick View Section

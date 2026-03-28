@@ -4,6 +4,14 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2026-03-28)
+**CQC-Ready Expiry System & Work Readiness Validation - COMPLETE**
+- Document expiry tracking per file (issue_date, expiry_date)
+- Dynamic expiry status: Valid (>30 days), Expiring Soon (<=30 days), Expired
+- Document Status card in employee overview
+- Critical expiry override: RTW/DBS expired = Not Ready
+- Work readiness microcopy: Clear explanations for each status
+
+## Previous Updates (2026-03-28)
 **UI Language Standardization - COMPLETE**
 - Employee list columns simplified: Employee, Role, Work Status, File Status, Progress, Actions
 - Work Status labels standardized: Ready to Work, Supervised Start, Not Ready
@@ -11,9 +19,7 @@
 - Progress format standardized: X% Complete
 - Employee profile header: "Progress" (was "Compliance Score"), "File Status" badge
 - Bulk Upload button removed from employee profile
-- Overview card labels: Work Status, Recruitment File, Policies, Progress
 
-## Previous Updates (2026-03-28)
 **Critical Bug Fixes & Policy Reversal System - COMPLETE**
 - Fixed document removal sync (await fetchData for immediate UI update)
 - Fixed scoring inconsistency (single source of truth for compliance %)

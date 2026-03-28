@@ -2136,6 +2136,44 @@ class IncidentLogUpdate(BaseModel):
     closed_at: Optional[str] = None
     closed_by: Optional[str] = None
 
+
+# Amendment models with required reason for audit trail
+class InsuranceDocUpdate(BaseModel):
+    """Update model for insurance/certificates with audit trail"""
+    name: Optional[str] = None
+    expiry_date: Optional[str] = None
+    policy_number: Optional[str] = None
+    provider: Optional[str] = None
+    issue_date: Optional[str] = None
+    notes: Optional[str] = None
+    reason: str  # Required for audit trail
+
+
+class OrgPolicyAmend(BaseModel):
+    """Amendment model for policies with audit trail"""
+    name: Optional[str] = None
+    category: Optional[str] = None
+    version: Optional[str] = None
+    review_date: Optional[str] = None
+    notes: Optional[str] = None
+    reason: str  # Required for audit trail
+
+
+class IncidentLogAmend(BaseModel):
+    """Amendment model for incidents with audit trail"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    incident_type: Optional[str] = None
+    date_occurred: Optional[str] = None
+    location: Optional[str] = None
+    persons_involved: Optional[str] = None
+    immediate_actions: Optional[str] = None
+    root_cause: Optional[str] = None
+    corrective_actions: Optional[str] = None
+    lessons_learned: Optional[str] = None
+    reason: str  # Required for audit trail
+
+
 class IncidentLogResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str

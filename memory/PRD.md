@@ -4,6 +4,36 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-28)
+**Audit Quick View RTW Inconsistency - FIXED**
+
+### Issue
+Audit Quick View showed **"Right to Work: Pending Review"** while What's Needed showed **"Checked & Approved"** for the same RTW documents. Contradictory states for the same data.
+
+### Root Cause
+1. **Wrong field name**: Frontend used `is_verified` (undefined) instead of `verified`
+2. **No single source of truth**: RTW status was computed inline in frontend instead of using a backend summary like DBS does
+
+### Fix Applied
+1. Created `get_employee_rtw_summary()` function in backend (similar to `dbs_summary`)
+2. Returns canonical status: `{ rtw_status, rtw_status_label, rtw_status_color, ... }`
+3. Updated frontend Audit Quick View to use `rtw_summary` from API
+4. Fixed Documents card which had same `is_verified` vs `verified` bug
+
+### Audit Quick View Cards - Source of Truth Audit
+| Card | Source | Status |
+|------|--------|--------|
+| DBS | `dbs_summary` from API | ✅ Canonical |
+| Right to Work | `rtw_summary` from API | ✅ Canonical (FIXED) |
+| Training | API `training` records | ✅ API-driven |
+| Documents | API `requirements.verified` | ✅ Fixed field name |
+| Progress | `statuses.overall_compliance.percentage` | ✅ Canonical |
+
+### Test Report
+`/app/test_reports/iteration_47.json` - 100% pass rate
+
+---
+
+## Previous Update (2025-12-28)
 **Progress Calculation Truth Bug - FIXED**
 
 ### Issue

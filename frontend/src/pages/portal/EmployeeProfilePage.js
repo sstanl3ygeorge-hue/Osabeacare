@@ -1419,14 +1419,16 @@ export default function EmployeeProfilePage() {
                   }`}>
                     {employee.status?.replace('_', ' ')}
                   </span>
-                  {/* File Status Badge - Standardized */}
+                  {/* File Status Badge - Uses API work_readiness status (single source of truth) */}
                   {(() => {
-                    const progress = complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0;
-                    const fileStatus = progress >= 100 ? 'Complete' : progress >= 80 ? 'Nearly Complete' : 'Incomplete';
-                    const fileStatusColor = progress >= 100 ? 'bg-success/10 text-success' : progress >= 80 ? 'bg-warning/10 text-warning' : 'bg-gray-100 text-gray-600';
+                    const workReadiness = complianceRequirements?.work_readiness || {};
+                    const statusLabel = workReadiness.status_label || 'Unknown';
+                    const statusColor = workReadiness.status_color === 'success' ? 'bg-success/10 text-success' : 
+                                       workReadiness.status_color === 'warning' ? 'bg-warning/10 text-warning' : 
+                                       'bg-gray-100 text-gray-600';
                     return (
-                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${fileStatusColor}`}>
-                        File Status: {fileStatus}
+                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColor}`}>
+                        {statusLabel}
                       </span>
                     );
                   })()}

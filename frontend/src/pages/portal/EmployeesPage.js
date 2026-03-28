@@ -491,22 +491,12 @@ export default function EmployeesPage() {
                 </thead>
                 <tbody>
                   {filteredEmployees.map((emp) => {
-                    // Calculate File Status
-                    const progress = emp.completion_percentage || 0;
-                    const fileStatus = progress >= 100 ? 'Complete' : progress >= 80 ? 'Nearly Complete' : 'Incomplete';
-                    const fileStatusColor = progress >= 100 ? 'bg-success/10 text-success' : progress >= 80 ? 'bg-warning/10 text-warning' : 'bg-gray-100 text-gray-600';
-                    
-                    // Standardize Work Status labels
-                    const getWorkStatusLabel = (status) => {
-                      if (status === 'work_ready' || status === 'fully_compliant') return 'Ready to Work';
-                      if (status === 'almost_ready' || status === 'supervised_start') return 'Supervised Start';
-                      return 'Not Ready';
-                    };
-                    const getWorkStatusColor = (status) => {
-                      if (status === 'work_ready' || status === 'fully_compliant') return 'bg-success/10 text-success';
-                      if (status === 'almost_ready' || status === 'supervised_start') return 'bg-warning/10 text-warning';
-                      return 'bg-error/10 text-error';
-                    };
+                    // Use work_readiness from API (single source of truth)
+                    const workReadiness = emp.work_readiness || {};
+                    const workStatusLabel = workReadiness.label || 'Unknown';
+                    const workStatusColor = workReadiness.color === 'success' ? 'bg-success/10 text-success' :
+                                           workReadiness.color === 'warning' ? 'bg-warning/10 text-warning' :
+                                           'bg-error/10 text-error';
                     
                     return (
                     <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
@@ -531,22 +521,20 @@ export default function EmployeesPage() {
                         <span className="text-text-primary">{emp.role}</span>
                       </td>
                       <td className="p-4">
-                        {/* Work Status Badge - Standardized Labels */}
-                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                          emp.work_readiness ? getWorkStatusColor(emp.work_readiness.status) : 'bg-error/10 text-error'
-                        }`}>
-                          {emp.work_readiness?.status === 'work_ready' || emp.work_readiness?.status === 'fully_compliant' ? (
+                        {/* Work Status Badge - Uses API work_readiness (single source of truth) */}
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}>
+                          {workReadiness.status === 'work_ready' || workReadiness.status === 'fully_compliant' ? (
                             <Shield className="h-3.5 w-3.5" />
                           ) : (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           )}
-                          {emp.work_readiness ? getWorkStatusLabel(emp.work_readiness.status) : 'Not Ready'}
+                          {workStatusLabel}
                         </div>
                       </td>
                       <td className="p-4 hidden lg:table-cell">
-                        {/* File Status Badge */}
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${fileStatusColor}`}>
-                          {fileStatus}
+                        {/* Recruitment File Status - Uses API work_readiness (same source) */}
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}>
+                          {workStatusLabel}
                         </span>
                       </td>
                       <td className="p-4">

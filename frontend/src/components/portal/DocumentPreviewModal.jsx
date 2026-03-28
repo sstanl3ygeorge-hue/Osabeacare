@@ -51,13 +51,26 @@ export default function DocumentPreviewModal({
   fileType: providedFileType,
   fileSize,
   token,
-  onDownload 
+  onDownload,
+  // Multi-file support
+  files = [],  // Array of {url, filename, content_type, file_id}
+  initialFileIndex = 0
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [blobUrl, setBlobUrl] = useState(null);
   const [contentType, setContentType] = useState(null);
   const [actualFileSize, setActualFileSize] = useState(fileSize);
+  
+  // Multi-file navigation state
+  const [currentFileIndex, setCurrentFileIndex] = useState(initialFileIndex);
+  
+  // Get current file from array or use single file props
+  const allFiles = files.length > 0 ? files : (fileUrl ? [{ url: fileUrl, filename: fileName, content_type: providedFileType }] : []);
+  const currentFile = allFiles[currentFileIndex] || {};
+  const activeFileUrl = currentFile.url || fileUrl;
+  const activeFileName = currentFile.filename || currentFile.file_label || fileName;
+  const hasMultipleFiles = allFiles.length > 1;
   
   // PDF specific state
   const [numPages, setNumPages] = useState(null);
@@ -67,12 +80,25 @@ export default function DocumentPreviewModal({
   const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Determine file type
-  const fileType = providedFileType || getFileType(contentType, fileName);
+  const fileType = currentFile.content_type ? getFileType(currentFile.content_type, activeFileName) : (providedFileType || getFileType(contentType, activeFileName));
   const FileIcon = FILE_TYPE_ICONS[fileType] || File;
+
+  // Navigate to next/previous file
+  const goToNextFile = () => {
+    if (currentFileIndex < allFiles.length - 1) {
+      setCurrentFileIndex(currentFileIndex + 1);
+    }
+  };
+  
+  const goToPrevFile = () => {
+    if (currentFileIndex > 0) {
+      setCurrentFileIndex(currentFileIndex - 1);
+    }
+  };
 
   // Fetch file with authentication
   useEffect(() => {
-    if (!isOpen || !fileUrl) return;
+    if (!isOpen || !activeFileUrl) return;
     
     let isMounted = true;
     setLoading(true);
@@ -85,7 +111,7 @@ export default function DocumentPreviewModal({
     const fetchFile = async () => {
       try {
         const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        const response = await fetch(fileUrl, { headers });
+        const response = await fetch(activeFileUrl, { headers });
         
         if (!response.ok) {
           throw new Error(`Failed to load file: ${response.status}`);
@@ -117,7 +143,7 @@ export default function DocumentPreviewModal({
         URL.revokeObjectURL(blobUrl);
       }
     };
-  }, [isOpen, fileUrl, token]);
+  }, [isOpen, activeFileUrl, token, currentFileIndex]);
 
   // Clean up blob URL on close
   useEffect(() => {
@@ -440,9 +466,9 @@ export default function DocumentPreviewModal({
       >
         {/* Accessibility: Hidden title and description for screen readers */}
         <VisuallyHidden>
-          <DialogTitle>{fileName || 'Document Preview'}</DialogTitle>
+          <DialogTitle>{activeFileName || 'Document Preview'}</DialogTitle>
           <DialogDescription>
-            Preview of {fileName || 'document'}. Use the toolbar to navigate pages, zoom, download, or open in a new tab.
+            Preview of {activeFileName || 'document'}. Use the toolbar to navigate pages, zoom, download, or open in a new tab.
           </DialogDescription>
         </VisuallyHidden>
         
@@ -453,8 +479,8 @@ export default function DocumentPreviewModal({
               <FileIcon className="h-5 w-5 text-gray-600" />
             </div>
             <div className="min-w-0 flex-1">
-              <h2 className="font-semibold text-gray-900 truncate" title={fileName}>
-                {fileName || 'Document'}
+              <h2 className="font-semibold text-gray-900 truncate" title={activeFileName}>
+                {activeFileName || 'Document'}
               </h2>
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <span className="uppercase">{fileType}</span>
@@ -464,9 +490,44 @@ export default function DocumentPreviewModal({
                     <span>{formatFileSize(actualFileSize)}</span>
                   </>
                 )}
+                {/* Multi-file indicator */}
+                {hasMultipleFiles && (
+                  <>
+                    <span>•</span>
+                    <span className="text-primary font-medium">
+                      File {currentFileIndex + 1} of {allFiles.length}
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           </div>
+          
+          {/* Multi-file navigation */}
+          {hasMultipleFiles && (
+            <div className="flex items-center gap-1 mr-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={goToPrevFile}
+                disabled={currentFileIndex === 0}
+                className="h-8 px-3"
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Prev
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={goToNextFile}
+                disabled={currentFileIndex === allFiles.length - 1}
+                className="h-8 px-3"
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          )}
           
           <div className="flex items-center gap-2 shrink-0">
             <Button

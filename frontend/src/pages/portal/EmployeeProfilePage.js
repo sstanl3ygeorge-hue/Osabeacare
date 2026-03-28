@@ -145,6 +145,7 @@ export default function EmployeeProfilePage() {
   // Document preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
+  const [previewFiles, setPreviewFiles] = useState([]); // For multi-file navigation
   
   // Sync tab changes to URL
   const handleTabChange = (value) => {
@@ -152,9 +153,27 @@ export default function EmployeeProfilePage() {
     setSearchParams({ tab: value }, { replace: true });
   };
   
-  // Open document in preview modal
+  // Open document in preview modal - supports single file or array
   const handlePreviewDocument = (url, name, filename) => {
     setPreviewFile({ url, name, filename });
+    setPreviewFiles([]); // Clear multi-file array
+    setPreviewOpen(true);
+  };
+  
+  // Open multiple files in preview modal with navigation
+  const handlePreviewMultipleFiles = (files, requirementId) => {
+    if (!files || files.length === 0) return;
+    
+    // Build array of file objects for the modal
+    const fileArray = files.map(f => ({
+      url: `${API}/employees/${employeeId}/requirements/${requirementId}/evidence/${f.file_id}/view`,
+      filename: f.file_label || f.original_filename || 'Document',
+      content_type: f.content_type,
+      file_id: f.file_id
+    }));
+    
+    setPreviewFiles(fileArray);
+    setPreviewFile(fileArray[0]); // Set first file as initial
     setPreviewOpen(true);
   };
 
@@ -2554,80 +2573,16 @@ export default function EmployeeProfilePage() {
                                     </p>
                                   )}
                                   
-                                  {/* Evidence files list - clickable to view each file */}
+                                  {/* Evidence files list - shows all files, click View button to browse */}
                                   {evidenceFiles.length > 0 && (
-                                    <div className="text-xs text-text-muted space-y-1 mt-1">
+                                    <div className="text-xs text-text-muted space-y-0.5 mt-1">
                                       {evidenceFiles.map((file, idx) => (
-                                        <div key={file.file_id || idx} className="flex items-center gap-2 group py-0.5 px-1 -mx-1 rounded hover:bg-gray-50">
-                                          <FileText className="h-3 w-3 flex-shrink-0 text-primary" />
-                                          {/* Clickable file name to view */}
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
-                                              setPreviewFile({
-                                                url: viewUrl,
-                                                filename: file.file_label || file.original_filename || 'Document',
-                                                content_type: file.content_type
-                                              });
-                                            }}
-                                            className="truncate max-w-[180px] text-left hover:text-primary hover:underline font-medium"
-                                            title={`Click to view: ${file.file_label || file.original_filename}`}
-                                          >
+                                        <div key={file.file_id || idx} className="flex items-center gap-1.5 py-0.5">
+                                          <FileText className="h-3 w-3 flex-shrink-0 text-primary/70" />
+                                          <span className="truncate max-w-[200px]">
                                             {file.file_label || file.original_filename || 'Document'}
-                                          </button>
+                                          </span>
                                           {file.verified && <Shield className="h-3 w-3 text-success flex-shrink-0" />}
-                                          {/* Quick actions for each file */}
-                                          <div className="flex items-center gap-1 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
-                                                setPreviewFile({
-                                                  url: viewUrl,
-                                                  filename: file.file_label || file.original_filename || 'Document',
-                                                  content_type: file.content_type
-                                                });
-                                              }}
-                                              className="p-1 hover:bg-primary/10 rounded text-primary"
-                                              title="View file"
-                                            >
-                                              <Eye className="h-3 w-3" />
-                                            </button>
-                                            <button
-                                              onClick={async (e) => {
-                                                e.stopPropagation();
-                                                try {
-                                                  const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
-                                                  const response = await axios.get(viewUrl, {
-                                                    headers: { Authorization: `Bearer ${token}` },
-                                                    responseType: 'blob'
-                                                  });
-                                                  const url = window.URL.createObjectURL(response.data);
-                                                  const link = document.createElement('a');
-                                                  link.href = url;
-                                                  link.download = file.original_filename || 'document';
-                                                  link.click();
-                                                  window.URL.revokeObjectURL(url);
-                                                } catch (err) {
-                                                  toast.error('Failed to download file');
-                                                }
-                                              }}
-                                              className="p-1 hover:bg-gray-200 rounded text-gray-600"
-                                              title="Download file"
-                                            >
-                                              <Download className="h-3 w-3" />
-                                            </button>
-                                            {!isAuditor() && evidenceFiles.length > 1 && (
-                                              <button
-                                                onClick={(e) => { e.stopPropagation(); openRemoveDialog(file, req.id); }}
-                                                className="p-1 hover:bg-error/10 rounded text-error/70 hover:text-error"
-                                                title="Remove this file"
-                                              >
-                                                <XCircle className="h-3 w-3" />
-                                              </button>
-                                            )}
-                                          </div>
                                         </div>
                                       ))}
                                     </div>
@@ -2730,26 +2685,17 @@ export default function EmployeeProfilePage() {
                                   </>
                                 )}
                                 
-                                {/* ACTION 2: View */}
+                                {/* ACTION 2: View - Opens all files with Next/Prev navigation */}
                                 {evidenceFiles.length > 0 && (
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => {
-                                      const file = evidenceFiles[0];
-                                      const viewUrl = `${API}/employees/${employeeId}/requirements/${req.id}/evidence/${file.file_id}/view`;
-                                      setPreviewFile({ 
-                                        url: viewUrl, 
-                                        name: file.original_filename || req.name,
-                                        filename: file.original_filename 
-                                      });
-                                      setPreviewOpen(true);
-                                    }}
+                                    onClick={() => handlePreviewMultipleFiles(evidenceFiles, req.id)}
                                     className="text-xs h-7 rounded-lg"
                                     data-testid={`view-evidence-${req.id}`}
                                   >
                                     <Eye className="h-3 w-3 mr-1" />
-                                    View
+                                    View {evidenceFiles.length > 1 ? `(${evidenceFiles.length})` : ''}
                                   </Button>
                                 )}
                                 
@@ -4035,16 +3981,17 @@ export default function EmployeeProfilePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Document Preview Modal */}
+      {/* Document Preview Modal - supports multi-file navigation */}
       <DocumentPreviewModal
         isOpen={previewOpen}
-        onClose={() => setPreviewOpen(false)}
+        onClose={() => { setPreviewOpen(false); setPreviewFiles([]); }}
         fileUrl={previewFile?.url}
-        fileName={previewFile?.name}
+        fileName={previewFile?.name || previewFile?.filename}
         token={token}
+        files={previewFiles}
         onDownload={previewFile ? async () => {
           try {
-            const downloadUrl = previewFile.url.replace('/file', '/download');
+            const downloadUrl = previewFile.url.replace('/view', '/download');
             const response = await axios.get(downloadUrl, {
               headers: { Authorization: `Bearer ${token}` },
               responseType: 'blob'

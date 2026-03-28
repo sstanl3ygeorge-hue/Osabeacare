@@ -777,9 +777,11 @@ def calculate_separated_statuses(requirements: List[dict], role: str, policies_d
         doc_color = "neutral"
     
     # Calculate Overall Compliance Percentage
-    total_items = len(requirements)
-    total_complete = sum(1 for r in requirements if r.get('status') == 'completed' and r.get('has_evidence'))
-    total_verified = sum(1 for r in requirements if r.get('verified', False))
+    # UNIFIED LOGIC: Exclude optional items from both numerator and denominator
+    non_optional_requirements = [r for r in requirements if not r.get('optional', False)]
+    total_items = len(non_optional_requirements)
+    total_complete = sum(1 for r in non_optional_requirements if r.get('status') == 'completed' and r.get('has_evidence'))
+    total_verified = sum(1 for r in non_optional_requirements if r.get('verified', False))
     overall_percentage = int((total_complete / total_items) * 100) if total_items > 0 else 0
     
     return {
@@ -1120,7 +1122,19 @@ def get_requirement_name(requirement_id: str) -> Optional[str]:
     return None
 
 async def check_item_completion(employee_id: str, item: dict) -> dict:
-    """Check if a specific mandatory item is complete for an employee"""
+    """Check if a specific mandatory item is complete for an employee.
+    UNIFIED LOGIC - Used by all compliance calculations.
+    
+    COMPLETED means:
+    - verified document OR
+    - valid training record (completed/expiring, not deleted/superseded) OR
+    - completed acknowledgement
+    
+    EXCLUDED from counts:
+    - optional requirements
+    - deleted/superseded/archived records
+    - test data
+    """
     result = {
         "id": item["id"],
         "name": item["name"],
@@ -1129,103 +1143,176 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
         "status": "missing",
         "verified": False,
         "details": None,
-        "expiry_date": None
+        "expiry_date": None,
+        "optional": item.get("optional", False),
+        "has_evidence": False
     }
     
     requirement_id = item["id"]
+    item_type = item.get("type", "document")
     
-    if item["type"] == "form":
-        # Check for completed form - FIRST by requirement_id, then by template_name
-        form = await db.generated_forms.find_one({
+    # ====== ACKNOWLEDGEMENT TYPE ======
+    if item_type == "acknowledgement":
+        ack = await db.requirement_acknowledgements.find_one({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
-            "status": {"$in": ["completed", "completed_imported", "reviewed", "signed_off"]}
-        }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "signed_off_at": 1})
+            "acknowledged": True
+        }, {"_id": 0})
         
-        # Fallback to template name matching
-        if not form:
-            form = await db.generated_forms.find_one({
-                "employee_id": employee_id,
-                "template_name": {"$regex": item.get("template_name", ""), "$options": "i"},
-                "status": {"$in": ["completed", "completed_imported", "reviewed", "signed_off"]}
-            }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "signed_off_at": 1})
+        if ack:
+            result["status"] = "complete"
+            result["verified"] = True  # Acknowledgements auto-verify
+            result["has_evidence"] = True
+            result["details"] = f"Acknowledged by {ack.get('acknowledged_by_name', 'Unknown')}"
+        return result
+    
+    # ====== FORM-GENERATED TYPE ======
+    if item_type in ["form", "form-generated"]:
+        # Check for completed form with PDF evidence
+        form = await db.generated_forms.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": requirement_id},
+                {"template_name": {"$regex": item.get("template_name", "NOMATCH"), "$options": "i"}}
+            ],
+            "status": {"$in": ["completed", "completed_imported", "reviewed", "signed_off"]}
+        }, {"_id": 0, "id": 1, "status": 1, "pdf_url": 1, "completed_at": 1, "signed_off_at": 1})
         
         if form:
-            result["status"] = "complete"
+            has_pdf = bool(form.get("pdf_url"))
+            result["status"] = "complete" if has_pdf else "completed_no_evidence"
             result["verified"] = form.get("status") == "signed_off"
+            result["has_evidence"] = has_pdf
             result["details"] = f"Form ID: {form['id']}"
-    
-    elif item["type"] == "document":
-        # Check for documents - FIRST by requirement_id (exclude superseded/inactive)
-        min_count = item.get("min_files", 1)
+            return result
         
+        # Fallback: Check for documents uploaded against this requirement
+        # (handles case where document was uploaded instead of form)
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
             "file_url": {"$exists": True, "$ne": None},
-            "status": {"$in": ["uploaded", "approved"]},
+            "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+            "$or": [
+                {"active": {"$exists": False}},
+                {"active": True}
+            ]
+        }, {"_id": 0, "id": 1, "status": 1, "verified": 1}).to_list(5)
+        
+        if docs:
+            result["status"] = "complete"
+            result["verified"] = all(d.get("verified") or d.get("status") == "approved" for d in docs)
+            result["has_evidence"] = True
+            result["details"] = f"{len(docs)} document(s) uploaded"
+            return result
+        
+        return result
+    
+    # ====== DOCUMENT TYPE ======
+    if item_type == "document":
+        min_count = item.get("min_files", 1)
+        
+        # Get active documents (exclude deleted/superseded)
+        docs = await db.employee_documents.find({
+            "employee_id": employee_id,
+            "requirement_id": requirement_id,
+            "file_url": {"$exists": True, "$ne": None},
+            "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
             "$or": [
                 {"active": {"$exists": False}},
                 {"active": True}
             ]
         }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
         
-        # Fallback to document_type_name matching for legacy documents
-        if len(docs) < min_count:
-            doc_types = item.get("document_types", [])
-            fallback_docs = await db.employee_documents.find({
-                "employee_id": employee_id,
-                "requirement_id": {"$exists": False},
-                "document_type_name": {"$regex": f"({'|'.join(doc_types)})", "$options": "i"},
-                "file_url": {"$exists": True, "$ne": None},
-                "status": {"$in": ["uploaded", "approved"]},
-                "$or": [
-                    {"active": {"$exists": False}},
-                    {"active": True}
-                ]
-            }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
-            docs.extend(fallback_docs)
-        
         if len(docs) >= min_count:
             result["status"] = "complete"
             result["verified"] = all(d.get("verified") or d.get("status") == "approved" for d in docs)
+            result["has_evidence"] = True
             result["details"] = f"{len(docs)} document(s) uploaded"
+            
             # Check for expiring documents
             for doc in docs:
                 if doc.get("expiry_date"):
                     try:
                         exp_date = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
-                        if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
+                        if exp_date < datetime.now(timezone.utc):
+                            result["status"] = "expired"
+                            result["expiry_date"] = doc["expiry_date"]
+                            break
+                        elif exp_date < datetime.now(timezone.utc) + timedelta(days=30):
                             result["status"] = "expiring"
                             result["expiry_date"] = doc["expiry_date"]
                     except:
                         pass
+        return result
     
-    elif item["type"] == "training":
-        # Check for completed training
+    # ====== TRAINING TYPE ======
+    if item_type == "training":
+        # Check for training records (exclude deleted/superseded/TEST)
+        # Match by requirement_id OR training name (same logic as /compliance-requirements)
+        training_name = item.get("training_name", item.get("name", ""))
+        
+        # First try by requirement_id (newer records)
         training = await db.training_records.find_one({
             "employee_id": employee_id,
-            "training_name": {"$regex": item.get("training_name", ""), "$options": "i"},
-            "status": "completed"
-        }, {"_id": 0, "id": 1, "status": 1, "completed_at": 1, "expiry_date": 1})
+            "requirement_id": requirement_id,
+            "status": {"$in": ["completed", "expiring"]},
+            "$and": [
+                {"training_name": {"$not": {"$regex": "^TEST", "$options": "i"}}}
+            ]
+        }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "completed_at": 1, "expiry_date": 1, 
+            "certificate_url": 1, "evidence_files": 1})
+        
+        # Fallback to training name matching (legacy records)
+        if not training and training_name:
+            training = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "status": {"$in": ["completed", "expiring"]},
+                "$and": [
+                    {"training_name": {"$regex": training_name, "$options": "i"}},
+                    {"training_name": {"$not": {"$regex": "^TEST", "$options": "i"}}}
+                ]
+            }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "completed_at": 1, "expiry_date": 1, 
+                "certificate_url": 1, "evidence_files": 1})
         
         if training:
-            result["status"] = "complete"
-            result["verified"] = True
+            # Has evidence = has certificate URL or evidence files
+            has_evidence = bool(training.get("certificate_url") or training.get("evidence_files"))
+            result["status"] = "complete" if has_evidence else "completed_no_evidence"
+            result["verified"] = training.get("verified", False)
+            result["has_evidence"] = has_evidence
             result["details"] = f"Completed: {training.get('completed_at', 'N/A')}"
+            
             if training.get("expiry_date"):
                 try:
                     exp_date = datetime.fromisoformat(training["expiry_date"].replace('Z', '+00:00'))
-                    if exp_date < datetime.now(timezone.utc) + timedelta(days=30):
+                    if exp_date < datetime.now(timezone.utc):
+                        result["status"] = "expired"
+                        result["expiry_date"] = training["expiry_date"]
+                    elif exp_date < datetime.now(timezone.utc) + timedelta(days=30):
                         result["status"] = "expiring"
                         result["expiry_date"] = training["expiry_date"]
                 except:
                     pass
+        return result
     
     return result
 
 async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
-    """Calculate full compliance status for an employee"""
+    """
+    UNIFIED COMPLIANCE CALCULATION - Single source of truth for all views.
+    
+    Used by:
+    - Employee list view
+    - Employee profile
+    - Dashboard
+    - Audit View
+    
+    Rules:
+    - COMPLETED = verified document OR valid training OR completed acknowledgement
+    - EXCLUDE optional items from BOTH numerator and denominator
+    - EXCLUDE deleted/superseded/test records
+    """
     mandatory_items = get_mandatory_items_for_role(role)
     
     results = []
@@ -1233,24 +1320,38 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
     verified_count = 0
     expiring_count = 0
     missing_count = 0
+    optional_count = 0  # Track optional items to exclude from total
     
     for item in mandatory_items:
+        # Skip optional items from compliance calculation
+        is_optional = item.get("optional", False)
+        if is_optional:
+            optional_count += 1
+        
         check = await check_item_completion(employee_id, item)
         results.append(check)
         
-        if check["status"] == "complete":
-            complete_count += 1
-            if check["verified"]:
-                verified_count += 1
-        elif check["status"] == "expiring":
-            complete_count += 1
-            expiring_count += 1
-        else:
-            missing_count += 1
+        # Only count non-optional items toward compliance
+        if not is_optional:
+            if check["status"] in ["complete", "expiring", "expired"]:
+                # Must have evidence to count
+                if check.get("has_evidence", True):  # Default True for backwards compat
+                    complete_count += 1
+                    if check["verified"]:
+                        verified_count += 1
+                    if check["status"] == "expiring":
+                        expiring_count += 1
+                else:
+                    missing_count += 1  # Completed but no evidence = still missing
+            else:
+                missing_count += 1
     
-    total_items = len(mandatory_items)
+    # Total excludes optional items
+    total_items = len(mandatory_items) - optional_count
+    
+    # Calculate percentages
     completion_percentage = int((complete_count / total_items) * 100) if total_items > 0 else 0
-    verification_percentage = int((verified_count / total_items) * 100) if total_items > 0 else 0
+    verification_percentage = int((verified_count / complete_count) * 100) if complete_count > 0 else 0
     
     return {
         "items": results,
@@ -1259,6 +1360,7 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
         "verified_count": verified_count,
         "expiring_count": expiring_count,
         "missing_count": missing_count,
+        "optional_count": optional_count,
         "completion_percentage": completion_percentage,
         "verification_percentage": verification_percentage
     }
@@ -2061,9 +2163,11 @@ async def generate_employee_code():
     return f"OCS-{str(num).zfill(4)}"
 
 async def calculate_completion_percentage(employee_id: str) -> int:
-    """Calculate completion percentage based on evidence-backed requirements.
-    MUST match the same logic used in /compliance-requirements endpoint.
-    Excludes deleted/superseded/archived records.
+    """
+    Calculate completion percentage using UNIFIED compliance logic.
+    This is a convenience wrapper around calculate_employee_compliance.
+    
+    MUST return identical values to what profile/dashboard show.
     """
     # Get employee role
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
@@ -2071,50 +2175,10 @@ async def calculate_completion_percentage(employee_id: str) -> int:
         return 0
     
     role = employee.get('role', '')
-    mandatory_items = get_mandatory_items_for_role(role)
-    total_items = len(mandatory_items)
     
-    if total_items == 0:
-        return 0
-    
-    # Count evidence-backed completions (matches logic in /compliance-requirements)
-    evidence_backed_count = 0
-    for item in mandatory_items:
-        item_id = item['id']
-        item_type = item.get('type', 'document')
-        
-        has_evidence = False
-        
-        if item_type == 'training':
-            # Check training records with evidence - exclude deleted/superseded
-            record = await db.training_records.find_one({
-                "employee_id": employee_id,
-                "requirement_id": item_id,
-                "status": {"$in": ["completed", "expiring"]},
-                "training_name": {"$not": {"$regex": "^TEST", "$options": "i"}},  # Exclude TEST
-                "$or": [
-                    {"certificate_url": {"$exists": True, "$ne": None}},
-                    {"evidence_files": {"$exists": True, "$ne": []}}
-                ]
-            }, {"_id": 0})
-            has_evidence = record is not None
-        else:
-            # Check employee documents with evidence - exclude deleted/superseded
-            doc = await db.employee_documents.find_one({
-                "employee_id": employee_id,
-                "requirement_id": item_id,
-                "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
-                "$or": [
-                    {"file_url": {"$exists": True, "$ne": None}},
-                    {"evidence_files": {"$exists": True, "$ne": []}}
-                ]
-            }, {"_id": 0})
-            has_evidence = doc is not None
-        
-        if has_evidence:
-            evidence_backed_count += 1
-    
-    return int((evidence_backed_count / total_items) * 100)
+    # Use the SINGLE unified calculation function
+    compliance = await calculate_employee_compliance(employee_id, role)
+    return compliance["completion_percentage"]
 
 async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     """Quick work readiness calculation for list views"""

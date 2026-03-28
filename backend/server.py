@@ -3657,6 +3657,7 @@ async def get_evidence_edit_history(
 
 
 
+@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")
 async def verify_requirement(
     employee_id: str,
     requirement_id: str,

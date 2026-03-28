@@ -450,7 +450,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Full E2E Audit Complete + Count Discrepancy Fixed
+2026-03-28 - Fixed Critical Approve Button 404 Bug
 
 ### Checklist Reordering by Audit Priority (Completed 2026-03-28)
 - [x] **Reorganized categories by real-world care audit priority**:
@@ -540,6 +540,12 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 🔁 **Confusing Flows:** None identified
 
 📊 **System Ready for Onboarding Multiple Employees:** YES
+
+### Critical Bug Fix: Approve Button 404 (Fixed 2026-03-28)
+- **Issue**: Approve/Verify button returned "Not Found" (404)
+- **Root Cause**: The `verify_requirement` function at line 3660 was missing its `@api_router.post` decorator
+- **Fix**: Added `@api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")` decorator
+- **Verified**: Endpoint now works correctly - returns success message or proper error if no evidence
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

@@ -5875,6 +5875,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     evidence_backed_count = 0
     optional_count = 0  # Track optional items to exclude from total
     
+    # Track conditional requirements for summary info
+    conditional_not_required = []
+    
     for item in mandatory_items:
         req_id = item['id']
         req_type = item.get('type', 'document')
@@ -5885,6 +5888,53 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         priority_order = item.get('priority_order', 99)
         work_ready_hint = item.get('work_ready_hint', '')
         is_optional = item.get('optional', False)
+        
+        # ======== Handle Conditional Requirements ========
+        # Check if this item has a conditional dependency (e.g., HMRC form depends on P45 absence)
+        conditional_on = item.get('conditional_on')
+        conditional_inverse = item.get('conditional_inverse', False)
+        
+        if conditional_on:
+            # Check if the conditional document exists for this employee
+            # Look for documents where document_type or requirement_id matches the conditional_on value
+            condition_met = False
+            for doc in all_docs:
+                doc_type = (doc.get('document_type') or '').lower()
+                doc_type_name = (doc.get('document_type_name') or '').lower()
+                doc_req_id = (doc.get('requirement_id') or '').lower()
+                
+                # Check if this document matches the conditional_on value
+                if conditional_on.lower() in [doc_type, doc_type_name, doc_req_id]:
+                    condition_met = True
+                    break
+                # Also check if the document_type_name contains the conditional value
+                if conditional_on.lower() in doc_type_name:
+                    condition_met = True
+                    break
+            
+            # Apply conditional logic
+            # conditional_inverse=True means: required when condition is NOT met (e.g., HMRC required if NO P45)
+            # conditional_inverse=False means: required when condition IS met
+            if conditional_inverse:
+                # Required when condition is NOT met (P45 absent = HMRC required)
+                if condition_met:
+                    # P45 exists, so HMRC is NOT required - skip this item
+                    conditional_not_required.append({
+                        "id": req_id,
+                        "name": item['name'],
+                        "reason": f"Not required because {conditional_on.upper()} document exists"
+                    })
+                    continue
+            else:
+                # Required when condition IS met
+                if not condition_met:
+                    # Condition not met, skip this item
+                    conditional_not_required.append({
+                        "id": req_id,
+                        "name": item['name'],
+                        "reason": f"Not required because {conditional_on.upper()} document is missing"
+                    })
+                    continue
         
         # Track optional items
         if is_optional:
@@ -6325,7 +6375,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         # DBS Summary - computed from single source
         "dbs_summary": await get_employee_dbs_summary(employee_id),
         # RTW Summary - computed from single source
-        "rtw_summary": await get_employee_rtw_summary(employee_id)
+        "rtw_summary": await get_employee_rtw_summary(employee_id),
+        # Conditional requirements that were excluded
+        "conditional_not_required": conditional_not_required
     }
 
 @api_router.post("/employees/{employee_id}/upload-document")

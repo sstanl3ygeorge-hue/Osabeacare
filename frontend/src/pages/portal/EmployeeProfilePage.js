@@ -2891,6 +2891,25 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
+              {/* CONDITIONAL ITEMS INFO - Show items not required due to existing evidence */}
+              {complianceRequirements?.conditional_not_required?.length > 0 && (
+                <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">Some items not required for this employee:</p>
+                      <ul className="mt-1 space-y-0.5">
+                        {complianceRequirements.conditional_not_required.map((item, idx) => (
+                          <li key={idx} className="text-xs text-gray-600">
+                            {item.name} — {item.reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {!complianceRequirements ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -2930,7 +2949,8 @@ export default function EmployeeProfilePage() {
                       "job_application": "Upload original job application form",
                       "interview_record": "Upload interview notes or assessment form",
                       "employee_handbook": "Confirm employee has received and read handbook",
-                      "policies_signed": "Upload signed policy acknowledgement forms"
+                      "policies_signed": "Upload signed policy acknowledgement forms",
+                      "hmrc_starter_checklist": "Complete this form if employee does not have a P45 from previous employer"
                     };
                     
                     // Priority order - MUST match backend MANDATORY_ITEMS categories
@@ -3075,6 +3095,14 @@ export default function EmployeeProfilePage() {
                                   {/* MICROCOPY HELPER TEXT - Shows guidance for each requirement */}
                                   {helpText && !hasEvidence && !(req.priority === 'start_required' || req.is_mandatory_for_work) && (
                                     <p className="text-xs text-text-muted mt-0.5">{helpText}</p>
+                                  )}
+                                  
+                                  {/* CONDITIONAL REQUIREMENT NOTICE - For items like HMRC that depend on other documents */}
+                                  {req.id === 'hmrc_starter_checklist' && !hasEvidence && (
+                                    <p className="text-[10px] text-purple-600 font-medium mt-0.5 flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                                      Required because no P45 is on file
+                                    </p>
                                   )}
                                   
                                   {/* Multi-file guidance - only show when no evidence */}

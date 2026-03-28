@@ -450,7 +450,7 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - Michael Brown (OCS-0006) - Healthcare Assistant - Manchester
 
 ## Last Updated
-2026-03-28 - Checklist Reordering + Care-Focused Language + Evidence Editing
+2026-03-28 - File Preview Reliability Fixes + Checklist Reordering
 
 ### Checklist Reordering by Audit Priority (Completed 2026-03-28)
 - [x] **Reorganized categories by real-world care audit priority**:
@@ -463,6 +463,25 @@ Build a comprehensive compliance management portal for a UK care recruitment age
 - [x] **Backend**: Updated MANDATORY_ITEMS dictionary in server.py with new category prefixes
 - [x] **Frontend**: Updated categoryOrder and CATEGORY_DISPLAY in EmployeeProfilePage.js
 - [x] **Testing**: All 23 requirements display in correct order, categories verified
+
+### File Preview Reliability Fixes (Completed 2026-03-28)
+- [x] **Profile Photo Serving Endpoint**: Added `GET /api/employees/{id}/profile-photo/view` for authenticated photo fetching
+- [x] **EmployeeAvatar Component**: New reusable component at `/app/frontend/src/components/portal/EmployeeAvatar.jsx`
+  - Fetches photo via authenticated endpoint
+  - Falls back gracefully to initials if fetch fails or no photo
+  - Supports size variants: sm, md, lg
+- [x] **DocumentPreviewModal Improvements**:
+  - Enhanced PDF error state with "Preview unavailable" message
+  - Added "Open File" and "Download File" fallback buttons when preview fails
+  - Better user messaging instead of leaving users in broken error state
+- [x] **File Accessibility Check Before Verification**:
+  - `handleVerifyRequirement` now checks if evidence file is accessible before allowing approval
+  - `handleVerifyDocument` now validates file accessibility before verification
+  - Prevents approval of documents that cannot be opened/downloaded
+- [x] **Profile Photo Display Fix**:
+  - Profile photo now fetched via authenticated endpoint, not raw storage URL
+  - Photos display immediately after upload refresh
+  - Updated Dashboard, EmployeesPage, and EmployeeProfilePage to use EmployeeAvatar
 
 ### Care-Focused Language (Completed 2026-03-28)
 - [x] **Renamed all audit terminology to care terminology**:

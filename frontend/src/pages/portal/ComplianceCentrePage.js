@@ -15,7 +15,8 @@ import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
-  RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus
+  RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
+  Edit, History, Save
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -125,6 +126,20 @@ export default function ComplianceCentrePage() {
   const [policyAssignments, setPolicyAssignments] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [isAssigning, setIsAssigning] = useState(false);
+
+  // Amendment states - for editing policies, insurance, incidents with audit trail
+  const [amendDialogOpen, setAmendDialogOpen] = useState(false);
+  const [amendType, setAmendType] = useState(null); // 'policy', 'insurance', 'incident'
+  const [amendRecord, setAmendRecord] = useState(null);
+  const [amendForm, setAmendForm] = useState({});
+  const [isAmending, setIsAmending] = useState(false);
+  
+  // History states - for viewing amendment history
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyType, setHistoryType] = useState(null);
+  const [historyRecordId, setHistoryRecordId] = useState(null);
+  const [historyData, setHistoryData] = useState([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -348,6 +363,109 @@ export default function ComplianceCentrePage() {
     setUploadExpiryDate('');
     setUploadPolicyNumber('');
     setUploadProvider('');
+  };
+
+  // ==================== AMENDMENT HANDLERS ====================
+  
+  // Open amendment dialog with record data
+  const openAmendDialog = (type, record) => {
+    setAmendType(type);
+    setAmendRecord(record);
+    
+    // Pre-populate form based on type
+    if (type === 'policy') {
+      setAmendForm({
+        name: record.name || '',
+        category: record.category || '',
+        version: record.version || '',
+        review_date: record.review_date ? record.review_date.split('T')[0] : '',
+        notes: record.notes || '',
+        reason: ''
+      });
+    } else if (type === 'insurance') {
+      setAmendForm({
+        name: record.name || '',
+        expiry_date: record.expiry_date ? record.expiry_date.split('T')[0] : '',
+        policy_number: record.policy_number || '',
+        provider: record.provider || '',
+        notes: record.notes || '',
+        reason: ''
+      });
+    } else if (type === 'incident') {
+      setAmendForm({
+        title: record.title || '',
+        description: record.description || '',
+        incident_type: record.incident_type || 'incident',
+        date_occurred: record.date_occurred ? record.date_occurred.split('T')[0] : '',
+        location: record.location || '',
+        persons_involved: record.persons_involved || '',
+        immediate_actions: record.immediate_actions || '',
+        root_cause: record.root_cause || '',
+        corrective_actions: record.corrective_actions || '',
+        lessons_learned: record.lessons_learned || '',
+        reason: ''
+      });
+    }
+    
+    setAmendDialogOpen(true);
+  };
+  
+  // Submit amendment
+  const handleAmendSubmit = async () => {
+    if (!amendForm.reason || amendForm.reason.trim().length < 3) {
+      toast.error('Please provide a reason for this change (min 3 characters)');
+      return;
+    }
+    
+    setIsAmending(true);
+    try {
+      const endpoint = amendType === 'policy' 
+        ? `${API}/compliance/policies/${amendRecord.id}/amend`
+        : amendType === 'insurance'
+        ? `${API}/compliance/insurance/${amendRecord.id}/amend`
+        : `${API}/compliance/incidents/${amendRecord.id}/amend`;
+      
+      await axios.put(endpoint, amendForm, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      toast.success(`${amendType.charAt(0).toUpperCase() + amendType.slice(1)} updated successfully`);
+      setAmendDialogOpen(false);
+      setAmendRecord(null);
+      setAmendForm({});
+      fetchData();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || `Failed to update ${amendType}`);
+    } finally {
+      setIsAmending(false);
+    }
+  };
+  
+  // Load amendment history
+  const loadHistory = async (type, recordId) => {
+    setHistoryType(type);
+    setHistoryRecordId(recordId);
+    setIsLoadingHistory(true);
+    setHistoryDialogOpen(true);
+    
+    try {
+      const endpoint = type === 'policy' 
+        ? `${API}/compliance/policies/${recordId}/history`
+        : type === 'insurance'
+        ? `${API}/compliance/insurance/${recordId}/history`
+        : `${API}/compliance/incidents/${recordId}/history`;
+      
+      const response = await axios.get(endpoint, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      setHistoryData(response.data.history || []);
+    } catch (error) {
+      toast.error('Failed to load history');
+      setHistoryData([]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
   };
 
   const getStatusBadge = (status) => {
@@ -621,6 +739,26 @@ export default function ComplianceCentrePage() {
                                           size="sm"
                                           variant="outline"
                                           className="rounded-lg"
+                                          onClick={() => openAmendDialog('policy', policy)}
+                                          data-testid={`edit-policy-${policy.id}`}
+                                        >
+                                          <Edit className="h-4 w-4 mr-1" />
+                                          Edit
+                                        </Button>
+                                        <Button 
+                                          size="sm"
+                                          variant="ghost"
+                                          className="rounded-lg text-text-muted hover:text-text-primary"
+                                          onClick={() => loadHistory('policy', policy.id)}
+                                          data-testid={`history-policy-${policy.id}`}
+                                          title="View amendment history"
+                                        >
+                                          <History className="h-4 w-4" />
+                                        </Button>
+                                        <Button 
+                                          size="sm"
+                                          variant="outline"
+                                          className="rounded-lg"
                                           onClick={() => {
                                             setSelectedPolicy(policy);
                                             setSelectedInsurance(null);
@@ -771,19 +909,41 @@ export default function ComplianceCentrePage() {
                               Download
                             </Button>
                             {isAdmin() && (
-                              <Button 
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg"
-                                onClick={() => {
-                                  setSelectedInsurance(ins);
-                                  setSelectedPolicy(null);
-                                  setUploadDialogOpen(true);
-                                }}
-                              >
-                                <RefreshCw className="h-4 w-4 mr-1" />
-                                Replace
-                              </Button>
+                              <>
+                                <Button 
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-lg"
+                                  onClick={() => openAmendDialog('insurance', ins)}
+                                  data-testid={`edit-insurance-${ins.id}`}
+                                >
+                                  <Edit className="h-4 w-4 mr-1" />
+                                  Edit
+                                </Button>
+                                <Button 
+                                  size="sm"
+                                  variant="ghost"
+                                  className="rounded-lg text-text-muted hover:text-text-primary"
+                                  onClick={() => loadHistory('insurance', ins.id)}
+                                  data-testid={`history-insurance-${ins.id}`}
+                                  title="View amendment history"
+                                >
+                                  <History className="h-4 w-4" />
+                                </Button>
+                                <Button 
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-lg"
+                                  onClick={() => {
+                                    setSelectedInsurance(ins);
+                                    setSelectedPolicy(null);
+                                    setUploadDialogOpen(true);
+                                  }}
+                                >
+                                  <RefreshCw className="h-4 w-4 mr-1" />
+                                  Replace
+                                </Button>
+                              </>
                             )}
                           </div>
                         ) : isAdmin() && (
@@ -957,9 +1117,10 @@ export default function ComplianceCentrePage() {
                     <div 
                       key={incident.id}
                       className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
+                      data-testid={`incident-${incident.id}`}
                     >
                       <div className="flex items-start justify-between">
-                        <div>
+                        <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="text-xs font-mono text-text-muted">{incident.reference_number}</span>
                             {getStatusBadge(incident.status)}
@@ -978,6 +1139,31 @@ export default function ComplianceCentrePage() {
                             {incident.location && <span>Location: {incident.location}</span>}
                           </div>
                         </div>
+                        {/* Edit/History buttons for incidents */}
+                        {isAdmin() && (
+                          <div className="flex items-center gap-2 ml-4">
+                            <Button 
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg"
+                              onClick={() => openAmendDialog('incident', incident)}
+                              data-testid={`edit-incident-${incident.id}`}
+                            >
+                              <Edit className="h-4 w-4 mr-1" />
+                              Edit
+                            </Button>
+                            <Button 
+                              size="sm"
+                              variant="ghost"
+                              className="rounded-lg text-text-muted hover:text-text-primary"
+                              onClick={() => loadHistory('incident', incident.id)}
+                              data-testid={`history-incident-${incident.id}`}
+                              title="View amendment history"
+                            >
+                              <History className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
                       {incident.root_cause && (
                         <div className="mt-3 pt-3 border-t border-[#E4E8EB]">
@@ -1295,6 +1481,376 @@ export default function ComplianceCentrePage() {
                 data-testid="assign-policy-submit"
               >
                 {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Assign Policy'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Amendment Dialog - Edit Policy/Insurance/Incident with audit trail */}
+      <Dialog open={amendDialogOpen} onOpenChange={(open) => {
+        setAmendDialogOpen(open);
+        if (!open) {
+          setAmendRecord(null);
+          setAmendType(null);
+          setAmendForm({});
+        }
+      }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading">
+              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Insurance/Certificate' : 'Incident'} Details
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <p className="text-sm text-text-muted">
+              Update details below. A reason is required for audit compliance.
+            </p>
+            
+            {/* Policy Amendment Fields */}
+            {amendType === 'policy' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Policy Name</Label>
+                  <Input
+                    value={amendForm.name || ''}
+                    onChange={(e) => setAmendForm({...amendForm, name: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Category</Label>
+                    <Select 
+                      value={amendForm.category || ''} 
+                      onValueChange={(v) => setAmendForm({...amendForm, category: v})}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Core">Core</SelectItem>
+                        <SelectItem value="Clinical">Clinical</SelectItem>
+                        <SelectItem value="Operational">Operational</SelectItem>
+                        <SelectItem value="Governance">Governance</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Version</Label>
+                    <Input
+                      value={amendForm.version || ''}
+                      onChange={(e) => setAmendForm({...amendForm, version: e.target.value})}
+                      placeholder="e.g., v2.1"
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Next Review Date</Label>
+                  <Input
+                    type="date"
+                    value={amendForm.review_date || ''}
+                    onChange={(e) => setAmendForm({...amendForm, review_date: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    value={amendForm.notes || ''}
+                    onChange={(e) => setAmendForm({...amendForm, notes: e.target.value})}
+                    placeholder="Additional notes..."
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+              </>
+            )}
+            
+            {/* Insurance Amendment Fields */}
+            {amendType === 'insurance' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Document Name</Label>
+                  <Input
+                    value={amendForm.name || ''}
+                    onChange={(e) => setAmendForm({...amendForm, name: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Expiry Date</Label>
+                    <Input
+                      type="date"
+                      value={amendForm.expiry_date || ''}
+                      onChange={(e) => setAmendForm({...amendForm, expiry_date: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Policy Number</Label>
+                    <Input
+                      value={amendForm.policy_number || ''}
+                      onChange={(e) => setAmendForm({...amendForm, policy_number: e.target.value})}
+                      placeholder="Policy #"
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Provider</Label>
+                  <Input
+                    value={amendForm.provider || ''}
+                    onChange={(e) => setAmendForm({...amendForm, provider: e.target.value})}
+                    placeholder="e.g., Aviva, AXA"
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    value={amendForm.notes || ''}
+                    onChange={(e) => setAmendForm({...amendForm, notes: e.target.value})}
+                    placeholder="Additional notes..."
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+              </>
+            )}
+            
+            {/* Incident Amendment Fields */}
+            {amendType === 'incident' && (
+              <>
+                <div className="space-y-2">
+                  <Label>Title</Label>
+                  <Input
+                    value={amendForm.title || ''}
+                    onChange={(e) => setAmendForm({...amendForm, title: e.target.value})}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Incident Type</Label>
+                    <Select 
+                      value={amendForm.incident_type || ''} 
+                      onValueChange={(v) => setAmendForm({...amendForm, incident_type: v})}
+                    >
+                      <SelectTrigger className="rounded-xl">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="incident">Incident</SelectItem>
+                        <SelectItem value="outbreak">Outbreak</SelectItem>
+                        <SelectItem value="near_miss">Near Miss</SelectItem>
+                        <SelectItem value="complaint">Complaint</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Date Occurred</Label>
+                    <Input
+                      type="date"
+                      value={amendForm.date_occurred || ''}
+                      onChange={(e) => setAmendForm({...amendForm, date_occurred: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={amendForm.description || ''}
+                    onChange={(e) => setAmendForm({...amendForm, description: e.target.value})}
+                    className="rounded-xl"
+                    rows={3}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Location</Label>
+                    <Input
+                      value={amendForm.location || ''}
+                      onChange={(e) => setAmendForm({...amendForm, location: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Persons Involved</Label>
+                    <Input
+                      value={amendForm.persons_involved || ''}
+                      onChange={(e) => setAmendForm({...amendForm, persons_involved: e.target.value})}
+                      className="rounded-xl"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Immediate Actions Taken</Label>
+                  <Textarea
+                    value={amendForm.immediate_actions || ''}
+                    onChange={(e) => setAmendForm({...amendForm, immediate_actions: e.target.value})}
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Root Cause</Label>
+                  <Textarea
+                    value={amendForm.root_cause || ''}
+                    onChange={(e) => setAmendForm({...amendForm, root_cause: e.target.value})}
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Corrective Actions</Label>
+                  <Textarea
+                    value={amendForm.corrective_actions || ''}
+                    onChange={(e) => setAmendForm({...amendForm, corrective_actions: e.target.value})}
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Lessons Learned</Label>
+                  <Textarea
+                    value={amendForm.lessons_learned || ''}
+                    onChange={(e) => setAmendForm({...amendForm, lessons_learned: e.target.value})}
+                    className="rounded-xl"
+                    rows={2}
+                  />
+                </div>
+              </>
+            )}
+            
+            {/* Reason for Change - Required for all types */}
+            <div className="space-y-2 pt-2 border-t border-[#E4E8EB]">
+              <Label className="text-warning font-medium">Reason for Change *</Label>
+              <Textarea
+                value={amendForm.reason || ''}
+                onChange={(e) => setAmendForm({...amendForm, reason: e.target.value})}
+                placeholder="e.g., Correcting expiry date, Updating provider details, Adding missing information..."
+                className="rounded-xl border-warning/50 focus:border-warning"
+                rows={2}
+              />
+              <p className="text-xs text-text-muted">
+                This will be recorded in the audit trail for CQC compliance.
+              </p>
+            </div>
+            
+            <div className="flex justify-end gap-3 pt-4">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setAmendDialogOpen(false)} 
+                className="rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={handleAmendSubmit}
+                disabled={isAmending || !amendForm.reason?.trim()} 
+                className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                data-testid="amend-submit-btn"
+              >
+                {isAmending ? <Loader2 className="h-4 w-4 animate-spin" /> : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Changes
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* History Dialog - View amendment history */}
+      <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Amendment History
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {isLoadingHistory ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : historyData.length === 0 ? (
+              <div className="text-center py-8 text-text-muted">
+                <History className="h-12 w-12 mx-auto opacity-50 mb-3" />
+                <p>No amendments recorded</p>
+                <p className="text-xs mt-1">Changes will appear here after edits are made.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {historyData.map((entry, index) => (
+                  <div 
+                    key={index}
+                    className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <p className="text-sm font-medium text-text-primary">
+                          Amendment #{historyData.length - index}
+                        </p>
+                        <p className="text-xs text-text-muted">
+                          {entry.amended_at ? new Date(entry.amended_at).toLocaleString() : 'Unknown date'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2">
+                        <span className="text-xs font-medium text-warning bg-warning/10 px-2 py-0.5 rounded">
+                          Reason
+                        </span>
+                        <p className="text-sm text-text-primary flex-1">
+                          {entry.amendment_reason || 'No reason provided'}
+                        </p>
+                      </div>
+                      {/* Show previous values for key fields */}
+                      {historyType === 'policy' && (
+                        <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
+                          {entry.name && <p><span className="font-medium">Name:</span> {entry.name}</p>}
+                          {entry.version && <p><span className="font-medium">Version:</span> {entry.version}</p>}
+                          {entry.review_date && <p><span className="font-medium">Review Date:</span> {new Date(entry.review_date).toLocaleDateString()}</p>}
+                        </div>
+                      )}
+                      {historyType === 'insurance' && (
+                        <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
+                          {entry.name && <p><span className="font-medium">Name:</span> {entry.name}</p>}
+                          {entry.expiry_date && <p><span className="font-medium">Expiry:</span> {new Date(entry.expiry_date).toLocaleDateString()}</p>}
+                          {entry.provider && <p><span className="font-medium">Provider:</span> {entry.provider}</p>}
+                          {entry.policy_number && <p><span className="font-medium">Policy #:</span> {entry.policy_number}</p>}
+                        </div>
+                      )}
+                      {historyType === 'incident' && (
+                        <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
+                          {entry.title && <p><span className="font-medium">Title:</span> {entry.title}</p>}
+                          {entry.incident_type && <p><span className="font-medium">Type:</span> {entry.incident_type}</p>}
+                          {entry.date_occurred && <p><span className="font-medium">Date:</span> {new Date(entry.date_occurred).toLocaleDateString()}</p>}
+                          {entry.status && <p><span className="font-medium">Status:</span> {entry.status}</p>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            <div className="flex justify-end pt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setHistoryDialogOpen(false)} 
+                className="rounded-xl"
+              >
+                Close
               </Button>
             </div>
           </div>

@@ -1,0 +1,100 @@
+{
+  "summary": "Amendment capabilities testing completed successfully. All backend endpoints (PUT /api/compliance/{policies|insurance|incidents}/{id}/amend and GET /api/compliance/{policies|insurance|incidents}/{id}/history) are working correctly. Frontend UI shows Edit and History buttons for policies, insurance, and incidents with proper modal forms including required 'Reason for Change' field and audit trail messaging.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ Backend: PUT /api/compliance/policies/{id}/amend - requires reason field (422 without)",
+    "✅ Backend: PUT /api/compliance/policies/{id}/amend - successfully amends with reason",
+    "✅ Backend: GET /api/compliance/policies/{id}/history - returns amendment history",
+    "✅ Backend: PUT /api/compliance/insurance/{id}/amend - requires reason field (422 without)",
+    "✅ Backend: PUT /api/compliance/insurance/{id}/amend - successfully amends with reason",
+    "✅ Backend: PUT /api/compliance/insurance/{id}/amend - updates expiry date correctly",
+    "✅ Backend: GET /api/compliance/insurance/{id}/history - returns amendment history",
+    "✅ Backend: PUT /api/compliance/incidents/{id}/amend - requires reason field (422 without)",
+    "✅ Backend: PUT /api/compliance/incidents/{id}/amend - successfully amends with reason",
+    "✅ Backend: PUT /api/compliance/incidents/{id}/amend - updates multiple fields at once",
+    "✅ Backend: GET /api/compliance/incidents/{id}/history - returns amendment history",
+    "✅ Backend: History preserves previous state of records",
+    "✅ Backend: 404 returned for non-existent records",
+    "✅ Frontend: Edit button visible for policies with uploaded files",
+    "✅ Frontend: Edit button visible for insurance with uploaded files",
+    "✅ Frontend: Edit button visible for all incidents",
+    "✅ Frontend: History button visible for policies, insurance, incidents",
+    "✅ Frontend: Policy Edit modal shows 'Reason for Change *' required field",
+    "✅ Frontend: Insurance Edit modal shows 'Reason for Change *' required field",
+    "✅ Frontend: Incident Edit modal shows 'Reason for Change *' required field",
+    "✅ Frontend: Validation error shown when saving without reason",
+    "✅ Frontend: 'Incident updated successfully' toast on successful save",
+    "✅ Frontend: Amendment History modal shows all amendments with reasons and dates",
+    "✅ Frontend: History entries show Reason badge, Title, Type, Date, Status"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/backend/tests/test_amendment_endpoints.py",
+    "/app/test_reports/pytest/amendment_endpoints_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Amendment endpoints correctly store previous state in 'history' array before updating",
+    "Pydantic models (InsuranceDocUpdate, OrgPolicyAmend, IncidentLogAmend) correctly require 'reason' field",
+    "History endpoints return sorted history (most recent first)",
+    "Frontend correctly shows Edit buttons only for records with uploaded files (policies/insurance)",
+    "Frontend correctly shows Edit buttons for all incidents",
+    "Amendment modal includes audit trail messaging: 'This will be recorded in the audit trail for CQC compliance'"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_amendment_endpoints.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (18/18 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123"
+  },
+
+  "seed_data_creation": "Created test incident for amendment testing (TEST_Amendment_Incident_*)",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Amendment capabilities fully implemented and tested. Backend endpoints at lines 10140-10375 in server.py. Frontend ComplianceCentrePage.js has Edit/History buttons and modals. History modal shows 'No amendments recorded' for records without amendments, and shows full audit trail with Reason badges for amended records.",
+
+  "features_verified": {
+    "backend_endpoints": {
+      "PUT /api/compliance/insurance/{id}/amend": "Working - requires reason, stores history",
+      "PUT /api/compliance/policies/{id}/amend": "Working - requires reason, stores history",
+      "PUT /api/compliance/incidents/{id}/amend": "Working - requires reason, stores history",
+      "GET /api/compliance/insurance/{id}/history": "Working - returns sorted history array",
+      "GET /api/compliance/policies/{id}/history": "Working - returns sorted history array",
+      "GET /api/compliance/incidents/{id}/history": "Working - returns sorted history array"
+    },
+    "frontend_ui": {
+      "Edit buttons": "Visible for policies/insurance with files, all incidents",
+      "History buttons": "Visible for all policies, insurance, incidents",
+      "Edit modal": "Shows all editable fields + required 'Reason for Change' field",
+      "History modal": "Shows amendment timeline with reasons, dates, previous values",
+      "Validation": "Prevents save without reason field",
+      "Success feedback": "Toast notification on successful amendment"
+    }
+  }
+}

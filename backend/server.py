@@ -10138,6 +10138,243 @@ async def upload_insurance_doc(
     updated = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
     return updated
 
+
+# ==================== AMENDMENT ENDPOINTS (with history tracking) ====================
+
+@api_router.put("/compliance/insurance/{insurance_id}/amend")
+async def amend_insurance_doc(
+    insurance_id: str,
+    update: InsuranceDocUpdate,
+    user: dict = Depends(require_admin)
+):
+    """
+    Amend an insurance/certificate record with full audit trail.
+    Stores previous state in history array and requires a reason.
+    """
+    insurance = await db.insurance_docs.find_one({"id": insurance_id})
+    if not insurance:
+        raise HTTPException(status_code=404, detail="Insurance record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (excluding _id and history)
+    previous_state = {k: v for k, v in insurance.items() if k not in ['_id', 'history']}
+    previous_state['amended_at'] = now
+    previous_state['amended_by'] = user['user_id']
+    previous_state['amendment_reason'] = update.reason
+    
+    # Build update dict from non-null fields (excluding reason)
+    update_fields = {}
+    if update.name is not None:
+        update_fields['name'] = update.name
+    if update.expiry_date is not None:
+        update_fields['expiry_date'] = update.expiry_date
+    if update.policy_number is not None:
+        update_fields['policy_number'] = update.policy_number
+    if update.provider is not None:
+        update_fields['provider'] = update.provider
+    if update.issue_date is not None:
+        update_fields['issue_date'] = update.issue_date
+    if update.notes is not None:
+        update_fields['notes'] = update.notes
+    
+    update_fields['updated_at'] = now
+    
+    # Push previous state to history array and update document
+    await db.insurance_docs.update_one(
+        {"id": insurance_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_fields
+        }
+    )
+    
+    # Log to audit trail with old and new values
+    await log_audit_action(user['user_id'], "amend_insurance", "insurance", insurance_id, {
+        "reason": update.reason,
+        "changes": update_fields,
+        "previous_values": {k: previous_state.get(k) for k in update_fields.keys() if k != 'updated_at'}
+    })
+    
+    updated = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
+    return updated
+
+
+@api_router.get("/compliance/insurance/{insurance_id}/history")
+async def get_insurance_history(
+    insurance_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get amendment history for an insurance/certificate record"""
+    insurance = await db.insurance_docs.find_one({"id": insurance_id})
+    if not insurance:
+        raise HTTPException(status_code=404, detail="Insurance record not found")
+    
+    history = insurance.get('history', [])
+    # Sort by amended_at descending (most recent first)
+    history = sorted(history, key=lambda x: x.get('amended_at', ''), reverse=True)
+    
+    return {"history": history, "total": len(history)}
+
+
+@api_router.put("/compliance/policies/{policy_id}/amend")
+async def amend_org_policy(
+    policy_id: str,
+    update: OrgPolicyAmend,
+    user: dict = Depends(require_admin)
+):
+    """
+    Amend an organisation policy record with full audit trail.
+    Stores previous state in history array and requires a reason.
+    """
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (excluding _id and history)
+    previous_state = {k: v for k, v in policy.items() if k not in ['_id', 'history']}
+    previous_state['amended_at'] = now
+    previous_state['amended_by'] = user['user_id']
+    previous_state['amendment_reason'] = update.reason
+    
+    # Build update dict from non-null fields (excluding reason)
+    update_fields = {}
+    if update.name is not None:
+        update_fields['name'] = update.name
+    if update.category is not None:
+        update_fields['category'] = update.category
+    if update.version is not None:
+        update_fields['version'] = update.version
+    if update.review_date is not None:
+        update_fields['review_date'] = update.review_date
+    if update.notes is not None:
+        update_fields['notes'] = update.notes
+    
+    update_fields['updated_at'] = now
+    
+    # Push previous state to history array and update document
+    await db.org_policies.update_one(
+        {"id": policy_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_fields
+        }
+    )
+    
+    # Log to audit trail with old and new values
+    await log_audit_action(user['user_id'], "amend_policy", "org_policy", policy_id, {
+        "reason": update.reason,
+        "changes": update_fields,
+        "previous_values": {k: previous_state.get(k) for k in update_fields.keys() if k != 'updated_at'}
+    })
+    
+    updated = await db.org_policies.find_one({"id": policy_id}, {"_id": 0})
+    return updated
+
+
+@api_router.get("/compliance/policies/{policy_id}/history")
+async def get_policy_history(
+    policy_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get amendment history for an organisation policy"""
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    history = policy.get('history', [])
+    # Sort by amended_at descending (most recent first)
+    history = sorted(history, key=lambda x: x.get('amended_at', ''), reverse=True)
+    
+    return {"history": history, "total": len(history)}
+
+
+@api_router.put("/compliance/incidents/{incident_id}/amend")
+async def amend_incident_log(
+    incident_id: str,
+    update: IncidentLogAmend,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Amend an incident log with full audit trail.
+    Stores previous state in history array and requires a reason.
+    """
+    incident = await db.incident_logs.find_one({"id": incident_id})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (excluding _id and history)
+    previous_state = {k: v for k, v in incident.items() if k not in ['_id', 'history']}
+    previous_state['amended_at'] = now
+    previous_state['amended_by'] = user['user_id']
+    previous_state['amendment_reason'] = update.reason
+    
+    # Build update dict from non-null fields (excluding reason)
+    update_fields = {}
+    if update.title is not None:
+        update_fields['title'] = update.title
+    if update.description is not None:
+        update_fields['description'] = update.description
+    if update.incident_type is not None:
+        update_fields['incident_type'] = update.incident_type
+    if update.date_occurred is not None:
+        update_fields['date_occurred'] = update.date_occurred
+    if update.location is not None:
+        update_fields['location'] = update.location
+    if update.persons_involved is not None:
+        update_fields['persons_involved'] = update.persons_involved
+    if update.immediate_actions is not None:
+        update_fields['immediate_actions'] = update.immediate_actions
+    if update.root_cause is not None:
+        update_fields['root_cause'] = update.root_cause
+    if update.corrective_actions is not None:
+        update_fields['corrective_actions'] = update.corrective_actions
+    if update.lessons_learned is not None:
+        update_fields['lessons_learned'] = update.lessons_learned
+    
+    update_fields['updated_at'] = now
+    
+    # Push previous state to history array and update document
+    await db.incident_logs.update_one(
+        {"id": incident_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_fields
+        }
+    )
+    
+    # Log to audit trail with old and new values
+    await log_audit_action(user['user_id'], "amend_incident", "incident_log", incident_id, {
+        "reason": update.reason,
+        "changes": update_fields,
+        "previous_values": {k: previous_state.get(k) for k in update_fields.keys() if k != 'updated_at'}
+    })
+    
+    updated = await db.incident_logs.find_one({"id": incident_id}, {"_id": 0})
+    return updated
+
+
+@api_router.get("/compliance/incidents/{incident_id}/history")
+async def get_incident_history(
+    incident_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get amendment history for an incident log"""
+    incident = await db.incident_logs.find_one({"id": incident_id})
+    if not incident:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    
+    history = incident.get('history', [])
+    # Sort by amended_at descending (most recent first)
+    history = sorted(history, key=lambda x: x.get('amended_at', ''), reverse=True)
+    
+    return {"history": history, "total": len(history)}
+
+
 # ==================== FILE SERVING ENDPOINTS ====================
 
 @api_router.get("/compliance/policies/{policy_id}/file")

@@ -22,7 +22,7 @@ import {
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
-  Camera, Replace, FileX, ClipboardCheck, FormInput
+  Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -183,6 +183,7 @@ export default function EmployeeProfilePage() {
   // Profile extraction from application form state
   const [extractionDialogOpen, setExtractionDialogOpen] = useState(false);
   const [extractionResult, setExtractionResult] = useState(null);
+  const [extractionFailed, setExtractionFailed] = useState(null); // For graceful failure handling
   const [isExtracting, setIsExtracting] = useState(false);
   const [fieldsToApply, setFieldsToApply] = useState({});
   const [isApplyingExtraction, setIsApplyingExtraction] = useState(false);
@@ -1344,6 +1345,7 @@ export default function EmployeeProfilePage() {
     setIsExtracting(true);
     setExtractionDialogOpen(true);
     setExtractionResult(null);
+    setExtractionFailed(null);
     setFieldsToApply({});
     
     try {
@@ -1353,22 +1355,66 @@ export default function EmployeeProfilePage() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      setExtractionResult(response.data);
-      
-      // Initialize fields to apply based on extraction result
-      const initialFields = {};
-      response.data.fields.forEach(field => {
-        // Default: apply if field is empty in profile OR if extracted value differs
-        initialFields[field.field_name] = field.apply;
-      });
-      setFieldsToApply(initialFields);
-      
-      toast.success(`Extracted ${response.data.fields.length} fields from application form`);
+      // Check if extraction failed gracefully (returns extraction_failed: true)
+      if (response.data.extraction_failed) {
+        setExtractionFailed(response.data);
+        // Don't show error toast - show the options modal instead
+      } else {
+        setExtractionResult(response.data);
+        
+        // Initialize fields to apply based on extraction result
+        const initialFields = {};
+        response.data.fields.forEach(field => {
+          // Default: apply if field is empty in profile OR if extracted value differs
+          initialFields[field.field_name] = field.apply;
+        });
+        setFieldsToApply(initialFields);
+        
+        toast.success(`Extracted ${response.data.fields.length} fields from application form`);
+      }
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to extract data from application form');
-      setExtractionDialogOpen(false);
+      // Only show toast for actual API errors (not graceful failures)
+      const errorDetail = error.response?.data?.detail;
+      if (errorDetail && errorDetail.includes('No application form found')) {
+        toast.error('No application form found. Please upload an application form first.');
+        setExtractionDialogOpen(false);
+      } else {
+        // For unexpected errors, show failure options
+        setExtractionFailed({
+          extraction_failed: true,
+          message: errorDetail || 'An unexpected error occurred during extraction.',
+          options: [
+            { action: 'fill_manually', label: 'Fill form manually', description: 'Enter profile data manually' },
+            { action: 'retry', label: 'Retry extraction', description: 'Try extracting again' }
+          ]
+        });
+      }
     } finally {
       setIsExtracting(false);
+    }
+  };
+  
+  // Handle extraction failure options
+  const handleExtractionOption = async (action) => {
+    switch (action) {
+      case 'fill_manually':
+        setExtractionDialogOpen(false);
+        setExtractionFailed(null);
+        // Switch to forms tab for manual entry
+        setActiveTab('forms');
+        toast.info('You can manually enter profile data using the forms below.');
+        break;
+      case 'view_document':
+        if (extractionFailed?.file_url) {
+          window.open(extractionFailed.file_url, '_blank');
+        }
+        break;
+      case 'retry':
+        setExtractionFailed(null);
+        await handleExtractFromApplication();
+        break;
+      default:
+        break;
     }
   };
   
@@ -1414,6 +1460,13 @@ export default function EmployeeProfilePage() {
   
   // Discard extraction without applying
   const handleDiscardExtraction = async () => {
+    // If there's a failed extraction, just close the dialog
+    if (extractionFailed) {
+      setExtractionDialogOpen(false);
+      setExtractionFailed(null);
+      return;
+    }
+    
     if (!extractionResult) {
       setExtractionDialogOpen(false);
       return;
@@ -1432,6 +1485,7 @@ export default function EmployeeProfilePage() {
     
     setExtractionDialogOpen(false);
     setExtractionResult(null);
+    setExtractionFailed(null);
   };
   
   // Human-readable field name mapping
@@ -6281,13 +6335,19 @@ export default function EmployeeProfilePage() {
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
-              Review Extracted Data
+              {extractionFailed ? 'Extraction Options' : 'Review Extracted Data'}
             </DialogTitle>
             <DialogDescription>
-              Review the extracted values below. Select which fields to apply to the employee profile.
-              <span className="block mt-2 text-amber-600 font-medium">
-                Note: This updates profile data only. Compliance evidence requirements remain unchanged.
-              </span>
+              {extractionFailed ? (
+                extractionFailed.message
+              ) : (
+                <>
+                  Review the extracted values below. Select which fields to apply to the employee profile.
+                  <span className="block mt-2 text-amber-600 font-medium">
+                    Note: This updates profile data only. Compliance evidence requirements remain unchanged.
+                  </span>
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           
@@ -6296,6 +6356,73 @@ export default function EmployeeProfilePage() {
               <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
               <p className="text-text-muted">Extracting data from application form...</p>
               <p className="text-xs text-text-muted mt-1">This may take a few seconds</p>
+            </div>
+          ) : extractionFailed ? (
+            /* Extraction Failed - Show Options */
+            <div className="space-y-4">
+              {/* Friendly Message */}
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-800">
+                    <p className="font-medium mb-1">Don't worry - you can still proceed!</p>
+                    <p>Automatic extraction didn't work for this document, but you have options to continue.</p>
+                    {extractionFailed.extraction_log && (
+                      <p className="text-xs mt-2 text-amber-600">
+                        Details: {extractionFailed.extraction_log.file_type} ({Math.round((extractionFailed.extraction_log.file_size_bytes || 0) / 1024)} KB)
+                        {extractionFailed.extraction_log.failure_reason && (
+                          <span className="block">Reason: {extractionFailed.extraction_log.failure_reason}</span>
+                        )}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Options Buttons */}
+              <div className="space-y-3">
+                {extractionFailed.options?.map((option) => (
+                  <button
+                    key={option.action}
+                    onClick={() => handleExtractionOption(option.action)}
+                    className="w-full flex items-center gap-4 p-4 border rounded-lg hover:bg-gray-50 transition-colors text-left"
+                    data-testid={`extraction-option-${option.action}`}
+                  >
+                    <div className="flex-shrink-0">
+                      {option.action === 'fill_manually' && (
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                          <Edit className="h-5 w-5 text-blue-600" />
+                        </div>
+                      )}
+                      {option.action === 'view_document' && (
+                        <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                          <Eye className="h-5 w-5 text-purple-600" />
+                        </div>
+                      )}
+                      {option.action === 'retry' && (
+                        <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                          <RefreshCw className="h-5 w-5 text-green-600" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-text-primary">{option.label}</p>
+                      <p className="text-sm text-text-muted">{option.description}</p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-gray-400" />
+                  </button>
+                ))}
+              </div>
+              
+              <DialogFooter className="pt-4">
+                <Button
+                  variant="outline"
+                  onClick={handleDiscardExtraction}
+                  data-testid="close-extraction-dialog"
+                >
+                  Close
+                </Button>
+              </DialogFooter>
             </div>
           ) : extractionResult ? (
             <div className="space-y-4">

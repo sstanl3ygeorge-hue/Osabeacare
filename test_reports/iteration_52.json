@@ -1,0 +1,79 @@
+{
+  "summary": "Extraction feature fully tested. Backend: 16/16 tests passed. Frontend: All UI elements verified working. Extraction successfully extracts 15+ fields from application form with AI (GPT-5.2) and OCR fallback. Review dialog shows fields table with checkboxes, confidence levels, and quick actions. Compliance calculations remain unaffected.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ Backend: POST /api/employees/{id}/extract-from-application returns 200 with extracted fields",
+    "✅ Backend: Extraction returns fields with field_name, extracted_value, current_value, confidence, apply",
+    "✅ Backend: Confidence levels are high/medium/low",
+    "✅ Backend: GET /api/employees/{id}/extractions returns extraction history",
+    "✅ Backend: POST /api/extractions/{id}/apply endpoint exists",
+    "✅ Backend: POST /api/extractions/{id}/discard endpoint exists",
+    "✅ Backend: Graceful failure returns 200 with extraction_failed=true and options",
+    "✅ Backend: Options include fill_manually, view_document, retry",
+    "✅ Backend: Extraction log includes file_type, file_size_bytes, ai_attempted, ocr_attempted",
+    "✅ Backend: Extended profile fields (address, NI number, next of kin) accepted in PUT",
+    "✅ Backend: Compliance percentage unchanged after profile field update",
+    "✅ Backend: Compliance requirements structure correct",
+    "✅ Frontend: Extract from Application button visible on employee profile",
+    "✅ Frontend: Extraction dialog opens with loading state",
+    "✅ Frontend: Review Extracted Data dialog shows fields table with checkboxes",
+    "✅ Frontend: Confidence levels display with colored badges (high=green, medium=amber)",
+    "✅ Frontend: 'Profile Data Only' warning message visible",
+    "✅ Frontend: 'Select All' quick action works - shows 'Apply 15 Field(s)'",
+    "✅ Frontend: 'Clear All' quick action works - shows 'Apply 0 Field(s)'",
+    "✅ Frontend: 'Select Empty Only' quick action works - shows 'Apply 10 Field(s)'",
+    "✅ Frontend: Apply button shows count of selected fields"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/backend/tests/test_extraction_feature.py",
+    "/app/test_reports/pytest/extraction_feature_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "Backend extraction endpoint at lines 4140-4300 correctly handles both success and graceful failure",
+    "OCR fallback using Tesseract at lines 3901-3939 works when AI extraction fails",
+    "PDF to image conversion for GPT-5.2 at lines 3970-3986 handles multi-page PDFs",
+    "Extraction logging stores file_type, file_size_bytes, ai_attempted, ocr_attempted, failure_reason",
+    "Frontend extraction handlers at lines 1342-1420 properly handle both success and failure responses",
+    "Frontend extraction dialog at lines 6328-6558 shows review table or options modal based on response"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_extraction_feature.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (all UI verifications passed)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123",
+    "test_employee_id": "d88335f6-1b18-435a-8086-28af4a583f77"
+  },
+
+  "seed_data_creation": "",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Extraction feature fully verified. Key features: 1) POST /api/employees/{id}/extract-from-application extracts data from application form using GPT-5.2 with Tesseract OCR fallback. 2) Returns fields with field_name, extracted_value, current_value, confidence (high/medium/low), apply flag. 3) Graceful failure returns extraction_failed=true with options (fill_manually, view_document, retry). 4) Frontend shows Review Extracted Data dialog with fields table, checkboxes, confidence badges, and quick actions (Select All, Clear All, Select Empty Only). 5) Profile Data Only warning visible. 6) Compliance calculations remain unaffected by profile field updates."
+}

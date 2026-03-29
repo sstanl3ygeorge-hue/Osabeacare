@@ -27,6 +27,9 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+import pytesseract
+from PIL import Image as PILImage
+from pdf2image import convert_from_bytes
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -3881,40 +3884,172 @@ class ApplyExtractionRequest(BaseModel):
     fields_to_apply: List[str]  # List of field names to apply
 
 
-async def extract_text_from_document(file_url: str) -> str:
-    """Extract text content from a document using OCR/AI"""
+class ExtractionLog(BaseModel):
+    """Detailed extraction log for debugging"""
+    file_type: str
+    file_size_bytes: int
+    ai_extraction_attempted: bool = False
+    ai_extraction_success: bool = False
+    ai_error: Optional[str] = None
+    ocr_attempted: bool = False
+    ocr_success: bool = False
+    ocr_error: Optional[str] = None
+    final_method: Optional[str] = None  # "ai", "ocr", "failed"
+    failure_reason: Optional[str] = None
+
+
+def perform_ocr_extraction(file_bytes: bytes, content_type: str) -> tuple[str, str]:
+    """
+    Perform OCR on document bytes using Tesseract.
+    Returns (extracted_text, error_message)
+    """
+    try:
+        extracted_texts = []
+        
+        # Handle PDFs - convert to images first
+        if 'pdf' in content_type.lower():
+            try:
+                images = convert_from_bytes(file_bytes, dpi=200)
+                for i, image in enumerate(images):
+                    text = pytesseract.image_to_string(image, lang='eng')
+                    if text.strip():
+                        extracted_texts.append(f"--- Page {i+1} ---\n{text}")
+            except Exception as pdf_err:
+                return "", f"PDF conversion failed: {str(pdf_err)}"
+        else:
+            # Handle image files directly
+            try:
+                image = PILImage.open(io.BytesIO(file_bytes))
+                # Convert to RGB if necessary (for RGBA or other modes)
+                if image.mode not in ('RGB', 'L'):
+                    image = image.convert('RGB')
+                text = pytesseract.image_to_string(image, lang='eng')
+                if text.strip():
+                    extracted_texts.append(text)
+            except Exception as img_err:
+                return "", f"Image processing failed: {str(img_err)}"
+        
+        combined_text = "\n".join(extracted_texts)
+        if combined_text.strip():
+            return combined_text, ""
+        else:
+            return "", "OCR produced no readable text"
+            
+    except Exception as e:
+        return "", f"OCR extraction error: {str(e)}"
+
+
+async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]:
+    """
+    Extract text content from a document using AI with OCR fallback.
+    Returns (extracted_text, extraction_log)
+    """
+    extraction_log = ExtractionLog(
+        file_type="unknown",
+        file_size_bytes=0
+    )
+    
     try:
         # Get document bytes
         file_bytes, content_type = get_object(file_url)
+        extraction_log.file_type = content_type or "unknown"
+        extraction_log.file_size_bytes = len(file_bytes)
         
-        # Convert to base64 for AI processing
-        file_base64 = base64.b64encode(file_bytes).decode('utf-8')
+        logger.info(f"Document extraction started - Type: {content_type}, Size: {len(file_bytes)} bytes")
         
-        # Use GPT-5.2 vision for extraction
-        api_key = os.environ.get('EMERGENT_LLM_KEY')
-        if not api_key:
-            raise HTTPException(status_code=500, detail="LLM API key not configured")
+        # Step 1: Try AI-based extraction first
+        extraction_log.ai_extraction_attempted = True
+        ai_text = ""
         
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"extraction-{uuid.uuid4()}",
-            system_message="""You are a document data extraction specialist. Extract all visible text and data from the provided document image.
+        try:
+            api_key = os.environ.get('EMERGENT_LLM_KEY')
+            if not api_key:
+                extraction_log.ai_error = "LLM API key not configured"
+                logger.warning("AI extraction skipped: LLM API key not configured")
+            else:
+                # For PDFs, convert to images first (GPT-5.2 only accepts images)
+                images_to_process = []
+                
+                if 'pdf' in (content_type or '').lower():
+                    try:
+                        from pdf2image import convert_from_bytes
+                        pdf_images = convert_from_bytes(file_bytes, dpi=150, first_page=1, last_page=3)  # Limit to first 3 pages
+                        for i, img in enumerate(pdf_images):
+                            # Convert PIL image to bytes
+                            img_buffer = io.BytesIO()
+                            img.save(img_buffer, format='PNG')
+                            img_bytes = img_buffer.getvalue()
+                            images_to_process.append(base64.b64encode(img_bytes).decode('utf-8'))
+                        logger.info(f"Converted PDF to {len(images_to_process)} image(s) for AI processing")
+                    except Exception as pdf_err:
+                        extraction_log.ai_error = f"PDF to image conversion failed: {str(pdf_err)}"
+                        logger.warning(f"Failed to convert PDF to images: {pdf_err}")
+                else:
+                    # Direct image - use as-is
+                    images_to_process.append(base64.b64encode(file_bytes).decode('utf-8'))
+                
+                if images_to_process:
+                    all_extracted_text = []
+                    
+                    for i, image_base64 in enumerate(images_to_process):
+                        chat = LlmChat(
+                            api_key=api_key,
+                            session_id=f"extraction-{uuid.uuid4()}",
+                            system_message="""You are a document data extraction specialist. Extract all visible text and data from the provided document image.
 Focus on identifying form fields, their labels, and the values filled in.
 Return the extracted content in a structured, readable format."""
-        ).with_model("openai", "gpt-5.2")
+                        ).with_model("openai", "gpt-5.2")
+                        
+                        image_content = ImageContent(image_base64=image_base64)
+                        user_message = UserMessage(
+                            text=f"Extract all text and data from this document image (page {i+1}). Include form field labels and their values.",
+                            file_contents=[image_content]
+                        )
+                        
+                        page_text = await chat.send_message(user_message)
+                        if page_text and page_text.strip():
+                            all_extracted_text.append(f"--- Page {i+1} ---\n{page_text}")
+                    
+                    ai_text = "\n\n".join(all_extracted_text)
+                    
+                    if ai_text and len(ai_text.strip()) > 20:
+                        extraction_log.ai_extraction_success = True
+                        extraction_log.final_method = "ai"
+                        logger.info(f"AI extraction successful - extracted {len(ai_text)} characters from {len(images_to_process)} page(s)")
+                        return ai_text, extraction_log
+                    else:
+                        extraction_log.ai_error = "AI returned insufficient text"
+                        logger.warning("AI extraction returned insufficient text, trying OCR fallback")
+                else:
+                    extraction_log.ai_error = "No images to process"
+                    
+        except Exception as ai_err:
+            extraction_log.ai_error = str(ai_err)
+            logger.warning(f"AI extraction failed: {ai_err}, trying OCR fallback")
         
-        # Create message with image
-        image_content = ImageContent(image_base64=file_base64)
-        user_message = UserMessage(
-            text="Extract all text and data from this document. Include form field labels and their values.",
-            file_contents=[image_content]
-        )
+        # Step 2: OCR Fallback
+        extraction_log.ocr_attempted = True
+        logger.info("Attempting OCR fallback extraction...")
         
-        response = await chat.send_message(user_message)
-        return response
+        ocr_text, ocr_error = perform_ocr_extraction(file_bytes, content_type)
+        
+        if ocr_text and len(ocr_text.strip()) > 20:
+            extraction_log.ocr_success = True
+            extraction_log.final_method = "ocr"
+            logger.info(f"OCR extraction successful - extracted {len(ocr_text)} characters")
+            return ocr_text, extraction_log
+        else:
+            extraction_log.ocr_error = ocr_error or "OCR produced no readable text"
+            extraction_log.final_method = "failed"
+            extraction_log.failure_reason = f"AI: {extraction_log.ai_error or 'N/A'}, OCR: {extraction_log.ocr_error}"
+            logger.error(f"Both extraction methods failed - AI: {extraction_log.ai_error}, OCR: {extraction_log.ocr_error}")
+            return "", extraction_log
+            
     except Exception as e:
-        logger.error(f"Failed to extract text from document: {e}")
-        return ""
+        extraction_log.failure_reason = f"Document retrieval error: {str(e)}"
+        extraction_log.final_method = "failed"
+        logger.error(f"Failed to retrieve document for extraction: {e}")
+        return "", extraction_log
 
 
 async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str) -> List[ExtractedField]:
@@ -4018,6 +4153,8 @@ async def extract_from_application_form(
     - Complete compliance requirements
     - Provide evidence for NI number verification, address proof, etc.
     - Affect compliance calculations
+    
+    If extraction fails, returns extraction_failed=True with options for user.
     """
     # Verify employee exists
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -4062,24 +4199,87 @@ async def extract_from_application_form(
     if not file_url:
         raise HTTPException(status_code=404, detail="Application form has no file attached")
     
-    # Step 1: Extract text from document
+    # Step 1: Extract text from document (with OCR fallback)
     logger.info(f"Extracting text from application form for employee {employee_id}")
-    extracted_text = await extract_text_from_document(file_url)
+    extracted_text, extraction_log = await extract_text_from_document(file_url)
     
+    # Log extraction attempt details
+    log_details = {
+        "employee_id": employee_id,
+        "document_id": doc_id,
+        "file_type": extraction_log.file_type,
+        "file_size_bytes": extraction_log.file_size_bytes,
+        "ai_attempted": extraction_log.ai_extraction_attempted,
+        "ai_success": extraction_log.ai_extraction_success,
+        "ocr_attempted": extraction_log.ocr_attempted,
+        "ocr_success": extraction_log.ocr_success,
+        "final_method": extraction_log.final_method,
+        "failure_reason": extraction_log.failure_reason
+    }
+    logger.info(f"Extraction log: {log_details}")
+    
+    # Store extraction log in DB for debugging
+    await db.extraction_logs.insert_one({
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "document_id": doc_id,
+        "file_url": file_url,
+        **log_details,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Handle extraction failure gracefully - do NOT block the user
     if not extracted_text:
-        raise HTTPException(
-            status_code=422, 
-            detail="Could not extract text from document. Please ensure the document is readable."
+        return JSONResponse(
+            status_code=200,  # Return 200 to prevent blocking error
+            content={
+                "extraction_failed": True,
+                "employee_id": employee_id,
+                "document_id": doc_id,
+                "file_url": file_url,
+                "message": "We couldn't automatically extract data from this document. You can still fill the form manually.",
+                "extraction_log": {
+                    "file_type": extraction_log.file_type,
+                    "file_size_bytes": extraction_log.file_size_bytes,
+                    "ai_attempted": extraction_log.ai_extraction_attempted,
+                    "ocr_attempted": extraction_log.ocr_attempted,
+                    "failure_reason": extraction_log.failure_reason
+                },
+                "options": [
+                    {"action": "fill_manually", "label": "Fill form manually", "description": "Enter profile data manually"},
+                    {"action": "view_document", "label": "View uploaded document", "description": "Open the document to reference while filling"},
+                    {"action": "retry", "label": "Retry extraction", "description": "Try extracting again"}
+                ]
+            }
         )
     
     # Step 2: Parse text into structured fields
-    logger.info(f"Parsing extracted text into profile fields")
+    logger.info(f"Parsing extracted text into profile fields for employee {employee_id}")
     extracted_fields = await parse_extracted_text_to_fields(extracted_text, employee_id)
     
     if not extracted_fields:
-        raise HTTPException(
-            status_code=422,
-            detail="No profile fields could be identified in the document."
+        # Still don't block - return graceful failure with options
+        return JSONResponse(
+            status_code=200,
+            content={
+                "extraction_failed": True,
+                "employee_id": employee_id,
+                "document_id": doc_id,
+                "file_url": file_url,
+                "message": "We extracted text but couldn't identify profile fields. You can still fill the form manually.",
+                "extraction_log": {
+                    "file_type": extraction_log.file_type,
+                    "file_size_bytes": extraction_log.file_size_bytes,
+                    "extraction_method": extraction_log.final_method,
+                    "text_extracted": True,
+                    "fields_parsed": False
+                },
+                "options": [
+                    {"action": "fill_manually", "label": "Fill form manually", "description": "Enter profile data manually"},
+                    {"action": "view_document", "label": "View uploaded document", "description": "Open the document to reference while filling"},
+                    {"action": "retry", "label": "Retry extraction", "description": "Try extracting again"}
+                ]
+            }
         )
     
     # Step 3: Save extraction result for review
@@ -4093,6 +4293,7 @@ async def extract_from_application_form(
         "file_url": file_url,
         "fields": [f.model_dump() for f in extracted_fields],
         "extracted_text_preview": extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text,
+        "extraction_method": extraction_log.final_method,  # Track which method worked
         "status": "pending_review",
         "extracted_at": now,
         "extracted_by": user['user_id'],

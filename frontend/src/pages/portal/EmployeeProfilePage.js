@@ -1823,11 +1823,11 @@ export default function EmployeeProfilePage() {
             // Extract key compliance data for audit visibility
             const reqs = complianceRequirements?.requirements || [];
             
-            // RTW Summary - USE COMPUTED DATA FROM API (single source of truth)
+            // SAFETY ENGINES - USE COMPUTED DATA FROM API (single source of truth)
             const rtwSummary = complianceRequirements?.rtw_summary || {};
-            
-            // DBS Summary - USE COMPUTED DATA FROM API (single source of truth)
             const dbsSummary = complianceRequirements?.dbs_summary || {};
+            const trainingSummary = complianceRequirements?.training_summary || {};
+            const safetyStatus = complianceRequirements?.safety_status || {};
             
             // Calculate missing items (no evidence)
             const missingItems = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
@@ -1835,19 +1835,22 @@ export default function EmployeeProfilePage() {
             // Calculate pending review (has evidence but not verified)
             const pendingReview = reqs.filter(r => r.has_evidence && !r.verified).length;
             
-            // Expiring soon items (from expiry_alerts object)
-            const expiryAlerts = complianceRequirements?.expiry_alerts || {};
-            const expiringSoon = (expiryAlerts.expiring_soon_count || 0) + (expiryAlerts.expired_count || 0);
+            // Safety engine blocking status
+            const isBlocking = safetyStatus.is_safe_to_deploy === false;
+            const blockingReasons = complianceRequirements?.statuses?.safety_blocking_reasons || [];
             
-            // DBS expiry info
-            const dbsExpiry = dbsSummary.next_dbs_review_due;
-            const dbsExpiryDays = dbsExpiry ? Math.ceil((new Date(dbsExpiry) - new Date()) / (1000 * 60 * 60 * 24)) : null;
-            const dbsExpiringWarning = dbsExpiryDays !== null && dbsExpiryDays <= 30 && dbsExpiryDays > 0;
+            // DBS info from safety engine
+            const dbsExpiry = dbsSummary.review_due_date || dbsSummary.next_dbs_review_due;
+            const dbsExpiryDays = dbsSummary.days_remaining;
+            const dbsBlocking = dbsSummary.is_blocking;
             
-            // RTW expiry info  
+            // RTW info from safety engine
             const rtwExpiry = rtwSummary.expiry_date;
-            const rtwExpiryDays = rtwSummary.days_until_expiry;
-            const rtwExpiringWarning = rtwExpiryDays !== undefined && rtwExpiryDays <= 30 && rtwExpiryDays > 0;
+            const rtwExpiryDays = rtwSummary.days_remaining;
+            const rtwBlocking = rtwSummary.is_blocking;
+            
+            // Training info from safety engine
+            const trainingBlocking = trainingSummary.is_blocking;
             
             // Category breakdown
             const categoryStats = {};
@@ -1871,9 +1874,6 @@ export default function EmployeeProfilePage() {
               '6_Admin': 'Admin'
             };
             
-            // Calculate alerts count
-            const alertsCount = missingItems + pendingReview + expiringSoon;
-            
             return (
               <div className="mt-6 pt-6 border-t border-[#E4E8EB]">
                 {/* Audit Quick View Header */}
@@ -1886,21 +1886,22 @@ export default function EmployeeProfilePage() {
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="audit-quick-view">
                   {/* DBS Status with Expiry */}
                   <div className={`p-3 rounded-xl border ${
-                    dbsSummary.dbs_status_color === 'red' ? 'border-red-200 bg-red-50' :
-                    dbsSummary.dbs_status_color === 'amber' || dbsExpiringWarning ? 'border-amber-200 bg-amber-50' :
+                    dbsBlocking || dbsSummary.dbs_status_color === 'red' ? 'border-red-200 bg-red-50' :
+                    dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'border-amber-200 bg-amber-50' :
                     dbsSummary.dbs_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
                   }`} data-testid="dbs-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <Shield className={`h-4 w-4 ${
-                        dbsSummary.dbs_status_color === 'red' ? 'text-red-600' :
-                        dbsSummary.dbs_status_color === 'amber' || dbsExpiringWarning ? 'text-amber-600' :
+                        dbsBlocking || dbsSummary.dbs_status_color === 'red' ? 'text-red-600' :
+                        dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'text-amber-600' :
                         dbsSummary.dbs_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">DBS</span>
+                      {dbsBlocking && <span className="text-xs px-1 py-0.5 bg-red-600 text-white rounded">BLOCKED</span>}
                     </div>
                     <p className={`text-sm font-medium ${
-                      dbsSummary.dbs_status_color === 'red' ? 'text-red-700' :
-                      dbsSummary.dbs_status_color === 'amber' || dbsExpiringWarning ? 'text-amber-700' :
+                      dbsBlocking || dbsSummary.dbs_status_color === 'red' ? 'text-red-700' :
+                      dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'text-amber-700' :
                       dbsSummary.dbs_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
                     }`}>
                       {dbsSummary.dbs_status_label || 'Unknown'}
@@ -1908,32 +1909,35 @@ export default function EmployeeProfilePage() {
                     {dbsExpiry && (
                       <p className={`text-xs mt-1 ${
                         dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'text-red-600 font-medium' :
-                        dbsExpiringWarning ? 'text-amber-600 font-medium' : 'text-text-muted'
+                        dbsSummary.status_band === 'urgent' ? 'text-amber-600 font-medium' : 'text-text-muted'
                       }`}>
-                        {dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'Expired: ' : 'Review: '}
+                        {dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'Overdue: ' : 'Review: '}
                         {new Date(dbsExpiry).toLocaleDateString()}
-                        {dbsExpiringWarning && <span className="ml-1">({dbsExpiryDays}d)</span>}
+                        {dbsExpiryDays !== null && dbsExpiryDays > 0 && dbsExpiryDays <= 60 && (
+                          <span className="ml-1">({dbsExpiryDays}d)</span>
+                        )}
                       </p>
                     )}
                   </div>
                   
                   {/* RTW Status with Expiry - MUST show expiry date clearly */}
                   <div className={`p-3 rounded-xl border ${
-                    rtwSummary.rtw_status_color === 'red' || rtwSummary.expiry_status === 'expired' ? 'border-red-200 bg-red-50' :
-                    rtwSummary.rtw_status_color === 'amber' || rtwExpiringWarning ? 'border-amber-200 bg-amber-50' :
+                    rtwBlocking || rtwSummary.rtw_status_color === 'red' ? 'border-red-200 bg-red-50' :
+                    rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'border-amber-200 bg-amber-50' :
                     rtwSummary.rtw_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
                   }`} data-testid="rtw-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${
-                        rtwSummary.rtw_status_color === 'red' || rtwSummary.expiry_status === 'expired' ? 'text-red-600' :
-                        rtwSummary.rtw_status_color === 'amber' || rtwExpiringWarning ? 'text-amber-600' :
+                        rtwBlocking || rtwSummary.rtw_status_color === 'red' ? 'text-red-600' :
+                        rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'text-amber-600' :
                         rtwSummary.rtw_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
+                      {rtwBlocking && <span className="text-xs px-1 py-0.5 bg-red-600 text-white rounded">BLOCKED</span>}
                     </div>
                     <p className={`text-sm font-medium ${
-                      rtwSummary.rtw_status_color === 'red' || rtwSummary.expiry_status === 'expired' ? 'text-red-700' :
-                      rtwSummary.rtw_status_color === 'amber' || rtwExpiringWarning ? 'text-amber-700' :
+                      rtwBlocking || rtwSummary.rtw_status_color === 'red' ? 'text-red-700' :
+                      rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'text-amber-700' :
                       rtwSummary.rtw_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
                     }`}>
                       {rtwSummary.rtw_status_label || 'Unknown'}
@@ -1941,47 +1945,57 @@ export default function EmployeeProfilePage() {
                     {/* RTW Expiry - prominently displayed */}
                     {rtwExpiry ? (
                       <p className={`text-xs mt-1 font-medium ${
-                        rtwSummary.expiry_status === 'expired' ? 'text-red-600' :
-                        rtwExpiringWarning ? 'text-amber-600' : 'text-text-muted'
+                        rtwSummary.status_band === 'expired' ? 'text-red-600' :
+                        rtwSummary.status_band === 'urgent' ? 'text-amber-600' : 'text-text-muted'
                       }`}>
-                        {rtwSummary.expiry_status === 'expired' ? '⚠ Expired: ' : 'Expires: '}
+                        {rtwSummary.status_band === 'expired' ? '⚠ Expired: ' : 'Expires: '}
                         {new Date(rtwExpiry).toLocaleDateString()}
-                        {rtwExpiryDays !== undefined && rtwExpiryDays > 0 && (
-                          <span className={`ml-1 ${rtwExpiringWarning ? 'text-amber-700' : ''}`}>
-                            ({rtwExpiryDays}d)
-                          </span>
+                        {rtwExpiryDays !== undefined && rtwExpiryDays > 0 && rtwExpiryDays <= 60 && (
+                          <span className="ml-1">({rtwExpiryDays}d)</span>
                         )}
                       </p>
+                    ) : rtwSummary.permission_type === 'permanent' ? (
+                      <p className="text-xs mt-1 text-green-600 font-medium">Permanent</p>
                     ) : (
                       <p className="text-xs mt-1 text-text-muted">No expiry set</p>
                     )}
                   </div>
                   
-                  {/* Alerts Card */}
+                  {/* Alerts Card - Show blocking status prominently */}
                   <div className={`p-3 rounded-xl border ${
-                    alertsCount > 0 ? (missingItems > 0 ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50') : 
+                    isBlocking ? 'border-red-200 bg-red-50' :
+                    (missingItems > 0 || pendingReview > 0) ? 'border-amber-200 bg-amber-50' : 
                     'border-green-200 bg-green-50'
                   }`} data-testid="alerts-card">
                     <div className="flex items-center gap-2 mb-1">
                       <AlertTriangle className={`h-4 w-4 ${
-                        alertsCount > 0 ? (missingItems > 0 ? 'text-red-600' : 'text-amber-600') : 'text-green-600'
+                        isBlocking ? 'text-red-600' :
+                        (missingItems > 0 || pendingReview > 0) ? 'text-amber-600' : 'text-green-600'
                       }`} />
-                      <span className="text-xs font-semibold text-text-primary">Alerts</span>
+                      <span className="text-xs font-semibold text-text-primary">
+                        {isBlocking ? 'BLOCKED' : 'Alerts'}
+                      </span>
                     </div>
-                    {alertsCount > 0 ? (
+                    {isBlocking ? (
+                      <div className="space-y-0.5">
+                        <p className="text-xs text-red-700 font-semibold">Not Work Ready</p>
+                        {blockingReasons.slice(0, 2).map((reason, idx) => (
+                          <p key={idx} className="text-xs text-red-600 line-clamp-1" title={reason}>
+                            {reason?.split(' - ')[0] || reason}
+                          </p>
+                        ))}
+                      </div>
+                    ) : (missingItems > 0 || pendingReview > 0) ? (
                       <div className="space-y-0.5">
                         {missingItems > 0 && (
-                          <p className="text-xs text-red-700 font-medium">{missingItems} missing</p>
+                          <p className="text-xs text-amber-700">{missingItems} missing</p>
                         )}
                         {pendingReview > 0 && (
-                          <p className="text-xs text-amber-700">{pendingReview} pending review</p>
-                        )}
-                        {expiringSoon > 0 && (
-                          <p className="text-xs text-amber-600">{expiringSoon} expiring soon</p>
+                          <p className="text-xs text-amber-700">{pendingReview} pending</p>
                         )}
                       </div>
                     ) : (
-                      <p className="text-sm font-medium text-green-700">All Clear</p>
+                      <p className="text-sm font-medium text-green-700">Work Ready</p>
                     )}
                   </div>
                   

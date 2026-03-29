@@ -4,6 +4,44 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Safety Engines: DBS, RTW & Training Countdown/Blocking Systems - COMPLETE**
+
+### Overview
+Implemented three safety engines that determine work readiness through blocking logic. If ANY engine is blocking, the employee is NOT work-ready.
+
+### 1. DBS Engine
+- Computes review dates from Update Service checks (12 month cycle)
+- Status bands: current / due_soon / urgent / overdue
+- BLOCKING if: missing OR overdue >14 days
+- WARNING if: pending verification OR due soon
+
+### 2. RTW Engine  
+- Tracks permission_type (permanent/time_limited)
+- Status bands: current / due_soon / urgent / expired
+- BLOCKING if: missing OR expired OR not verified
+- WARNING if: expiring soon (≤60 days)
+
+### 3. Training Engine
+- Tracks core/start-critical vs supplementary training
+- Core training (safeguarding, manual handling, etc.) BLOCKS if missing/expired
+- Supplementary training = warning only, never blocks
+- Default renewal: 365 days, First Aid/Food Hygiene: 3 years
+
+### Work Ready Derivation
+```
+is_work_ready = all_mandatory_verified AND NOT (dbs_blocking OR rtw_blocking OR training_blocking)
+```
+
+### Example States
+| Employee | Status | Reason |
+|----------|--------|--------|
+| Olakunle | Ready | All engines current |
+| Lawrence | BLOCKED | RTW missing |
+| Olumide | Warning | Training expiring |
+
+---
+
+## Previous Update (2025-12-29)
 **Smart OCR Extraction & Compliance Centre UI Improvements - COMPLETE**
 
 ### 1. Smart OCR Retry with Confidence Scoring

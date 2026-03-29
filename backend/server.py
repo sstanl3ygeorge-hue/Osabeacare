@@ -1513,29 +1513,61 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     """
     SINGLE SOURCE OF TRUTH for DBS status across all views.
     
+    SAFETY ENGINE: Computes blocking status for work readiness.
+    
     Derives DBS summary from existing evidence:
     - DBS Certificate (requirement_id: dbs_certificate)
     - DBS Update Service Check (requirement_id: dbs_check)
     
-    Returns computed status, dates, and review schedule.
+    Returns computed status, dates, review schedule, and blocking state.
+    
+    STATUS BANDS:
+    - current: >30 days until review
+    - due_soon: 31-60 days until review  
+    - urgent: 1-30 days until review
+    - overdue: review date passed
+    
+    BLOCKING RULES:
+    - Missing DBS where required = BLOCKING
+    - Overdue review beyond grace period = BLOCKING (14 day grace)
+    - Pending verification = WARNING only
+    - Due soon = WARNING only
     """
     DBS_REVIEW_INTERVAL_DAYS = 365  # 12 months for DBS Update Service checks
+    DBS_BLOCKING_GRACE_DAYS = 14  # Grace period before overdue becomes blocking
     
-    # Initialize summary
+    # Initialize summary with safety engine fields
     summary = {
+        # Core identification
         "dbs_status": "missing",
         "dbs_status_label": "Missing",
         "dbs_status_color": "red",
-        "last_dbs_check_date": None,
-        "next_dbs_review_due": None,
-        "days_until_review": None,
+        
+        # Status band (current/due_soon/urgent/overdue)
+        "status_band": "overdue",
+        
+        # Dates
+        "certificate_issue_date": None,
+        "update_service_last_checked": None,
+        "review_due_date": None,
+        "days_remaining": None,
+        
+        # Evidence flags
         "certificate_on_file": False,
         "certificate_verified": False,
         "certificate_date": None,
         "update_service_active": False,
         "update_service_verified": False,
         "update_service_date": None,
-        "needs_attention": False
+        
+        # Safety engine outputs
+        "is_blocking": True,  # Default to blocking if missing
+        "blocking_reason": "DBS evidence missing",
+        "needs_attention": True,
+        
+        # Audit trail
+        "source_date_used": None,
+        "rule_applied": "no_evidence"
     }
     
     # Get DBS Certificate record (most recent active)
@@ -1569,8 +1601,8 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
         summary["certificate_on_file"] = True
         summary["certificate_verified"] = dbs_cert.get("verified", False)
         
-        # Use uploaded_at as the certificate date
-        cert_date = dbs_cert.get("uploaded_at") or dbs_cert.get("issue_date")
+        # Use issue_date if available, else uploaded_at
+        cert_date = dbs_cert.get("issue_date") or dbs_cert.get("uploaded_at")
         if cert_date:
             if isinstance(cert_date, str):
                 try:
@@ -1579,6 +1611,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
                     cert_date = None
             if cert_date:
                 summary["certificate_date"] = cert_date.isoformat()
+                summary["certificate_issue_date"] = cert_date.isoformat()
     
     # Process DBS Update Service Check
     if dbs_update:
@@ -1595,65 +1628,127 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
         
         if check_date:
             summary["update_service_date"] = check_date.isoformat()
-            summary["last_dbs_check_date"] = check_date.isoformat()
+            summary["update_service_last_checked"] = check_date.isoformat()
+            summary["source_date_used"] = check_date.isoformat()
             
             # Calculate next review due (12 months from last check)
             next_review = check_date + timedelta(days=DBS_REVIEW_INTERVAL_DAYS)
-            summary["next_dbs_review_due"] = next_review.isoformat()
+            summary["review_due_date"] = next_review.isoformat()
+            summary["next_dbs_review_due"] = next_review.isoformat()  # Legacy field
             
             # Calculate days until review
             days_until = (next_review - now).days
-            summary["days_until_review"] = days_until
+            summary["days_remaining"] = days_until
+            summary["days_until_review"] = days_until  # Legacy field
     
-    # Determine overall DBS status
+    # Determine overall DBS status and blocking state
     if summary["update_service_active"] and summary["update_service_verified"]:
         # Update Service is the gold standard
-        days_until = summary["days_until_review"]
+        days_until = summary["days_remaining"]
+        summary["rule_applied"] = "update_service_verified"
+        
         if days_until is not None:
-            if days_until < 0:
+            if days_until < -DBS_BLOCKING_GRACE_DAYS:
+                # Beyond grace period - BLOCKING
                 summary["dbs_status"] = "review_overdue"
-                summary["dbs_status_label"] = "Review Overdue"
+                summary["dbs_status_label"] = f"Overdue by {abs(days_until)}d"
                 summary["dbs_status_color"] = "red"
+                summary["status_band"] = "overdue"
+                summary["is_blocking"] = True
+                summary["blocking_reason"] = f"DBS review overdue by {abs(days_until)} days (exceeds {DBS_BLOCKING_GRACE_DAYS}d grace)"
+                summary["needs_attention"] = True
+            elif days_until < 0:
+                # Within grace period - WARNING only
+                summary["dbs_status"] = "review_overdue"
+                summary["dbs_status_label"] = f"Overdue by {abs(days_until)}d"
+                summary["dbs_status_color"] = "red"
+                summary["status_band"] = "overdue"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
                 summary["needs_attention"] = True
             elif days_until <= 30:
-                summary["dbs_status"] = "review_due_soon"
-                summary["dbs_status_label"] = f"Review Due in {days_until}d"
+                # Urgent - WARNING
+                summary["dbs_status"] = "review_urgent"
+                summary["dbs_status_label"] = f"Due in {days_until}d"
                 summary["dbs_status_color"] = "amber"
+                summary["status_band"] = "urgent"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
+                summary["needs_attention"] = True
+            elif days_until <= 60:
+                # Due soon - WARNING
+                summary["dbs_status"] = "review_due_soon"
+                summary["dbs_status_label"] = f"Due in {days_until}d"
+                summary["dbs_status_color"] = "amber"
+                summary["status_band"] = "due_soon"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
                 summary["needs_attention"] = True
             else:
+                # Current - all good
                 summary["dbs_status"] = "current"
                 summary["dbs_status_label"] = "Current"
                 summary["dbs_status_color"] = "green"
+                summary["status_band"] = "current"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
+                summary["needs_attention"] = False
         else:
             summary["dbs_status"] = "current"
             summary["dbs_status_label"] = "Current"
             summary["dbs_status_color"] = "green"
+            summary["status_band"] = "current"
+            summary["is_blocking"] = False
+            summary["blocking_reason"] = None
+            summary["needs_attention"] = False
+            
     elif summary["update_service_active"]:
-        # Has update service but not verified
+        # Has update service but not verified - WARNING only
         summary["dbs_status"] = "pending_verification"
         summary["dbs_status_label"] = "Pending Verification"
         summary["dbs_status_color"] = "blue"
+        summary["status_band"] = "urgent"
+        summary["is_blocking"] = False  # Not blocking, just needs verification
+        summary["blocking_reason"] = None
         summary["needs_attention"] = True
+        summary["rule_applied"] = "update_service_unverified"
+        
     elif summary["certificate_on_file"] and summary["certificate_verified"]:
-        # Has certificate only (no update service)
+        # Has certificate only (no update service) - WARNING, recommend update service
         summary["dbs_status"] = "certificate_only"
         summary["dbs_status_label"] = "Certificate Only"
         summary["dbs_status_color"] = "amber"
-        # Use certificate date as last check for display purposes
+        summary["status_band"] = "due_soon"
+        summary["is_blocking"] = False
+        summary["blocking_reason"] = None
+        summary["needs_attention"] = True
+        summary["rule_applied"] = "certificate_only_no_update_service"
+        # Use certificate date as source
         if summary["certificate_date"]:
-            summary["last_dbs_check_date"] = summary["certificate_date"]
+            summary["source_date_used"] = summary["certificate_date"]
+            summary["update_service_last_checked"] = summary["certificate_date"]  # For display
+            
     elif summary["certificate_on_file"]:
-        # Has certificate but not verified
+        # Has certificate but not verified - WARNING only
         summary["dbs_status"] = "pending_verification"
         summary["dbs_status_label"] = "Pending Verification"
         summary["dbs_status_color"] = "blue"
+        summary["status_band"] = "urgent"
+        summary["is_blocking"] = False
+        summary["blocking_reason"] = None
         summary["needs_attention"] = True
+        summary["rule_applied"] = "certificate_unverified"
+        
     else:
-        # No DBS evidence at all
+        # No DBS evidence at all - BLOCKING
         summary["dbs_status"] = "missing"
         summary["dbs_status_label"] = "Missing"
         summary["dbs_status_color"] = "red"
+        summary["status_band"] = "overdue"
+        summary["is_blocking"] = True
+        summary["blocking_reason"] = "DBS certificate and Update Service check both missing"
         summary["needs_attention"] = True
+        summary["rule_applied"] = "no_evidence"
     
     return summary
 
@@ -1662,22 +1757,63 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
     """
     SINGLE SOURCE OF TRUTH for Right to Work status across all views.
     
+    SAFETY ENGINE: Computes blocking status for work readiness.
+    
     Derives RTW summary from existing evidence:
     - Right to Work Documents (requirement_id: right_to_work_documents)
     - Right to Work Verification (requirement_id: right_to_work_check)
     
     Both must be present and verified for full RTW approval.
+    
+    STATUS BANDS:
+    - current: >60 days until expiry OR permanent
+    - due_soon: 31-60 days until expiry
+    - urgent: 1-30 days until expiry
+    - expired: expiry date passed
+    
+    BLOCKING RULES:
+    - Missing RTW evidence = BLOCKING
+    - Expired RTW = BLOCKING
+    - Not verified = BLOCKING (legal requirement)
+    - Expiring soon = WARNING only
+    
+    PERMISSION TYPES:
+    - permanent: British/Irish citizen, settled status
+    - time_limited: Visa, BRP with expiry, pre-settled status
     """
     summary = {
+        # Core identification
         "rtw_status": "missing",
         "rtw_status_label": "Missing",
         "rtw_status_color": "red",
+        
+        # Status band (current/due_soon/urgent/expired)
+        "status_band": "expired",
+        
+        # Evidence details
+        "evidence_type": None,  # passport, brp, share_code, settled_status, etc.
+        "permission_type": None,  # permanent or time_limited
+        
+        # Dates
+        "verified_date": None,
+        "expiry_date": None,
+        "next_follow_up_due": None,
+        "days_remaining": None,
+        
+        # Evidence flags
         "documents_on_file": False,
         "documents_verified": False,
         "verification_on_file": False,
         "verification_verified": False,
-        "expiry_date": None,
-        "needs_attention": False
+        
+        # Safety engine outputs
+        "is_blocking": True,  # Default to blocking if missing
+        "blocking_reason": "Right to Work evidence missing",
+        "needs_attention": True,
+        
+        # Audit trail
+        "source_date_used": None,
+        "rule_applied": "no_evidence"
     }
     
     # Get Right to Work Documents (passport, visa, BRP, share code proof)
@@ -1690,7 +1826,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             {"active": True}
         ],
         "file_url": {"$exists": True, "$ne": None}
-    }, {"_id": 0, "verified": 1, "status": 1, "expiry_date": 1}).to_list(10)
+    }, {"_id": 0}).to_list(10)
     
     # Get Right to Work Verification Check
     rtw_check = await db.employee_documents.find({
@@ -1702,7 +1838,9 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             {"active": True}
         ],
         "file_url": {"$exists": True, "$ne": None}
-    }, {"_id": 0, "verified": 1, "status": 1}).to_list(5)
+    }, {"_id": 0}).to_list(5)
+    
+    now = datetime.now(timezone.utc)
     
     # Process RTW Documents
     if rtw_docs:
@@ -1711,19 +1849,60 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             d.get("verified") or d.get("status") == "approved" 
             for d in rtw_docs
         )
+        
+        # Determine evidence type and permission type from metadata
+        for doc in rtw_docs:
+            doc_type = doc.get("document_type") or doc.get("evidence_type", "").lower()
+            notes = (doc.get("notes") or "").lower()
+            
+            # Detect evidence type
+            if "passport" in doc_type or "passport" in notes:
+                summary["evidence_type"] = "passport"
+            elif "brp" in doc_type or "biometric" in notes:
+                summary["evidence_type"] = "brp"
+            elif "share" in doc_type or "share code" in notes:
+                summary["evidence_type"] = "share_code"
+            elif "settled" in notes or "euss" in notes:
+                summary["evidence_type"] = "settled_status"
+            elif not summary["evidence_type"]:
+                summary["evidence_type"] = "document"
+            
+            # Detect permission type from notes/metadata
+            if "permanent" in notes or "british" in notes or "irish" in notes or "settled status" in notes:
+                summary["permission_type"] = "permanent"
+            elif "visa" in notes or "limited" in notes or "pre-settled" in notes or "brp" in doc_type:
+                summary["permission_type"] = "time_limited"
+        
         # Check for expiry - get the earliest expiry date
         for doc in rtw_docs:
             if doc.get("expiry_date"):
                 doc_expiry = doc.get("expiry_date")
                 if summary["expiry_date"] is None or doc_expiry < summary["expiry_date"]:
                     summary["expiry_date"] = doc_expiry
+                    summary["source_date_used"] = doc_expiry
         
-        # Calculate expiry status if we have an expiry date
+        # Calculate expiry status and days remaining
         if summary["expiry_date"]:
-            expiry_status = calculate_expiry_status(summary["expiry_date"])
-            summary["expiry_status"] = expiry_status.get("status")
-            summary["expiry_label"] = expiry_status.get("label")
-            summary["days_until_expiry"] = expiry_status.get("days_until_expiry")
+            summary["permission_type"] = summary["permission_type"] or "time_limited"
+            summary["next_follow_up_due"] = summary["expiry_date"]
+            
+            try:
+                expiry_dt = datetime.fromisoformat(summary["expiry_date"].replace('Z', '+00:00'))
+                days_until = (expiry_dt - now).days
+                summary["days_remaining"] = days_until
+                summary["days_until_expiry"] = days_until  # Legacy
+            except:
+                pass
+        else:
+            # No expiry = likely permanent
+            if not summary["permission_type"]:
+                summary["permission_type"] = "permanent"
+        
+        # Get verified date from most recent verified document
+        for doc in rtw_docs:
+            if doc.get("verified") and doc.get("uploaded_at"):
+                summary["verified_date"] = doc.get("uploaded_at")
+                break
     
     # Process RTW Verification
     if rtw_check:
@@ -1732,29 +1911,420 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             c.get("verified") or c.get("status") == "approved" 
             for c in rtw_check
         )
+        
+        # Use verification date if we don't have one yet
+        if not summary["verified_date"]:
+            for check in rtw_check:
+                if check.get("verified") and check.get("uploaded_at"):
+                    summary["verified_date"] = check.get("uploaded_at")
+                    break
     
-    # Determine status based on both requirements
+    # Determine status and blocking state
     if summary["documents_on_file"] and summary["verification_on_file"]:
         if summary["documents_verified"] and summary["verification_verified"]:
-            summary["rtw_status"] = "verified"
-            summary["rtw_status_label"] = "Verified"
-            summary["rtw_status_color"] = "green"
+            summary["rule_applied"] = "fully_verified"
+            
+            # Check expiry status for time-limited permission
+            days_remaining = summary.get("days_remaining")
+            
+            if days_remaining is not None:
+                if days_remaining < 0:
+                    # EXPIRED - BLOCKING
+                    summary["rtw_status"] = "expired"
+                    summary["rtw_status_label"] = f"Expired {abs(days_remaining)}d ago"
+                    summary["rtw_status_color"] = "red"
+                    summary["status_band"] = "expired"
+                    summary["is_blocking"] = True
+                    summary["blocking_reason"] = f"Right to Work expired {abs(days_remaining)} days ago - cannot legally employ"
+                    summary["needs_attention"] = True
+                elif days_remaining <= 30:
+                    # Urgent - WARNING
+                    summary["rtw_status"] = "expiring_urgent"
+                    summary["rtw_status_label"] = f"Expires in {days_remaining}d"
+                    summary["rtw_status_color"] = "amber"
+                    summary["status_band"] = "urgent"
+                    summary["is_blocking"] = False
+                    summary["blocking_reason"] = None
+                    summary["needs_attention"] = True
+                    summary["expiry_status"] = "expiring_soon"
+                elif days_remaining <= 60:
+                    # Due soon - WARNING
+                    summary["rtw_status"] = "expiring_soon"
+                    summary["rtw_status_label"] = f"Expires in {days_remaining}d"
+                    summary["rtw_status_color"] = "amber"
+                    summary["status_band"] = "due_soon"
+                    summary["is_blocking"] = False
+                    summary["blocking_reason"] = None
+                    summary["needs_attention"] = True
+                    summary["expiry_status"] = "expiring_soon"
+                else:
+                    # Current
+                    summary["rtw_status"] = "verified"
+                    summary["rtw_status_label"] = "Verified"
+                    summary["rtw_status_color"] = "green"
+                    summary["status_band"] = "current"
+                    summary["is_blocking"] = False
+                    summary["blocking_reason"] = None
+                    summary["needs_attention"] = False
+                    summary["expiry_status"] = "valid"
+            else:
+                # No expiry date - permanent permission
+                summary["rtw_status"] = "verified"
+                summary["rtw_status_label"] = "Verified (No Expiry)"
+                summary["rtw_status_color"] = "green"
+                summary["status_band"] = "current"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
+                summary["needs_attention"] = False
+                summary["expiry_status"] = "no_expiry"
         else:
+            # Not verified - BLOCKING (legal requirement)
             summary["rtw_status"] = "pending_verification"
-            summary["rtw_status_label"] = "Pending Review"
+            summary["rtw_status_label"] = "Pending Verification"
             summary["rtw_status_color"] = "blue"
+            summary["status_band"] = "urgent"
+            summary["is_blocking"] = True
+            summary["blocking_reason"] = "Right to Work not verified - legal requirement before employment"
             summary["needs_attention"] = True
+            summary["rule_applied"] = "pending_verification"
+            
     elif summary["documents_on_file"] or summary["verification_on_file"]:
-        # Partial - only one of the two requirements
+        # Partial - only one of the two requirements - BLOCKING
         summary["rtw_status"] = "incomplete"
         summary["rtw_status_label"] = "Incomplete"
         summary["rtw_status_color"] = "amber"
+        summary["status_band"] = "urgent"
+        summary["is_blocking"] = True
+        summary["blocking_reason"] = "Right to Work incomplete - both documents and verification check required"
         summary["needs_attention"] = True
+        summary["rule_applied"] = "incomplete_evidence"
     else:
+        # Missing - BLOCKING
         summary["rtw_status"] = "missing"
         summary["rtw_status_label"] = "Missing"
         summary["rtw_status_color"] = "red"
+        summary["status_band"] = "expired"
+        summary["is_blocking"] = True
+        summary["blocking_reason"] = "Right to Work evidence missing - cannot legally employ"
         summary["needs_attention"] = True
+        summary["rule_applied"] = "no_evidence"
+    
+    return summary
+
+
+# Core/Start-Critical Training Requirements that BLOCK work readiness
+CORE_TRAINING_REQUIREMENTS = [
+    "safeguarding_adults",
+    "safeguarding_children", 
+    "moving_handling",
+    "manual_handling",
+    "infection_control",
+    "medication_awareness",
+    "health_safety",
+    "basic_life_support",
+    "first_aid",
+    "food_hygiene",
+    "fire_safety",
+    "coshh",
+    "gdpr_data_protection",
+    "equality_diversity",
+    "mental_capacity_act",
+    "deprivation_of_liberty"
+]
+
+# Training renewal intervals (days) - default is 365 (annual)
+TRAINING_RENEWAL_RULES = {
+    "safeguarding_adults": 365,
+    "safeguarding_children": 365,
+    "moving_handling": 365,
+    "manual_handling": 365,
+    "infection_control": 365,
+    "medication_awareness": 365,
+    "health_safety": 365,
+    "basic_life_support": 365,
+    "first_aid": 1095,  # 3 years
+    "food_hygiene": 1095,  # 3 years
+    "fire_safety": 365,
+    "default": 365  # Default to annual
+}
+
+
+async def get_employee_training_safety_summary(employee_id: str) -> dict:
+    """
+    SINGLE SOURCE OF TRUTH for Training status across all views.
+    
+    SAFETY ENGINE: Computes blocking status for work readiness.
+    
+    Only CORE/START-CRITICAL training blocks work readiness:
+    - Safeguarding, Manual Handling, Infection Control, etc.
+    
+    Supplementary/additional training = warning only, never blocks.
+    
+    STATUS BANDS:
+    - current: >30 days until expiry
+    - due_soon: 31-60 days until expiry
+    - urgent: 1-30 days until expiry
+    - expired: expiry date passed OR missing core training
+    
+    BLOCKING RULES:
+    - Missing core/start-critical training = BLOCKING
+    - Expired core/start-critical training = BLOCKING
+    - Unverified core training = BLOCKING
+    - Supplementary training expired/missing = WARNING only
+    
+    EXPIRY CALCULATION:
+    - Use explicit expiry_date if present
+    - Otherwise compute: completion_date + renewal_interval
+    - Use earlier of the two if both exist (unless policy override)
+    """
+    summary = {
+        # Core counts
+        "required_current_count": 0,  # Core training that is current
+        "required_total_count": 0,    # Total core training required
+        "expiring_soon_count": 0,     # Training expiring in 60 days
+        "expired_count": 0,           # Expired training
+        
+        # Status band
+        "status_band": "current",
+        "training_status": "current",
+        "training_status_label": "Up to Date",
+        "training_status_color": "green",
+        
+        # Items needing attention
+        "next_due_items": [],         # List of {name, days_remaining, status}
+        "missing_core_items": [],     # Core training not started
+        "expired_items": [],          # Expired training names
+        
+        # Safety engine outputs
+        "is_blocking": False,
+        "blocking_reason": None,
+        "needs_attention": False,
+        
+        # Audit trail
+        "rule_applied": "all_current"
+    }
+    
+    now = datetime.now(timezone.utc)
+    
+    # Get all active training records for employee
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["completed", "verified", "expiring", "active"]},
+        "deleted_at": {"$exists": False}
+    }, {"_id": 0}).to_list(100)
+    
+    # Get requirements to identify what training is needed
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
+    role = employee.get("role", "care_worker") if employee else "care_worker"
+    
+    requirements = await db.requirements.find({
+        "type": "training",
+        "roles": {"$in": [role, "all"]}
+    }, {"_id": 0, "id": 1, "name": 1, "requirement_type": 1}).to_list(100)
+    
+    # Build set of required training IDs
+    required_training_ids = set()
+    core_training_ids = set()
+    
+    for req in requirements:
+        req_id = req.get("id", "")
+        req_type = req.get("requirement_type", "required")
+        
+        if req_type in ["required", "conditional_required"]:
+            required_training_ids.add(req_id)
+            
+            # Check if it's core training
+            if any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS):
+                core_training_ids.add(req_id)
+    
+    # Process training records
+    completed_training = {}  # req_id -> {record, expiry_date, days_remaining, is_core}
+    
+    for record in training_records:
+        req_id = record.get("requirement_id", "")
+        training_name = record.get("training_name", req_id)
+        
+        # Skip if not verified (only count verified training)
+        if not record.get("verified", False) and record.get("status") != "verified":
+            # Check if this is core training that's unverified
+            if req_id in core_training_ids or any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS):
+                summary["missing_core_items"].append(f"{training_name} (unverified)")
+            continue
+        
+        # Calculate expiry
+        explicit_expiry = record.get("expiry_date")
+        completion_date = record.get("completed_at") or record.get("completion_date")
+        
+        # Get renewal interval for this training type
+        renewal_days = TRAINING_RENEWAL_RULES.get("default", 365)
+        for rule_key, rule_days in TRAINING_RENEWAL_RULES.items():
+            if rule_key in req_id.lower():
+                renewal_days = rule_days
+                break
+        
+        # Calculate computed expiry from completion date
+        computed_expiry = None
+        if completion_date:
+            try:
+                if isinstance(completion_date, str):
+                    comp_dt = datetime.fromisoformat(completion_date.replace('Z', '+00:00'))
+                else:
+                    comp_dt = completion_date
+                computed_expiry = (comp_dt + timedelta(days=renewal_days)).isoformat()
+            except:
+                pass
+        
+        # Use explicit expiry if present, else computed, take earlier date
+        final_expiry = None
+        if explicit_expiry and computed_expiry:
+            final_expiry = min(explicit_expiry, computed_expiry)
+        elif explicit_expiry:
+            final_expiry = explicit_expiry
+        elif computed_expiry:
+            final_expiry = computed_expiry
+        
+        # Calculate days remaining
+        days_remaining = None
+        if final_expiry:
+            try:
+                exp_dt = datetime.fromisoformat(final_expiry.replace('Z', '+00:00'))
+                days_remaining = (exp_dt - now).days
+            except:
+                pass
+        
+        is_core = req_id in core_training_ids or any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS)
+        
+        completed_training[req_id] = {
+            "name": training_name,
+            "expiry_date": final_expiry,
+            "days_remaining": days_remaining,
+            "is_core": is_core,
+            "verified": record.get("verified", False) or record.get("status") == "verified"
+        }
+    
+    # Analyze training status
+    core_missing = []
+    core_expired = []
+    expiring_soon = []
+    
+    for req_id in core_training_ids:
+        if req_id not in completed_training:
+            # Find requirement name
+            req_name = req_id
+            for req in requirements:
+                if req.get("id") == req_id:
+                    req_name = req.get("name", req_id)
+                    break
+            core_missing.append(req_name)
+    
+    for req_id, data in completed_training.items():
+        days = data.get("days_remaining")
+        name = data.get("name", req_id)
+        is_core = data.get("is_core", False)
+        
+        if days is not None:
+            if days < 0:
+                # Expired
+                summary["expired_count"] += 1
+                summary["expired_items"].append(name)
+                if is_core:
+                    core_expired.append(name)
+            elif days <= 30:
+                # Urgent
+                summary["expiring_soon_count"] += 1
+                summary["next_due_items"].append({
+                    "name": name,
+                    "days_remaining": days,
+                    "status": "urgent",
+                    "is_core": is_core
+                })
+                expiring_soon.append(name)
+            elif days <= 60:
+                # Due soon
+                summary["expiring_soon_count"] += 1
+                summary["next_due_items"].append({
+                    "name": name,
+                    "days_remaining": days,
+                    "status": "due_soon",
+                    "is_core": is_core
+                })
+    
+    # Count current core training
+    summary["required_total_count"] = len(core_training_ids)
+    summary["required_current_count"] = len([
+        req_id for req_id in core_training_ids 
+        if req_id in completed_training 
+        and (completed_training[req_id].get("days_remaining") is None or completed_training[req_id].get("days_remaining", 0) >= 0)
+    ])
+    
+    # Update missing core items
+    summary["missing_core_items"].extend(core_missing)
+    
+    # Determine blocking status
+    if core_missing:
+        summary["is_blocking"] = True
+        summary["blocking_reason"] = f"Missing core training: {', '.join(core_missing[:3])}" + (f" (+{len(core_missing)-3} more)" if len(core_missing) > 3 else "")
+        summary["status_band"] = "expired"
+        summary["training_status"] = "missing_core"
+        summary["training_status_label"] = f"{len(core_missing)} Core Missing"
+        summary["training_status_color"] = "red"
+        summary["rule_applied"] = "core_training_missing"
+        summary["needs_attention"] = True
+        
+    elif core_expired:
+        summary["is_blocking"] = True
+        summary["blocking_reason"] = f"Expired core training: {', '.join(core_expired[:3])}" + (f" (+{len(core_expired)-3} more)" if len(core_expired) > 3 else "")
+        summary["status_band"] = "expired"
+        summary["training_status"] = "core_expired"
+        summary["training_status_label"] = f"{len(core_expired)} Core Expired"
+        summary["training_status_color"] = "red"
+        summary["rule_applied"] = "core_training_expired"
+        summary["needs_attention"] = True
+        
+    elif summary["expiring_soon_count"] > 0:
+        # Check if any core training is in urgent band
+        core_urgent = [item for item in summary["next_due_items"] if item.get("is_core") and item.get("status") == "urgent"]
+        
+        if core_urgent:
+            summary["status_band"] = "urgent"
+            summary["training_status"] = "core_expiring"
+            summary["training_status_label"] = f"{len(core_urgent)} Core Due Soon"
+            summary["training_status_color"] = "amber"
+        else:
+            summary["status_band"] = "due_soon"
+            summary["training_status"] = "expiring_soon"
+            summary["training_status_label"] = f"{summary['expiring_soon_count']} Expiring Soon"
+            summary["training_status_color"] = "amber"
+        
+        summary["is_blocking"] = False
+        summary["blocking_reason"] = None
+        summary["rule_applied"] = "training_expiring_soon"
+        summary["needs_attention"] = True
+        
+    elif summary["expired_count"] > 0:
+        # Non-core training expired - WARNING only
+        summary["status_band"] = "due_soon"
+        summary["training_status"] = "supplementary_expired"
+        summary["training_status_label"] = f"{summary['expired_count']} Supplementary Expired"
+        summary["training_status_color"] = "amber"
+        summary["is_blocking"] = False
+        summary["blocking_reason"] = None
+        summary["rule_applied"] = "supplementary_expired_warning"
+        summary["needs_attention"] = True
+        
+    else:
+        # All good
+        summary["status_band"] = "current"
+        summary["training_status"] = "current"
+        summary["training_status_label"] = "Up to Date"
+        summary["training_status_color"] = "green"
+        summary["is_blocking"] = False
+        summary["blocking_reason"] = None
+        summary["rule_applied"] = "all_current"
+        summary["needs_attention"] = False
+    
+    # Sort next due items by days remaining
+    summary["next_due_items"].sort(key=lambda x: x.get("days_remaining", 999))
     
     return summary
 
@@ -7672,7 +8242,7 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     # Calculate Separated Statuses (new model)
     separated_statuses = calculate_separated_statuses(requirements, role, policies_data)
     
-    return {
+    result = {
         "employee_id": employee_id,
         "employee_name": f"{employee['first_name']} {employee['last_name']}",
         "role": role,
@@ -7696,13 +8266,53 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "expired_count": len(expired_items),
             "has_alerts": len(expiring_soon_items) > 0 or len(expired_items) > 0
         },
-        # DBS Summary - computed from single source
+        # DBS Summary - computed from single source (SAFETY ENGINE)
         "dbs_summary": await get_employee_dbs_summary(employee_id),
-        # RTW Summary - computed from single source
+        # RTW Summary - computed from single source (SAFETY ENGINE)
         "rtw_summary": await get_employee_rtw_summary(employee_id),
+        # Training Summary - computed from single source (SAFETY ENGINE)
+        "training_summary": await get_employee_training_safety_summary(employee_id),
         # Conditional requirements that were excluded
         "conditional_not_required": conditional_not_required
     }
+    
+    # === SAFETY ENGINE: Derive is_work_ready from blocking engines ===
+    dbs_blocking = result["dbs_summary"].get("is_blocking", False)
+    rtw_blocking = result["rtw_summary"].get("is_blocking", False)
+    training_blocking = result["training_summary"].get("is_blocking", False)
+    
+    any_blocking = dbs_blocking or rtw_blocking or training_blocking
+    
+    # Build blocking reasons list
+    blocking_reasons = []
+    if dbs_blocking:
+        blocking_reasons.append(result["dbs_summary"].get("blocking_reason"))
+    if rtw_blocking:
+        blocking_reasons.append(result["rtw_summary"].get("blocking_reason"))
+    if training_blocking:
+        blocking_reasons.append(result["training_summary"].get("blocking_reason"))
+    
+    # Override is_work_ready based on safety engines
+    # Original logic: all_mandatory_verified
+    # New logic: all_mandatory_verified AND no blocking engines
+    original_work_ready = result["statuses"]["is_work_ready"]
+    safety_work_ready = not any_blocking
+    
+    result["statuses"]["is_work_ready"] = original_work_ready and safety_work_ready
+    result["statuses"]["safety_blocking"] = any_blocking
+    result["statuses"]["safety_blocking_reasons"] = blocking_reasons
+    
+    # Add overall safety status for easy consumption
+    result["safety_status"] = {
+        "is_safe_to_deploy": not any_blocking,
+        "dbs_blocking": dbs_blocking,
+        "rtw_blocking": rtw_blocking,
+        "training_blocking": training_blocking,
+        "blocking_reasons": blocking_reasons,
+        "summary": "Ready to Work" if not any_blocking else blocking_reasons[0] if blocking_reasons else "Safety check failed"
+    }
+    
+    return result
 
 @api_router.post("/employees/{employee_id}/upload-document")
 async def upload_document_for_requirement(

@@ -2113,29 +2113,32 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
         "deleted_at": {"$exists": False}
     }, {"_id": 0}).to_list(100)
     
-    # Get requirements to identify what training is needed
+    # Get requirements from MANDATORY_ITEMS (single source of truth for requirements)
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
     role = employee.get("role", "care_worker") if employee else "care_worker"
     
-    requirements = await db.requirements.find({
-        "type": "training",
-        "roles": {"$in": [role, "all"]}
-    }, {"_id": 0, "id": 1, "name": 1, "requirement_type": 1}).to_list(100)
-    
-    # Build set of required training IDs
+    # Build set of required training IDs from MANDATORY_ITEMS
     required_training_ids = set()
     core_training_ids = set()
     
-    for req in requirements:
-        req_id = req.get("id", "")
-        req_type = req.get("requirement_type", "required")
+    # Get training items from MANDATORY_ITEMS (source of truth)
+    training_items = MANDATORY_ITEMS.get("training", [])
+    # Add nurse-specific training if applicable
+    if role and "nurse" in role.lower():
+        training_items = training_items + [i for i in MANDATORY_ITEMS.get("nurse_specific", []) if i.get("type") == "training"]
+    
+    for item in training_items:
+        req_id = item.get("id", "")
+        priority = item.get("priority", "secondary")
         
-        if req_type in ["required", "conditional_required"]:
-            required_training_ids.add(req_id)
-            
-            # Check if it's core training
-            if any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS):
-                core_training_ids.add(req_id)
+        # All training items are required
+        required_training_ids.add(req_id)
+        
+        # Check if it's core/start-critical training
+        if priority == "start_required":
+            core_training_ids.add(req_id)
+        elif any(core in req_id.lower() for core in CORE_TRAINING_REQUIREMENTS):
+            core_training_ids.add(req_id)
     
     # Process training records
     completed_training = {}  # req_id -> {record, expiry_date, days_remaining, is_core}
@@ -2209,11 +2212,11 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
     
     for req_id in core_training_ids:
         if req_id not in completed_training:
-            # Find requirement name
+            # Find requirement name from training_items
             req_name = req_id
-            for req in requirements:
-                if req.get("id") == req_id:
-                    req_name = req.get("name", req_id)
+            for item in training_items:
+                if item.get("id") == req_id:
+                    req_name = item.get("name", req_id)
                     break
             core_missing.append(req_name)
     
@@ -4060,8 +4063,8 @@ async def get_dbs_register(
     
     # Sort: needs_attention first, then by next_dbs_review_due
     register.sort(key=lambda x: (
-        not x["needs_attention"],  # needs_attention=True first
-        x["next_dbs_review_due"] or "9999"  # earliest review due first
+        not x.get("needs_attention", False),  # needs_attention=True first
+        x.get("next_dbs_review_due") or "9999"  # earliest review due first
     ))
     
     # Summary stats

@@ -303,16 +303,27 @@ export default function ComplianceCentrePage() {
 
   const handleUploadInsurance = async (e) => {
     e.preventDefault();
-    if (!uploadFile || !selectedInsurance || !uploadExpiryDate) return;
+    if (!uploadFile || !selectedInsurance) return;
+    
+    // Check if expiry is required for this certificate type
+    const requiresExpiry = selectedInsurance.requires_expiry_date !== false;
+    if (requiresExpiry && !uploadExpiryDate) {
+      toast.error('Expiry date is required for this certificate type');
+      return;
+    }
     
     setIsUploading(true);
     try {
       const formData = new FormData();
       formData.append('file', uploadFile);
       
-      let url = `${API}/compliance/insurance/${selectedInsurance.id}/upload?expiry_date=${uploadExpiryDate}`;
-      if (uploadPolicyNumber) url += `&policy_number=${encodeURIComponent(uploadPolicyNumber)}`;
-      if (uploadProvider) url += `&provider=${encodeURIComponent(uploadProvider)}`;
+      // Build URL with optional expiry date
+      let url = `${API}/compliance/insurance/${selectedInsurance.id}/upload`;
+      const params = new URLSearchParams();
+      if (uploadExpiryDate) params.append('expiry_date', uploadExpiryDate);
+      if (uploadPolicyNumber) params.append('policy_number', uploadPolicyNumber);
+      if (uploadProvider) params.append('provider', uploadProvider);
+      if (params.toString()) url += `?${params.toString()}`;
       
       await axios.post(url, formData, {
         headers: { 
@@ -321,12 +332,12 @@ export default function ComplianceCentrePage() {
         }
       });
       
-      toast.success('Insurance document uploaded');
+      toast.success('Certificate uploaded successfully');
       setUploadDialogOpen(false);
       resetUploadForm();
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to upload insurance');
+      toast.error(error.response?.data?.detail || 'Failed to upload certificate');
     } finally {
       setIsUploading(false);
     }
@@ -1523,12 +1534,12 @@ export default function ComplianceCentrePage() {
                         Report Incident
                       </Button>
                     </DialogTrigger>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle className="font-heading">Report Incident/Outbreak</DialogTitle>
+                    <DialogTitle className="font-heading text-lg pr-6">Report Incident/Outbreak</DialogTitle>
                   </DialogHeader>
                   <form onSubmit={handleCreateIncident} className="space-y-4 mt-4">
-                    <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Incident Type *</Label>
                         <Select 
@@ -1581,7 +1592,7 @@ export default function ComplianceCentrePage() {
                       />
                     </div>
                     
-                    <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Location</Label>
                         <Input
@@ -1635,11 +1646,11 @@ export default function ComplianceCentrePage() {
                       />
                     </div>
                     
-                    <div className="flex justify-end gap-3 pt-4">
-                      <Button type="button" variant="outline" onClick={() => setIncidentDialogOpen(false)} className="rounded-xl">
+                    <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
+                      <Button type="button" variant="outline" onClick={() => setIncidentDialogOpen(false)} className="rounded-xl w-full sm:w-auto">
                         Cancel
                       </Button>
-                      <Button type="submit" disabled={isSubmitting} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+                      <Button type="submit" disabled={isSubmitting} className="bg-primary hover:bg-primary-hover text-white rounded-xl w-full sm:w-auto">
                         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Submit Report'}
                       </Button>
                     </div>
@@ -2329,9 +2340,9 @@ export default function ComplianceCentrePage() {
 
       {/* Upload Dialog */}
       <Dialog open={uploadDialogOpen} onOpenChange={(open) => { setUploadDialogOpen(open); if (!open) resetUploadForm(); }}>
-        <DialogContent>
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-heading">
+            <DialogTitle className="font-heading text-lg pr-6">
               {selectedPolicy ? `Upload ${selectedPolicy.name}` : selectedInsurance ? `Upload ${selectedInsurance.name}` : 'Upload Document'}
             </DialogTitle>
           </DialogHeader>
@@ -2345,6 +2356,11 @@ export default function ComplianceCentrePage() {
                 onClear={() => setUploadFile(null)}
                 placeholder="Drop document here or click to browse"
               />
+              {uploadFile && (
+                <p className="text-xs text-text-muted truncate" title={uploadFile.name}>
+                  Selected: {uploadFile.name}
+                </p>
+              )}
             </div>
             
             {selectedPolicy && (
@@ -2372,42 +2388,67 @@ export default function ComplianceCentrePage() {
             
             {selectedInsurance && (
               <>
-                <div className="space-y-2">
-                  <Label>Expiry Date *</Label>
-                  <Input
-                    type="date"
-                    value={uploadExpiryDate}
-                    onChange={(e) => setUploadExpiryDate(e.target.value)}
-                    required
-                    className="rounded-xl"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Policy Number</Label>
-                  <Input
-                    value={uploadPolicyNumber}
-                    onChange={(e) => setUploadPolicyNumber(e.target.value)}
-                    placeholder="Insurance policy number"
-                    className="rounded-xl"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Insurance Provider</Label>
-                  <Input
-                    value={uploadProvider}
-                    onChange={(e) => setUploadProvider(e.target.value)}
-                    placeholder="e.g., Aviva, AXA"
-                    className="rounded-xl"
-                  />
+                {/* Conditional Expiry Date based on certificate type */}
+                {selectedInsurance.requires_expiry_date !== false ? (
+                  <div className="space-y-2">
+                    <Label>Expiry Date *</Label>
+                    <Input
+                      type="date"
+                      value={uploadExpiryDate}
+                      onChange={(e) => setUploadExpiryDate(e.target.value)}
+                      required
+                      className="rounded-xl"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label>Expiry Date (optional)</Label>
+                    <Input
+                      type="date"
+                      value={uploadExpiryDate}
+                      onChange={(e) => setUploadExpiryDate(e.target.value)}
+                      className="rounded-xl"
+                    />
+                    {selectedInsurance.valid_until_replaced && (
+                      <p className="text-xs text-success flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" />
+                        Valid until replaced — no expiry date required
+                      </p>
+                    )}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Policy/Ref Number</Label>
+                    <Input
+                      value={uploadPolicyNumber}
+                      onChange={(e) => setUploadPolicyNumber(e.target.value)}
+                      placeholder="Certificate reference"
+                      className="rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Provider/Issuer</Label>
+                    <Input
+                      value={uploadProvider}
+                      onChange={(e) => setUploadProvider(e.target.value)}
+                      placeholder="e.g., Companies House"
+                      className="rounded-xl"
+                    />
+                  </div>
                 </div>
               </>
             )}
             
-            <div className="flex justify-end gap-3 pt-4">
-              <Button type="button" variant="outline" onClick={() => { setUploadDialogOpen(false); resetUploadForm(); }} className="rounded-xl">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
+              <Button type="button" variant="outline" onClick={() => { setUploadDialogOpen(false); resetUploadForm(); }} className="rounded-xl w-full sm:w-auto">
                 Cancel
               </Button>
-              <Button type="submit" disabled={isUploading} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+              <Button 
+                type="submit" 
+                disabled={isUploading || !uploadFile} 
+                className="bg-primary hover:bg-primary-hover text-white rounded-xl w-full sm:w-auto"
+              >
                 {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Upload'}
               </Button>
             </div>
@@ -2440,26 +2481,26 @@ export default function ComplianceCentrePage() {
           setSelectedEmployees([]);
         }
       }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-heading">Assign Policy to Employees</DialogTitle>
+            <DialogTitle className="font-heading text-lg pr-6">Assign Policy to Employees</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
             {policyToAssign && (
               <div className="p-3 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
-                <p className="font-medium text-text-primary">{policyToAssign.name}</p>
+                <p className="font-medium text-text-primary truncate" title={policyToAssign.name}>{policyToAssign.name}</p>
                 <p className="text-sm text-text-muted">Version {policyToAssign.version}</p>
               </div>
             )}
             
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <Label className="text-sm font-medium">Select Employees</Label>
               <Button 
                 type="button" 
                 variant="ghost" 
                 size="sm"
                 onClick={selectAllUnassigned}
-                className="text-primary"
+                className="text-primary text-xs"
               >
                 Select All Unassigned
               </Button>
@@ -2493,13 +2534,13 @@ export default function ComplianceCentrePage() {
                         checked={selectedEmployees.includes(emp.id)}
                         onChange={() => !isAlreadyAssigned && toggleEmployeeSelection(emp.id)}
                         disabled={isAlreadyAssigned}
-                        className="rounded border-[#E4E8EB]"
+                        className="rounded border-[#E4E8EB] flex-shrink-0"
                       />
-                      <span className="text-text-primary flex-1">
+                      <span className="text-text-primary flex-1 truncate">
                         {emp.first_name} {emp.last_name}
                       </span>
                       {isAlreadyAssigned && (
-                        <span className={`text-xs px-2 py-0.5 rounded ${
+                        <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap ${
                           assignment?.status === 'acknowledged' || assignment?.status === 'signed' 
                             ? 'bg-green-100 text-green-700' 
                             : 'bg-blue-100 text-blue-700'
@@ -2519,19 +2560,19 @@ export default function ComplianceCentrePage() {
               {selectedEmployees.length} employee(s) selected
             </p>
             
-            <div className="flex justify-end gap-3 pt-4">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={() => { setAssignDialogOpen(false); setSelectedEmployees([]); }} 
-                className="rounded-xl"
+                className="rounded-xl w-full sm:w-auto"
               >
                 Cancel
               </Button>
               <Button 
                 onClick={handleAssignPolicy}
                 disabled={isAssigning || selectedEmployees.length === 0} 
-                className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                className="bg-primary hover:bg-primary-hover text-white rounded-xl w-full sm:w-auto"
                 data-testid="assign-policy-submit"
               >
                 {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Assign Policy'}
@@ -2550,10 +2591,10 @@ export default function ComplianceCentrePage() {
           setAmendForm({});
         }
       }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-heading">
-              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Insurance/Certificate' : 'Incident'} Details
+            <DialogTitle className="font-heading text-lg pr-6">
+              Edit {amendType === 'policy' ? 'Policy' : amendType === 'insurance' ? 'Certificate' : 'Incident'} Details
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-4">
@@ -2572,7 +2613,7 @@ export default function ComplianceCentrePage() {
                     className="rounded-xl"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Category</Label>
                     <Select 
@@ -2622,43 +2663,54 @@ export default function ComplianceCentrePage() {
               </>
             )}
             
-            {/* Insurance Amendment Fields */}
+            {/* Insurance/Certificate Amendment Fields */}
             {amendType === 'insurance' && (
               <>
                 <div className="space-y-2">
-                  <Label>Document Name</Label>
+                  <Label>Certificate Name</Label>
                   <Input
                     value={amendForm.name || ''}
                     onChange={(e) => setAmendForm({...amendForm, name: e.target.value})}
                     className="rounded-xl"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label>Expiry Date</Label>
+                    {/* Conditional expiry label based on certificate type */}
+                    <Label>
+                      {amendRecord?.requires_expiry_date === false 
+                        ? 'Expiry Date (optional)' 
+                        : 'Expiry Date'}
+                    </Label>
                     <Input
                       type="date"
                       value={amendForm.expiry_date || ''}
                       onChange={(e) => setAmendForm({...amendForm, expiry_date: e.target.value})}
                       className="rounded-xl"
                     />
+                    {amendRecord?.valid_until_replaced && (
+                      <p className="text-xs text-success flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" />
+                        Valid until replaced
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-2">
-                    <Label>Policy Number</Label>
+                    <Label>Policy/Ref Number</Label>
                     <Input
                       value={amendForm.policy_number || ''}
                       onChange={(e) => setAmendForm({...amendForm, policy_number: e.target.value})}
-                      placeholder="Policy #"
+                      placeholder="Reference #"
                       className="rounded-xl"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Provider</Label>
+                  <Label>Provider/Issuer</Label>
                   <Input
                     value={amendForm.provider || ''}
                     onChange={(e) => setAmendForm({...amendForm, provider: e.target.value})}
-                    placeholder="e.g., Aviva, AXA"
+                    placeholder="e.g., Companies House, CQC"
                     className="rounded-xl"
                   />
                 </div>
@@ -2686,7 +2738,7 @@ export default function ComplianceCentrePage() {
                     className="rounded-xl"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Incident Type</Label>
                     <Select 
@@ -2723,7 +2775,7 @@ export default function ComplianceCentrePage() {
                     rows={3}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Location</Label>
                     <Input
@@ -2795,19 +2847,19 @@ export default function ComplianceCentrePage() {
               </p>
             </div>
             
-            <div className="flex justify-end gap-3 pt-4">
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4 border-t border-[#E4E8EB]">
               <Button 
                 type="button" 
                 variant="outline" 
                 onClick={() => setAmendDialogOpen(false)} 
-                className="rounded-xl"
+                className="rounded-xl w-full sm:w-auto"
               >
                 Cancel
               </Button>
               <Button 
                 onClick={handleAmendSubmit}
                 disabled={isAmending || !amendForm.reason?.trim()} 
-                className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                className="bg-primary hover:bg-primary-hover text-white rounded-xl w-full sm:w-auto"
                 data-testid="amend-submit-btn"
               >
                 {isAmending ? <Loader2 className="h-4 w-4 animate-spin" /> : (
@@ -2824,9 +2876,9 @@ export default function ComplianceCentrePage() {
 
       {/* History Dialog - View amendment history */}
       <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
+            <DialogTitle className="font-heading text-lg flex items-center gap-2 pr-6">
               <History className="h-5 w-5" />
               Amendment History
             </DialogTitle>
@@ -2861,32 +2913,32 @@ export default function ComplianceCentrePage() {
                     </div>
                     <div className="space-y-2">
                       <div className="flex items-start gap-2">
-                        <span className="text-xs font-medium text-warning bg-warning/10 px-2 py-0.5 rounded">
+                        <span className="text-xs font-medium text-warning bg-warning/10 px-2 py-0.5 rounded whitespace-nowrap">
                           Reason
                         </span>
-                        <p className="text-sm text-text-primary flex-1">
+                        <p className="text-sm text-text-primary flex-1 break-words">
                           {entry.amendment_reason || 'No reason provided'}
                         </p>
                       </div>
                       {/* Show previous values for key fields */}
                       {historyType === 'policy' && (
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
-                          {entry.name && <p><span className="font-medium">Name:</span> {entry.name}</p>}
+                          {entry.name && <p className="truncate"><span className="font-medium">Name:</span> {entry.name}</p>}
                           {entry.version && <p><span className="font-medium">Version:</span> {entry.version}</p>}
                           {entry.review_date && <p><span className="font-medium">Review Date:</span> {new Date(entry.review_date).toLocaleDateString()}</p>}
                         </div>
                       )}
                       {historyType === 'insurance' && (
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
-                          {entry.name && <p><span className="font-medium">Name:</span> {entry.name}</p>}
+                          {entry.name && <p className="truncate"><span className="font-medium">Name:</span> {entry.name}</p>}
                           {entry.expiry_date && <p><span className="font-medium">Expiry:</span> {new Date(entry.expiry_date).toLocaleDateString()}</p>}
-                          {entry.provider && <p><span className="font-medium">Provider:</span> {entry.provider}</p>}
+                          {entry.provider && <p className="truncate"><span className="font-medium">Provider:</span> {entry.provider}</p>}
                           {entry.policy_number && <p><span className="font-medium">Policy #:</span> {entry.policy_number}</p>}
                         </div>
                       )}
                       {historyType === 'incident' && (
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
-                          {entry.title && <p><span className="font-medium">Title:</span> {entry.title}</p>}
+                          {entry.title && <p className="truncate"><span className="font-medium">Title:</span> {entry.title}</p>}
                           {entry.incident_type && <p><span className="font-medium">Type:</span> {entry.incident_type}</p>}
                           {entry.date_occurred && <p><span className="font-medium">Date:</span> {new Date(entry.date_occurred).toLocaleDateString()}</p>}
                           {entry.status && <p><span className="font-medium">Status:</span> {entry.status}</p>}
@@ -2898,7 +2950,7 @@ export default function ComplianceCentrePage() {
               </div>
             )}
             
-            <div className="flex justify-end pt-4">
+            <div className="flex justify-end pt-4 border-t border-[#E4E8EB]">
               <Button 
                 variant="outline" 
                 onClick={() => setHistoryDialogOpen(false)} 

@@ -3655,6 +3655,8 @@ class InsuranceDocResponse(BaseModel):
     required: Optional[bool] = True
     conditional: Optional[bool] = False
     renewal_period_months: Optional[int] = 12
+    requires_expiry_date: Optional[bool] = True  # Whether expiry date is mandatory for this cert type
+    valid_until_replaced: Optional[bool] = False  # Whether cert is valid until replaced (no expiry)
     status: str  # valid, expiring_soon, expired, missing
     file_url: Optional[str] = None
     original_filename: Optional[str] = None
@@ -14041,6 +14043,12 @@ async def get_insurance_docs(user: dict = Depends(get_current_user)):
     thirty_days = now + timedelta(days=30)
     
     for doc in docs:
+        # Ensure requires_expiry_date and valid_until_replaced are always present
+        if "requires_expiry_date" not in doc:
+            doc["requires_expiry_date"] = True  # Default to requiring expiry
+        if "valid_until_replaced" not in doc:
+            doc["valid_until_replaced"] = False
+        
         if not doc.get("file_url"):
             doc["status"] = "missing"
         elif doc.get("expiry_date"):
@@ -14064,6 +14072,7 @@ async def get_insurance_docs(user: dict = Depends(get_current_user)):
             except Exception:
                 doc["status"] = "valid"
         else:
+            # No expiry date - valid if file exists (for valid_until_replaced certs)
             doc["status"] = "valid"
     
     return docs
@@ -14072,7 +14081,7 @@ async def get_insurance_docs(user: dict = Depends(get_current_user)):
 async def upload_insurance_doc(
     insurance_id: str,
     file: UploadFile = File(...),
-    expiry_date: str = Query(...),
+    expiry_date: Optional[str] = Query(None),  # Now optional - depends on requires_expiry_date
     policy_number: Optional[str] = None,
     provider: Optional[str] = None,
     user: dict = Depends(require_admin)
@@ -14081,6 +14090,11 @@ async def upload_insurance_doc(
     insurance = await db.insurance_docs.find_one({"id": insurance_id})
     if not insurance:
         raise HTTPException(status_code=404, detail="Insurance record not found")
+    
+    # Check if expiry date is required for this certificate type
+    requires_expiry = insurance.get("requires_expiry_date", True)
+    if requires_expiry and not expiry_date:
+        raise HTTPException(status_code=400, detail="Expiry date is required for this certificate type")
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -14092,10 +14106,13 @@ async def upload_insurance_doc(
     update_data = {
         "file_url": result["path"],
         "original_filename": file.filename,
-        "expiry_date": expiry_date,
         "status": "valid",
         "updated_at": now
     }
+    
+    # Only set expiry_date if provided (certificates that don't require expiry won't have one)
+    if expiry_date:
+        update_data["expiry_date"] = expiry_date
     
     if policy_number:
         update_data["policy_number"] = policy_number
@@ -14106,7 +14123,7 @@ async def upload_insurance_doc(
     
     await log_audit_action(user['user_id'], "upload_insurance", "insurance", insurance_id, {
         "filename": file.filename,
-        "expiry_date": expiry_date
+        "expiry_date": expiry_date or "N/A (valid until replaced)"
     })
     
     updated = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})

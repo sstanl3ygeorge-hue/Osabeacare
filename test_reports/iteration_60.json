@@ -1,0 +1,101 @@
+{
+  "summary": "Bug Fix Verified: Compliance Centre certificates modal layout overflow and certificate expiry logic. All features working correctly - conditional expiry labels, 'Valid until replaced' helper text, modal layout at various viewport widths.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Upload/Amendment dialogs",
+        "issues": ["Minor: Console warning about missing Description or aria-describedby for DialogContent - accessibility improvement recommended"]
+      }
+    ]
+  },
+
+  "passed_tests": [
+    "✅ Backend: GET /api/compliance/insurance returns requires_expiry_date and valid_until_replaced fields",
+    "✅ Backend: Company Registration Certificate has requires_expiry_date=false, valid_until_replaced=true",
+    "✅ Backend: Employer's Liability Insurance has requires_expiry_date=true, valid_until_replaced=false",
+    "✅ Backend: CQC Registration Certificate has requires_expiry_date=false, valid_until_replaced=true",
+    "✅ Backend: Legionella Risk Assessment has requires_expiry_date=false",
+    "✅ Backend: Food Hygiene Rating Certificate has requires_expiry_date=false, valid_until_replaced=true",
+    "✅ Backend: Asbestos Survey Report has requires_expiry_date=false, valid_until_replaced=true",
+    "✅ Backend: Upload without expiry date fails for certificates that require expiry (400 error)",
+    "✅ Backend: Upload without expiry date succeeds for certificates that don't require expiry",
+    "✅ Frontend: CQC Registration upload modal shows 'Expiry Date (optional)' label",
+    "✅ Frontend: CQC Registration upload modal shows 'Valid until replaced — no expiry date required' helper text",
+    "✅ Frontend: Employer's Liability upload modal shows 'Expiry Date *' (required) label",
+    "✅ Frontend: Employer's Liability upload modal does NOT show 'Valid until replaced' helper text",
+    "✅ Frontend: Modal buttons (Cancel, Upload) visible inside modal at 1920px viewport",
+    "✅ Frontend: Modal buttons visible at 800px viewport width (no overflow)",
+    "✅ Frontend: Company Registration Amendment dialog shows 'Expiry Date (optional)' label",
+    "✅ Frontend: Company Registration Amendment dialog shows 'Valid until replaced' helper text",
+    "✅ Frontend: Public Liability Amendment dialog shows 'Expiry Date' (required) label",
+    "✅ Frontend: Public Liability Amendment dialog does NOT show 'Valid until replaced' helper text"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/backend/tests/test_insurance_expiry.py",
+    "/app/test_reports/pytest/insurance_expiry_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "InsuranceDocResponse Pydantic model correctly includes requires_expiry_date and valid_until_replaced fields (line 3658-3659)",
+    "Upload endpoint correctly validates expiry_date based on requires_expiry_date flag (line 14095-14097)",
+    "Frontend upload dialog correctly renders conditional expiry field based on selectedInsurance.requires_expiry_date (line 2392)",
+    "Frontend shows 'Valid until replaced' helper text when selectedInsurance.valid_until_replaced is true (line 2412-2417)",
+    "Amendment dialog correctly shows conditional expiry label based on amendRecord.requires_expiry_date (line 2681-2683)",
+    "Modal CSS uses max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto for proper responsive layout (line 2343)"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_insurance_expiry.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all UI tests passed)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123"
+  },
+
+  "certificates_tested": {
+    "requires_expiry_false": [
+      "CQC Registration Certificate (valid_until_replaced=true)",
+      "Company Registration Certificate (valid_until_replaced=true)",
+      "Legionella Risk Assessment (valid_until_replaced=false)",
+      "Food Hygiene Rating Certificate (valid_until_replaced=true)",
+      "Asbestos Survey Report (valid_until_replaced=true)"
+    ],
+    "requires_expiry_true": [
+      "Employer's Liability Insurance",
+      "Public Liability Insurance",
+      "Professional Indemnity Insurance",
+      "ICO Registration Certificate",
+      "Fire Safety Certificate",
+      "Electrical Installation Certificate (EICR)",
+      "Gas Safety Certificate",
+      "PAT Testing Certificate"
+    ]
+  },
+
+  "seed_data_creation": "None - used existing seeded insurance/certificate data",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Certificate expiry logic bug fix verified. The Compliance Centre now correctly shows conditional expiry date labels ('Expiry Date (optional)' vs 'Expiry Date *') and 'Valid until replaced' helper text based on certificate type. Modal layouts are responsive and don't overflow at various viewport widths. Backend correctly validates expiry date requirements during upload."
+}

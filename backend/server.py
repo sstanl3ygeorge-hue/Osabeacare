@@ -30,6 +30,7 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 import pytesseract
 from PIL import Image as PILImage
 from pdf2image import convert_from_bytes
+import pdfplumber  # Primary method for typed PDF extraction
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -4492,6 +4493,8 @@ def perform_ocr_extraction(file_bytes: bytes, content_type: str) -> tuple[str, s
     """
     Perform OCR on document bytes using Tesseract.
     Returns (extracted_text, error_message)
+    
+    NOTE: This is now a FALLBACK method. pdfplumber is primary for PDFs.
     """
     try:
         extracted_texts = []
@@ -4529,15 +4532,149 @@ def perform_ocr_extraction(file_bytes: bytes, content_type: str) -> tuple[str, s
         return "", f"OCR extraction error: {str(e)}"
 
 
+def perform_pdfplumber_extraction(file_bytes: bytes) -> tuple[str, str]:
+    """
+    PRIMARY METHOD: Extract text directly from PDF using pdfplumber.
+    Works best with typed/structured forms (not scanned images).
+    
+    Returns (extracted_text, error_message)
+    """
+    try:
+        import pdfplumber
+        
+        extracted_texts = []
+        
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            logger.info(f"pdfplumber: Processing PDF with {len(pdf.pages)} pages")
+            
+            for i, page in enumerate(pdf.pages):
+                # Extract text
+                text = page.extract_text() or ""
+                
+                # Also try extracting tables if present
+                tables = page.extract_tables()
+                table_text = ""
+                for table in tables:
+                    if table:
+                        for row in table:
+                            if row:
+                                row_text = " | ".join([str(cell or "").strip() for cell in row])
+                                if row_text.strip():
+                                    table_text += row_text + "\n"
+                
+                # Combine text and table data
+                page_content = text
+                if table_text:
+                    page_content += f"\n\n[TABLE DATA]\n{table_text}"
+                
+                if page_content.strip():
+                    extracted_texts.append(f"--- Page {i+1} ---\n{page_content}")
+        
+        combined_text = "\n\n".join(extracted_texts)
+        
+        if combined_text and len(combined_text.strip()) > 50:
+            logger.info(f"pdfplumber: Extracted {len(combined_text)} characters from PDF")
+            return combined_text, ""
+        else:
+            return "", "pdfplumber extracted insufficient text (may be scanned/image PDF)"
+            
+    except ImportError:
+        return "", "pdfplumber not installed"
+    except Exception as e:
+        return "", f"pdfplumber extraction error: {str(e)}"
+
+
+def validate_extracted_value(field_name: str, value: str) -> tuple[bool, str]:
+    """
+    Validate extracted values before saving.
+    Returns (is_valid, rejection_reason)
+    
+    Rejects:
+    - Placeholder/test values (TEST_, SAMPLE_, etc.)
+    - Invalid NI number formats
+    - Malformed emails
+    - Empty or whitespace-only values
+    """
+    if not value or not value.strip():
+        return False, "Empty or whitespace value"
+    
+    value = value.strip()
+    
+    # Reject placeholder values
+    placeholder_patterns = [
+        r'^TEST_',
+        r'^SAMPLE_',
+        r'^EXAMPLE_',
+        r'^XXX',
+        r'^000000',
+        r'^placeholder',
+        r'^N/A$',
+        r'^TBD$',
+        r'^TBC$',
+        r'^\[.*\]$',  # [brackets]
+        r'^<.*>$',    # <angle brackets>
+    ]
+    
+    for pattern in placeholder_patterns:
+        if re.match(pattern, value, re.IGNORECASE):
+            return False, f"Appears to be placeholder value: {value}"
+    
+    # Field-specific validation
+    if field_name == 'ni_number':
+        # UK NI format: 2 letters, 6 numbers, 1 letter (e.g., AB123456C)
+        ni_pattern = r'^[A-Z]{2}\d{6}[A-Z]$'
+        if not re.match(ni_pattern, value.upper().replace(' ', '')):
+            return False, f"Invalid NI number format: {value}"
+    
+    if field_name == 'email':
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, value):
+            return False, f"Invalid email format: {value}"
+    
+    if field_name == 'phone' or field_name == 'emergency_phone':
+        # Basic phone validation - must have at least 10 digits
+        digits = re.sub(r'\D', '', value)
+        if len(digits) < 10:
+            return False, f"Phone number too short: {value}"
+    
+    if field_name == 'postcode':
+        # UK postcode pattern (simplified)
+        postcode_pattern = r'^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$'
+        if not re.match(postcode_pattern, value.upper().replace('  ', ' ')):
+            return False, f"Invalid UK postcode format: {value}"
+    
+    if field_name == 'date_of_birth':
+        # Must be valid date
+        try:
+            # Try common formats
+            for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y']:
+                try:
+                    parsed = datetime.strptime(value, fmt)
+                    # Basic sanity check - DOB should be 16-100 years ago
+                    age = (datetime.now() - parsed).days / 365
+                    if age < 16 or age > 100:
+                        return False, f"Date of birth implies unrealistic age: {value}"
+                    break
+                except:
+                    continue
+            else:
+                return False, f"Cannot parse date of birth: {value}"
+        except:
+            return False, f"Invalid date of birth: {value}"
+    
+    return True, ""
+
+
 async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]:
     """
-    Extract text content from a document using AI with smart OCR fallback.
+    Extract text content from a document using IMPROVED pipeline.
     
-    Smart OCR Logic:
-    1. Run AI extraction first
-    2. If AI fails → run OCR fallback
-    3. If AI succeeds but returns low quality → run OCR and merge results
-    4. If AI confidence is HIGH → return AI result only
+    NEW EXTRACTION ORDER (for typed/structured forms):
+    ═══════════════════════════════════════════════════════════════════
+    1. pdfplumber (PRIMARY) - Direct text extraction for typed PDFs
+    2. OCR fallback (pdf2image + pytesseract) - For scanned/image PDFs
+    3. AI extraction - For image files or supplemental extraction
+    ═══════════════════════════════════════════════════════════════════
     
     Returns (extracted_text, extraction_log)
     """
@@ -4552,23 +4689,62 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
         extraction_log.file_type = content_type or "unknown"
         extraction_log.file_size_bytes = len(file_bytes)
         
-        logger.info(f"Document extraction started - Type: {content_type}, Size: {len(file_bytes)} bytes")
+        logger.info(f"[EXTRACTION] Started - Type: {content_type}, Size: {len(file_bytes)} bytes")
         
-        # Step 1: Try AI-based extraction first
+        is_pdf = 'pdf' in (content_type or '').lower()
+        extracted_text = ""
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # STEP 1: pdfplumber (PRIMARY for PDFs)
+        # ═══════════════════════════════════════════════════════════════════
+        if is_pdf:
+            logger.info("[EXTRACTION] Step 1: Trying pdfplumber (primary method for typed PDFs)...")
+            
+            pdf_text, pdf_error = perform_pdfplumber_extraction(file_bytes)
+            
+            if pdf_text and len(pdf_text.strip()) > 100:
+                logger.info(f"[EXTRACTION] pdfplumber SUCCESS - {len(pdf_text)} chars extracted")
+                extraction_log.final_method = "pdfplumber"
+                extraction_log.ai_extraction_attempted = False
+                extraction_log.ocr_attempted = False
+                return pdf_text, extraction_log
+            else:
+                logger.info(f"[EXTRACTION] pdfplumber insufficient: {pdf_error}")
+                # Continue to OCR fallback
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # STEP 2: OCR Fallback (for scanned PDFs or images)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("[EXTRACTION] Step 2: Trying OCR (fallback for scanned documents)...")
+        extraction_log.ocr_attempted = True
+        
+        ocr_text, ocr_error = perform_ocr_extraction(file_bytes, content_type)
+        
+        if ocr_text and len(ocr_text.strip()) > 100:
+            logger.info(f"[EXTRACTION] OCR SUCCESS - {len(ocr_text)} chars extracted")
+            extraction_log.ocr_success = True
+            extraction_log.final_method = "ocr"
+            return ocr_text, extraction_log
+        else:
+            extraction_log.ocr_error = ocr_error or "OCR produced insufficient text"
+            logger.info(f"[EXTRACTION] OCR insufficient: {ocr_error}")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # STEP 3: AI Vision Extraction (final fallback)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("[EXTRACTION] Step 3: Trying AI Vision extraction (final fallback)...")
         extraction_log.ai_extraction_attempted = True
-        ai_text = ""
-        ai_quality_score = 0  # Track AI quality
         
         try:
             api_key = os.environ.get('EMERGENT_LLM_KEY')
             if not api_key:
                 extraction_log.ai_error = "LLM API key not configured"
-                logger.warning("AI extraction skipped: LLM API key not configured")
+                logger.warning("[EXTRACTION] AI skipped: LLM API key not configured")
             else:
                 # For PDFs, convert to images first (GPT-5.2 only accepts images)
                 images_to_process = []
                 
-                if 'pdf' in (content_type or '').lower():
+                if is_pdf:
                     try:
                         from pdf2image import convert_from_bytes
                         pdf_images = convert_from_bytes(file_bytes, dpi=150, first_page=1, last_page=3)
@@ -4577,15 +4753,16 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
                             img.save(img_buffer, format='PNG')
                             img_bytes = img_buffer.getvalue()
                             images_to_process.append(base64.b64encode(img_bytes).decode('utf-8'))
-                        logger.info(f"Converted PDF to {len(images_to_process)} image(s) for AI processing")
+                        logger.info(f"[EXTRACTION] Converted PDF to {len(images_to_process)} image(s) for AI")
                     except Exception as pdf_err:
                         extraction_log.ai_error = f"PDF to image conversion failed: {str(pdf_err)}"
-                        logger.warning(f"Failed to convert PDF to images: {pdf_err}")
+                        logger.warning(f"[EXTRACTION] Failed to convert PDF to images: {pdf_err}")
                 else:
                     images_to_process.append(base64.b64encode(file_bytes).decode('utf-8'))
                 
                 if images_to_process:
                     all_extracted_text = []
+                    ai_quality_score = 0
                     
                     for i, image_base64 in enumerate(images_to_process):
                         chat = LlmChat(
@@ -4610,75 +4787,36 @@ At the end, rate your confidence in the extraction quality from 0-100 on a new l
                             if confidence_match:
                                 page_confidence = int(confidence_match.group(1))
                                 ai_quality_score = max(ai_quality_score, page_confidence)
-                                # Remove confidence line from text
                                 page_text = re.sub(r'\n*CONFIDENCE_SCORE:\s*\d+\s*$', '', page_text).strip()
                             all_extracted_text.append(f"--- Page {i+1} ---\n{page_text}")
                     
                     ai_text = "\n\n".join(all_extracted_text)
                     
-                    if ai_text and len(ai_text.strip()) > 20:
+                    if ai_text and len(ai_text.strip()) > 50:
                         extraction_log.ai_extraction_success = True
                         extraction_log.ai_overall_confidence = ai_quality_score / 100.0 if ai_quality_score else 0.7
-                        logger.info(f"AI extraction successful - {len(ai_text)} chars, confidence: {ai_quality_score}")
-                        
-                        # SMART OCR DECISION:
-                        # If AI confidence is LOW (< 50), run OCR to supplement
-                        if ai_quality_score < 50:
-                            extraction_log.ocr_retry_reason = f"AI confidence too low ({ai_quality_score})"
-                            logger.info(f"AI confidence low ({ai_quality_score}), running OCR supplement...")
-                            # Continue to OCR section below
-                        else:
-                            # High confidence - return AI result
-                            extraction_log.final_method = "ai"
-                            return ai_text, extraction_log
+                        extraction_log.final_method = "ai"
+                        logger.info(f"[EXTRACTION] AI SUCCESS - {len(ai_text)} chars, confidence: {ai_quality_score}")
+                        return ai_text, extraction_log
                     else:
                         extraction_log.ai_error = "AI returned insufficient text"
-                        logger.warning("AI extraction returned insufficient text, trying OCR fallback")
                 else:
                     extraction_log.ai_error = "No images to process"
                     
         except Exception as ai_err:
             extraction_log.ai_error = str(ai_err)
-            logger.warning(f"AI extraction failed: {ai_err}, trying OCR fallback")
+            logger.warning(f"[EXTRACTION] AI failed: {ai_err}")
         
-        # Step 2: OCR Fallback (or supplement for low-confidence AI)
-        extraction_log.ocr_attempted = True
-        logger.info("Attempting OCR extraction...")
-        
-        ocr_text, ocr_error = perform_ocr_extraction(file_bytes, content_type)
-        
-        if ocr_text and len(ocr_text.strip()) > 20:
-            extraction_log.ocr_success = True
-            
-            # Merge results if we have both AI and OCR
-            if ai_text and extraction_log.ai_extraction_success:
-                extraction_log.final_method = "ai+ocr"
-                # Combine AI and OCR results with priority to AI
-                combined_text = f"=== AI EXTRACTION ===\n{ai_text}\n\n=== OCR SUPPLEMENT ===\n{ocr_text}"
-                logger.info(f"Combined AI+OCR extraction - total {len(combined_text)} characters")
-                return combined_text, extraction_log
-            else:
-                extraction_log.final_method = "ocr"
-                logger.info(f"OCR extraction successful - extracted {len(ocr_text)} characters")
-                return ocr_text, extraction_log
-        else:
-            extraction_log.ocr_error = ocr_error or "OCR produced no readable text"
-            
-            # If we have AI text (even low confidence), use it
-            if ai_text and extraction_log.ai_extraction_success:
-                extraction_log.final_method = "ai"
-                logger.info("Using AI extraction (OCR failed to supplement)")
-                return ai_text, extraction_log
-            
-            extraction_log.final_method = "failed"
-            extraction_log.failure_reason = f"AI: {extraction_log.ai_error or 'N/A'}, OCR: {extraction_log.ocr_error}"
-            logger.error(f"Both extraction methods failed - AI: {extraction_log.ai_error}, OCR: {extraction_log.ocr_error}")
-            return "", extraction_log
+        # All methods failed
+        extraction_log.final_method = "failed"
+        extraction_log.failure_reason = f"All extraction methods failed. pdfplumber: N/A, OCR: {extraction_log.ocr_error}, AI: {extraction_log.ai_error}"
+        logger.error(f"[EXTRACTION] FAILED - All methods exhausted")
+        return "", extraction_log
             
     except Exception as e:
         extraction_log.failure_reason = f"Document retrieval error: {str(e)}"
         extraction_log.final_method = "failed"
-        logger.error(f"Failed to retrieve document for extraction: {e}")
+        logger.error(f"[EXTRACTION] Failed to retrieve document: {e}")
         return "", extraction_log
 
 
@@ -4757,8 +4895,10 @@ If no data can be extracted, return an empty array: []"""
             logger.error(f"Failed to parse AI response as JSON: {response[:200]}")
             parsed_fields = []
         
-        # Convert to ExtractedField objects with current values
+        # Convert to ExtractedField objects with current values and VALIDATION
         result = []
+        rejected_fields = []
+        
         for field_data in parsed_fields:
             field_name = field_data.get('field_name', '')
             if field_name in EXTRACTABLE_PROFILE_FIELDS:
@@ -4768,6 +4908,16 @@ If no data can be extracted, return an empty array: []"""
                 # Convert current value to string for comparison
                 if current_val is not None and not isinstance(current_val, str):
                     current_val = str(current_val)
+                
+                # ═══════════════════════════════════════════════════════════
+                # VALIDATION: Reject invalid/placeholder values
+                # ═══════════════════════════════════════════════════════════
+                if extracted_val:
+                    is_valid, rejection_reason = validate_extracted_value(field_name, str(extracted_val))
+                    if not is_valid:
+                        rejected_fields.append(f"{field_name}: {rejection_reason}")
+                        logger.warning(f"[EXTRACTION] Rejected field '{field_name}': {rejection_reason}")
+                        continue  # Skip this field
                 
                 # Handle confidence - could be string or number
                 raw_confidence = field_data.get('confidence', 0.5)
@@ -4797,7 +4947,10 @@ If no data can be extracted, return an empty array: []"""
                     extraction_method=extraction_method
                 ))
         
-        logger.info(f"Parsed {len(result)} fields, {len(low_confidence_fields)} with low confidence")
+        if rejected_fields:
+            logger.info(f"[EXTRACTION] Rejected {len(rejected_fields)} fields with invalid values: {rejected_fields}")
+        
+        logger.info(f"[EXTRACTION] Parsed {len(result)} valid fields, {len(low_confidence_fields)} with low confidence")
         return result, low_confidence_fields
     except Exception as e:
         logger.error(f"Failed to parse extracted text: {e}")

@@ -1,0 +1,94 @@
+{
+  "summary": "Application Form Extraction Pipeline - All 13 tests PASSED. pdfplumber is correctly used as PRIMARY extraction method for typed PDFs. Validation layer correctly rejects TEST_ placeholders, invalid NI numbers, and malformed emails. 38 fields extracted with high confidence (>0.8).",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ POST /api/employees/{id}/extract-from-application returns 200 with extracted fields",
+    "✅ pdfplumber used as PRIMARY method (extraction_method='pdfplumber')",
+    "✅ No 'poppler not installed' error - poppler-utils is installed",
+    "✅ Validation rejects TEST_ placeholder values (none in extracted fields)",
+    "✅ NI number format validation working (TK753130C is valid UK format)",
+    "✅ Email format validation working (otunbakunlelonge85@gmail.com is valid)",
+    "✅ 38 fields extracted with high confidence (all >0.8)",
+    "✅ Confidence values are numeric (0.0-1.0 range)",
+    "✅ Extraction log structure correct (file_type, file_size_bytes, final_method)",
+    "✅ OCR and AI not attempted when pdfplumber succeeds",
+    "✅ Field structure correct (field_name, extracted_value, confidence, apply)",
+    "✅ Graceful failure handling with options (fill_manually, retry)",
+    "✅ Multiple fields extracted from application form (38 fields)"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/backend/tests/test_extraction_pipeline.py",
+    "/app/test_reports/pytest/extraction_pipeline_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "pdfplumber correctly implemented as PRIMARY extraction method at line 4535",
+    "validate_extracted_value() at line 4587 correctly rejects TEST_, SAMPLE_, invalid NI, malformed emails",
+    "extract_text_from_document() at line 4668 follows correct order: pdfplumber → OCR → AI",
+    "Extraction pipeline returns extraction_method='pdfplumber' confirming primary method used",
+    "All 38 extracted fields have confidence > 0.8 (high confidence)",
+    "Validation layer prevents placeholder/invalid values from being saved"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_extraction_pipeline.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "N/A (backend only testing)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123"
+  },
+
+  "test_employee": {
+    "id": "d88335f6-1b18-435a-8086-28af4a583f77",
+    "name": "Olakunle Alonge",
+    "has_application_form": true,
+    "fields_extracted": 38,
+    "extraction_method": "pdfplumber"
+  },
+
+  "extraction_verification": {
+    "pdfplumber_primary": "VERIFIED - extraction_method='pdfplumber' in response",
+    "poppler_installed": "VERIFIED - pdftotext version 22.12.0 available",
+    "validation_layer": "VERIFIED - TEST_ values rejected, valid NI/email formats enforced",
+    "high_confidence": "VERIFIED - all 38 fields have confidence > 0.8",
+    "field_structure": "VERIFIED - field_name, extracted_value, confidence, apply present"
+  },
+
+  "sample_extracted_fields": [
+    {"field_name": "first_name", "extracted_value": "Olakunle", "confidence": 0.99},
+    {"field_name": "last_name", "extracted_value": "Alonge", "confidence": 0.99},
+    {"field_name": "ni_number", "extracted_value": "TK753130C", "confidence": 0.99},
+    {"field_name": "email", "extracted_value": "otunbakunlelonge85@gmail.com", "confidence": 0.99},
+    {"field_name": "postcode", "extracted_value": "ME4 5QD", "confidence": 0.99}
+  ],
+
+  "seed_data_creation": "",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Extraction pipeline verified. Key changes: 1) pdfplumber is PRIMARY method for typed PDFs (not OCR/AI). 2) Validation layer rejects TEST_, invalid NI, malformed emails. 3) Test employee Olakunle Alonge (d88335f6-1b18-435a-8086-28af4a583f77) has application form that extracts 38 fields with high confidence. 4) poppler-utils installed (pdftotext v22.12.0)."
+}

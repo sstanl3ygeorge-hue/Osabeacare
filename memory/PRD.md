@@ -4,6 +4,44 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**RTW Logic Simplified: Verification as Source of Truth - COMPLETE**
+
+### Decision
+Use **Right to Work Verification** as the source for expiry/follow-up monitoring and card display.
+Do NOT use Right to Work Documents for displayed expiry.
+
+### Reason
+The document is evidence only. The verification record is the operational/legal check we actually monitor.
+Example: BRP may be uploaded as document, but share code verification produces the expiry we care about.
+
+### Data Sources (Corrected)
+
+| Record | Use For | Do NOT Use For |
+|--------|---------|----------------|
+| **RTW Documents** | evidence_type, documents_on_file | expiry display, countdown |
+| **RTW Verification** | status, permission_type, expiry_date, countdown, blocking | - |
+
+### Card Display Rules
+
+| Permission Type | Card Shows |
+|-----------------|------------|
+| **Permanent** (no verification expiry) | "Verified (Permanent)" + "Permanent - No Expiry" |
+| **Time-Limited** (has verification expiry) | "Verified (Time-Limited)" + "Expires: [date] (Xd)" |
+| **Missing** | "Missing Verification" |
+
+### Verification
+- **Olakunle Alonge**: Verification expiry 2028-05-13 → "Verified (Time-Limited)" (775d) ✅
+- **Ayomi Lori**: Verification expiry 2026-09-28 → "Verified (Time-Limited)" (182d) ✅
+- **Henrietta Omo-Igene**: No verification expiry → "Verified (Permanent)" ✅
+
+### Test Results
+- Backend: 23/23 tests passed (100%)
+- Frontend: All UI verifications passed
+- Test report: `/app/test_reports/iteration_55.json`
+
+---
+
+## Previous Update (2025-12-29)
 **Right to Work Summary Logic Bug Fix - COMPLETE**
 
 ### Problem

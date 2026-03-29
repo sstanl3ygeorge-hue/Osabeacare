@@ -24,6 +24,7 @@ import {
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight
 } from 'lucide-react';
+import { FileUploaderInline } from '../../components/ui/file-uploader';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -2258,14 +2259,15 @@ export default function EmployeeProfilePage() {
                     )}
                     <div className="space-y-2">
                       <Label>File</Label>
-                      <Input
-                        type="file"
-                        onChange={(e) => setUploadFile(e.target.files[0])}
-                        className="rounded-xl"
+                      <FileUploaderInline
+                        onFileSelect={(file) => setUploadFile(file)}
+                        selectedFile={uploadFile}
+                        onClear={() => setUploadFile(null)}
+                        placeholder="Drop file here or click to browse"
                         data-testid="doc-file-input"
                       />
                       <p className="text-xs text-text-muted">
-                        Upload a clear copy of the document. PDF, JPG, PNG accepted.
+                        Upload a clear copy of the document. PDF, JPG, PNG accepted (max 10MB).
                       </p>
                     </div>
                     <div className="flex justify-end gap-3 pt-4">
@@ -2410,64 +2412,26 @@ export default function EmployeeProfilePage() {
                       <Label className="text-sm font-medium">
                         Application Form <span className="text-red-500">*</span>
                       </Label>
-                      <div 
-                        className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                          importAppFile ? 'border-primary bg-primary/5' : 'border-[#E4E8EB] hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="file"
-                          accept=".pdf,.doc,.docx"
-                          onChange={(e) => setImportAppFile(e.target.files?.[0] || null)}
-                          className="hidden"
-                          id="import-app-file"
-                        />
-                        <label htmlFor="import-app-file" className="cursor-pointer">
-                          {importAppFile ? (
-                            <div className="flex items-center justify-center gap-2">
-                              <FileText className="h-5 w-5 text-primary" />
-                              <span className="text-sm font-medium text-primary">{importAppFile.name}</span>
-                            </div>
-                          ) : (
-                            <div>
-                              <Upload className="h-8 w-8 mx-auto mb-2 text-text-muted" />
-                              <p className="text-sm text-text-muted">Click to upload application form</p>
-                              <p className="text-xs text-text-muted mt-1">PDF, DOC, DOCX accepted</p>
-                            </div>
-                          )}
-                        </label>
-                      </div>
+                      <FileUploaderInline
+                        onFileSelect={(file) => setImportAppFile(file)}
+                        selectedFile={importAppFile}
+                        onClear={() => setImportAppFile(null)}
+                        acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']}
+                        placeholder="Drop application form here or click to browse"
+                      />
                     </div>
 
                     <div className="space-y-2">
                       <Label className="text-sm font-medium">
                         CV / Resume <span className="text-text-muted">(optional)</span>
                       </Label>
-                      <div 
-                        className={`border-2 border-dashed rounded-xl p-4 text-center transition-colors ${
-                          importCvFile ? 'border-primary bg-primary/5' : 'border-[#E4E8EB] hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="file"
-                          accept=".pdf,.doc,.docx"
-                          onChange={(e) => setImportCvFile(e.target.files?.[0] || null)}
-                          className="hidden"
-                          id="import-cv-file"
-                        />
-                        <label htmlFor="import-cv-file" className="cursor-pointer">
-                          {importCvFile ? (
-                            <div className="flex items-center justify-center gap-2">
-                              <FileText className="h-5 w-5 text-primary" />
-                              <span className="text-sm font-medium text-primary">{importCvFile.name}</span>
-                            </div>
-                          ) : (
-                            <div className="py-1">
-                              <p className="text-sm text-text-muted">Click to upload CV</p>
-                            </div>
-                          )}
-                        </label>
-                      </div>
+                      <FileUploaderInline
+                        onFileSelect={(file) => setImportCvFile(file)}
+                        selectedFile={importCvFile}
+                        onClear={() => setImportCvFile(null)}
+                        acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']}
+                        placeholder="Drop CV here or click to browse"
+                      />
                     </div>
 
                     <div className="bg-[#F8FAFA] rounded-xl p-4 space-y-2">
@@ -2600,33 +2564,13 @@ export default function EmployeeProfilePage() {
                       <Label className="text-sm font-medium">
                         Document File <span className="text-red-500">*</span>
                       </Label>
-                      <div 
-                        className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-                          importDocFile ? 'border-primary bg-primary/5' : 'border-[#E4E8EB] hover:border-primary/50'
-                        }`}
-                      >
-                        <input
-                          type="file"
-                          accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                          onChange={(e) => setImportDocFile(e.target.files?.[0] || null)}
-                          className="hidden"
-                          id="import-doc-file"
-                        />
-                        <label htmlFor="import-doc-file" className="cursor-pointer">
-                          {importDocFile ? (
-                            <div className="flex items-center justify-center gap-2">
-                              <FileText className="h-5 w-5 text-primary" />
-                              <span className="text-sm font-medium text-primary">{importDocFile.name}</span>
-                            </div>
-                          ) : (
-                            <div>
-                              <Upload className="h-8 w-8 mx-auto mb-2 text-text-muted" />
-                              <p className="text-sm text-text-muted">Click to upload document</p>
-                              <p className="text-xs text-text-muted mt-1">PDF, DOC, DOCX, JPG, PNG accepted</p>
-                            </div>
-                          )}
-                        </label>
-                      </div>
+                      <FileUploaderInline
+                        onFileSelect={(file) => setImportDocFile(file)}
+                        selectedFile={importDocFile}
+                        onClear={() => setImportDocFile(null)}
+                        acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/jpg', 'image/png']}
+                        placeholder="Drop document here or click to browse"
+                      />
                     </div>
 
                     <div className="space-y-2">
@@ -5297,15 +5241,16 @@ export default function EmployeeProfilePage() {
               
               <div className="space-y-2">
                 <Label className="text-text-primary">Certificate File *</Label>
-                <Input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                  onChange={(e) => setTrainingCertFile(e.target.files?.[0] || null)}
-                  className="rounded-xl"
+                <FileUploaderInline
+                  onFileSelect={(file) => setTrainingCertFile(file)}
+                  selectedFile={trainingCertFile}
+                  onClear={() => setTrainingCertFile(null)}
+                  acceptedTypes={['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']}
+                  placeholder="Drop certificate here or click to browse"
                   data-testid="training-cert-file-input"
                 />
                 <p className="text-xs text-text-muted">
-                  Accepted formats: PDF, JPG, PNG, DOC, DOCX
+                  Accepted formats: PDF, JPG, PNG, DOC, DOCX (max 10MB)
                 </p>
               </div>
               
@@ -5667,12 +5612,12 @@ export default function EmployeeProfilePage() {
             )}
             <div className="space-y-2">
               <Label htmlFor="replace-file">New File <span className="text-error">*</span></Label>
-              <Input
-                id="replace-file"
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.webp"
-                onChange={(e) => setReplaceFile(e.target.files?.[0] || null)}
-                className="cursor-pointer"
+              <FileUploaderInline
+                onFileSelect={(file) => setReplaceFile(file)}
+                selectedFile={replaceFile}
+                onClear={() => setReplaceFile(null)}
+                acceptedTypes={['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp']}
+                placeholder="Drop replacement file here or click to browse"
               />
               <p className="text-xs text-muted-foreground">Upload PDF or photo (JPG, PNG)</p>
             </div>

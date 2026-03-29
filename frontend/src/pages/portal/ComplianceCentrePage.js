@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { toast } from 'sonner';
 import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
+import { FileUploaderInline } from '../../components/ui/file-uploader';
 import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
@@ -2338,11 +2339,11 @@ export default function ComplianceCentrePage() {
           <form onSubmit={selectedPolicy ? handleUploadPolicy : handleUploadInsurance} className="space-y-4 mt-4">
             <div className="space-y-2">
               <Label>Document File *</Label>
-              <Input
-                type="file"
-                onChange={(e) => setUploadFile(e.target.files[0])}
-                required
-                className="rounded-xl"
+              <FileUploaderInline
+                onFileSelect={(file) => setUploadFile(file)}
+                selectedFile={uploadFile}
+                onClear={() => setUploadFile(null)}
+                placeholder="Drop document here or click to browse"
               />
             </div>
             

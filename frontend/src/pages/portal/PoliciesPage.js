@@ -8,6 +8,7 @@ import { Label } from '../../components/ui/label';
 import { Textarea } from '../../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { toast } from 'sonner';
+import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { 
   FileCheck, Plus, Users, CheckCircle, Clock, Loader2, 
   Upload, Eye, Shield, AlertTriangle, FileText
@@ -404,12 +405,12 @@ export default function PoliciesPage() {
                                 </div>
                                 <div className="space-y-2">
                                   <Label htmlFor="policyFile">Policy Document (PDF recommended)</Label>
-                                  <Input
-                                    id="policyFile"
-                                    type="file"
-                                    accept=".pdf,.doc,.docx"
-                                    onChange={(e) => setUploadFile(e.target.files[0])}
-                                    className="rounded-xl"
+                                  <FileUploaderInline
+                                    onFileSelect={(file) => setUploadFile(file)}
+                                    selectedFile={uploadFile}
+                                    onClear={() => setUploadFile(null)}
+                                    acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']}
+                                    placeholder="Drop policy document here or click to browse"
                                   />
                                 </div>
                                 <div className="flex justify-end gap-3 pt-4">

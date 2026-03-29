@@ -4635,16 +4635,53 @@ APPLICATION_FORM_FIELD_MAPPING = {
     "professional_misconduct_declaration": "professional_misconduct_declared",
     "health_issue_declaration": "health_issue_declared",
     
-    # Health-related fields (for Staff Health Questionnaire prefill)
+    # Health-related fields (STRICTLY LIMITED for CQC compliance)
+    # Only these 3 health fields can be extracted - no other medical data
     "health_issues_disability": "health_issues_disability",  # Maps to medical_problems_affecting_work
     "influenza_vaccine_status": "influenza_vaccine_status",
     "influenza_vaccine_date": "flu_vaccination_date",
     "flu_vaccination_date": "flu_vaccination_date",
+    
+    # Professional registration
     "professional_registration_number": "professional_registration_number",
 }
 
 # Fields that can be extracted from application forms
 EXTRACTABLE_PROFILE_FIELDS = list(set(APPLICATION_FORM_FIELD_MAPPING.values()))
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUDIT-SAFE EXTRACTION RULES
+# ═══════════════════════════════════════════════════════════════════════════════
+# Fields that can be safely auto-applied (default apply=True when field is empty)
+# These are non-sensitive personal info fields that don't affect CQC compliance
+SAFE_AUTO_APPLY_FIELDS = {
+    "first_name", "last_name", "middle_name", "title",
+    "address_line_1", "address_line_2", "city", "county", "postcode", "country",
+    "phone", "phone_secondary", "email", "date_of_birth",
+    "has_driving_licence", "driving_licence_number", "has_own_vehicle",
+    "vehicle_registration", "vehicle_make_model",
+    "next_of_kin_name", "next_of_kin_relationship", "next_of_kin_phone",
+    "next_of_kin_address", "next_of_kin_city", "next_of_kin_county",
+    "next_of_kin_postcode", "next_of_kin_country",
+    "ni_number",  # NI number is profile data (evidence is separate)
+    "professional_registration_number",
+}
+
+# Fields that require manual review before applying (default apply=False)
+# These are sensitive fields that affect compliance or require verification
+REVIEW_BEFORE_APPLY_FIELDS = {
+    # References - require verification from referees
+    "reference_1_name", "reference_1_company", "reference_1_email", "reference_1_phone",
+    "reference_1_start_date", "reference_1_end_date",
+    "reference_2_name", "reference_2_company", "reference_2_email", "reference_2_phone",
+    "reference_2_start_date", "reference_2_end_date",
+    # Declarations - critical CQC compliance fields
+    "working_time_opt_out", "dbs_update_service_consent",
+    "criminal_offence_declared", "professional_misconduct_declared",
+    "health_issue_declared",
+    # Health data - sensitive, requires explicit review
+    "health_issues_disability", "influenza_vaccine_status", "flu_vaccination_date",
+}
 
 class ExtractedField(BaseModel):
     """A single extracted field with its value and confidence"""
@@ -5138,13 +5175,32 @@ If no data can be extracted, return an empty array: []"""
                     confidence_label = "low"
                     low_confidence_fields.append(field_name)
                 
+                # ═══════════════════════════════════════════════════════════
+                # AUDIT-SAFE APPLY RULES
+                # ═══════════════════════════════════════════════════════════
+                # Rule 1: If current value exists, NEVER auto-apply (preserve verified data)
+                # Rule 2: If field requires review (declarations, references, health), default to False
+                # Rule 3: Only safe personal info fields can auto-apply when empty
+                if current_val:
+                    # Existing value - never overwrite automatically
+                    should_apply = False
+                elif field_name in REVIEW_BEFORE_APPLY_FIELDS:
+                    # Sensitive field - always require manual review
+                    should_apply = False
+                elif field_name in SAFE_AUTO_APPLY_FIELDS:
+                    # Safe field with no existing value - can auto-apply
+                    should_apply = True
+                else:
+                    # Unknown field - default to requiring review
+                    should_apply = False
+                
                 result.append(ExtractedField(
                     field_name=field_name,
                     extracted_value=extracted_val,
                     current_value=current_val,
                     confidence=confidence_score,
                     confidence_label=confidence_label,
-                    apply=True if not current_val else False,  # Default apply only if field is empty
+                    apply=should_apply,
                     extraction_method=extraction_method
                 ))
         

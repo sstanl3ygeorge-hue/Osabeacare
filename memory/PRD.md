@@ -4,6 +4,67 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Application Form Extraction Mapping - FINALIZED**
+
+### Audit-Safe Extraction Mapping Implementation
+
+#### 1. Field Classification System
+Created explicit whitelists for extraction safety:
+
+**SAFE_AUTO_APPLY_FIELDS** (auto-apply when empty):
+- Personal Info: first_name, last_name, middle_name, title
+- Address: address_line_1, address_line_2, city, county, postcode, country
+- Contact: phone, phone_secondary, email, date_of_birth
+- Driving: has_driving_licence, driving_licence_number, has_own_vehicle, vehicle_registration, vehicle_make_model
+- Next of Kin: next_of_kin_name, next_of_kin_relationship, next_of_kin_phone, next_of_kin_address, next_of_kin_city, next_of_kin_county, next_of_kin_postcode, next_of_kin_country
+- Profile Data: ni_number, professional_registration_number
+
+**REVIEW_BEFORE_APPLY_FIELDS** (always require manual review):
+- References: reference_1_*, reference_2_* (all fields)
+- Declarations: working_time_opt_out, dbs_update_service_consent, criminal_offence_declared, professional_misconduct_declared, health_issue_declared
+- Health Data: health_issues_disability, influenza_vaccine_status, flu_vaccination_date
+
+#### 2. Extraction Rules Applied
+```python
+# Rule 1: If current value exists, NEVER auto-apply (preserve verified data)
+if current_val:
+    should_apply = False
+# Rule 2: If field requires review (declarations, references, health), default to False
+elif field_name in REVIEW_BEFORE_APPLY_FIELDS:
+    should_apply = False
+# Rule 3: Only safe personal info fields can auto-apply when empty
+elif field_name in SAFE_AUTO_APPLY_FIELDS:
+    should_apply = True
+# Rule 4: Unknown field - default to requiring review
+else:
+    should_apply = False
+```
+
+#### 3. Health Data Strictly Limited
+Only these 3 health fields can be extracted:
+- `health_issues_disability`
+- `influenza_vaccine_status`
+- `flu_vaccination_date`
+
+#### 4. Cross-Page Sync Verified
+**Finding**: No stale data issue exists. Both Training Page and Employee Profile Page fetch fresh data from `training_records` collection. The backend computes expiry statuses dynamically via `calculate_expiry_status()` on every API call.
+
+**Architecture Confirmation**:
+- Training corrections update `training_records` collection directly
+- Compliance-requirements endpoint queries fresh data from `training_records`
+- `calculate_expiry_status()` is called dynamically (no caching)
+- Both pages call independent `fetchData()` which triggers fresh API calls
+
+### Files Changed
+1. `/app/backend/server.py`:
+   - Added `SAFE_AUTO_APPLY_FIELDS` constant (lines 4658-4669)
+   - Added `REVIEW_BEFORE_APPLY_FIELDS` constant (lines 4673-4685)
+   - Updated `parse_extracted_text_to_fields()` function (lines 5178-5205)
+   - Fixed duplicate health field comment
+
+---
+
+## Previous Update (2025-12-29)
 **Audit-Readiness Fixes - COMPLETE**
 
 ### Issues Fixed

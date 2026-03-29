@@ -4,6 +4,47 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Training Tab View Certificate Bug Fix - COMPLETE**
+
+### Problem
+Clicking "View" on a training certificate in the Training tab crashed the page with:
+`ReferenceError: handleViewCertificate is not defined`
+
+Same certificates worked correctly from the What's Needed tab.
+
+### Root Cause
+Training tab used **undefined function names**:
+- Used: `handleViewCertificate` and `handleDownloadCertificate`
+- Correct: `handleViewTrainingCertificate` and `handleDownloadTrainingCertificate`
+
+### Fix Applied
+1. Changed `handleViewCertificate` → `handleViewTrainingCertificate` at line 4781
+2. Changed `handleDownloadCertificate` → `handleDownloadTrainingCertificate` at line 4794
+3. Added null checks to both handlers for graceful error handling
+
+### Training Tab Actions Audit (All Verified)
+| Action | Handler | Status |
+|--------|---------|--------|
+| View Evidence | `handleViewTrainingCertificate` | ✅ Working |
+| Download | `handleDownloadTrainingCertificate` | ✅ Working |
+| Edit/Correct | `setTrainingCorrectionDialogOpen` | ✅ Working |
+| View History | API call + `setTrainingHistoryDialogOpen` | ✅ Working |
+| Delete Record | `setDeletingTrainingRecord` + dialog | ✅ Working |
+| Verify | `handleVerifyTraining` | ✅ Working |
+| Unverify | `handleUnverifyTraining` | ✅ Working |
+
+### Verification
+- Training tab now opens certificate modal correctly
+- Both Training tab and What's Needed tab use same underlying certificate data
+- No JavaScript errors in console
+
+### Test Results
+- Frontend: 100% (all actions verified)
+- Test report: `/app/test_reports/iteration_59.json`
+
+---
+
+## Previous Update (2025-12-29)
 **Extraction Apply Flow Fix - COMPLETE**
 
 ### Root Cause

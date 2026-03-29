@@ -4,6 +4,39 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Structured Form Submission Bug Fix - COMPLETE**
+
+### Problem
+Forms could be opened and filled, but submission was failing with generic "Failed to submit form" toast error. This affected all structured forms including Health Screening, Induction, Interview Record, etc.
+
+### Root Cause
+Frontend code at lines 1653 and 1680 in `EmployeeProfilePage.js` called `fetchComplianceRequirements()` after successful form submission, but **this function was never defined**. The function `fetchData()` contains the compliance requirements fetch logic. When the undefined function was called, JavaScript threw a ReferenceError which got caught by the catch block and displayed "Failed to submit form" even though the API call returned 200 success.
+
+### Fixes Applied
+
+#### 1. Frontend Changes (`EmployeeProfilePage.js`)
+- **Line 1653 (handleFormSubmit)**: Replaced `fetchComplianceRequirements()` with `fetchData()`
+- **Line 1680 (handleVerifyFormSubmission)**: Replaced `fetchComplianceRequirements()` with `fetchData()`
+- Added `console.error('Form submission error:', error)` for better debugging
+
+### Forms Now Working
+All 7 structured form types submit and save correctly:
+1. Health Screening Questionnaire
+2. Induction & Competency Assessment
+3. Interview Record
+4. Recruitment Compliance Checklist
+5. Staff Personal Information
+6. HMRC Starter Checklist
+7. Equal Opportunities Monitoring
+
+### Test Results
+- Backend: 100% (20/20 tests passed)
+- Frontend: 100% (all UI tests passed)
+- Test report: `/app/test_reports/iteration_61.json`
+
+---
+
+## Previous Update (2025-12-29)
 **Compliance Centre Certificate Modal Fix - COMPLETE**
 
 ### Problem

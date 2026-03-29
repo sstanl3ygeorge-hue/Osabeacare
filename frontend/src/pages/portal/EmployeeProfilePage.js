@@ -1829,18 +1829,50 @@ export default function EmployeeProfilePage() {
             // DBS Summary - USE COMPUTED DATA FROM API (single source of truth)
             const dbsSummary = complianceRequirements?.dbs_summary || {};
             
-            // Training Status (from training array)
-            const completedTraining = training.filter(t => t.status === 'completed').length;
-            const verifiedTraining = training.filter(t => t.verified).length;
-            const expiredTraining = training.filter(t => {
-              if (!t.expiry_date) return false;
-              return new Date(t.expiry_date) < new Date();
-            }).length;
-            const totalMandatory = training.filter(t => t.mandatory).length;
+            // Calculate missing items (no evidence)
+            const missingItems = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
             
-            // Documents pending - use correct field name 'verified' not 'is_verified'
-            const pendingDocs = reqs.filter(r => r.type === 'document' && !r.has_evidence).length;
-            const unverifiedDocs = reqs.filter(r => r.type === 'document' && r.has_evidence && !r.verified).length;
+            // Calculate pending review (has evidence but not verified)
+            const pendingReview = reqs.filter(r => r.has_evidence && !r.verified).length;
+            
+            // Expiring soon items (from expiry_alerts object)
+            const expiryAlerts = complianceRequirements?.expiry_alerts || {};
+            const expiringSoon = (expiryAlerts.expiring_soon_count || 0) + (expiryAlerts.expired_count || 0);
+            
+            // DBS expiry info
+            const dbsExpiry = dbsSummary.next_dbs_review_due;
+            const dbsExpiryDays = dbsExpiry ? Math.ceil((new Date(dbsExpiry) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+            const dbsExpiringWarning = dbsExpiryDays !== null && dbsExpiryDays <= 30 && dbsExpiryDays > 0;
+            
+            // RTW expiry info  
+            const rtwExpiry = rtwSummary.expiry_date;
+            const rtwExpiryDays = rtwSummary.days_until_expiry;
+            const rtwExpiringWarning = rtwExpiryDays !== undefined && rtwExpiryDays <= 30 && rtwExpiryDays > 0;
+            
+            // Category breakdown
+            const categoryStats = {};
+            reqs.forEach(r => {
+              const cat = r.category || 'Other';
+              if (!categoryStats[cat]) {
+                categoryStats[cat] = { total: 0, complete: 0, verified: 0 };
+              }
+              categoryStats[cat].total += 1;
+              if (r.has_evidence) categoryStats[cat].complete += 1;
+              if (r.verified) categoryStats[cat].verified += 1;
+            });
+            
+            // Map categories to display names
+            const categoryDisplayNames = {
+              '1_Legal_Safety': 'Legal & Safety',
+              '2_Core_Training': 'Training',
+              '3_Competency_Health': 'Health',
+              '4_Recruitment_Record': 'Recruitment',
+              '5_Agreements': 'Agreements',
+              '6_Admin': 'Admin'
+            };
+            
+            // Calculate alerts count
+            const alertsCount = missingItems + pendingReview + expiringSoon;
             
             return (
               <div className="mt-6 pt-6 border-t border-[#E4E8EB]">
@@ -1850,165 +1882,234 @@ export default function EmployeeProfilePage() {
                   <p className="text-xs text-text-muted">Key compliance items for checker review</p>
                 </div>
                 
-                {/* Quick Status Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="audit-quick-view">
-                  {/* DBS Status - Uses computed dbs_summary from API */}
+                {/* Quick Status Cards - 4 cards */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="audit-quick-view">
+                  {/* DBS Status with Expiry */}
                   <div className={`p-3 rounded-xl border ${
                     dbsSummary.dbs_status_color === 'red' ? 'border-red-200 bg-red-50' :
-                    dbsSummary.dbs_status_color === 'amber' ? 'border-amber-200 bg-amber-50' :
+                    dbsSummary.dbs_status_color === 'amber' || dbsExpiringWarning ? 'border-amber-200 bg-amber-50' :
                     dbsSummary.dbs_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
                   }`} data-testid="dbs-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <Shield className={`h-4 w-4 ${
                         dbsSummary.dbs_status_color === 'red' ? 'text-red-600' :
-                        dbsSummary.dbs_status_color === 'amber' ? 'text-amber-600' :
+                        dbsSummary.dbs_status_color === 'amber' || dbsExpiringWarning ? 'text-amber-600' :
                         dbsSummary.dbs_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">DBS</span>
                     </div>
                     <p className={`text-sm font-medium ${
                       dbsSummary.dbs_status_color === 'red' ? 'text-red-700' :
-                      dbsSummary.dbs_status_color === 'amber' ? 'text-amber-700' :
+                      dbsSummary.dbs_status_color === 'amber' || dbsExpiringWarning ? 'text-amber-700' :
                       dbsSummary.dbs_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
                     }`}>
                       {dbsSummary.dbs_status_label || 'Unknown'}
                     </p>
-                    {dbsSummary.next_dbs_review_due && (
-                      <p className="text-xs text-text-muted mt-0.5">
-                        Review: {new Date(dbsSummary.next_dbs_review_due).toLocaleDateString()}
+                    {dbsExpiry && (
+                      <p className={`text-xs mt-1 ${
+                        dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'text-red-600 font-medium' :
+                        dbsExpiringWarning ? 'text-amber-600 font-medium' : 'text-text-muted'
+                      }`}>
+                        {dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'Expired: ' : 'Review: '}
+                        {new Date(dbsExpiry).toLocaleDateString()}
+                        {dbsExpiringWarning && <span className="ml-1">({dbsExpiryDays}d)</span>}
                       </p>
                     )}
                   </div>
                   
-                  {/* RTW Status - Uses computed rtw_summary from API */}
+                  {/* RTW Status with Expiry - MUST show expiry date clearly */}
                   <div className={`p-3 rounded-xl border ${
-                    rtwSummary.rtw_status_color === 'red' ? 'border-red-200 bg-red-50' :
-                    rtwSummary.rtw_status_color === 'amber' ? 'border-amber-200 bg-amber-50' :
+                    rtwSummary.rtw_status_color === 'red' || rtwSummary.expiry_status === 'expired' ? 'border-red-200 bg-red-50' :
+                    rtwSummary.rtw_status_color === 'amber' || rtwExpiringWarning ? 'border-amber-200 bg-amber-50' :
                     rtwSummary.rtw_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
                   }`} data-testid="rtw-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${
-                        rtwSummary.rtw_status_color === 'red' ? 'text-red-600' :
-                        rtwSummary.rtw_status_color === 'amber' ? 'text-amber-600' :
+                        rtwSummary.rtw_status_color === 'red' || rtwSummary.expiry_status === 'expired' ? 'text-red-600' :
+                        rtwSummary.rtw_status_color === 'amber' || rtwExpiringWarning ? 'text-amber-600' :
                         rtwSummary.rtw_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
                     </div>
                     <p className={`text-sm font-medium ${
-                      rtwSummary.rtw_status_color === 'red' ? 'text-red-700' :
-                      rtwSummary.rtw_status_color === 'amber' ? 'text-amber-700' :
+                      rtwSummary.rtw_status_color === 'red' || rtwSummary.expiry_status === 'expired' ? 'text-red-700' :
+                      rtwSummary.rtw_status_color === 'amber' || rtwExpiringWarning ? 'text-amber-700' :
                       rtwSummary.rtw_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
                     }`}>
                       {rtwSummary.rtw_status_label || 'Unknown'}
                     </p>
-                    {/* RTW Expiry Date */}
-                    {rtwSummary.expiry_date && (
-                      <p className={`text-xs mt-1 ${
-                        rtwSummary.expiry_status === 'expired' ? 'text-red-600 font-medium' :
-                        rtwSummary.expiry_status === 'expiring_soon' ? 'text-amber-600' :
-                        'text-text-muted'
+                    {/* RTW Expiry - prominently displayed */}
+                    {rtwExpiry ? (
+                      <p className={`text-xs mt-1 font-medium ${
+                        rtwSummary.expiry_status === 'expired' ? 'text-red-600' :
+                        rtwExpiringWarning ? 'text-amber-600' : 'text-text-muted'
                       }`}>
-                        {rtwSummary.expiry_status === 'expired' ? 'Expired: ' : 'Expires: '}
-                        {new Date(rtwSummary.expiry_date).toLocaleDateString()}
-                        {rtwSummary.days_until_expiry !== undefined && rtwSummary.days_until_expiry > 0 && (
-                          <span className="ml-1">({rtwSummary.days_until_expiry} days)</span>
+                        {rtwSummary.expiry_status === 'expired' ? '⚠ Expired: ' : 'Expires: '}
+                        {new Date(rtwExpiry).toLocaleDateString()}
+                        {rtwExpiryDays !== undefined && rtwExpiryDays > 0 && (
+                          <span className={`ml-1 ${rtwExpiringWarning ? 'text-amber-700' : ''}`}>
+                            ({rtwExpiryDays}d)
+                          </span>
                         )}
                       </p>
+                    ) : (
+                      <p className="text-xs mt-1 text-text-muted">No expiry set</p>
                     )}
                   </div>
                   
-                  {/* Training Status */}
+                  {/* Alerts Card */}
                   <div className={`p-3 rounded-xl border ${
-                    expiredTraining > 0 ? 'border-red-200 bg-red-50' :
-                    completedTraining < totalMandatory ? 'border-amber-200 bg-amber-50' :
+                    alertsCount > 0 ? (missingItems > 0 ? 'border-red-200 bg-red-50' : 'border-amber-200 bg-amber-50') : 
                     'border-green-200 bg-green-50'
-                  }`} data-testid="training-status-card">
+                  }`} data-testid="alerts-card">
                     <div className="flex items-center gap-2 mb-1">
-                      <GraduationCap className={`h-4 w-4 ${
-                        expiredTraining > 0 ? 'text-red-600' :
-                        completedTraining < totalMandatory ? 'text-amber-600' : 'text-green-600'
+                      <AlertTriangle className={`h-4 w-4 ${
+                        alertsCount > 0 ? (missingItems > 0 ? 'text-red-600' : 'text-amber-600') : 'text-green-600'
                       }`} />
-                      <span className="text-xs font-semibold text-text-primary">Training</span>
+                      <span className="text-xs font-semibold text-text-primary">Alerts</span>
                     </div>
-                    <p className={`text-sm font-medium ${
-                      expiredTraining > 0 ? 'text-red-700' :
-                      completedTraining < totalMandatory ? 'text-amber-700' : 'text-green-700'
-                    }`}>
-                      {expiredTraining > 0 ? `${expiredTraining} Expired` :
-                       completedTraining < totalMandatory ? `${completedTraining}/${totalMandatory} Complete` :
-                       `${verifiedTraining}/${completedTraining} Verified`}
-                    </p>
+                    {alertsCount > 0 ? (
+                      <div className="space-y-0.5">
+                        {missingItems > 0 && (
+                          <p className="text-xs text-red-700 font-medium">{missingItems} missing</p>
+                        )}
+                        {pendingReview > 0 && (
+                          <p className="text-xs text-amber-700">{pendingReview} pending review</p>
+                        )}
+                        {expiringSoon > 0 && (
+                          <p className="text-xs text-amber-600">{expiringSoon} expiring soon</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm font-medium text-green-700">All Clear</p>
+                    )}
                   </div>
                   
-                  {/* Documents Status */}
-                  <div className={`p-3 rounded-xl border ${
-                    pendingDocs > 0 ? 'border-red-200 bg-red-50' :
-                    unverifiedDocs > 0 ? 'border-amber-200 bg-amber-50' :
-                    'border-green-200 bg-green-50'
-                  }`} data-testid="docs-status-card">
-                    <div className="flex items-center gap-2 mb-1">
-                      <FileText className={`h-4 w-4 ${
-                        pendingDocs > 0 ? 'text-red-600' :
-                        unverifiedDocs > 0 ? 'text-amber-600' : 'text-green-600'
-                      }`} />
-                      <span className="text-xs font-semibold text-text-primary">Documents</span>
+                  {/* Compliance Breakdown Card */}
+                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50" data-testid="compliance-breakdown-card">
+                    <div className="flex items-center gap-2 mb-2">
+                      <ClipboardList className="h-4 w-4 text-slate-600" />
+                      <span className="text-xs font-semibold text-text-primary">Breakdown</span>
                     </div>
-                    <p className={`text-sm font-medium ${
-                      pendingDocs > 0 ? 'text-red-700' :
-                      unverifiedDocs > 0 ? 'text-amber-700' : 'text-green-700'
-                    }`}>
-                      {pendingDocs > 0 ? `${pendingDocs} Missing` :
-                       unverifiedDocs > 0 ? `${unverifiedDocs} Unverified` : 'All Verified'}
-                    </p>
-                  </div>
-                  
-                  {/* Progress */}
-                  <div className={`p-3 rounded-xl border ${
-                    (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 100 ? 'border-green-200 bg-green-50' :
-                    (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'border-amber-200 bg-amber-50' :
-                    'border-red-200 bg-red-50'
-                  }`} data-testid="progress-status-card">
-                    <div className="flex items-center gap-2 mb-1">
-                      <CheckCircle className={`h-4 w-4 ${
-                        (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 100 ? 'text-green-600' :
-                        (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'text-amber-600' : 'text-red-600'
-                      }`} />
-                      <span className="text-xs font-semibold text-text-primary">Progress</span>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                      {Object.entries(categoryStats)
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .slice(0, 4) // Show top 4 categories
+                        .map(([cat, stats]) => {
+                          const displayName = categoryDisplayNames[cat] || cat.replace(/^\d+_/, '').replace(/_/g, ' ');
+                          const isComplete = stats.complete === stats.total;
+                          return (
+                            <div key={cat} className="flex items-center justify-between">
+                              <span className="text-xs text-text-muted truncate">{displayName}</span>
+                              <span className={`text-xs font-medium ${isComplete ? 'text-green-600' : 'text-amber-600'}`}>
+                                {stats.complete}/{stats.total}
+                              </span>
+                            </div>
+                          );
+                        })}
                     </div>
-                    <p className={`text-sm font-medium ${
-                      (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 100 ? 'text-green-700' :
-                      (complianceRequirements?.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'text-amber-700' : 'text-red-700'
-                    }`}>
-                      {complianceRequirements?.statuses?.overall_compliance?.percentage || 0}% Complete
-                    </p>
                   </div>
                 </div>
               </div>
             );
           })()}
 
-          {/* Contact Info Row */}
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 pt-4 border-t border-[#E4E8EB]">
-            <div className="flex items-center gap-3">
-              <Mail className="h-5 w-5 text-text-muted" />
-              <span className="text-sm text-text-primary">{employee.email}</span>
+          {/* Status Strip - Replaces contact row */}
+          <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-[#E4E8EB]" data-testid="status-strip">
+            {/* Employee ID */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
+              <User className="h-4 w-4 text-slate-500" />
+              <span className="text-sm font-medium text-slate-700">{employee.employee_id || employee.id?.slice(0, 8)}</span>
             </div>
-            {employee.phone && (
-              <div className="flex items-center gap-3">
-                <Phone className="h-5 w-5 text-text-muted" />
-                <span className="text-sm text-text-primary">{employee.phone}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-3">
-              <ClipboardList className="h-5 w-5 text-text-muted" />
-              <span className="text-sm text-text-primary">{employee.onboarding_status || 'New'}</span>
-            </div>
-            {employee.start_date && (
-              <div className="flex items-center gap-3">
-                <Calendar className="h-5 w-5 text-text-muted" />
-                <span className="text-sm text-text-primary">Started: {employee.start_date}</span>
-              </div>
-            )}
+            
+            {/* Missing Items */}
+            {(() => {
+              const reqs = complianceRequirements?.requirements || [];
+              const missing = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
+              if (missing > 0) {
+                return (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-red-100 rounded-lg">
+                    <XCircle className="h-4 w-4 text-red-600" />
+                    <span className="text-sm font-medium text-red-700">{missing} Missing</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
+            {/* Pending Review */}
+            {(() => {
+              const reqs = complianceRequirements?.requirements || [];
+              const pending = reqs.filter(r => r.has_evidence && !r.verified).length;
+              if (pending > 0) {
+                return (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-100 rounded-lg">
+                    <Clock className="h-4 w-4 text-amber-600" />
+                    <span className="text-sm font-medium text-amber-700">{pending} Pending Review</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
+            {/* Key Expiry - Show most critical */}
+            {(() => {
+              const dbsSummary = complianceRequirements?.dbs_summary || {};
+              const rtwSummary = complianceRequirements?.rtw_summary || {};
+              
+              // Check RTW expiry first (more critical)
+              if (rtwSummary.expiry_date) {
+                const days = rtwSummary.days_until_expiry;
+                if (days !== undefined && days <= 30) {
+                  return (
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
+                      days <= 0 ? 'bg-red-100' : 'bg-amber-100'
+                    }`}>
+                      <Calendar className={`h-4 w-4 ${days <= 0 ? 'text-red-600' : 'text-amber-600'}`} />
+                      <span className={`text-sm font-medium ${days <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
+                        RTW {days <= 0 ? 'Expired' : `Expires ${days}d`}
+                      </span>
+                    </div>
+                  );
+                }
+              }
+              
+              // Check DBS expiry
+              if (dbsSummary.next_dbs_review_due) {
+                const days = Math.ceil((new Date(dbsSummary.next_dbs_review_due) - new Date()) / (1000 * 60 * 60 * 24));
+                if (days <= 30) {
+                  return (
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
+                      days <= 0 ? 'bg-red-100' : 'bg-amber-100'
+                    }`}>
+                      <Calendar className={`h-4 w-4 ${days <= 0 ? 'text-red-600' : 'text-amber-600'}`} />
+                      <span className={`text-sm font-medium ${days <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
+                        DBS {days <= 0 ? 'Overdue' : `Review ${days}d`}
+                      </span>
+                    </div>
+                  );
+                }
+              }
+              
+              return null;
+            })()}
+            
+            {/* All Clear badge if no issues */}
+            {(() => {
+              const reqs = complianceRequirements?.requirements || [];
+              const missing = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
+              const pending = reqs.filter(r => r.has_evidence && !r.verified).length;
+              
+              if (missing === 0 && pending === 0) {
+                return (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 rounded-lg">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <span className="text-sm font-medium text-green-700">All Verified</span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
 
           {!isAuditor() && (

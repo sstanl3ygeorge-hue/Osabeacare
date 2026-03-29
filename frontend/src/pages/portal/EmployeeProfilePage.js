@@ -21,7 +21,7 @@ import {
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
-  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FilePdf,
+  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer,
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
@@ -1691,6 +1691,45 @@ export default function EmployeeProfilePage() {
       fetchData(); // Refresh all data including compliance requirements
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to verify form');
+    }
+  };
+
+  // Generate PDF from form submission (Template-Backed Forms Architecture)
+  const handleGenerateFormPDF = async (submissionId, formType) => {
+    setIsGenerating(true);
+    try {
+      const response = await axios.post(
+        `${API}/form-submissions/${submissionId}/generate-pdf`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.data.file_url) {
+        // Open the generated PDF in a new tab
+        window.open(response.data.file_url, '_blank');
+        toast.success('PDF generated successfully');
+      }
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast.error(error.response?.data?.detail || 'Failed to generate PDF');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Download existing PDF export or generate new one
+  const handleDownloadFormPDF = async (submissionId) => {
+    try {
+      const response = await axios.get(
+        `${API}/form-submissions/${submissionId}/download-pdf`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.data.file_url) {
+        window.open(response.data.file_url, '_blank');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to download PDF');
     }
   };
 
@@ -3818,6 +3857,24 @@ export default function EmployeeProfilePage() {
                                       <Edit className="h-3 w-3 mr-1" />
                                       Edit
                                     </Button>
+                                    {/* Generate PDF - Only for Staff Health Questionnaire for now */}
+                                    {req.id === 'staff_health_questionnaire' && req.form_submission?.id && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => handleGenerateFormPDF(req.form_submission.id, req.id)}
+                                        disabled={isGenerating}
+                                        className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                                        data-testid={`generate-pdf-form-${req.id}`}
+                                      >
+                                        {isGenerating ? (
+                                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                        ) : (
+                                          <FileDown className="h-3 w-3 mr-1" />
+                                        )}
+                                        Generate PDF
+                                      </Button>
+                                    )}
                                   </>
                                 )}
                                 

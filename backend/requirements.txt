@@ -129,3 +129,6 @@ zipp==3.23.0
 pdfminer.six==20251230
 pdfplumber==0.11.9
 pypdfium2==5.6.0
+PyPDF2==3.0.1
+pypdfium2==5.6.0
+reportlab==4.4.10

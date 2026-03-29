@@ -3311,6 +3311,110 @@ class FormSubmissionResponse(BaseModel):
     notes: Optional[str] = None
 
 
+# ============================================================================
+# PDF TEMPLATE MODELS - Template-Backed Forms Architecture
+# ============================================================================
+
+class PDFTemplateCreate(BaseModel):
+    """Create a new PDF template for a form type"""
+    form_type: str  # e.g., 'staff_health_questionnaire'
+    name: str  # e.g., 'Osabea Staff Health Questionnaire v1.0'
+    version: str = "1.0"
+    mapping_config: Optional[Dict[str, Any]] = None  # Field mapping configuration
+
+class PDFTemplateResponse(BaseModel):
+    """Response model for PDF templates"""
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    form_type: str
+    name: str
+    version: str
+    file_url: Optional[str] = None
+    storage_path: Optional[str] = None
+    is_active: bool = False
+    mapping_config: Optional[Dict[str, Any]] = None
+    created_by: str
+    created_by_name: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+class PDFExportResponse(BaseModel):
+    """Response model for generated PDF exports"""
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    submission_id: str
+    template_id: Optional[str] = None
+    employee_id: str
+    employee_name: str
+    form_type: str
+    file_url: str
+    storage_path: str
+    created_at: str
+    created_by: str
+
+
+# ============================================================================
+# STAFF HEALTH QUESTIONNAIRE - PDF Field Mapping Configuration
+# ============================================================================
+
+STAFF_HEALTH_PDF_MAPPING = {
+    "form_type": "staff_health_questionnaire",
+    "template_name": "Staff Health Questionnaire",
+    "company_branding": {
+        "name": "Osabea Healthcare Solutions Ltd",
+        "logo_text": "O",
+        "header_color": "#2E7D32",
+        "confidentiality_notice": "CONFIDENTIAL - For Occupational Health Use Only"
+    },
+    "sections": [
+        {
+            "id": "personal_info",
+            "title": "Personal Information",
+            "fields": [
+                {"field_id": "full_name", "label": "Full Name", "type": "text"},
+                {"field_id": "date_of_birth", "label": "Date of Birth", "type": "date"},
+                {"field_id": "contact_number", "label": "Contact Number", "type": "text"},
+                {"field_id": "gp_name", "label": "GP Name", "type": "text"},
+                {"field_id": "gp_address", "label": "GP Address", "type": "text"},
+                {"field_id": "gp_contact_number", "label": "GP Contact Number", "type": "text"},
+                {"field_id": "nhs_number", "label": "NHS Number", "type": "text"},
+                {"field_id": "flu_vaccination_date", "label": "Date of last Flu vaccination", "type": "date"},
+                {"field_id": "covid_vaccination_dates", "label": "Dates of Covid-19 vaccinations", "type": "text"}
+            ]
+        },
+        {
+            "id": "health_questions",
+            "title": "Health Questions",
+            "fields": [
+                {"field_id": "significant_illness", "label": "Significant illness (Asthma, Diabetes, Heart Disease, Other)", "type": "yes_no", "details_field": "significant_illness_details"},
+                {"field_id": "ongoing_gp_treatment", "label": "Regularly seeing GP for ongoing health condition", "type": "yes_no", "details_field": "ongoing_gp_treatment_details"},
+                {"field_id": "specialist_waiting_list", "label": "On waiting list to see specialist / seen one in past 5 years", "type": "yes_no", "details_field": "specialist_waiting_list_details"},
+                {"field_id": "hospital_admissions_last_5_years", "label": "Hospital admissions in last 5 years", "type": "yes_no", "details_field": "hospital_admissions_last_5_years_details"},
+                {"field_id": "work_related_condition", "label": "Illness/impairment caused or worsened by work", "type": "yes_no", "details_field": "work_related_condition_details"},
+                {"field_id": "medical_problems_affecting_work", "label": "Medical problems affecting normal working role", "type": "yes_no", "details_field": "medical_problems_affecting_work_details"},
+                {"field_id": "needs_adjustments", "label": "Need adjustments/assistance for normal duties", "type": "yes_no", "details_field": "needs_adjustments_details"},
+                {"field_id": "taking_medication", "label": "Regularly taking prescription medication", "type": "yes_no", "details_field": "taking_medication_details"},
+                {"field_id": "other_health_concerns", "label": "Other health matters not covered above", "type": "text"}
+            ]
+        },
+        {
+            "id": "declaration",
+            "title": "Declaration",
+            "fields": [
+                {"field_id": "declaration_confirmed", "label": "Declaration confirmed", "type": "checkbox"},
+                {"field_id": "signature_name", "label": "Signature", "type": "text"},
+                {"field_id": "signature_date", "label": "Date", "type": "date"}
+            ]
+        }
+    ]
+}
+
+# Global mapping registry for all form types
+PDF_FIELD_MAPPINGS = {
+    "staff_health_questionnaire": STAFF_HEALTH_PDF_MAPPING
+}
+
+
 # Policy Models
 class PolicyCreate(BaseModel):
     title: str
@@ -9458,6 +9562,533 @@ async def delete_form_submission(submission_id: str, user: dict = Depends(requir
     })
     
     return {"success": True, "message": "Form submission deleted"}
+
+
+# ============================================================================
+# PDF TEMPLATE MANAGEMENT & GENERATION - Template-Backed Forms Architecture
+# ============================================================================
+
+async def generate_staff_health_pdf(submission_data: dict, employee_data: dict, template_config: dict = None) -> bytes:
+    """
+    Generate a completed Staff Health Questionnaire PDF from structured form data.
+    Uses reportlab to create a professional PDF matching the official template layout.
+    
+    Args:
+        submission_data: The structured form data from form_submissions
+        employee_data: Employee profile data for additional context
+        template_config: Optional custom template configuration
+    
+    Returns:
+        bytes: The generated PDF content
+    """
+    buffer = io.BytesIO()
+    
+    # Use the mapping config or default
+    mapping = template_config or STAFF_HEALTH_PDF_MAPPING
+    branding = mapping.get("company_branding", {})
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    
+    # Custom styles matching Osabea branding
+    section_header_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontSize=12,
+        textColor=colors.white,
+        alignment=TA_LEFT,
+        spaceBefore=12,
+        spaceAfter=6
+    )
+    
+    label_style = ParagraphStyle(
+        'FieldLabel',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#333333'),
+        fontName='Helvetica-Bold'
+    )
+    
+    value_style = ParagraphStyle(
+        'FieldValue',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#000000')
+    )
+    
+    question_style = ParagraphStyle(
+        'Question',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#333333'),
+        leftIndent=10
+    )
+    
+    # Build story (content elements)
+    story = []
+    
+    # Header with green background
+    green_color = colors.HexColor(branding.get("header_color", "#2E7D32"))
+    
+    # Company header table
+    header_data = [[
+        Paragraph(f"<b>{branding.get('logo_text', 'O')}</b>", 
+                  ParagraphStyle('Logo', fontSize=24, textColor=colors.white, alignment=TA_CENTER)),
+        Paragraph(f"<b>{branding.get('name', 'Osabea Healthcare Solutions Ltd')}</b><br/><font size='10'>Staff Health Questionnaire</font>", 
+                  ParagraphStyle('HeaderText', fontSize=14, textColor=colors.white, alignment=TA_LEFT))
+    ]]
+    
+    header_table = Table(header_data, colWidths=[25*mm, 145*mm])
+    header_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), green_color),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 3*mm))
+    
+    # Confidentiality notice
+    confidentiality = branding.get("confidentiality_notice", "CONFIDENTIAL - For Occupational Health Use Only")
+    story.append(Paragraph(f"<i>{confidentiality}</i>", 
+                          ParagraphStyle('Confidential', fontSize=8, textColor=colors.HexColor('#666666'), alignment=TA_CENTER)))
+    story.append(Spacer(1, 5*mm))
+    
+    # Helper function to format field value
+    def format_value(value, field_type="text"):
+        if value is None or value == "":
+            return "-"
+        if field_type == "date" and value:
+            try:
+                # Parse ISO date and format nicely
+                if 'T' in str(value):
+                    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                    return dt.strftime('%d/%m/%Y')
+                return value
+            except:
+                return value
+        if field_type == "checkbox":
+            return "Yes" if value else "No"
+        return str(value)
+    
+    # Process each section
+    for section in mapping.get("sections", []):
+        # Section header with green background
+        section_data = [[Paragraph(f"<b>{section['title']}</b>", section_header_style)]]
+        section_table = Table(section_data, colWidths=[170*mm])
+        section_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), green_color),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        story.append(section_table)
+        story.append(Spacer(1, 2*mm))
+        
+        # Build field rows
+        if section['id'] == 'health_questions':
+            # Health questions in a special format
+            for field in section.get('fields', []):
+                field_id = field['field_id']
+                field_type = field.get('type', 'text')
+                label = field['label']
+                value = submission_data.get(field_id, '')
+                
+                if field_type == 'yes_no':
+                    answer = format_value(value)
+                    details_field = field.get('details_field')
+                    details = submission_data.get(details_field, '') if details_field and value == 'Yes' else ''
+                    
+                    q_data = [[
+                        Paragraph(f"{label}", question_style),
+                        Paragraph(f"<b>{answer}</b>", value_style)
+                    ]]
+                    q_table = Table(q_data, colWidths=[140*mm, 30*mm])
+                    q_table.setStyle(TableStyle([
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E0E0E0')),
+                    ]))
+                    story.append(q_table)
+                    
+                    if details:
+                        details_data = [[Paragraph(f"<i>Details: {details}</i>", 
+                                                   ParagraphStyle('Details', fontSize=9, textColor=colors.HexColor('#555555'), leftIndent=20))]]
+                        details_table = Table(details_data, colWidths=[170*mm])
+                        details_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F5F5F5')),
+                            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                            ('TOPPADDING', (0, 0), (-1, -1), 3),
+                            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                        ]))
+                        story.append(details_table)
+                else:
+                    # Free text field
+                    value_formatted = format_value(value, field_type)
+                    q_data = [[
+                        Paragraph(f"{label}", question_style),
+                        Paragraph(f"{value_formatted}", value_style)
+                    ]]
+                    q_table = Table(q_data, colWidths=[140*mm, 30*mm])
+                    q_table.setStyle(TableStyle([
+                        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                        ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E0E0E0')),
+                    ]))
+                    story.append(q_table)
+        else:
+            # Regular fields in a 2-column layout
+            field_rows = []
+            for field in section.get('fields', []):
+                field_id = field['field_id']
+                field_type = field.get('type', 'text')
+                label = field['label']
+                value = submission_data.get(field_id, '')
+                value_formatted = format_value(value, field_type)
+                
+                field_rows.append([
+                    Paragraph(f"<b>{label}:</b>", label_style),
+                    Paragraph(value_formatted, value_style)
+                ])
+            
+            if field_rows:
+                field_table = Table(field_rows, colWidths=[60*mm, 110*mm])
+                field_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+                    ('TOPPADDING', (0, 0), (-1, -1), 4),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E0E0E0')),
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#F8F8F8')),
+                ]))
+                story.append(field_table)
+        
+        story.append(Spacer(1, 4*mm))
+    
+    # Footer with submission info
+    story.append(Spacer(1, 5*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#E0E0E0')))
+    story.append(Spacer(1, 3*mm))
+    
+    submitted_at = submission_data.get('_submitted_at', '')
+    if submitted_at:
+        try:
+            dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+            submitted_at = dt.strftime('%d/%m/%Y at %H:%M')
+        except:
+            pass
+    
+    footer_text = f"Generated from Osabea Compliance Portal | Form submitted: {submitted_at} | Employee: {employee_data.get('first_name', '')} {employee_data.get('last_name', '')} ({employee_data.get('employee_code', '')})"
+    story.append(Paragraph(footer_text, ParagraphStyle('Footer', fontSize=8, textColor=colors.HexColor('#888888'), alignment=TA_CENTER)))
+    
+    # Build PDF
+    doc.build(story)
+    
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+@api_router.get("/pdf-templates")
+async def list_pdf_templates(
+    form_type: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """List all PDF templates, optionally filtered by form type"""
+    query = {}
+    if form_type:
+        query["form_type"] = form_type
+    
+    templates = await db.form_pdf_templates.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return templates
+
+
+@api_router.get("/pdf-templates/{template_id}")
+async def get_pdf_template(template_id: str, user: dict = Depends(require_admin)):
+    """Get a specific PDF template"""
+    template = await db.form_pdf_templates.find_one({"id": template_id}, {"_id": 0})
+    if not template:
+        raise HTTPException(status_code=404, detail="PDF template not found")
+    return template
+
+
+@api_router.post("/pdf-templates", response_model=PDFTemplateResponse)
+async def create_pdf_template(
+    form_type: str = Form(...),
+    name: str = Form(...),
+    version: str = Form("1.0"),
+    file: UploadFile = File(...),
+    user: dict = Depends(require_admin)
+):
+    """
+    Upload a new PDF template for a form type.
+    The template PDF is stored in object storage and can be used for reference.
+    """
+    template_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Validate form type exists
+    if form_type not in FORM_BASED_REQUIREMENTS and form_type not in PDF_FIELD_MAPPINGS:
+        raise HTTPException(status_code=400, detail=f"Unknown form type: {form_type}")
+    
+    # Upload file to storage
+    content = await file.read()
+    storage_path = f"{APP_NAME}/pdf-templates/{form_type}/{template_id}_{file.filename}"
+    content_type = file.content_type or "application/pdf"
+    
+    result = put_object(storage_path, content, content_type)
+    
+    # Get default mapping for this form type
+    default_mapping = PDF_FIELD_MAPPINGS.get(form_type, {})
+    
+    template_doc = {
+        "id": template_id,
+        "form_type": form_type,
+        "name": name,
+        "version": version,
+        "file_url": result.get("path"),
+        "storage_path": storage_path,
+        "original_filename": file.filename,
+        "is_active": False,  # Not active by default
+        "mapping_config": default_mapping,
+        "created_by": user['user_id'],
+        "created_by_name": user.get('name', 'Unknown'),
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.form_pdf_templates.insert_one(template_doc)
+    
+    await log_audit_action(user['user_id'], "pdf_template_created", "pdf_template", template_id, {
+        "form_type": form_type,
+        "name": name,
+        "version": version
+    })
+    
+    return {**template_doc, "_id": None}
+
+
+@api_router.put("/pdf-templates/{template_id}/activate")
+async def activate_pdf_template(template_id: str, user: dict = Depends(require_admin)):
+    """Mark a PDF template as active (deactivates other templates for the same form type)"""
+    template = await db.form_pdf_templates.find_one({"id": template_id})
+    if not template:
+        raise HTTPException(status_code=404, detail="PDF template not found")
+    
+    form_type = template["form_type"]
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Deactivate all other templates for this form type
+    await db.form_pdf_templates.update_many(
+        {"form_type": form_type, "id": {"$ne": template_id}},
+        {"$set": {"is_active": False, "updated_at": now}}
+    )
+    
+    # Activate this template
+    await db.form_pdf_templates.update_one(
+        {"id": template_id},
+        {"$set": {"is_active": True, "updated_at": now}}
+    )
+    
+    await log_audit_action(user['user_id'], "pdf_template_activated", "pdf_template", template_id, {
+        "form_type": form_type
+    })
+    
+    return {"success": True, "message": f"Template activated for {form_type}"}
+
+
+@api_router.delete("/pdf-templates/{template_id}")
+async def delete_pdf_template(template_id: str, user: dict = Depends(require_admin)):
+    """Delete a PDF template"""
+    template = await db.form_pdf_templates.find_one({"id": template_id})
+    if not template:
+        raise HTTPException(status_code=404, detail="PDF template not found")
+    
+    await db.form_pdf_templates.delete_one({"id": template_id})
+    
+    await log_audit_action(user['user_id'], "pdf_template_deleted", "pdf_template", template_id, {
+        "form_type": template["form_type"],
+        "name": template["name"]
+    })
+    
+    return {"success": True, "message": "Template deleted"}
+
+
+@api_router.post("/form-submissions/{submission_id}/generate-pdf")
+async def generate_form_pdf(submission_id: str, user: dict = Depends(require_admin)):
+    """
+    Generate a completed PDF from a form submission.
+    
+    This endpoint:
+    1. Loads structured data from form_submissions (source of truth)
+    2. Loads active template config for the form type (if any)
+    3. Renders a completed PDF using the template layout + structured data
+    4. Saves the generated PDF as an export artifact
+    5. Returns the PDF file URL
+    
+    The PDF is purely an export artifact - form_submissions remains the source of truth.
+    """
+    # Get the form submission
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    form_type = submission.get("form_type")
+    employee_id = submission.get("employee_id")
+    
+    # Get employee data
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get active template for this form type (if any)
+    active_template = await db.form_pdf_templates.find_one({
+        "form_type": form_type,
+        "is_active": True
+    })
+    
+    # Get mapping config - use template's config if available, otherwise use default
+    mapping_config = None
+    if active_template and active_template.get("mapping_config"):
+        mapping_config = active_template["mapping_config"]
+    elif form_type in PDF_FIELD_MAPPINGS:
+        mapping_config = PDF_FIELD_MAPPINGS[form_type]
+    
+    if not mapping_config:
+        raise HTTPException(status_code=400, detail=f"No PDF mapping configured for form type: {form_type}")
+    
+    # Prepare submission data with metadata
+    submission_data = submission.get("data", {})
+    submission_data["_submitted_at"] = submission.get("submitted_at", "")
+    submission_data["_verified"] = submission.get("verified", False)
+    submission_data["_status"] = submission.get("status", "submitted")
+    
+    # Generate PDF based on form type
+    if form_type == "staff_health_questionnaire":
+        pdf_bytes = await generate_staff_health_pdf(submission_data, employee, mapping_config)
+    else:
+        # Generic PDF generation for other form types (can be extended)
+        raise HTTPException(status_code=400, detail=f"PDF generation not yet implemented for form type: {form_type}")
+    
+    # Save generated PDF to storage
+    export_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"{form_type}_{employee_name}_{timestamp}.pdf"
+    storage_path = f"{APP_NAME}/pdf-exports/{form_type}/{export_id}_{filename}"
+    
+    result = put_object(storage_path, pdf_bytes, "application/pdf")
+    
+    # Save export record
+    export_doc = {
+        "id": export_id,
+        "submission_id": submission_id,
+        "template_id": active_template["id"] if active_template else None,
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+        "employee_code": employee.get("employee_code", ""),
+        "form_type": form_type,
+        "file_url": result.get("path"),
+        "storage_path": storage_path,
+        "filename": filename,
+        "created_at": now,
+        "created_by": user['user_id'],
+        "created_by_name": user.get('name', 'Unknown')
+    }
+    
+    await db.form_pdf_exports.insert_one(export_doc)
+    
+    await log_audit_action(user['user_id'], "pdf_generated", "form_submission", submission_id, {
+        "export_id": export_id,
+        "form_type": form_type,
+        "employee_id": employee_id
+    })
+    
+    return {
+        "success": True,
+        "export_id": export_id,
+        "file_url": result.get("path"),
+        "filename": filename,
+        "message": "PDF generated successfully"
+    }
+
+
+@api_router.get("/form-submissions/{submission_id}/download-pdf")
+async def download_form_pdf(submission_id: str, user: dict = Depends(get_current_user)):
+    """
+    Download the most recent PDF export for a form submission.
+    If no export exists, generates one on-the-fly.
+    """
+    # Check for existing export
+    export = await db.form_pdf_exports.find_one(
+        {"submission_id": submission_id},
+        sort=[("created_at", -1)]
+    )
+    
+    if export and export.get("file_url"):
+        # Return existing export URL
+        return {
+            "file_url": export["file_url"],
+            "filename": export.get("filename", "form.pdf"),
+            "created_at": export.get("created_at"),
+            "cached": True
+        }
+    
+    # No export exists - generate one (requires admin)
+    # For non-admins, return error
+    if not user.get('role') == 'admin':
+        raise HTTPException(status_code=404, detail="No PDF export found. Admin can generate one.")
+    
+    # Generate PDF on-the-fly
+    result = await generate_form_pdf(submission_id, user)
+    return {
+        **result,
+        "cached": False
+    }
+
+
+@api_router.get("/pdf-exports")
+async def list_pdf_exports(
+    form_type: Optional[str] = None,
+    employee_id: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """List PDF exports with optional filters"""
+    query = {}
+    if form_type:
+        query["form_type"] = form_type
+    if employee_id:
+        query["employee_id"] = employee_id
+    
+    exports = await db.form_pdf_exports.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    return exports
+
+
+@api_router.get("/pdf-field-mappings/{form_type}")
+async def get_pdf_field_mapping(form_type: str, user: dict = Depends(require_admin)):
+    """Get the field mapping configuration for a form type"""
+    if form_type not in PDF_FIELD_MAPPINGS:
+        raise HTTPException(status_code=404, detail=f"No field mapping found for form type: {form_type}")
+    
+    return PDF_FIELD_MAPPINGS[form_type]
 
 
 # ==================== POLICY ROUTES ====================

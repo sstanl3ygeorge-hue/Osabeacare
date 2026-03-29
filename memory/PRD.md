@@ -4,6 +4,96 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Template-Backed Forms Architecture - COMPLETE**
+
+### Architecture Overview
+PDF templates are export/render artifacts only. `form_submissions` remains the source of truth.
+
+### Data Model Changes
+
+#### 1. `form_pdf_templates` Collection
+```javascript
+{
+  id: "uuid",
+  form_type: "staff_health_questionnaire",
+  name: "Osabea Staff Health Questionnaire v1.0",
+  version: "1.0",
+  file_url: "storage/path/to/template.pdf",
+  storage_path: "osabea-care/pdf-templates/staff_health_questionnaire/...",
+  is_active: true,
+  mapping_config: { /* field mapping */ },
+  created_by: "user_id",
+  created_by_name: "Admin Name",
+  created_at: "ISO timestamp"
+}
+```
+
+#### 2. `form_pdf_exports` Collection
+```javascript
+{
+  id: "uuid",
+  submission_id: "form_submission_id",
+  template_id: "optional_template_id",
+  employee_id: "uuid",
+  employee_name: "Name",
+  form_type: "staff_health_questionnaire",
+  file_url: "storage/path/to/generated.pdf",
+  filename: "staff_health_questionnaire_Name_timestamp.pdf",
+  created_at: "ISO timestamp",
+  created_by: "user_id"
+}
+```
+
+### Field Mapping Configuration
+```javascript
+PDF_FIELD_MAPPINGS = {
+  "staff_health_questionnaire": {
+    "form_type": "staff_health_questionnaire",
+    "company_branding": {
+      "name": "Osabea Healthcare Solutions Ltd",
+      "header_color": "#2E7D32",
+      "confidentiality_notice": "CONFIDENTIAL - For Occupational Health Use Only"
+    },
+    "sections": [
+      { "id": "personal_info", "title": "Personal Information", "fields": [...] },
+      { "id": "health_questions", "title": "Health Questions", "fields": [...] },
+      { "id": "declaration", "title": "Declaration", "fields": [...] }
+    ]
+  }
+}
+```
+
+### API Endpoints Added
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/pdf-templates` | GET | List all templates |
+| `/api/pdf-templates` | POST | Upload new template |
+| `/api/pdf-templates/{id}/activate` | PUT | Set template as active |
+| `/api/pdf-templates/{id}` | DELETE | Delete template |
+| `/api/pdf-field-mappings/{form_type}` | GET | Get field mapping config |
+| `/api/form-submissions/{id}/generate-pdf` | POST | Generate PDF from submission |
+| `/api/form-submissions/{id}/download-pdf` | GET | Download/get PDF URL |
+| `/api/pdf-exports` | GET | List PDF exports |
+
+### Storage Paths
+- Templates: `{APP_NAME}/pdf-templates/{form_type}/{template_id}_{filename}.pdf`
+- Exports: `{APP_NAME}/pdf-exports/{form_type}/{export_id}_{form_type}_{employee}_{timestamp}.pdf`
+
+### UI Changes
+- **"Generate PDF" button** added for Staff Health Questionnaire
+- Button appears after form submission in What's Needed tab
+- Opens generated PDF in new browser tab
+- Shows success toast on completion
+
+### Test Results
+- Backend: 100% (18/18 tests passed)
+- Frontend: 100% (all UI tests passed)
+- Report: `/app/test_reports/iteration_63.json`
+
+---
+
+## Previous Update (2025-12-29)
 **Staff Health Questionnaire Form - COMPLETE**
 
 ### What Was Built

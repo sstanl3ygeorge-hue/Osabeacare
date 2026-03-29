@@ -1650,8 +1650,9 @@ export default function EmployeeProfilePage() {
       setFormModalOpen(false);
       setFormTemplate(null);
       setFormData({});
-      fetchComplianceRequirements();
+      fetchData(); // Refresh all data including compliance requirements
     } catch (error) {
+      console.error('Form submission error:', error);
       toast.error(error.response?.data?.detail || 'Failed to submit form');
     } finally {
       setIsSubmittingForm(false);
@@ -1677,7 +1678,7 @@ export default function EmployeeProfilePage() {
       });
       toast.success('Form verified successfully');
       setViewFormOpen(false);
-      fetchComplianceRequirements();
+      fetchData(); // Refresh all data including compliance requirements
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to verify form');
     }

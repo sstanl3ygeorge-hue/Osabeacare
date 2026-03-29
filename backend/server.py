@@ -251,6 +251,8 @@ MANDATORY_ITEMS = {
         # (Defined in "training" section below)
         
         # ======== CATEGORY 3: COMPETENCY & HEALTH (For Supervised Start) ========
+        # ARCHIVED: Legacy health screening - replaced by Staff Health Questionnaire
+        # Historical submissions preserved, hidden from new employee files
         {"id": "health_screening", "name": "Health Screening Questionnaire", 
          "category": "3_Competency_Health", "type": "form-generated",
          "template_name": "Health Screening Questionnaire",
@@ -258,7 +260,9 @@ MANDATORY_ITEMS = {
          "priority": "supervised_start", "priority_order": 20,
          "status_group": "competency_health",
          "description": "Health questionnaire and medical attachments",
-         "work_ready_hint": "Required for supervised start"},
+         "work_ready_hint": "Required for supervised start",
+         "archived": True,  # Hidden from UI - replaced by staff_health_questionnaire
+         "archived_reason": "Replaced by Staff Health Questionnaire (Osabea official form)"},
         
         {"id": "staff_health_questionnaire", "name": "Staff Health Questionnaire", 
          "category": "3_Competency_Health", "type": "form-generated",
@@ -2791,12 +2795,12 @@ FORM_BASED_REQUIREMENTS = {
                 "fields": [
                     {"id": "full_name", "label": "Full Name", "type": "text", "required": True, "auto_fill": "full_name"},
                     {"id": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True, "auto_fill": "date_of_birth"},
-                    {"id": "contact_number", "label": "Contact Number", "type": "text", "required": True, "auto_fill": "phone"},
+                    {"id": "contact_number", "label": "Contact Number", "type": "text", "required": True, "auto_fill": "contact_number"},
                     {"id": "gp_name", "label": "GP Name", "type": "text"},
                     {"id": "gp_address", "label": "GP Address", "type": "textarea"},
                     {"id": "gp_contact_number", "label": "GP Contact Number", "type": "text"},
                     {"id": "nhs_number", "label": "NHS Number", "type": "text"},
-                    {"id": "flu_vaccination_date", "label": "Date of last Flu vaccination", "type": "date"},
+                    {"id": "flu_vaccination_date", "label": "Date of last Flu vaccination", "type": "date", "auto_fill": "flu_vaccination_date"},
                     {"id": "covid_vaccination_dates", "label": "Dates of Covid-19 vaccinations", "type": "text", "placeholder": "e.g., 01/03/2021, 15/06/2021, 20/12/2021"},
                 ]
             },
@@ -4630,6 +4634,13 @@ APPLICATION_FORM_FIELD_MAPPING = {
     "criminal_offence_declaration": "criminal_offence_declared",
     "professional_misconduct_declaration": "professional_misconduct_declared",
     "health_issue_declaration": "health_issue_declared",
+    
+    # Health-related fields (for Staff Health Questionnaire prefill)
+    "health_issues_disability": "health_issues_disability",  # Maps to medical_problems_affecting_work
+    "influenza_vaccine_status": "influenza_vaccine_status",
+    "influenza_vaccine_date": "flu_vaccination_date",
+    "flu_vaccination_date": "flu_vaccination_date",
+    "professional_registration_number": "professional_registration_number",
 }
 
 # Fields that can be extracted from application forms
@@ -8242,6 +8253,10 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         work_ready_hint = item.get('work_ready_hint', '')
         is_optional = item.get('optional', False)
         
+        # ======== Skip archived requirements (hide from UI, preserve historical data) ========
+        if item.get('archived', False):
+            continue
+        
         # ======== Handle Conditional Requirements ========
         # Check if this item has a conditional dependency (e.g., HMRC form depends on P45 absence)
         conditional_on = item.get('conditional_on')
@@ -8457,6 +8472,11 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             }, {"_id": 0})
             
             if form_submission:
+                # Check for PDF export
+                pdf_export = await db.form_pdf_exports.find_one({
+                    "submission_id": form_submission['id']
+                }, {"_id": 0}, sort=[("created_at", -1)])
+                
                 req['form_submission'] = {
                     "id": form_submission['id'],
                     "status": form_submission['status'],
@@ -8465,7 +8485,12 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     "verified": form_submission.get('verified', False),
                     "verified_by_name": form_submission.get('verified_by_name'),
                     "verified_at": form_submission.get('verified_at'),
-                    "data": form_submission.get('data', {})
+                    "data": form_submission.get('data', {}),
+                    # PDF export info for button state
+                    "has_pdf_export": pdf_export is not None,
+                    "pdf_export_url": pdf_export.get('file_url') if pdf_export else None,
+                    "pdf_export_filename": pdf_export.get('filename') if pdf_export else None,
+                    "pdf_export_created_at": pdf_export.get('created_at') if pdf_export else None
                 }
                 
                 # Form submission counts as evidence
@@ -9299,6 +9324,7 @@ async def get_form_auto_fill_data(
         "postcode": employee.get("postcode"),
         "country": employee.get("country"),
         "phone": employee.get("phone"),
+        "contact_number": employee.get("phone"),  # For Staff Health Questionnaire
         "phone_primary": employee.get("phone"),
         "phone_secondary": employee.get("phone_secondary"),
         "email": employee.get("email"),
@@ -9306,6 +9332,8 @@ async def get_form_auto_fill_data(
         "start_date": employee.get("start_date"),
         "employment_start_date": employee.get("start_date"),
         "marital_status": employee.get("marital_status"),
+        # Health-related fields from extraction
+        "flu_vaccination_date": employee.get("flu_vaccination_date"),
         # Next of kin / Emergency contact
         "next_of_kin_name": employee.get("next_of_kin_name") or employee.get("emergency_contact_name"),
         "emergency_name": employee.get("next_of_kin_name") or employee.get("emergency_contact_name"),
@@ -9325,6 +9353,8 @@ async def get_form_auto_fill_data(
         "candidate_name": build_full_name(),
         "employee_name": build_full_name(),
         "position_applied": employee.get("role"),
+        # Today's date for signature fields
+        "today": datetime.now(timezone.utc).strftime('%Y-%m-%d'),
     }
     
     # Build the auto-fill response based on what the form requests

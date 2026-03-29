@@ -1,0 +1,101 @@
+{
+  "summary": "Audit-readiness fixes verified: Health Screening archived (not visible), Staff Health Questionnaire visible with all PDF buttons working correctly based on state.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ Health Screening Questionnaire is NOT visible in What's Needed tab (archived flag working)",
+    "✅ Staff Health Questionnaire IS visible in What's Needed tab",
+    "✅ Only ONE health form shows in Supervised Start / Health section",
+    "✅ Staff Health Questionnaire submission saves correctly (verified via API)",
+    "✅ View Form button opens structured data modal with all fields",
+    "✅ Edit button opens form with pre-filled data from employee profile",
+    "✅ View PDF button visible when PDF export exists",
+    "✅ Download PDF button visible when PDF export exists",
+    "✅ Regenerate button (refresh icon) available when PDF exists",
+    "✅ Generate PDF endpoint works (POST /api/form-submissions/{id}/generate-pdf)",
+    "✅ Download PDF endpoint works (GET /api/form-submissions/{id}/download-pdf)",
+    "✅ Mark as Approved (verify) endpoint works (POST /api/form-submissions/{id}/verify)",
+    "✅ compliance-requirements endpoint filters out archived items correctly"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/backend/tests/test_audit_readiness.py",
+    "/app/test_reports/pytest/audit_readiness_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "MANDATORY_ITEMS health_screening has archived:true flag at line ~264 in server.py",
+    "compliance-requirements endpoint skips archived items at line ~8256-8258",
+    "PDF button state logic correctly implemented at line ~3861-3930 in EmployeeProfilePage.js",
+    "FORM_BASED_REQUIREMENTS excludes health_screening (commented as archived) at line ~32-41",
+    "form_submission response includes has_pdf_export and pdf_export_url for button state"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_audit_readiness.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all UI tests passed)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123"
+  },
+
+  "test_employee": {
+    "id": "d88335f6-1b18-435a-8086-28af4a583f77",
+    "name": "Olakunle Alonge",
+    "code": "OCS-0001"
+  },
+
+  "button_states_verified": {
+    "when_pdf_exists": {
+      "view_pdf": "visible",
+      "download_pdf": "visible",
+      "regenerate": "visible",
+      "generate_pdf": "hidden"
+    },
+    "when_no_pdf": {
+      "generate_pdf": "visible",
+      "view_pdf": "hidden",
+      "download_pdf": "hidden"
+    }
+  },
+
+  "archived_items_verified": {
+    "health_screening": {
+      "archived": true,
+      "archived_reason": "Replaced by Staff Health Questionnaire (Osabea official form)",
+      "visible_in_ui": false
+    },
+    "staff_health_questionnaire": {
+      "archived": false,
+      "visible_in_ui": true
+    }
+  },
+
+  "seed_data_creation": "None - used existing form submission for employee d88335f6-1b18-435a-8086-28af4a583f77",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Audit-readiness fixes verified. health_screening is archived and hidden from UI. staff_health_questionnaire is the only health form visible. PDF button states work correctly based on has_pdf_export flag. View Form shows structured data modal, Edit opens pre-filled form. All endpoints working: generate-pdf, download-pdf, verify."
+}

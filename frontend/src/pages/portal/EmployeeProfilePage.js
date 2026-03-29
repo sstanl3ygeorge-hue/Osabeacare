@@ -30,7 +30,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Form-based requirements (open modal instead of file upload)
 const FORM_BASED_REQUIREMENTS = [
-  'health_screening', 
+  // 'health_screening' - ARCHIVED: replaced by staff_health_questionnaire
   'induction', 
   'interview_record', 
   'recruitment_checklist', 
@@ -3857,23 +3857,76 @@ export default function EmployeeProfilePage() {
                                       <Edit className="h-3 w-3 mr-1" />
                                       Edit
                                     </Button>
-                                    {/* Generate PDF - Only for Staff Health Questionnaire for now */}
+                                    
+                                    {/* PDF Actions for Staff Health Questionnaire */}
                                     {req.id === 'staff_health_questionnaire' && req.form_submission?.id && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleGenerateFormPDF(req.form_submission.id, req.id)}
-                                        disabled={isGenerating}
-                                        className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
-                                        data-testid={`generate-pdf-form-${req.id}`}
-                                      >
-                                        {isGenerating ? (
-                                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                        ) : (
-                                          <FileDown className="h-3 w-3 mr-1" />
+                                      <>
+                                        {/* Show Generate PDF if no export exists */}
+                                        {!req.form_submission.has_pdf_export && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() => handleGenerateFormPDF(req.form_submission.id, req.id)}
+                                            disabled={isGenerating}
+                                            className="text-xs h-7 text-primary border-primary hover:bg-primary/10 rounded-lg"
+                                            data-testid={`generate-pdf-form-${req.id}`}
+                                          >
+                                            {isGenerating ? (
+                                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                            ) : (
+                                              <FileDown className="h-3 w-3 mr-1" />
+                                            )}
+                                            Generate PDF
+                                          </Button>
                                         )}
-                                        Generate PDF
-                                      </Button>
+                                        
+                                        {/* Show View PDF if export exists */}
+                                        {req.form_submission.has_pdf_export && req.form_submission.pdf_export_url && (
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => window.open(req.form_submission.pdf_export_url, '_blank')}
+                                              className="text-xs h-7 rounded-lg"
+                                              data-testid={`view-pdf-${req.id}`}
+                                            >
+                                              <Eye className="h-3 w-3 mr-1" />
+                                              View PDF
+                                            </Button>
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() => {
+                                                const link = document.createElement('a');
+                                                link.href = req.form_submission.pdf_export_url;
+                                                link.download = req.form_submission.pdf_export_filename || 'form.pdf';
+                                                link.click();
+                                              }}
+                                              className="text-xs h-7 rounded-lg"
+                                              data-testid={`download-pdf-${req.id}`}
+                                            >
+                                              <Download className="h-3 w-3 mr-1" />
+                                              Download PDF
+                                            </Button>
+                                            {/* Regenerate PDF option */}
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              onClick={() => handleGenerateFormPDF(req.form_submission.id, req.id)}
+                                              disabled={isGenerating}
+                                              className="text-xs h-7 text-text-muted hover:text-primary rounded-lg"
+                                              title="Regenerate PDF with latest data"
+                                              data-testid={`regenerate-pdf-form-${req.id}`}
+                                            >
+                                              {isGenerating ? (
+                                                <Loader2 className="h-3 w-3 animate-spin" />
+                                              ) : (
+                                                <RefreshCw className="h-3 w-3" />
+                                              )}
+                                            </Button>
+                                          </>
+                                        )}
+                                      </>
                                     )}
                                   </>
                                 )}

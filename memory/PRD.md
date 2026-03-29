@@ -4,48 +4,60 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
-**Training Tab View Certificate Bug Fix - COMPLETE**
+**Compliance Centre Certificate Modal Fix - COMPLETE**
 
 ### Problem
-Clicking "View" on a training certificate in the Training tab crashed the page with:
-`ReferenceError: handleViewCertificate is not defined`
-
-Same certificates worked correctly from the What's Needed tab.
+1. Compliance Centre certificate upload modal forced users to enter expiry dates for certificates that don't need one (like Company Registration Certificate)
+2. Modal layout had overflow issues - content could extend beyond modal bounds
 
 ### Root Cause
-Training tab used **undefined function names**:
-- Used: `handleViewCertificate` and `handleDownloadCertificate`
-- Correct: `handleViewTrainingCertificate` and `handleDownloadTrainingCertificate`
+1. Frontend always showed expiry date as mandatory (`Expiry Date *`)
+2. Backend endpoint required `expiry_date` as mandatory parameter
+3. Pydantic response model `InsuranceDocResponse` didn't include `requires_expiry_date` and `valid_until_replaced` fields
+4. Modal CSS lacked proper max-width and responsive handling
 
-### Fix Applied
-1. Changed `handleViewCertificate` → `handleViewTrainingCertificate` at line 4781
-2. Changed `handleDownloadCertificate` → `handleDownloadTrainingCertificate` at line 4794
-3. Added null checks to both handlers for graceful error handling
+### Fixes Applied
 
-### Training Tab Actions Audit (All Verified)
-| Action | Handler | Status |
-|--------|---------|--------|
-| View Evidence | `handleViewTrainingCertificate` | ✅ Working |
-| Download | `handleDownloadTrainingCertificate` | ✅ Working |
-| Edit/Correct | `setTrainingCorrectionDialogOpen` | ✅ Working |
-| View History | API call + `setTrainingHistoryDialogOpen` | ✅ Working |
-| Delete Record | `setDeletingTrainingRecord` + dialog | ✅ Working |
-| Verify | `handleVerifyTraining` | ✅ Working |
-| Unverify | `handleUnverifyTraining` | ✅ Working |
+#### 1. Backend Changes
+- Added `requires_expiry_date` and `valid_until_replaced` to `InsuranceDocResponse` Pydantic model
+- Made `expiry_date` parameter optional in `/api/compliance/insurance/{id}/upload` endpoint
+- Added validation to enforce expiry_date only when `requires_expiry_date=true`
+- GET endpoint now returns proper values for these fields
 
-### Verification
-- Training tab now opens certificate modal correctly
-- Both Training tab and What's Needed tab use same underlying certificate data
-- No JavaScript errors in console
+#### 2. Frontend Changes
+- Upload modal conditionally shows "Expiry Date *" vs "Expiry Date (optional)" based on `requires_expiry_date`
+- Shows "Valid until replaced — no expiry date required" helper text when `valid_until_replaced=true`
+- Amendment modal also shows conditional expiry label
+- Fixed modal CSS: `max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto`
+- Responsive button layouts with `flex-col-reverse sm:flex-row`
+- Added truncate classes for long filenames
+
+### Certificate Expiry Configuration
+| Certificate | Requires Expiry | Valid Until Replaced |
+|-------------|-----------------|---------------------|
+| Public Liability Insurance | ✅ Yes | ❌ No |
+| Employer's Liability Insurance | ✅ Yes | ❌ No |
+| Professional Indemnity Insurance | ✅ Yes | ❌ No |
+| CQC Registration Certificate | ❌ No | ✅ Yes |
+| ICO Registration Certificate | ✅ Yes | ❌ No |
+| Company Registration Certificate | ❌ No | ✅ Yes |
+| Fire Safety Certificate | ✅ Yes | ❌ No |
+| EICR | ✅ Yes | ❌ No |
+| Gas Safety Certificate | ✅ Yes | ❌ No |
+| PAT Testing Certificate | ✅ Yes | ❌ No |
+| Legionella Risk Assessment | ❌ No | ❌ No |
+| Food Hygiene Rating | ❌ No | ✅ Yes |
+| Asbestos Survey Report | ❌ No | ✅ Yes |
 
 ### Test Results
-- Frontend: 100% (all actions verified)
-- Test report: `/app/test_reports/iteration_59.json`
+- Backend: 100% (9/9 tests passed)
+- Frontend: 100% (all UI tests passed)
+- Test report: `/app/test_reports/iteration_60.json`
 
 ---
 
 ## Previous Update (2025-12-29)
-**Extraction Apply Flow Fix - COMPLETE**
+**Training Tab View Certificate Bug Fix - COMPLETE**
 
 ### Root Cause
 1. **Pydantic validation error**: `working_time_opt_out` field stored as string ("I wish to opt out") but model expected `bool`

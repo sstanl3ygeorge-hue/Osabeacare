@@ -1759,11 +1759,21 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
     
     SAFETY ENGINE: Computes blocking status for work readiness.
     
-    Derives RTW summary from existing evidence:
-    - Right to Work Documents (requirement_id: right_to_work_documents)
-    - Right to Work Verification (requirement_id: right_to_work_check)
+    DATA SOURCES (SIMPLIFIED):
+    ═══════════════════════════════════════════════════════════════════
+    RIGHT TO WORK DOCUMENTS (requirement_id: right_to_work_documents)
+      → evidence_type (passport, BRP, etc.)
+      → documents_on_file flag
+      → documents_verified flag
+      → Used for: Evidence presence only
+      → NOT used for: Expiry display, countdown, alerts
     
-    Both must be present and verified for full RTW approval.
+    RIGHT TO WORK VERIFICATION (requirement_id: right_to_work_check)
+      → permission_type (permanent / time_limited)
+      → expiry_date (for card display and countdown)
+      → checked_at, checked_by
+      → Used for: ALL status, expiry, countdown, blocking logic
+    ═══════════════════════════════════════════════════════════════════
     
     STATUS BANDS:
     - current: >60 days until expiry OR permanent
@@ -1772,81 +1782,66 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
     - expired: expiry date passed
     
     BLOCKING RULES:
-    - Missing RTW evidence = BLOCKING
+    - Missing RTW verification = BLOCKING
     - Expired RTW = BLOCKING
     - Not verified = BLOCKING (legal requirement)
     - Expiring soon = WARNING only
-    
-    PERMISSION TYPES:
-    - permanent: British/Irish citizen, settled status
-    - time_limited: Visa, BRP with expiry, pre-settled status
     """
     summary = {
-        # Core identification
+        # Core status (derived from VERIFICATION)
         "rtw_status": "missing",
-        "rtw_status_label": "Missing",
+        "rtw_status_label": "Missing Verification",
         "rtw_status_color": "red",
-        
-        # Status band (current/due_soon/urgent/expired)
         "status_band": "expired",
         
-        # Evidence details
-        "evidence_type": None,  # passport, brp, share_code, settled_status, etc.
-        "permission_type": None,  # permanent or time_limited
-        
-        # Dates from RIGHT TO WORK DOCUMENTS (legal expiry)
-        "expiry_date": None,  # Legal permission expiry from rtw_documents
-        "days_remaining": None,  # Days until legal expiry
-        
-        # Dates from RIGHT TO WORK VERIFICATION (check tracking)
-        "checked_at": None,  # When the RTW check was performed
-        "checked_by": None,  # Who performed the check
-        "next_follow_up_due": None,  # Next follow-up check date
-        "verified_date": None,  # When documents were verified
-        
-        # Evidence flags
+        # From RTW DOCUMENTS (evidence only)
+        "evidence_type": None,  # passport, brp, share_code, etc.
         "documents_on_file": False,
         "documents_verified": False,
+        
+        # From RTW VERIFICATION (source of truth for monitoring)
+        "permission_type": None,  # permanent or time_limited
+        "expiry_date": None,  # From verification - drives card display
+        "days_remaining": None,  # Computed from verification expiry
+        "checked_at": None,
+        "checked_by": None,
+        "verified_date": None,
         "verification_on_file": False,
         "verification_verified": False,
         
         # Safety engine outputs
-        "is_blocking": True,  # Default to blocking if missing
-        "blocking_reason": "Right to Work evidence missing",
+        "is_blocking": True,
+        "blocking_reason": "Right to Work verification missing",
         "needs_attention": True,
         
         # Audit trail
-        "source_date_used": None,
-        "rule_applied": "no_evidence"
+        "source": "verification",  # Always verification for expiry
+        "rule_applied": "no_verification"
     }
     
-    # Get Right to Work Documents (passport, visa, BRP, share code proof)
+    # Get Right to Work Documents (evidence only - NOT used for expiry)
     rtw_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": "right_to_work_documents",
         "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
-        "$or": [
-            {"active": {"$exists": False}},
-            {"active": True}
-        ],
+        "$or": [{"active": {"$exists": False}}, {"active": True}],
         "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}).to_list(10)
     
-    # Get Right to Work Verification Check
+    # Get Right to Work Verification (SOURCE OF TRUTH for status/expiry)
     rtw_check = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": "right_to_work_check",
         "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
-        "$or": [
-            {"active": {"$exists": False}},
-            {"active": True}
-        ],
+        "$or": [{"active": {"$exists": False}}, {"active": True}],
         "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}).to_list(5)
     
     now = datetime.now(timezone.utc)
     
-    # Process RTW Documents
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 1: Process RTW Documents (evidence presence ONLY)
+    # ═══════════════════════════════════════════════════════════════════
     if rtw_docs:
         summary["documents_on_file"] = True
         summary["documents_verified"] = all(
@@ -1854,12 +1849,11 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             for d in rtw_docs
         )
         
-        # Determine evidence type and permission type from metadata
+        # Detect evidence type from document metadata
         for doc in rtw_docs:
-            doc_type = doc.get("document_type") or doc.get("evidence_type", "").lower()
+            doc_type = (doc.get("document_type") or doc.get("evidence_type") or "").lower()
             notes = (doc.get("notes") or "").lower()
             
-            # Detect evidence type
             if "passport" in doc_type or "passport" in notes:
                 summary["evidence_type"] = "passport"
             elif "brp" in doc_type or "biometric" in notes:
@@ -1870,54 +1864,10 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
                 summary["evidence_type"] = "settled_status"
             elif not summary["evidence_type"]:
                 summary["evidence_type"] = "document"
-            
-            # Detect permission type from notes/metadata
-            if "permanent" in notes or "british" in notes or "irish" in notes or "settled status" in notes:
-                summary["permission_type"] = "permanent"
-            elif "visa" in notes or "limited" in notes or "pre-settled" in notes or "brp" in doc_type:
-                summary["permission_type"] = "time_limited"
-        
-        # Check for expiry - get the earliest expiry date
-        for doc in rtw_docs:
-            if doc.get("expiry_date"):
-                doc_expiry = doc.get("expiry_date")
-                if summary["expiry_date"] is None or doc_expiry < summary["expiry_date"]:
-                    summary["expiry_date"] = doc_expiry
-                    summary["source_date_used"] = doc_expiry
-        
-        # Calculate expiry status and days remaining
-        if summary["expiry_date"]:
-            summary["permission_type"] = summary["permission_type"] or "time_limited"
-            
-            try:
-                expiry_str = summary["expiry_date"]
-                # Handle different date formats
-                if 'T' in expiry_str:
-                    # ISO format with time
-                    expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                else:
-                    # Date only format (YYYY-MM-DD)
-                    expiry_dt = datetime.strptime(expiry_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                
-                days_until = (expiry_dt - now).days
-                summary["days_remaining"] = days_until
-                summary["days_until_expiry"] = days_until  # Legacy
-            except Exception as e:
-                # Log parsing errors for debugging
-                print(f"RTW expiry date parsing error: {e} for date: {summary['expiry_date']}")
-                pass
-        else:
-            # No expiry = likely permanent
-            if not summary["permission_type"]:
-                summary["permission_type"] = "permanent"
-        
-        # Get verified date from most recent verified document
-        for doc in rtw_docs:
-            if doc.get("verified") and doc.get("uploaded_at"):
-                summary["verified_date"] = doc.get("uploaded_at")
-                break
     
-    # Process RTW Verification (source for checked_at, checked_by, next_follow_up_due)
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 2: Process RTW Verification (SOURCE OF TRUTH for all status)
+    # ═══════════════════════════════════════════════════════════════════
     if rtw_check:
         summary["verification_on_file"] = True
         summary["verification_verified"] = all(
@@ -1925,36 +1875,58 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             for c in rtw_check
         )
         
-        # Extract check details from verification records
+        # Get the most recent verification record
         for check in rtw_check:
-            # Get checked_at from uploaded_at or verified_at
+            # Extract checked_at
             if not summary["checked_at"]:
                 summary["checked_at"] = check.get("uploaded_at") or check.get("verified_at")
             
-            # Get checked_by from verified_by or uploaded_by
+            # Extract checked_by
             if not summary["checked_by"]:
                 summary["checked_by"] = check.get("verified_by") or check.get("uploaded_by")
             
-            # Get next_follow_up_due from verification's expiry_date
-            # This is the FOLLOW-UP check date, separate from legal permission expiry
-            if check.get("expiry_date") and not summary.get("verification_follow_up_date"):
-                summary["verification_follow_up_date"] = check.get("expiry_date")
+            # Extract verified_date
+            if not summary["verified_date"] and check.get("verified"):
+                summary["verified_date"] = check.get("uploaded_at") or check.get("verified_at")
+            
+            # ═══════════════════════════════════════════════════════════
+            # EXPIRY DATE: From VERIFICATION record ONLY
+            # This drives the card display and countdown
+            # ═══════════════════════════════════════════════════════════
+            if check.get("expiry_date") and not summary["expiry_date"]:
+                summary["expiry_date"] = check.get("expiry_date")
+            
+            # Detect permission type from verification notes/metadata
+            notes = (check.get("notes") or "").lower()
+            doc_type = (check.get("document_type") or "").lower()
+            
+            if not summary["permission_type"]:
+                if "permanent" in notes or "british" in notes or "irish" in notes or "settled status" in notes or "indefinite" in notes:
+                    summary["permission_type"] = "permanent"
+                elif "visa" in notes or "limited" in notes or "pre-settled" in notes or "brp" in doc_type or "time" in notes:
+                    summary["permission_type"] = "time_limited"
         
-        # Use verification date if we don't have one yet
-        if not summary["verified_date"]:
-            for check in rtw_check:
-                if check.get("verified") and check.get("uploaded_at"):
-                    summary["verified_date"] = check.get("uploaded_at")
-                    break
+        # If expiry_date exists, it's time-limited; if not, check if explicitly permanent
+        if summary["expiry_date"]:
+            summary["permission_type"] = "time_limited"
+        elif not summary["permission_type"]:
+            # No expiry date and no explicit type = permanent
+            summary["permission_type"] = "permanent"
     
-    # Set next_follow_up_due based on data available:
-    # - If legal expiry exists, use that (must follow up before expiry)
-    # - Else if verification has follow-up date, use that
-    # - Else no follow-up needed (permanent)
+    # ═══════════════════════════════════════════════════════════════════
+    # STEP 3: Calculate days_remaining from VERIFICATION expiry
+    # ═══════════════════════════════════════════════════════════════════
     if summary["expiry_date"]:
-        summary["next_follow_up_due"] = summary["expiry_date"]
-    elif summary.get("verification_follow_up_date"):
-        summary["next_follow_up_due"] = summary["verification_follow_up_date"]
+        try:
+            expiry_str = summary["expiry_date"]
+            if 'T' in expiry_str:
+                expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+            else:
+                expiry_dt = datetime.strptime(expiry_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            
+            summary["days_remaining"] = (expiry_dt - now).days
+        except Exception as e:
+            print(f"RTW verification expiry date parsing error: {e} for date: {summary['expiry_date']}")
     
     # Determine status and blocking state
     if summary["documents_on_file"] and summary["verification_on_file"]:

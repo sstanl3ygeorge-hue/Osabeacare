@@ -13,12 +13,13 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/portal/dashboard', icon: LayoutDashboard },
   { name: 'Employees', href: '/portal/employees', icon: Users },
+  { name: 'Service Users', href: '/portal/service-users', icon: Heart },
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
@@ -48,7 +49,8 @@ export default function PortalLayout() {
     <nav className="flex-1 px-4 py-6 space-y-1">
       {filteredNavigation.map((item) => {
         const isActive = location.pathname === item.href || 
-          (item.href === '/portal/employees' && location.pathname.startsWith('/portal/employees/'));
+          (item.href === '/portal/employees' && location.pathname.startsWith('/portal/employees/')) ||
+          (item.href === '/portal/service-users' && location.pathname.startsWith('/portal/service-users/'));
         return (
           <Link
             key={item.name}

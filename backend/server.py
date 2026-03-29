@@ -13842,26 +13842,134 @@ async def update_org_policy(
 # Insurance & Certificates required for care agency compliance (CQC aligned)
 # Structure: Required certificates are mandatory, Conditional depend on service type
 COMPLIANCE_CERTIFICATES = [
-    # REQUIRED - Insurance
-    {"name": "Public Liability Insurance", "type": "public_liability", "category": "insurance", "required": True, "renewal_period_months": 12},
-    {"name": "Employer's Liability Insurance", "type": "employers_liability", "category": "insurance", "required": True, "renewal_period_months": 12},
-    {"name": "Professional Indemnity Insurance", "type": "professional_indemnity", "category": "insurance", "required": True, "renewal_period_months": 12},
+    # REQUIRED - Insurance (All expire annually)
+    {
+        "name": "Public Liability Insurance", 
+        "type": "public_liability", 
+        "category": "insurance", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "Employer's Liability Insurance", 
+        "type": "employers_liability", 
+        "category": "insurance", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "Professional Indemnity Insurance", 
+        "type": "professional_indemnity", 
+        "category": "insurance", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
     
     # REQUIRED - Regulatory Certificates
-    {"name": "CQC Registration Certificate", "type": "cqc_registration", "category": "regulatory", "required": True, "renewal_period_months": 0},  # No renewal - perpetual until canceled
-    {"name": "ICO Registration Certificate", "type": "ico_registration", "category": "regulatory", "required": True, "renewal_period_months": 12},
-    {"name": "Company Registration Certificate", "type": "company_registration", "category": "regulatory", "required": True, "renewal_period_months": 0},
+    {
+        "name": "CQC Registration Certificate", 
+        "type": "cqc_registration", 
+        "category": "regulatory", 
+        "required": True, 
+        "renewal_period_months": 0,
+        "requires_expiry_date": False,  # Valid until replaced/cancelled
+        "valid_until_replaced": True,
+    },
+    {
+        "name": "ICO Registration Certificate", 
+        "type": "ico_registration", 
+        "category": "regulatory", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,  # ICO registration expires annually
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "Company Registration Certificate", 
+        "type": "company_registration", 
+        "category": "regulatory", 
+        "required": True, 
+        "renewal_period_months": 0,
+        "requires_expiry_date": False,  # No expiry - valid until company dissolved
+        "valid_until_replaced": True,
+    },
     
     # REQUIRED - Safety Certificates
-    {"name": "Fire Safety Certificate", "type": "fire_safety", "category": "safety", "required": True, "renewal_period_months": 12},
-    {"name": "Electrical Installation Certificate (EICR)", "type": "electrical_inspection", "category": "safety", "required": True, "renewal_period_months": 60},  # 5 years
-    {"name": "Gas Safety Certificate", "type": "gas_safety", "category": "safety", "required": True, "renewal_period_months": 12},
-    {"name": "PAT Testing Certificate", "type": "pat_testing", "category": "safety", "required": True, "renewal_period_months": 12},
+    {
+        "name": "Fire Safety Certificate", 
+        "type": "fire_safety", 
+        "category": "safety", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "Electrical Installation Certificate (EICR)", 
+        "type": "electrical_inspection", 
+        "category": "safety", 
+        "required": True, 
+        "renewal_period_months": 60,  # 5 years
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "Gas Safety Certificate", 
+        "type": "gas_safety", 
+        "category": "safety", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "PAT Testing Certificate", 
+        "type": "pat_testing", 
+        "category": "safety", 
+        "required": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": True,
+        "valid_until_replaced": False,
+    },
     
     # CONDITIONAL - Based on service type
-    {"name": "Legionella Risk Assessment", "type": "legionella", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 24},
-    {"name": "Food Hygiene Rating Certificate", "type": "food_hygiene", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 12},
-    {"name": "Asbestos Survey Report", "type": "asbestos_survey", "category": "safety", "required": False, "conditional": True, "renewal_period_months": 0},
+    {
+        "name": "Legionella Risk Assessment", 
+        "type": "legionella", 
+        "category": "safety", 
+        "required": False, 
+        "conditional": True, 
+        "renewal_period_months": 24,
+        "requires_expiry_date": False,  # Review-based, not hard expiry
+        "review_interval_months": 24,
+        "valid_until_replaced": False,
+    },
+    {
+        "name": "Food Hygiene Rating Certificate", 
+        "type": "food_hygiene", 
+        "category": "safety", 
+        "required": False, 
+        "conditional": True, 
+        "renewal_period_months": 12,
+        "requires_expiry_date": False,  # Rating doesn't expire
+        "valid_until_replaced": True,
+    },
+    {
+        "name": "Asbestos Survey Report", 
+        "type": "asbestos_survey", 
+        "category": "safety", 
+        "required": False, 
+        "conditional": True, 
+        "renewal_period_months": 0,
+        "requires_expiry_date": False,  # Valid until property changes
+        "valid_until_replaced": True,
+    },
 ]
 
 # Legacy compatibility - keep old list for backward compatibility
@@ -13879,6 +13987,7 @@ async def seed_insurance_docs(user: dict = Depends(require_admin)):
     """Seed insurance and certificate document placeholders (CQC aligned)"""
     now = datetime.now(timezone.utc).isoformat()
     created = 0
+    updated = 0
     
     for cert in COMPLIANCE_CERTIFICATES:
         existing = await db.insurance_docs.find_one({"insurance_type": cert["type"]})
@@ -13891,6 +14000,9 @@ async def seed_insurance_docs(user: dict = Depends(require_admin)):
                 "required": cert.get("required", True),
                 "conditional": cert.get("conditional", False),
                 "renewal_period_months": cert.get("renewal_period_months", 12),
+                "requires_expiry_date": cert.get("requires_expiry_date", True),
+                "valid_until_replaced": cert.get("valid_until_replaced", False),
+                "review_interval_months": cert.get("review_interval_months"),
                 "status": "missing",
                 "file_url": None,
                 "original_filename": None,
@@ -13904,8 +14016,20 @@ async def seed_insurance_docs(user: dict = Depends(require_admin)):
             }
             await db.insurance_docs.insert_one(doc)
             created += 1
+        else:
+            # Update existing doc with new config fields
+            await db.insurance_docs.update_one(
+                {"insurance_type": cert["type"]},
+                {"$set": {
+                    "requires_expiry_date": cert.get("requires_expiry_date", True),
+                    "valid_until_replaced": cert.get("valid_until_replaced", False),
+                    "review_interval_months": cert.get("review_interval_months"),
+                    "updated_at": now
+                }}
+            )
+            updated += 1
     
-    return {"message": f"Created {created} certificate placeholders", "total": len(COMPLIANCE_CERTIFICATES)}
+    return {"message": f"Created {created}, updated {updated} certificate placeholders", "total": len(COMPLIANCE_CERTIFICATES)}
 
 @api_router.get("/compliance/insurance", response_model=List[InsuranceDocResponse])
 async def get_insurance_docs(user: dict = Depends(get_current_user)):

@@ -2555,12 +2555,12 @@ class EmployeeResponse(BaseModel):
     bank_sort_code: Optional[str] = None
     bank_account_number: Optional[str] = None
     bank_account_name: Optional[str] = None
-    # Working declarations from application form
-    working_time_opt_out: Optional[bool] = None
-    dbs_update_service_consent: Optional[bool] = None
-    criminal_offence_declared: Optional[bool] = None
-    professional_misconduct_declared: Optional[bool] = None
-    health_issue_declared: Optional[bool] = None
+    # Working declarations from application form - using Any to handle string or bool
+    working_time_opt_out: Optional[Any] = None
+    dbs_update_service_consent: Optional[Any] = None
+    criminal_offence_declared: Optional[Any] = None
+    professional_misconduct_declared: Optional[Any] = None
+    health_issue_declared: Optional[Any] = None
 
 # Document Type Models
 class DocumentTypeCreate(BaseModel):

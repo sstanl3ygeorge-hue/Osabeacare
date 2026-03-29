@@ -4,6 +4,58 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Service User File Structure - COMPLETE**
+
+### Feature
+Created foundation for service user records (people receiving care) based on CQC-aligned 10-section file model.
+
+### Collections Created
+- `service_users`: Basic profile data (full_name, date_of_birth, nhs_number, address, status)
+- `service_user_documents`: Documents organized by section
+
+### 10 File Sections (CQC-Aligned)
+| # | Section | Purpose |
+|---|---------|---------|
+| 1 | Personal Info & Referral | Basic info, referral details |
+| 2 | Consent & Contracts | Service agreements, consent forms |
+| 3 | Assessments | Needs assessments |
+| 4 | Care Plans | Individual care/support plans |
+| 5 | Risk Assessments | Risk management plans |
+| 6 | Monitoring | Daily logs, charts |
+| 7 | Medication | MAR charts, prescriptions |
+| 8 | Health Visits | GP, hospital, specialist visits |
+| 9 | Reviews | Care reviews, quality checks |
+| 10 | Letters | Correspondence, other docs |
+
+### UI Created
+- **Service Users List Page** (`/portal/service-users`)
+- **Service User Profile Page** (`/portal/service-users/:id`)
+- 11 tabs: Overview + 10 numbered sections
+- Document upload per section using existing FileUploader
+
+### What Was NOT Added (Per Requirements)
+- ❌ No compliance scoring
+- ❌ No safety engines
+- ❌ No complex logic
+- ✅ Simple structure only
+- ✅ Document upload/view/verify
+
+### Reused Systems
+- FileUploader component
+- Document verification
+- Audit logging
+
+### Test Results
+- Backend: 20/20 tests passed
+- Frontend: All UI verified
+- Test report: `/app/test_reports/iteration_57.json`
+
+### Additional Fix
+Fixed pre-existing `/api/employees` 500 error caused by Pydantic validation of `working_time_opt_out` field.
+
+---
+
+## Previous Update (2025-12-29)
 **Application Form Extraction Pipeline Fixed - COMPLETE**
 
 ### Issue

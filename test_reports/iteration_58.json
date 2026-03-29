@@ -1,0 +1,99 @@
+{
+  "summary": "Extraction Apply Fields Fix - All tests PASSED. Backend (9/9) and Frontend verification complete. The fix for Pydantic validation error on working_time_opt_out field and Promise.allSettled for graceful degradation is working correctly.",
+
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+
+  "passed_tests": [
+    "✅ GET /api/employees/{id} works without Pydantic validation errors",
+    "✅ GET /api/employees list works without Pydantic validation errors",
+    "✅ POST /api/employees/{id}/extract-from-application returns extraction with fields",
+    "✅ POST /api/extractions/{id}/apply successfully saves selected fields to profile",
+    "✅ Profile shows updated values after apply (ni_number=TK753130C, city=Chatham, postcode=ME4 5HY)",
+    "✅ Apply supports partial updates - only selected fields are updated",
+    "✅ Failed fields are reported individually, not as generic error",
+    "✅ working_time_opt_out field accepts both string and boolean values (Optional[Any])",
+    "✅ GET /api/employees/{id}/compliance-requirements works correctly",
+    "✅ All 9 fetchData endpoints work correctly (Promise.allSettled graceful degradation)",
+    "✅ Employee profile page loads after apply without 'Failed to load employee data' error",
+    "✅ Frontend displays extracted profile data correctly (NI Number, Address, City, Postcode)"
+  ],
+
+  "failed_tests": [],
+
+  "test_report_links": [
+    "/app/backend/tests/test_extraction_apply.py",
+    "/app/test_reports/pytest/extraction_apply_results.xml"
+  ],
+
+  "action_items": [],
+
+  "critical_code_review_comments": [
+    "EmployeeResponse model correctly uses Optional[Any] for declaration fields (working_time_opt_out, dbs_update_service_consent, etc.) at line 2559",
+    "apply_extraction() has proper error handling with partial success support at line 5199",
+    "fetchData() correctly uses Promise.allSettled for graceful degradation at line 264",
+    "APPLICATION_FORM_FIELD_MAPPING correctly maps extracted fields at line 4367",
+    "Boolean field conversion handles string values like 'I wish to opt out' correctly"
+  ],
+
+  "updated_files": [
+    "/app/backend/tests/test_extraction_apply.py"
+  ],
+
+  "success_rate": {
+    "backend": "100% (9/9 tests passed)",
+    "frontend": "100% (all UI elements verified)"
+  },
+
+  "test_credentials": {
+    "admin_email": "admin@osabea.care",
+    "admin_password": "admin123"
+  },
+
+  "test_employee": {
+    "name": "Olakunle Alonge",
+    "id": "d88335f6-1b18-435a-8086-28af4a583f77",
+    "employee_code": "OCS-0001",
+    "verified_fields": {
+      "ni_number": "TK753130C",
+      "city": "Chatham",
+      "postcode": "ME4 5HY",
+      "address": "148 Castle Road, Chatham, Kent, ME4 5HY, Uk",
+      "next_of_kin_name": "Oluremilekun Alonge"
+    }
+  },
+
+  "fixes_verified": [
+    {
+      "issue": "Pydantic validation error on working_time_opt_out field (string vs bool)",
+      "fix": "Changed EmployeeResponse model to use Optional[Any] for declaration fields",
+      "status": "VERIFIED"
+    },
+    {
+      "issue": "Promise.all failing entire fetchData if one request fails",
+      "fix": "Changed fetchData() from Promise.all to Promise.allSettled for graceful degradation",
+      "status": "VERIFIED"
+    },
+    {
+      "issue": "Apply extraction not supporting partial updates",
+      "fix": "apply_extraction() now validates each field individually and reports failures separately",
+      "status": "VERIFIED"
+    }
+  ],
+
+  "seed_data_creation": "None - used existing test employee Olakunle Alonge",
+
+  "retest_needed": false,
+
+  "should_main_agent_self_test": false,
+
+  "context_for_next_testing_agent": "Extraction and apply functionality fully working. Test employee Olakunle Alonge (d88335f6-1b18-435a-8086-28af4a583f77) has 38 fields extracted and applied from application form. Profile displays NI Number, Address, City, Postcode correctly. The working_time_opt_out field now accepts both string and boolean values via Optional[Any] type."
+}

@@ -5204,6 +5204,9 @@ async def apply_extraction(
     """
     Apply selected extracted fields to employee profile.
     
+    SUPPORTS PARTIAL UPDATES: Only the selected fields are updated.
+    Each field is validated individually, allowing some to succeed even if others fail.
+    
     IMPORTANT: This updates PROFILE DATA only. It does NOT:
     - Mark any compliance requirements as complete
     - Provide evidence for document requirements
@@ -5232,18 +5235,66 @@ async def apply_extraction(
     if not fields_to_apply:
         raise HTTPException(status_code=400, detail="No fields selected to apply")
     
-    # Build update dict from selected fields
+    # Build update dict from selected fields with validation
     update_data = {}
     applied_fields = []
+    failed_fields = []
+    unsupported_fields = []
     
     for field_data in extraction['fields']:
         field_name = field_data['field_name']
-        if field_name in fields_to_apply and field_data.get('extracted_value'):
-            value = field_data['extracted_value']
+        if field_name not in fields_to_apply:
+            continue
             
-            # Convert boolean strings
-            if field_name in ['has_driving_licence', 'has_own_vehicle', 'driver_status']:
-                value = value.lower() in ['true', 'yes', '1'] if isinstance(value, str) else bool(value)
+        extracted_value = field_data.get('extracted_value')
+        if not extracted_value:
+            continue
+        
+        # Check if field is in supported list
+        if field_name not in EXTRACTABLE_PROFILE_FIELDS:
+            unsupported_fields.append({
+                "field": field_name,
+                "reason": "Field not in supported profile schema"
+            })
+            continue
+        
+        try:
+            value = extracted_value
+            
+            # Type conversion for boolean fields
+            boolean_fields = ['has_driving_licence', 'has_own_vehicle', 'driver_status',
+                             'working_time_opt_out', 'dbs_update_service_consent',
+                             'criminal_offence_declared', 'professional_misconduct_declared',
+                             'health_issue_declared']
+            
+            if field_name in boolean_fields:
+                if isinstance(value, str):
+                    # Convert common string values to boolean
+                    value_lower = value.lower().strip()
+                    if value_lower in ['true', 'yes', '1', 'y']:
+                        value = True
+                    elif value_lower in ['false', 'no', '0', 'n']:
+                        value = False
+                    else:
+                        # Keep as string for human-readable declarations
+                        value = value
+                else:
+                    value = bool(value)
+            
+            # Validate specific field formats
+            if field_name == 'ni_number' and value:
+                # Clean NI number format
+                clean_ni = value.upper().replace(' ', '').replace('-', '')
+                if len(clean_ni) == 9:
+                    value = clean_ni
+            
+            if field_name == 'postcode' and value:
+                # Normalize postcode format
+                value = value.upper().strip()
+            
+            if field_name == 'email' and value:
+                # Normalize email
+                value = value.lower().strip()
             
             update_data[field_name] = value
             applied_fields.append({
@@ -5251,17 +5302,49 @@ async def apply_extraction(
                 "value": value,
                 "previous": field_data.get('current_value')
             })
+            
+        except Exception as field_error:
+            failed_fields.append({
+                "field": field_name,
+                "reason": str(field_error),
+                "attempted_value": str(extracted_value)[:100]
+            })
     
-    if not update_data:
+    # Proceed with save even if some fields failed (partial success)
+    if not update_data and not applied_fields:
+        if unsupported_fields:
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "message": "No valid fields to apply",
+                    "unsupported_fields": unsupported_fields,
+                    "failed_fields": failed_fields
+                }
+            )
         raise HTTPException(status_code=400, detail="No valid fields to apply")
     
-    # Update employee profile
+    # Update employee profile with partial data
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": update_data}
-    )
+    try:
+        result = await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": update_data}
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Employee not found")
+            
+    except Exception as db_error:
+        logger.error(f"Database update failed: {db_error}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "Failed to save profile updates",
+                "error": str(db_error),
+                "applied_fields_attempted": [f["field"] for f in applied_fields]
+            }
+        )
     
     # Mark extraction as applied
     await db.profile_extractions.update_one(
@@ -5272,6 +5355,8 @@ async def apply_extraction(
             "applied_by": user['user_id'],
             "applied_by_name": user.get('name', user.get('email', 'Unknown')),
             "applied_fields": applied_fields,
+            "failed_fields": failed_fields,
+            "unsupported_fields": unsupported_fields,
             "updated_at": datetime.now(timezone.utc).isoformat()
         }}
     )
@@ -5283,15 +5368,32 @@ async def apply_extraction(
         employee_id,
         {
             "extraction_id": extraction_id,
-            "applied_fields": applied_fields
+            "applied_fields": applied_fields,
+            "failed_fields": failed_fields
         }
     )
     
-    return {
+    response = {
+        "success": True,
         "message": f"Successfully applied {len(applied_fields)} field(s) to profile",
         "applied_fields": applied_fields,
         "compliance_note": "Profile data updated. Compliance evidence requirements remain unchanged."
     }
+    
+    # Add warnings if some fields failed
+    if failed_fields:
+        response["warnings"] = {
+            "failed_fields": failed_fields,
+            "message": f"{len(failed_fields)} field(s) could not be applied"
+        }
+    
+    if unsupported_fields:
+        response["unsupported"] = {
+            "fields": unsupported_fields,
+            "message": f"{len(unsupported_fields)} field(s) not supported in profile schema"
+        }
+    
+    return response
 
 
 @api_router.post("/extractions/{extraction_id}/discard")

@@ -260,34 +260,47 @@ export default function EmployeeProfilePage() {
   const isSuperAdmin = () => user?.role === 'super_admin';
 
   const fetchData = async () => {
-    try {
-      const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes] = await Promise.all([
-        axios.get(`${API}/employees/${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/policy-assignments?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-      
-      setEmployee(empRes.data);
-      setDocuments(docsRes.data);
-      setDocumentTypes(typesRes.data);
-      setPolicies(policiesRes.data);
-      setTraining(trainingRes.data);
-      setAuditLogs(logsRes.data);
-      setGeneratedForms(formsRes.data);
-      setTemplates(templatesRes.data);
-      setComplianceRequirements(compReqRes.data);
-    } catch (error) {
-      console.error('Failed to fetch employee data:', error);
-      toast.error('Failed to load employee data');
-    } finally {
-      setLoading(false);
+    // Use Promise.allSettled to allow partial success
+    const results = await Promise.allSettled([
+      axios.get(`${API}/employees/${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/employee-documents?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/document-types`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/policy-assignments?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/training-records?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } })
+    ]);
+    
+    // Process results - extract data or use defaults
+    const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes] = results;
+    
+    let hasError = false;
+    
+    // Employee data is critical - if it fails, show error
+    if (empRes.status === 'fulfilled') {
+      setEmployee(empRes.value.data);
+    } else {
+      console.error('Failed to fetch employee:', empRes.reason);
+      hasError = true;
     }
+    
+    // Other data can fail gracefully with defaults
+    setDocuments(docsRes.status === 'fulfilled' ? docsRes.value.data : []);
+    setDocumentTypes(typesRes.status === 'fulfilled' ? typesRes.value.data : []);
+    setPolicies(policiesRes.status === 'fulfilled' ? policiesRes.value.data : []);
+    setTraining(trainingRes.status === 'fulfilled' ? trainingRes.value.data : []);
+    setAuditLogs(logsRes.status === 'fulfilled' ? logsRes.value.data : []);
+    setGeneratedForms(formsRes.status === 'fulfilled' ? formsRes.value.data : []);
+    setTemplates(templatesRes.status === 'fulfilled' ? templatesRes.value.data : []);
+    setComplianceRequirements(compReqRes.status === 'fulfilled' ? compReqRes.value.data : {});
+    
+    if (hasError) {
+      toast.error('Failed to load employee data');
+    }
+    
+    setLoading(false);
   };
 
   const fetchCompliance = async () => {
@@ -1442,18 +1455,61 @@ export default function EmployeeProfilePage() {
     
     setIsApplyingExtraction(true);
     try {
-      await axios.post(
+      const response = await axios.post(
         `${API}/extractions/${extractionResult.extraction_id}/apply`,
         { extraction_id: extractionResult.extraction_id, fields_to_apply: selectedFields },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      toast.success(`Applied ${selectedFields.length} field(s) to profile`);
+      const result = response.data;
+      
+      // Show success with details
+      if (result.applied_fields && result.applied_fields.length > 0) {
+        toast.success(`Profile updated: ${result.applied_fields.length} field(s) applied`);
+      }
+      
+      // Show warnings for failed fields
+      if (result.warnings?.failed_fields?.length > 0) {
+        const failedNames = result.warnings.failed_fields.map(f => f.field).join(', ');
+        toast.warning(`Some fields could not be applied: ${failedNames}`);
+      }
+      
+      // Show info for unsupported fields
+      if (result.unsupported?.fields?.length > 0) {
+        const unsupportedNames = result.unsupported.fields.map(f => f.field).join(', ');
+        toast.info(`Unsupported fields skipped: ${unsupportedNames}`);
+      }
+      
       setExtractionDialogOpen(false);
       setExtractionResult(null);
-      fetchData(); // Refresh employee data
+      
+      // Refresh employee data
+      try {
+        await fetchData();
+      } catch (refreshError) {
+        console.error('Error refreshing data after apply:', refreshError);
+        // Don't show error toast - the apply was successful
+      }
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to apply extracted data');
+      const errorDetail = error.response?.data?.detail;
+      
+      if (typeof errorDetail === 'object') {
+        // Structured error response
+        const message = errorDetail.message || 'Failed to apply extracted data';
+        const failedFields = errorDetail.failed_fields || [];
+        const unsupportedFields = errorDetail.unsupported_fields || [];
+        
+        if (failedFields.length > 0) {
+          const failedInfo = failedFields.map(f => `${f.field}: ${f.reason}`).join('\n');
+          toast.error(`${message}\n${failedInfo}`);
+        } else if (unsupportedFields.length > 0) {
+          toast.error(`${message}: ${unsupportedFields.map(f => f.field).join(', ')}`);
+        } else {
+          toast.error(message);
+        }
+      } else {
+        toast.error(errorDetail || 'Failed to apply extracted data');
+      }
     } finally {
       setIsApplyingExtraction(false);
     }

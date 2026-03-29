@@ -2016,10 +2016,11 @@ export default function EmployeeProfilePage() {
 
           {/* Status Strip - Replaces contact row */}
           <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-[#E4E8EB]" data-testid="status-strip">
-            {/* Employee ID */}
+            {/* Employee ID - Always show business-facing code (OCS-XXXX), never internal UUID */}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
               <User className="h-4 w-4 text-slate-500" />
-              <span className="text-sm font-medium text-slate-700">{employee.employee_id || employee.id?.slice(0, 8)}</span>
+              <span className="text-sm text-slate-500">Employee ID:</span>
+              <span className="text-sm font-semibold text-slate-700">{employee.employee_code || 'Not assigned'}</span>
             </div>
             
             {/* Missing Items */}

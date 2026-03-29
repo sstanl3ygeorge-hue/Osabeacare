@@ -1008,13 +1008,21 @@ export default function EmployeeProfilePage() {
   
   // View training certificate
   const handleViewTrainingCertificate = (trainingId, filename) => {
+    if (!trainingId) {
+      toast.error('Training record not found');
+      return;
+    }
     const url = `${API}/training-records/${trainingId}/certificate/file`;
-    setPreviewFile({ url, name: filename || 'Certificate', filename: filename });
+    setPreviewFile({ url, name: filename || 'Certificate', filename: filename || 'Certificate' });
     setPreviewOpen(true);
   };
   
   // Download training certificate
   const handleDownloadTrainingCertificate = async (trainingId, filename) => {
+    if (!trainingId) {
+      toast.error('Training record not found');
+      return;
+    }
     try {
       const response = await axios.get(
         `${API}/training-records/${trainingId}/certificate/download`,
@@ -1032,7 +1040,8 @@ export default function EmployeeProfilePage() {
       URL.revokeObjectURL(url);
       toast.success('Certificate downloaded');
     } catch (error) {
-      toast.error('Failed to download certificate');
+      console.error('Download error:', error);
+      toast.error(error.response?.status === 404 ? 'Certificate file not found' : 'Failed to download certificate');
     }
   };
   
@@ -4769,7 +4778,7 @@ export default function EmployeeProfilePage() {
                                 size="sm" 
                                 variant="ghost"
                                 className="h-8 w-8 p-0 rounded-lg"
-                                onClick={() => handleViewCertificate(record.id)}
+                                onClick={() => handleViewTrainingCertificate(record.id, record.certificate_filename)}
                                 title="View Evidence"
                               >
                                 <Eye className="h-4 w-4" />
@@ -4782,7 +4791,7 @@ export default function EmployeeProfilePage() {
                                 size="sm" 
                                 variant="ghost"
                                 className="h-8 w-8 p-0 rounded-lg"
-                                onClick={() => handleDownloadCertificate(record.id)}
+                                onClick={() => handleDownloadTrainingCertificate(record.id, record.certificate_filename)}
                                 title="Download"
                               >
                                 <Download className="h-4 w-4" />

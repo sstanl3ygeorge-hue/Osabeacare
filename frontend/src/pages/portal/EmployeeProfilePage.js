@@ -1951,12 +1951,12 @@ export default function EmployeeProfilePage() {
                       }`}>
                         {rtwSummary.status_band === 'expired' ? '⚠ Expired: ' : 'Expires: '}
                         {new Date(rtwExpiry).toLocaleDateString()}
-                        {rtwExpiryDays !== undefined && rtwExpiryDays > 0 && rtwExpiryDays <= 60 && (
+                        {rtwExpiryDays !== undefined && rtwExpiryDays !== null && rtwExpiryDays > 0 && (
                           <span className="ml-1">({rtwExpiryDays}d)</span>
                         )}
                       </p>
                     ) : rtwSummary.permission_type === 'permanent' ? (
-                      <p className="text-xs mt-1 text-green-600 font-medium">Permanent</p>
+                      <p className="text-xs mt-1 text-green-600 font-medium">Permanent - No Expiry</p>
                     ) : (
                       <p className="text-xs mt-1 text-text-muted">No expiry set</p>
                     )}

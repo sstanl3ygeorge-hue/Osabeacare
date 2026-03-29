@@ -1794,11 +1794,15 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
         "evidence_type": None,  # passport, brp, share_code, settled_status, etc.
         "permission_type": None,  # permanent or time_limited
         
-        # Dates
-        "verified_date": None,
-        "expiry_date": None,
-        "next_follow_up_due": None,
-        "days_remaining": None,
+        # Dates from RIGHT TO WORK DOCUMENTS (legal expiry)
+        "expiry_date": None,  # Legal permission expiry from rtw_documents
+        "days_remaining": None,  # Days until legal expiry
+        
+        # Dates from RIGHT TO WORK VERIFICATION (check tracking)
+        "checked_at": None,  # When the RTW check was performed
+        "checked_by": None,  # Who performed the check
+        "next_follow_up_due": None,  # Next follow-up check date
+        "verified_date": None,  # When documents were verified
         
         # Evidence flags
         "documents_on_file": False,
@@ -1884,14 +1888,23 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
         # Calculate expiry status and days remaining
         if summary["expiry_date"]:
             summary["permission_type"] = summary["permission_type"] or "time_limited"
-            summary["next_follow_up_due"] = summary["expiry_date"]
             
             try:
-                expiry_dt = datetime.fromisoformat(summary["expiry_date"].replace('Z', '+00:00'))
+                expiry_str = summary["expiry_date"]
+                # Handle different date formats
+                if 'T' in expiry_str:
+                    # ISO format with time
+                    expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                else:
+                    # Date only format (YYYY-MM-DD)
+                    expiry_dt = datetime.strptime(expiry_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                
                 days_until = (expiry_dt - now).days
                 summary["days_remaining"] = days_until
                 summary["days_until_expiry"] = days_until  # Legacy
-            except:
+            except Exception as e:
+                # Log parsing errors for debugging
+                print(f"RTW expiry date parsing error: {e} for date: {summary['expiry_date']}")
                 pass
         else:
             # No expiry = likely permanent
@@ -1904,7 +1917,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
                 summary["verified_date"] = doc.get("uploaded_at")
                 break
     
-    # Process RTW Verification
+    # Process RTW Verification (source for checked_at, checked_by, next_follow_up_due)
     if rtw_check:
         summary["verification_on_file"] = True
         summary["verification_verified"] = all(
@@ -1912,12 +1925,36 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             for c in rtw_check
         )
         
+        # Extract check details from verification records
+        for check in rtw_check:
+            # Get checked_at from uploaded_at or verified_at
+            if not summary["checked_at"]:
+                summary["checked_at"] = check.get("uploaded_at") or check.get("verified_at")
+            
+            # Get checked_by from verified_by or uploaded_by
+            if not summary["checked_by"]:
+                summary["checked_by"] = check.get("verified_by") or check.get("uploaded_by")
+            
+            # Get next_follow_up_due from verification's expiry_date
+            # This is the FOLLOW-UP check date, separate from legal permission expiry
+            if check.get("expiry_date") and not summary.get("verification_follow_up_date"):
+                summary["verification_follow_up_date"] = check.get("expiry_date")
+        
         # Use verification date if we don't have one yet
         if not summary["verified_date"]:
             for check in rtw_check:
                 if check.get("verified") and check.get("uploaded_at"):
                     summary["verified_date"] = check.get("uploaded_at")
                     break
+    
+    # Set next_follow_up_due based on data available:
+    # - If legal expiry exists, use that (must follow up before expiry)
+    # - Else if verification has follow-up date, use that
+    # - Else no follow-up needed (permanent)
+    if summary["expiry_date"]:
+        summary["next_follow_up_due"] = summary["expiry_date"]
+    elif summary.get("verification_follow_up_date"):
+        summary["next_follow_up_due"] = summary["verification_follow_up_date"]
     
     # Determine status and blocking state
     if summary["documents_on_file"] and summary["verification_on_file"]:
@@ -1958,9 +1995,10 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
                     summary["needs_attention"] = True
                     summary["expiry_status"] = "expiring_soon"
                 else:
-                    # Current
+                    # Current (>60 days until expiry)
                     summary["rtw_status"] = "verified"
-                    summary["rtw_status_label"] = "Verified"
+                    # Show time-limited status clearly
+                    summary["rtw_status_label"] = "Verified (Time-Limited)"
                     summary["rtw_status_color"] = "green"
                     summary["status_band"] = "current"
                     summary["is_blocking"] = False
@@ -1970,13 +2008,14 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             else:
                 # No expiry date - permanent permission
                 summary["rtw_status"] = "verified"
-                summary["rtw_status_label"] = "Verified (No Expiry)"
+                summary["rtw_status_label"] = "Verified (Permanent)"
                 summary["rtw_status_color"] = "green"
                 summary["status_band"] = "current"
                 summary["is_blocking"] = False
                 summary["blocking_reason"] = None
                 summary["needs_attention"] = False
-                summary["expiry_status"] = "no_expiry"
+                summary["expiry_status"] = "permanent"
+                summary["permission_type"] = "permanent"  # Ensure permission_type is set
         else:
             # Not verified - BLOCKING (legal requirement)
             summary["rtw_status"] = "pending_verification"

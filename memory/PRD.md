@@ -4,6 +4,73 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Extraction Apply Flow Fix - COMPLETE**
+
+### Root Cause
+1. **Pydantic validation error**: `working_time_opt_out` field stored as string ("I wish to opt out") but model expected `bool`
+2. **Promise.all failure**: fetchData() used Promise.all - if ANY of 9 requests failed, entire page showed error
+
+### Fixes Applied
+
+#### 1. EmployeeResponse Model Update
+Changed declaration fields to `Optional[Any]` to accept both string and boolean:
+```python
+working_time_opt_out: Optional[Any] = None
+dbs_update_service_consent: Optional[Any] = None
+criminal_offence_declared: Optional[Any] = None
+professional_misconduct_declared: Optional[Any] = None
+health_issue_declared: Optional[Any] = None
+```
+
+#### 2. Partial Update Support
+Apply endpoint now:
+- Validates each field individually
+- Reports failed/unsupported fields separately
+- Allows partial success (some fields save even if others fail)
+
+#### 3. Graceful Fetch Degradation
+Changed `fetchData()` from `Promise.all` to `Promise.allSettled`:
+- Page loads even if non-critical requests fail
+- Only shows error if employee data request fails
+
+### Writable Profile Schema
+| Category | Fields |
+|----------|--------|
+| Personal | first_name, last_name, date_of_birth, ni_number |
+| Contact | phone, phone_secondary, email |
+| Address | address_line_1, address_line_2, city, county, postcode, country |
+| Next of Kin | next_of_kin_name, next_of_kin_relationship, next_of_kin_phone, next_of_kin_address_* |
+| Transport | has_driving_licence, has_own_vehicle |
+| References | reference_1_*, reference_2_* |
+
+### Field Mapping (Extraction → Profile)
+```
+ni_number → ni_number
+phone → phone
+phone_secondary → phone_secondary
+email → email
+next_of_kin_name → next_of_kin_name
+next_of_kin_phone → next_of_kin_phone
+```
+
+### Verified Example
+Employee: Olakunle Alonge
+- **38 fields extracted** from application form
+- **5 fields applied** successfully:
+  - ni_number: TK753130C
+  - city: Chatham
+  - postcode: ME4 5HY
+  - next_of_kin_name: Oluremilekun Alonge
+  - next_of_kin_phone: 07398 792488
+
+### Test Results
+- Backend: 9/9 tests passed (100%)
+- Frontend: All UI verified
+- Test report: `/app/test_reports/iteration_58.json`
+
+---
+
+## Previous Update (2025-12-29)
 **Service User File Structure - COMPLETE**
 
 ### Feature

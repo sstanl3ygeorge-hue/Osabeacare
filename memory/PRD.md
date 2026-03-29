@@ -3,7 +3,72 @@
 ## Company
 **Osabea Healthcare Solutions**
 
-## Latest Update (2025-12-28)
+## Latest Update (2025-12-29)
+**Extract from Application Form - OCR Fallback & Improved UX - COMPLETE**
+
+### Summary
+Enhanced the "Extract from Application Form" feature with PDF-to-image conversion for GPT-5.2, Tesseract OCR fallback, and graceful failure handling that doesn't block users.
+
+### Improvements Made
+
+#### 1. PDF-to-Image Conversion for AI Extraction
+- GPT-5.2 only accepts image formats (PNG, JPEG, GIF, WebP)
+- PDFs are now converted to images (up to 3 pages at 150 DPI) before AI processing
+- Multi-page PDFs are processed sequentially with page markers
+
+#### 2. Tesseract OCR Fallback
+- If AI extraction fails, Tesseract OCR is attempted
+- Supports both PDF (converted to images) and direct images
+- Dependencies: `pytesseract`, `pdf2image`, `poppler-utils`, `tesseract-ocr`
+
+#### 3. Graceful Failure Handling (NO MORE BLOCKING)
+Instead of error toast, failed extractions return:
+```json
+{
+  "extraction_failed": true,
+  "message": "We couldn't automatically extract data from this document. You can still fill the form manually.",
+  "options": [
+    {"action": "fill_manually", "label": "Fill form manually"},
+    {"action": "view_document", "label": "View uploaded document"},
+    {"action": "retry", "label": "Retry extraction"}
+  ]
+}
+```
+
+#### 4. Detailed Extraction Logging
+Logged to `extraction_logs` collection:
+- `file_type` - MIME type of document
+- `file_size_bytes` - File size
+- `ai_attempted` / `ai_success` - AI extraction status
+- `ocr_attempted` / `ocr_success` - OCR fallback status
+- `final_method` - "ai", "ocr", or "failed"
+- `failure_reason` - Detailed error message
+
+#### 5. Frontend Options Modal
+When extraction fails, users see a modal with 3 clear options:
+- **Fill form manually** → Switches to forms tab
+- **View uploaded document** → Opens document in new tab
+- **Retry extraction** → Attempts extraction again
+
+### API Changes
+| Endpoint | Change |
+|----------|--------|
+| `POST /api/employees/{id}/extract-from-application` | Now returns 200 even on failure with `extraction_failed: true` |
+
+### Test Status
+| Test | Status |
+|------|--------|
+| Backend: Extraction returns fields with confidence | ✅ PASS |
+| Backend: Graceful failure with options | ✅ PASS |
+| Backend: Extraction logging | ✅ PASS |
+| Frontend: Review dialog with fields table | ✅ PASS |
+| Frontend: Select All/Clear All/Select Empty Only | ✅ PASS |
+| Frontend: Confidence badges (high/medium/low) | ✅ PASS |
+| Compliance calculations unaffected | ✅ PASS |
+
+---
+
+## Previous Update (2025-12-28)
 **CQC-Aligned Compliance Centre Upgrade - COMPLETE**
 
 ### Summary

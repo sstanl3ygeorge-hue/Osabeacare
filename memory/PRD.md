@@ -4,6 +4,52 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Application Form Extraction Pipeline Fixed - COMPLETE**
+
+### Issue
+Extraction was failing with: "OCR: PDF conversion failed: Unable to get page count. Is poppler installed and in PATH?"
+Also seeing incorrect TEST_ placeholder values being extracted.
+
+### Fixes Applied
+
+#### 1. Poppler Installed
+- Installed `poppler-utils` package for PDF processing
+- Verified: `pdftotext version 22.12.0`
+
+#### 2. pdfplumber as PRIMARY Method
+New extraction order for typed/structured forms:
+1. **pdfplumber** (PRIMARY) - Direct text extraction
+2. **OCR** (fallback) - pdf2image + pytesseract
+3. **AI Vision** (final fallback) - GPT-5.2
+
+#### 3. Validation Layer Added
+Rejects before saving:
+- ❌ `TEST_`, `SAMPLE_`, `EXAMPLE_` placeholders
+- ❌ Invalid NI number formats (must match XX######X)
+- ❌ Malformed emails
+- ❌ Invalid UK postcodes
+- ❌ Unrealistic dates of birth
+
+#### 4. Improved Logging
+Logs show:
+- Extraction method used (pdfplumber/OCR/AI)
+- Characters extracted
+- Fields parsed
+- Rejected fields with reasons
+
+### Verification
+Test employee Olakunle Alonge:
+- **38 fields extracted** with high confidence (>0.8)
+- **Method: pdfplumber** (not OCR or AI)
+- **Valid data**: NI=TK753130C, Email=otunbakunlelonge85@gmail.com
+
+### Test Results
+- Backend: 13/13 tests passed (100%)
+- Test report: `/app/test_reports/iteration_56.json`
+
+---
+
+## Previous Update (2025-12-29)
 **RTW Logic Simplified: Verification as Source of Truth - COMPLETE**
 
 ### Decision

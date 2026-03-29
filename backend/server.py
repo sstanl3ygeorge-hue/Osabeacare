@@ -260,6 +260,16 @@ MANDATORY_ITEMS = {
          "description": "Health questionnaire and medical attachments",
          "work_ready_hint": "Required for supervised start"},
         
+        {"id": "staff_health_questionnaire", "name": "Staff Health Questionnaire", 
+         "category": "3_Competency_Health", "type": "form-generated",
+         "template_name": "Staff Health Questionnaire",
+         "form_requirement_id": "staff_health_questionnaire",
+         "allow_multiple_files": False, "source": "form",
+         "priority": "supervised_start", "priority_order": 20,
+         "status_group": "competency_health",
+         "description": "Official Osabea Health Questionnaire - required for employment",
+         "work_ready_hint": "Required for supervised start"},
+        
         {"id": "induction", "name": "Induction & Competency Assessment", 
          "category": "3_Competency_Health", "type": "form-generated",
          "template_name": "Induction & Competency Assessment",
@@ -2763,7 +2773,81 @@ FORM_BASED_REQUIREMENTS = {
     },
     
     # ========================================================================
-    # 2. RECRUITMENT CHECKLIST - Simplified Verification Form
+    # 2. STAFF HEALTH QUESTIONNAIRE - Based on Osabea Official Template
+    # ========================================================================
+    "staff_health_questionnaire": {
+        "name": "Staff Health Questionnaire",
+        "form_type": "staff_health_questionnaire",
+        "auto_fill_fields": ["full_name", "date_of_birth", "phone"],
+        "branding": {
+            "show_logo": True,
+            "header_color": "#2E7D32",  # Green header like the official document
+            "company_name": "Osabea Healthcare Solutions Ltd"
+        },
+        "sections": [
+            {
+                "id": "personal_info",
+                "title": "Personal Information",
+                "fields": [
+                    {"id": "full_name", "label": "Full Name", "type": "text", "required": True, "auto_fill": "full_name"},
+                    {"id": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True, "auto_fill": "date_of_birth"},
+                    {"id": "contact_number", "label": "Contact Number", "type": "text", "required": True, "auto_fill": "phone"},
+                    {"id": "gp_name", "label": "GP Name", "type": "text"},
+                    {"id": "gp_address", "label": "GP Address", "type": "textarea"},
+                    {"id": "gp_contact_number", "label": "GP Contact Number", "type": "text"},
+                    {"id": "nhs_number", "label": "NHS Number", "type": "text"},
+                    {"id": "flu_vaccination_date", "label": "Date of last Flu vaccination", "type": "date"},
+                    {"id": "covid_vaccination_dates", "label": "Dates of Covid-19 vaccinations", "type": "text", "placeholder": "e.g., 01/03/2021, 15/06/2021, 20/12/2021"},
+                ]
+            },
+            {
+                "id": "health_questions",
+                "title": "Health Questions",
+                "description": "Please answer the following questions honestly. If you answer 'Yes' to any question, please provide details in the space provided.",
+                "fields": [
+                    {"id": "significant_illness", "label": "Do you have, or have you ever had any significant illness? (i.e. Asthma, Diabetes, Heart Disease, Other)", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "significant_illness_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "significant_illness", "conditional_value": "Yes"},
+                    
+                    {"id": "ongoing_gp_treatment", "label": "Are you regularly seeing your GP for any ongoing health condition?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "ongoing_gp_treatment_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "ongoing_gp_treatment", "conditional_value": "Yes"},
+                    
+                    {"id": "specialist_waiting_list", "label": "Are you on a waiting list to see a specialist, or have you seen one in the past 5 years?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "specialist_waiting_list_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "specialist_waiting_list", "conditional_value": "Yes"},
+                    
+                    {"id": "hospital_admissions_last_5_years", "label": "Have you had any hospital admissions in the last 5 years?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "hospital_admissions_last_5_years_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "hospital_admissions_last_5_years", "conditional_value": "Yes"},
+                    
+                    {"id": "work_related_condition", "label": "Have you ever had any illness/impairment/disability which may have been caused by, or made worse by your work?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "work_related_condition_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "work_related_condition", "conditional_value": "Yes"},
+                    
+                    {"id": "medical_problems_affecting_work", "label": "Are you aware of any other medical problems you have that may cause you difficulty in performing your normal working role or attending work?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "medical_problems_affecting_work_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "medical_problems_affecting_work", "conditional_value": "Yes"},
+                    
+                    {"id": "needs_adjustments", "label": "Do you think you may need any adjustments or assistance in order for you to undertake your normal working duties?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "needs_adjustments_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "needs_adjustments", "conditional_value": "Yes"},
+                    
+                    {"id": "taking_medication", "label": "Are you regularly taking any prescription medication?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "taking_medication_details", "label": "If yes, please give details", "type": "textarea", "conditional_on": "taking_medication", "conditional_value": "Yes"},
+                    
+                    {"id": "other_health_concerns", "label": "Are there any other matters concerning your health not covered by the previous questions, which we should know about?", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "description": "Please be advised, Osabea Healthcare Solutions Ltd will ensure the confidentiality of ALL information provided in this document is maintained and ONLY accessed in an emergency situation. Where required, any reasonable adjustments and/or risk assessments will be implemented and regularly reviewed on an individual basis to ensure you are safeguarded at all times.",
+                "fields": [
+                    {"id": "declaration_confirmed", "label": "To the best of my knowledge and belief the information given above is true and correct", "type": "checkbox", "required": True},
+                    {"id": "signature_name", "label": "Signature (type full name)", "type": "text", "required": True},
+                    {"id": "signature_date", "label": "Date", "type": "date", "required": True, "auto_fill": "today"},
+                ]
+            }
+        ],
+        "fields": []
+    },
+    
+    # ========================================================================
+    # 3. RECRUITMENT CHECKLIST - Simplified Verification Form
     # ========================================================================
     "recruitment_checklist": {
         "name": "Recruitment Compliance Checklist",
@@ -9016,6 +9100,7 @@ async def get_form_template(requirement_id: str, user: dict = Depends(get_curren
         "is_conditional": config.get("is_conditional", False),
         "updates_profile": config.get("updates_profile", False),
         "auto_fill_fields": config.get("auto_fill_fields", []),
+        "branding": config.get("branding"),  # Include branding for styled forms
         "sections": config.get("sections", []),
         "fields": config.get("fields", [])  # Backward compatibility
     }

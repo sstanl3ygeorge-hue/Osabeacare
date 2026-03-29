@@ -36,7 +36,8 @@ const FORM_BASED_REQUIREMENTS = [
   'recruitment_checklist', 
   'equal_opportunities',
   'hmrc_starter_checklist',
-  'staff_personal_info'
+  'staff_personal_info',
+  'staff_health_questionnaire'
 ];
 
 const statusIcons = {
@@ -1604,6 +1605,9 @@ export default function EmployeeProfilePage() {
         headers: { Authorization: `Bearer ${token}` }
       });
       
+      // Get today's date in YYYY-MM-DD format for auto-fill
+      const today = new Date().toISOString().split('T')[0];
+      
       if (existingResponse.data && existingResponse.data.length > 0) {
         // Use existing submission data
         setFormData(existingResponse.data[0].data || {});
@@ -1614,13 +1618,19 @@ export default function EmployeeProfilePage() {
             `${API}/form-submissions/auto-fill/${requirementId}/${employeeId}`,
             { headers: { Authorization: `Bearer ${token}` } }
           );
-          setFormData(autoFillResponse.data.auto_fill_data || {});
+          // Add today's date for signature_date if not already set
+          const autoFillData = autoFillResponse.data.auto_fill_data || {};
+          if (!autoFillData.signature_date) {
+            autoFillData.signature_date = today;
+          }
+          setFormData(autoFillData);
         } catch (autoFillError) {
           // Fallback to basic employee data if auto-fill endpoint fails
           setFormData({
             employee_name: `${employee.first_name} ${employee.last_name}`,
             full_name: `${employee.first_name} ${employee.last_name}`,
-            candidate_name: `${employee.first_name} ${employee.last_name}`
+            candidate_name: `${employee.first_name} ${employee.last_name}`,
+            signature_date: today
           });
         }
       }
@@ -6088,11 +6098,28 @@ export default function EmployeeProfilePage() {
         }
       }}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading flex items-center gap-2">
-              <ClipboardCheck className="h-5 w-5 text-primary" />
-              {formTemplate?.name || 'Complete Form'}
-            </DialogTitle>
+          {/* Branded Header for Staff Health Questionnaire */}
+          {formTemplate?.branding?.show_logo && (
+            <div className="bg-[#2E7D32] text-white p-4 -m-6 mb-4 rounded-t-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center">
+                  <span className="text-[#2E7D32] font-bold text-xl">O</span>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold">{formTemplate?.branding?.company_name || 'Osabea Healthcare Solutions Ltd'}</h2>
+                  <p className="text-sm opacity-90">{formTemplate?.name}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          <DialogHeader className={formTemplate?.branding?.show_logo ? 'pt-0' : ''}>
+            {!formTemplate?.branding?.show_logo && (
+              <DialogTitle className="font-heading flex items-center gap-2">
+                <ClipboardCheck className="h-5 w-5 text-primary" />
+                {formTemplate?.name || 'Complete Form'}
+              </DialogTitle>
+            )}
             {formTemplate?.description && (
               <DialogDescription className="text-sm text-text-muted">
                 {formTemplate.description}
@@ -6139,12 +6166,21 @@ export default function EmployeeProfilePage() {
                     // Skip admin-only sections for non-admins
                     if (section.admin_only && !isAdmin()) return null;
                     
+                    // Use green header style if form has branding
+                    const sectionHeaderClass = formTemplate?.branding?.header_color 
+                      ? 'bg-[#2E7D32] text-white px-4 py-3 border-b border-[#2E7D32]'
+                      : 'bg-gray-50 px-4 py-3 border-b border-gray-200';
+                    
                     return (
                       <div key={section.id} className="border border-gray-200 rounded-xl overflow-hidden">
-                        <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
-                          <h4 className="font-medium text-text-primary">{section.title}</h4>
+                        <div className={sectionHeaderClass}>
+                          <h4 className={`font-medium ${formTemplate?.branding?.header_color ? 'text-white' : 'text-text-primary'}`}>
+                            {section.title}
+                          </h4>
                           {section.description && (
-                            <p className="text-xs text-text-muted mt-0.5">{section.description}</p>
+                            <p className={`text-xs mt-0.5 ${formTemplate?.branding?.header_color ? 'text-white/80' : 'text-text-muted'}`}>
+                              {section.description}
+                            </p>
                           )}
                         </div>
                         <div className="p-4 space-y-4">

@@ -4,6 +4,46 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Right to Work Summary Logic Bug Fix - COMPLETE**
+
+### Problem
+RTW card displayed contradictory information:
+- Showed "Verified (No Expiry)" 
+- BUT also displayed an expiry date underneath
+
+### Root Cause
+Date parsing issue in `get_employee_rtw_summary()`. Date formats like "2026-09-28" (without time) were not being parsed correctly, causing `days_remaining` to be `None`. When `days_remaining` is None, the code fell through to the "No Expiry" case.
+
+### Fix Applied
+1. **Date parsing**: Added handling for date-only format (YYYY-MM-DD) in addition to ISO format with time
+2. **Status labels**: Updated to distinguish "Verified (Time-Limited)" vs "Verified (Permanent)"
+3. **New fields**: Added `checked_at`, `checked_by` fields from RTW Verification record
+4. **Frontend**: Updated card to show "Permanent - No Expiry" for permanent, countdown for time-limited
+
+### Data Model (Corrected)
+| Source | Fields |
+|--------|--------|
+| Right to Work Documents | evidence_type, permission_type, expiry_date (legal) |
+| Right to Work Verification | checked_at, checked_by, next_follow_up_due |
+
+### Display Rules
+| Permission Type | Card Shows |
+|-----------------|------------|
+| Permanent | "Verified (Permanent)" + "Permanent - No Expiry" |
+| Time-Limited | "Verified (Time-Limited)" + "Expires: [date] (Xd)" |
+
+### Verification
+- **Ayomi Lori (time-limited)**: Shows "Verified (Time-Limited)", Expires 9/28/2026 (182d) ✅
+- **Olakunle Alonge (permanent)**: Shows "Verified (Permanent)", Permanent - No Expiry ✅
+
+### Test Results
+- Backend: 19/19 tests passed (100%)
+- Frontend: All UI verifications passed
+- Test report: `/app/test_reports/iteration_54.json`
+
+---
+
+## Previous Update (2025-12-29)
 **Full System Data Integrity & Architecture Audit - COMPLETE**
 
 ### Summary

@@ -4,6 +4,77 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Audit-Readiness Fixes - COMPLETE**
+
+### Issues Fixed
+
+#### 1. Duplicate Health Form Removed
+**Root Cause**: Both `health_screening` (legacy) and `staff_health_questionnaire` (new) were defined in `MANDATORY_ITEMS` under category `3_Competency_Health`.
+
+**Fix**: Added `archived: true` flag to `health_screening` in `MANDATORY_ITEMS`. The compliance-requirements endpoint now skips items with `archived: true`, hiding them from the UI while preserving historical submissions.
+
+```python
+# In MANDATORY_ITEMS (server.py line ~258)
+{"id": "health_screening", ..., "archived": True, "archived_reason": "Replaced by Staff Health Questionnaire"}
+```
+
+#### 2. Staff Health Questionnaire End-to-End Working
+All actions now work correctly:
+- ✅ Save submission
+- ✅ Reopen/Edit with pre-filled data
+- ✅ View Form (structured submission modal)
+- ✅ Generate PDF
+- ✅ View PDF (opens in new tab)
+- ✅ Download PDF
+- ✅ Regenerate PDF
+
+#### 3. Button State Logic Fixed
+**Root Cause**: UI showed buttons without checking if the underlying resource (PDF) exists.
+
+**Fix**: Added `has_pdf_export`, `pdf_export_url`, and `pdf_export_filename` to form_submission response. Button visibility logic now correctly checks state:
+
+| State | Buttons Shown |
+|-------|--------------|
+| No PDF export | Generate PDF |
+| PDF export exists | View PDF, Download PDF, Regenerate (refresh) |
+| Always | View Form, Edit |
+
+#### 4. Application Form Extraction Mapping
+Added extraction mapping for health-related fields:
+- `flu_vaccination_date` → Staff Health Questionnaire auto-fill
+- `health_issues_disability` → prefill consideration
+- `contact_number` → auto-fill from phone
+
+### Files Changed
+1. `/app/backend/server.py`:
+   - Added `archived` flag to `health_screening` requirement
+   - Added skip logic for archived items in compliance-requirements
+   - Added `has_pdf_export`, `pdf_export_url` to form_submission response
+   - Added `flu_vaccination_date`, `contact_number` to auto-fill mapping
+
+2. `/app/frontend/src/pages/portal/EmployeeProfilePage.js`:
+   - Updated `FORM_BASED_REQUIREMENTS` to exclude `health_screening`
+   - Added conditional PDF button rendering based on `has_pdf_export`
+   - Added View PDF, Download PDF, Regenerate buttons
+
+### Test Results
+- Backend: 100% (9/9 tests passed)
+- Frontend: 100% (all UI tests passed)
+- Report: `/app/test_reports/iteration_64.json`
+
+### Button Visibility Logic (Final)
+```
+if (form_submission.has_pdf_export && form_submission.pdf_export_url):
+    show: View PDF, Download PDF, Regenerate
+else:
+    show: Generate PDF
+    
+always show: View Form, Edit (if form_submission exists)
+```
+
+---
+
+## Previous Update (2025-12-29)
 **Template-Backed Forms Architecture - COMPLETE**
 
 ### Architecture Overview

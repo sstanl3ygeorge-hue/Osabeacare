@@ -4,6 +4,70 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Cross-Page Compliance State Consistency - FIXED**
+
+### Single Source of Truth Implementation
+
+#### Root Cause Location
+**File**: `/app/frontend/src/pages/portal/TrainingPage.js` (line 45)
+- Frontend had its own `getExpiryStatus()` function computing expiry locally
+- Employee profile page also computed expiry inline instead of using backend response
+
+**Files Changed**:
+1. `/app/backend/server.py`:
+   - Added `compute_training_record_status()` - CANONICAL function (lines 3563-3671)
+   - Added `enrich_training_record_with_computed_status()` helper (lines 3673-3697)
+   - Updated `TrainingRecordResponse` model with computed fields
+   - Updated all training record endpoints to return enriched records
+   - Added `clear_expiry_date` flag to `TrainingRecordUpdateRequest`
+
+2. `/app/frontend/src/pages/portal/TrainingPage.js`:
+   - Removed local `getExpiryStatus()` function
+   - Added `getBackendExpiryStatus()` that reads backend-computed fields
+   - Stats now computed from backend `renewal_status` and `computed_status`
+
+3. `/app/frontend/src/pages/portal/EmployeeProfilePage.js`:
+   - Training tab now uses backend-computed `computed_status`, `renewal_status`, etc.
+   - Fallback to local computation only for backward compatibility
+
+#### Status Computation Logic (SINGLE SOURCE OF TRUTH)
+```python
+def compute_training_record_status(record):
+    if no completion_date → "not_started"
+    if expiry_date exists and today > expiry_date → "expired"
+    if expiry_date exists and within 30 days → "needs_renewal"
+    else → "completed"
+```
+
+#### Computed Fields Added to API Responses
+- `computed_status`: "not_started" | "expired" | "needs_renewal" | "completed"
+- `renewal_status`: "expired" | "expiring_soon" | "valid" | "no_expiry"
+- `days_until_expiry`: Integer (negative if expired)
+- `status_label`: Human-readable label (e.g., "Expired (453d ago)")
+- `status_color`: "red" | "amber" | "green" | "gray"
+
+#### Test Results
+**Test 1: Change expiry to past date**
+- Set Health & Safety expiry to 2025-01-01
+- Training Matrix: 1 Expired, "Expired (453d ago)" ✅
+- Employee Profile: "Expired (453d ago)" badge ✅
+- Dashboard: 1 Expired ✅
+
+**Test 2: Remove expiry date**
+- Cleared expiry using `clear_expiry_date: true`
+- Training Matrix: 0 Expired, "Verified" badge ✅
+- Employee Profile: No expired badge ✅
+- Dashboard: 0 Expired ✅
+
+### Proof: Training = Employee Profile = Dashboard
+| Metric | Training Matrix | Employee Profile | Dashboard |
+|--------|-----------------|------------------|-----------|
+| After setting expired | 1 Expired | "Expired (453d ago)" | 1 Expired |
+| After clearing expiry | 0 Expired | "Verified" | 0 Expired |
+
+---
+
+## Previous Update (2025-12-29)
 **Application Form Extraction Mapping - FINALIZED**
 
 ### Audit-Safe Extraction Mapping Implementation

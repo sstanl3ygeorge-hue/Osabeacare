@@ -3521,6 +3521,12 @@ class TrainingRecordResponse(BaseModel):
     evidence_files: Optional[List[dict]] = []
     created_at: str
     updated_at: Optional[str] = None
+    # COMPUTED fields (from compute_training_record_status) - SINGLE SOURCE OF TRUTH
+    computed_status: Optional[str] = None  # not_started, expired, needs_renewal, completed
+    renewal_status: Optional[str] = None  # expired, expiring_soon, valid, no_expiry
+    days_until_expiry: Optional[int] = None  # Negative if expired
+    status_label: Optional[str] = None  # Human readable label
+    status_color: Optional[str] = None  # green, amber, red, gray
 
 
 # Training validity periods (in days) - CQC requirements
@@ -3555,6 +3561,148 @@ def calculate_training_expiry(completion_date: str, requirement_id: str) -> str:
     completion = datetime.fromisoformat(completion_date.replace('Z', '+00:00')) if 'T' in completion_date else datetime.strptime(completion_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
     expiry = completion + timedelta(days=validity_days)
     return expiry.isoformat()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SINGLE SOURCE OF TRUTH: Training Record Status Computation
+# ═══════════════════════════════════════════════════════════════════════════════
+# This is the CANONICAL function for computing training status.
+# All APIs MUST use this function. Frontend MUST NOT compute status locally.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_training_record_status(record: dict) -> dict:
+    """
+    SINGLE SOURCE OF TRUTH for training record status.
+    
+    Canonical fields used:
+    - completion_date: When training was completed
+    - expiry_date: When training expires (if set)
+    - verified: Whether training has been verified
+    
+    Computed status values:
+    - "not_started": No completion_date
+    - "expired": expiry_date exists AND today > expiry_date
+    - "needs_renewal": expiry_date exists AND within 30 days of expiry
+    - "completed": Has completion_date, not expired, not near expiry
+    - "valid": Same as completed (alias for clarity)
+    
+    Returns dict with:
+    - computed_status: The canonical status string
+    - renewal_status: Detailed expiry info (or None)
+    - days_until_expiry: Number (negative if expired)
+    - status_label: Human readable label
+    - status_color: UI color (green/amber/red)
+    """
+    completion_date = record.get('completion_date')
+    expiry_date = record.get('expiry_date')
+    verified = record.get('verified', False)
+    
+    # No completion date = not started
+    if not completion_date:
+        return {
+            "computed_status": "not_started",
+            "renewal_status": None,
+            "days_until_expiry": None,
+            "status_label": "Not Started",
+            "status_color": "gray"
+        }
+    
+    # If no expiry date, it's completed/valid indefinitely
+    if not expiry_date:
+        return {
+            "computed_status": "completed",
+            "renewal_status": "no_expiry",
+            "days_until_expiry": None,
+            "status_label": "Completed" if not verified else "Verified",
+            "status_color": "green"
+        }
+    
+    # Calculate days until expiry
+    try:
+        now = datetime.now(timezone.utc)
+        if isinstance(expiry_date, str):
+            if 'T' in expiry_date:
+                exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+            else:
+                exp_dt = datetime.strptime(expiry_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        else:
+            exp_dt = expiry_date
+        
+        days_until_expiry = (exp_dt - now).days
+        expiry_date_str = exp_dt.strftime('%Y-%m-%d')
+        
+        if days_until_expiry < 0:
+            # EXPIRED
+            return {
+                "computed_status": "expired",
+                "renewal_status": "expired",
+                "days_until_expiry": days_until_expiry,
+                "expiry_date": expiry_date_str,
+                "status_label": f"Expired ({abs(days_until_expiry)}d ago)",
+                "status_color": "red"
+            }
+        elif days_until_expiry <= EXPIRY_WARNING_DAYS:
+            # NEEDS RENEWAL (within 30 days)
+            return {
+                "computed_status": "needs_renewal",
+                "renewal_status": "expiring_soon",
+                "days_until_expiry": days_until_expiry,
+                "expiry_date": expiry_date_str,
+                "status_label": f"Expires in {days_until_expiry}d",
+                "status_color": "amber"
+            }
+        else:
+            # VALID
+            return {
+                "computed_status": "completed",
+                "renewal_status": "valid",
+                "days_until_expiry": days_until_expiry,
+                "expiry_date": expiry_date_str,
+                "status_label": f"Valid ({days_until_expiry}d left)",
+                "status_color": "green"
+            }
+    except Exception as e:
+        logger.error(f"Error computing training status: {e}")
+        return {
+            "computed_status": "completed",
+            "renewal_status": "unknown",
+            "days_until_expiry": None,
+            "status_label": "Completed",
+            "status_color": "green"
+        }
+
+
+def enrich_training_record_with_computed_status(record: dict) -> dict:
+    """
+    Enrich a training record with computed status fields.
+    This REPLACES any stale persisted status with freshly computed values.
+    """
+    computed = compute_training_record_status(record)
+    
+    # Create enriched record (copy to avoid mutation)
+    enriched = dict(record)
+    
+    # Add computed fields
+    enriched['computed_status'] = computed['computed_status']
+    enriched['renewal_status'] = computed['renewal_status']
+    enriched['days_until_expiry'] = computed['days_until_expiry']
+    enriched['status_label'] = computed['status_label']
+    enriched['status_color'] = computed['status_color']
+    
+    # IMPORTANT: Override persisted 'status' with computed value
+    # This ensures stale "expired" or "expiring" flags don't persist incorrectly
+    if computed['computed_status'] == 'expired':
+        enriched['status'] = 'expired'
+    elif computed['computed_status'] == 'needs_renewal':
+        enriched['status'] = 'expiring'
+    elif computed['computed_status'] == 'not_started':
+        enriched['status'] = 'not_started'
+    else:
+        # Keep original status if completed (could be in_progress -> completed)
+        if record.get('status') not in ['completed', 'verified']:
+            enriched['status'] = 'completed'
+    
+    return enriched
 
 
 async def get_or_create_training_record(
@@ -8281,8 +8429,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     # Get all forms for this employee
     all_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
     
-    # Get all training records
-    all_training = await db.training_records.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    # Get all training records - ENRICH WITH COMPUTED STATUS (SINGLE SOURCE OF TRUTH)
+    raw_training = await db.training_records.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    all_training = [enrich_training_record_with_computed_status(t) for t in raw_training]
     
     # Get all acknowledgements for this employee
     all_acknowledgements = await db.requirement_acknowledgements.find({
@@ -8630,7 +8779,13 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     "verified_by": linked_training.get('verified_by'),
                     "verified_at": linked_training.get('verified_at'),
                     "completion_method": linked_training.get('completion_method'),
-                    "has_evidence": bool(evidence_files)
+                    "has_evidence": bool(evidence_files),
+                    # COMPUTED STATUS FIELDS - SINGLE SOURCE OF TRUTH
+                    "computed_status": linked_training.get('computed_status'),
+                    "renewal_status": linked_training.get('renewal_status'),
+                    "days_until_expiry": linked_training.get('days_until_expiry'),
+                    "status_label": linked_training.get('status_label'),
+                    "status_color": linked_training.get('status_color')
                 }
                 
                 if linked_training.get('verified') and evidence_files:
@@ -10732,7 +10887,9 @@ async def create_training_record(record: TrainingRecordCreate, user: dict = Depe
     
     await log_audit_action(user['user_id'], "create_training", "training_record", record_id, {"training_name": record.training_name})
     
-    return TrainingRecordResponse(**record_doc)
+    # CRITICAL: Enrich with computed status - SINGLE SOURCE OF TRUTH
+    enriched_record = enrich_training_record_with_computed_status(record_doc)
+    return TrainingRecordResponse(**enriched_record)
 
 @api_router.get("/training-records", response_model=List[TrainingRecordResponse])
 async def get_training_records(
@@ -10745,14 +10902,14 @@ async def get_training_records(
     user: dict = Depends(get_current_user)
 ):
     """
-    Get training records.
-    By default, only returns ACTIVE records (excludes superseded/deleted/test).
+    Get training records with COMPUTED status.
+    Status is computed fresh from canonical fields (completion_date, expiry_date).
+    Frontend MUST use the returned computed fields, not compute locally.
     """
     query = {}
     if employee_id:
         query["employee_id"] = employee_id
-    if status:
-        query["status"] = status
+    # NOTE: status filter now applies to COMPUTED status, handled after enrichment
     if mandatory is not None:
         query["mandatory"] = mandatory
     
@@ -10769,7 +10926,15 @@ async def get_training_records(
         query["record_status"] = {"$ne": "deleted"}
     
     records = await db.training_records.find(query, {"_id": 0}).to_list(1000)
-    return [TrainingRecordResponse(**r) for r in records]
+    
+    # CRITICAL: Enrich all records with computed status
+    enriched_records = [enrich_training_record_with_computed_status(r) for r in records]
+    
+    # Apply status filter on computed status if provided
+    if status:
+        enriched_records = [r for r in enriched_records if r.get('computed_status') == status or r.get('status') == status]
+    
+    return [TrainingRecordResponse(**r) for r in enriched_records]
 
 
 @api_router.delete("/training-records/cleanup-test")
@@ -10942,13 +11107,16 @@ async def update_training_record(record_id: str, update: TrainingRecordCreate, u
         raise HTTPException(status_code=404, detail="Training record not found")
     
     record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    return TrainingRecordResponse(**record)
+    # CRITICAL: Enrich with computed status - SINGLE SOURCE OF TRUTH
+    enriched_record = enrich_training_record_with_computed_status(record)
+    return TrainingRecordResponse(**enriched_record)
 
 
 class TrainingRecordUpdateRequest(BaseModel):
     """Request to update a training record - SINGLE SOURCE OF TRUTH"""
     completion_date: Optional[str] = None
     expiry_date: Optional[str] = None
+    clear_expiry_date: Optional[bool] = False  # Set to true to explicitly clear expiry
     status: Optional[str] = None  # not_started, in_progress, completed, expiring, expired
     verified: Optional[bool] = None
     notes: Optional[str] = None
@@ -11008,6 +11176,10 @@ async def update_employee_training_record(
     if update.expiry_date is not None:
         changes["expiry_date"] = {"old": record.get('expiry_date'), "new": update.expiry_date}
         update_data["expiry_date"] = update.expiry_date
+    elif update.clear_expiry_date:
+        # Explicitly clear expiry date
+        changes["expiry_date"] = {"old": record.get('expiry_date'), "new": None}
+        update_data["expiry_date"] = None
     
     if update.status is not None:
         changes["status"] = {"old": record.get('status'), "new": update.status}
@@ -11043,11 +11215,13 @@ async def update_employee_training_record(
     # Update employee compliance
     await update_employee_compliance(employee_id)
     
-    # Return updated record
+    # Return updated record with COMPUTED STATUS - SINGLE SOURCE OF TRUTH
     updated_record = await db.training_records.find_one({"id": record['id']}, {"_id": 0})
+    enriched_record = enrich_training_record_with_computed_status(updated_record)
+    
     return {
         "success": True,
-        "training_record": updated_record,
+        "training_record": enriched_record,
         "changes": changes
     }
 
@@ -11060,7 +11234,7 @@ async def get_employee_training_record(
 ):
     """
     Get the SINGLE ACTIVE training record for an employee+requirement.
-    This is the source of truth for training status.
+    Returns COMPUTED status - SINGLE SOURCE OF TRUTH.
     """
     # Find the active record
     record = await db.training_records.find_one({
@@ -11080,14 +11254,17 @@ async def get_employee_training_record(
     if not record:
         return {"exists": False, "training_record": None}
     
-    # Calculate current expiry status
+    # CRITICAL: Enrich with computed status - SINGLE SOURCE OF TRUTH
+    enriched_record = enrich_training_record_with_computed_status(record)
+    
+    # Also include legacy expiry_status for backward compatibility
     expiry_status = None
     if record.get('expiry_date'):
         expiry_status = calculate_expiry_status(record.get('expiry_date'))
     
     return {
         "exists": True,
-        "training_record": record,
+        "training_record": enriched_record,
         "expiry_status": expiry_status
     }
 
@@ -11756,11 +11933,13 @@ async def correct_training_record(
     )
     
     updated_record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    # CRITICAL: Enrich with computed status - SINGLE SOURCE OF TRUTH
+    enriched_record = enrich_training_record_with_computed_status(updated_record)
     
     return {
         "success": True,
         "message": f"Training record corrected: {correction.field}",
-        "training_record": updated_record,
+        "training_record": enriched_record,
         "audit_entry": {
             "field_changed": correction.field,
             "old_value": str(actual_old_value) if actual_old_value else None,

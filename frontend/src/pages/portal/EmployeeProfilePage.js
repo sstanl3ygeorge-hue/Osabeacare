@@ -4815,9 +4815,19 @@ export default function EmployeeProfilePage() {
               ) : (
                 <div className="space-y-3">
                   {training.map((record) => {
-                    // Calculate expiry status
+                    // Use backend-computed status - SINGLE SOURCE OF TRUTH
+                    // DO NOT compute locally - use record.computed_status, record.renewal_status, etc.
                     let expiryStatus = null;
-                    if (record.expiry_date) {
+                    if (record.computed_status || record.renewal_status) {
+                      // Use backend-computed values
+                      expiryStatus = {
+                        status: record.renewal_status || record.computed_status,
+                        label: record.status_label || (record.renewal_status === 'expired' ? 'Expired' : record.renewal_status === 'expiring_soon' ? 'Needs Renewal' : 'Valid'),
+                        color: record.status_color || 'green',
+                        days: record.days_until_expiry !== null && record.days_until_expiry !== undefined ? Math.abs(record.days_until_expiry) : null
+                      };
+                    } else if (record.expiry_date) {
+                      // Fallback for backward compatibility (should not happen with updated backend)
                       const now = new Date();
                       const expiry = new Date(record.expiry_date);
                       const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));

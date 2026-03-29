@@ -41,12 +41,29 @@ const additionalTraining = [
   'Dying, Death and Bereavement'
 ];
 
-// Calculate expiry status
-const getExpiryStatus = (expiryDate) => {
-  if (!expiryDate) return null;
+// REMOVED: Local expiry status calculation
+// Frontend MUST use backend-computed status (computed_status, renewal_status, status_label, status_color)
+// This ensures single source of truth across all pages
+
+// Helper to get expiry display from backend-computed fields
+const getBackendExpiryStatus = (record) => {
+  // Use backend-computed fields if available
+  if (record.computed_status) {
+    return {
+      status: record.renewal_status || record.computed_status,
+      label: record.status_label || record.computed_status,
+      daysText: record.days_until_expiry !== null && record.days_until_expiry !== undefined
+        ? (record.days_until_expiry < 0 ? `${Math.abs(record.days_until_expiry)} days ago` : `${record.days_until_expiry} days`)
+        : '',
+      color: record.status_color || 'gray'
+    };
+  }
+  
+  // Fallback for backward compatibility (should not happen with updated backend)
+  if (!record.expiry_date) return null;
   
   const now = new Date();
-  const expiry = new Date(expiryDate);
+  const expiry = new Date(record.expiry_date);
   const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
   
   if (daysUntilExpiry < 0) {
@@ -208,27 +225,22 @@ export default function TrainingPage() {
     return emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown';
   };
 
-  // Filter training records
+  // Filter training records using backend-computed status
   const filteredTraining = training.filter(record => {
     if (filter === 'all') return true;
     
-    const expiryStatus = getExpiryStatus(record.expiry_date);
-    if (!expiryStatus && (filter === 'expired' || filter === 'expiring_soon')) return false;
-    if (!expiryStatus && filter === 'valid') return !record.expiry_date; // Show records without expiry
+    // Use backend-computed renewal_status or computed_status
+    const renewalStatus = record.renewal_status || record.computed_status;
+    if (!renewalStatus && (filter === 'expired' || filter === 'expiring_soon')) return false;
+    if (!renewalStatus && filter === 'valid') return !record.expiry_date;
     
-    return expiryStatus?.status === filter;
+    return renewalStatus === filter || (filter === 'expiring_soon' && renewalStatus === 'needs_renewal');
   });
 
-  // Calculate stats
-  const completed = training.filter(t => t.status === 'completed').length;
-  const expired = training.filter(t => {
-    const status = getExpiryStatus(t.expiry_date);
-    return status?.status === 'expired';
-  }).length;
-  const expiringSoon = training.filter(t => {
-    const status = getExpiryStatus(t.expiry_date);
-    return status?.status === 'expiring_soon';
-  }).length;
+  // Calculate stats using backend-computed status
+  const completed = training.filter(t => t.status === 'completed' || t.computed_status === 'completed').length;
+  const expired = training.filter(t => t.renewal_status === 'expired' || t.computed_status === 'expired').length;
+  const expiringSoon = training.filter(t => t.renewal_status === 'expiring_soon' || t.computed_status === 'needs_renewal').length;
   const verified = training.filter(t => t.verified).length;
 
   return (
@@ -457,7 +469,8 @@ export default function TrainingPage() {
                 </thead>
                 <tbody>
                   {filteredTraining.map((record) => {
-                    const expiryStatus = getExpiryStatus(record.expiry_date);
+                    // Use backend-computed status - SINGLE SOURCE OF TRUTH
+                    const expiryStatus = getBackendExpiryStatus(record);
                     
                     return (
                       <tr key={record.id} className="border-b border-[#E4E8EB] hover:bg-[#F8FAFA]" data-testid={`training-row-${record.id}`}>

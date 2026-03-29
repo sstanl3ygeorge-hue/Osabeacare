@@ -6527,6 +6527,35 @@ export default function EmployeeProfilePage() {
             </div>
           ) : extractionResult ? (
             <div className="space-y-4">
+              {/* Extraction Method & Low Confidence Warning */}
+              {extractionResult.low_confidence_fields?.length > 0 && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-red-800">
+                      <p className="font-medium">Low Confidence Fields Detected</p>
+                      <p>Please review highlighted fields carefully: {extractionResult.low_confidence_fields.map(f => FIELD_LABELS[f] || f).join(', ')}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Extraction Method Badge */}
+              {extractionResult.extraction_method && (
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-text-muted">Extraction method:</span>
+                  <span className={`px-2 py-0.5 rounded font-medium ${
+                    extractionResult.extraction_method === 'ai' ? 'bg-blue-100 text-blue-700' :
+                    extractionResult.extraction_method === 'ai+ocr' ? 'bg-purple-100 text-purple-700' :
+                    'bg-gray-100 text-gray-700'
+                  }`}>
+                    {extractionResult.extraction_method === 'ai' ? 'AI Vision' :
+                     extractionResult.extraction_method === 'ai+ocr' ? 'AI + OCR' :
+                     extractionResult.extraction_method === 'ocr' ? 'OCR' : extractionResult.extraction_method}
+                  </span>
+                </div>
+              )}
+              
               {/* Compliance Note */}
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <div className="flex items-start gap-2">
@@ -6551,41 +6580,63 @@ export default function EmployeeProfilePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {extractionResult.fields.map((field, idx) => (
-                      <tr key={field.field_name} className={idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                        <td className="p-3">
-                          <input
-                            type="checkbox"
-                            checked={fieldsToApply[field.field_name] || false}
-                            onChange={() => toggleFieldToApply(field.field_name)}
-                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                            data-testid={`apply-field-${field.field_name}`}
-                          />
-                        </td>
-                        <td className="p-3 font-medium text-text-primary">
-                          {FIELD_LABELS[field.field_name] || field.field_name}
-                        </td>
-                        <td className="p-3">
-                          <span className={`${field.extracted_value ? 'text-text-primary' : 'text-text-muted italic'}`}>
-                            {field.extracted_value || 'Not found'}
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          <span className={`${field.current_value ? 'text-text-primary' : 'text-text-muted italic'}`}>
-                            {field.current_value || 'Empty'}
-                          </span>
-                        </td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                            field.confidence === 'high' ? 'bg-green-100 text-green-700' :
-                            field.confidence === 'medium' ? 'bg-amber-100 text-amber-700' :
-                            'bg-red-100 text-red-700'
-                          }`}>
-                            {field.confidence}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {extractionResult.fields.map((field, idx) => {
+                      // Handle both numeric confidence and string confidence_label
+                      const confidenceScore = typeof field.confidence === 'number' ? field.confidence : null;
+                      const confidenceLabel = field.confidence_label || 
+                        (typeof field.confidence === 'string' ? field.confidence : 
+                         confidenceScore >= 0.8 ? 'high' : confidenceScore >= 0.5 ? 'medium' : 'low');
+                      const isLowConfidence = confidenceLabel === 'low' || (confidenceScore !== null && confidenceScore < 0.5);
+                      
+                      return (
+                        <tr 
+                          key={field.field_name} 
+                          className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${isLowConfidence ? 'bg-red-50/50' : ''}`}
+                        >
+                          <td className="p-3">
+                            <input
+                              type="checkbox"
+                              checked={fieldsToApply[field.field_name] || false}
+                              onChange={() => toggleFieldToApply(field.field_name)}
+                              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                              data-testid={`apply-field-${field.field_name}`}
+                            />
+                          </td>
+                          <td className="p-3 font-medium text-text-primary">
+                            {FIELD_LABELS[field.field_name] || field.field_name}
+                            {isLowConfidence && (
+                              <span className="ml-2 text-red-500" title="Low confidence - please verify">⚠</span>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <span className={`${field.extracted_value ? 'text-text-primary' : 'text-text-muted italic'} ${isLowConfidence ? 'text-red-700' : ''}`}>
+                              {field.extracted_value || 'Not found'}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`${field.current_value ? 'text-text-primary' : 'text-text-muted italic'}`}>
+                              {field.current_value || 'Empty'}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-1">
+                              <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                confidenceLabel === 'high' ? 'bg-green-100 text-green-700' :
+                                confidenceLabel === 'medium' ? 'bg-amber-100 text-amber-700' :
+                                'bg-red-100 text-red-700'
+                              }`}>
+                                {confidenceLabel}
+                              </span>
+                              {confidenceScore !== null && (
+                                <span className="text-xs text-text-muted">
+                                  {Math.round(confidenceScore * 100)}%
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

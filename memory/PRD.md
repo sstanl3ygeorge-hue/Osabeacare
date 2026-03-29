@@ -4,6 +4,97 @@
 **Osabea Healthcare Solutions**
 
 ## Latest Update (2025-12-29)
+**Smart OCR Extraction & Compliance Centre UI Improvements - COMPLETE**
+
+### 1. Smart OCR Retry with Confidence Scoring
+
+#### Extraction Flow
+1. AI extraction runs first (GPT-5.2 Vision)
+2. If AI fails → OCR fallback (Tesseract)
+3. If AI succeeds but confidence < 50 → OCR supplement
+4. If AI confidence >= 50 → Return AI result only
+
+#### Response Format
+```json
+{
+  "fields": [
+    {
+      "field_name": "first_name",
+      "extracted_value": "John",
+      "confidence": 0.95,
+      "confidence_label": "high",
+      "extraction_method": "ai"
+    }
+  ],
+  "extraction_method": "ai",
+  "low_confidence_fields": ["postcode"]
+}
+```
+
+#### Confidence Scoring
+- 0.8-1.0 = "high" (green badge)
+- 0.5-0.79 = "medium" (amber badge)  
+- Below 0.5 = "low" (red badge + warning icon)
+
+#### Frontend Review Enhancements
+- Low confidence fields highlighted with ⚠ warning
+- Extraction method badge shown (AI Vision / AI + OCR / OCR)
+- Low confidence alert banner when applicable
+
+### 2. Incidents Tab Improvements
+
+#### KPI Summary Bar
+- Open incidents count
+- Closed incidents count
+- Overdue (>7 days) count (red highlight)
+- Total incidents count
+
+#### Filters Added
+- Status filter: All, Open, Investigating, Resolved, Closed
+- Type filter: All, Incident, Outbreak, Near Miss, Complaint
+
+#### Action Buttons per Incident
+- View - Opens incident details
+- Edit - Opens amendment dialog
+- Close - Quick close button (for open incidents)
+- History - View amendment history
+
+### 3. Reports Tab → Compliance Insights
+
+#### Active Alerts Section
+- Expiring/expired DBS
+- Expiring training
+- Expiring policies
+
+#### Action Cards
+- DBS Register → Link to /portal/dbs-register
+- Training Matrix → Link to /portal/training
+- Policies → Link to policies tab
+
+#### Quick Actions
+- Request Documents (→ Employees page)
+- Assign Policies (→ Policies tab)
+- Send Reminders (Coming soon)
+
+### Backend Changes
+- `ExtractionLog` model extended with confidence tracking
+- `ExtractedField` model now includes numeric confidence + label + method
+- `parse_extracted_text_to_fields` returns low confidence field names
+
+### Test Status
+| Feature | Status |
+|---------|--------|
+| Smart OCR retry logic | ✅ PASS |
+| Confidence scoring (0-1) | ✅ PASS |
+| Low confidence field tracking | ✅ PASS |
+| Incidents KPI bar | ✅ PASS |
+| Incidents filters | ✅ PASS |
+| Insights tab active alerts | ✅ PASS |
+| Action cards navigation | ✅ PASS |
+
+---
+
+## Previous Update (2025-12-29)
 **Employee Profile Header & Audit Quick View Improvements - COMPLETE**
 
 ### Summary

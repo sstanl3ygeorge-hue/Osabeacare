@@ -3865,8 +3865,10 @@ class ExtractedField(BaseModel):
     field_name: str
     extracted_value: Optional[str] = None
     current_value: Optional[str] = None
-    confidence: str = "medium"  # low, medium, high
+    confidence: float = 0.5  # 0.0 to 1.0 numeric confidence score
+    confidence_label: str = "medium"  # low, medium, high - for display
     apply: bool = True  # Default to apply, user can skip
+    extraction_method: Optional[str] = None  # "ai" or "ocr"
 
 class ExtractionResult(BaseModel):
     """Result of application form extraction"""
@@ -3891,11 +3893,15 @@ class ExtractionLog(BaseModel):
     ai_extraction_attempted: bool = False
     ai_extraction_success: bool = False
     ai_error: Optional[str] = None
+    ai_overall_confidence: Optional[float] = None  # Overall AI confidence score
     ocr_attempted: bool = False
     ocr_success: bool = False
     ocr_error: Optional[str] = None
-    final_method: Optional[str] = None  # "ai", "ocr", "failed"
+    final_method: Optional[str] = None  # "ai", "ocr", "ai+ocr", "failed"
     failure_reason: Optional[str] = None
+    fields_extracted: int = 0
+    low_confidence_fields: List[str] = []
+    ocr_retry_reason: Optional[str] = None  # Why OCR was triggered after AI
 
 
 def perform_ocr_extraction(file_bytes: bytes, content_type: str) -> tuple[str, str]:
@@ -3941,7 +3947,14 @@ def perform_ocr_extraction(file_bytes: bytes, content_type: str) -> tuple[str, s
 
 async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]:
     """
-    Extract text content from a document using AI with OCR fallback.
+    Extract text content from a document using AI with smart OCR fallback.
+    
+    Smart OCR Logic:
+    1. Run AI extraction first
+    2. If AI fails → run OCR fallback
+    3. If AI succeeds but returns low quality → run OCR and merge results
+    4. If AI confidence is HIGH → return AI result only
+    
     Returns (extracted_text, extraction_log)
     """
     extraction_log = ExtractionLog(
@@ -3960,6 +3973,7 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
         # Step 1: Try AI-based extraction first
         extraction_log.ai_extraction_attempted = True
         ai_text = ""
+        ai_quality_score = 0  # Track AI quality
         
         try:
             api_key = os.environ.get('EMERGENT_LLM_KEY')
@@ -3973,9 +3987,8 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
                 if 'pdf' in (content_type or '').lower():
                     try:
                         from pdf2image import convert_from_bytes
-                        pdf_images = convert_from_bytes(file_bytes, dpi=150, first_page=1, last_page=3)  # Limit to first 3 pages
+                        pdf_images = convert_from_bytes(file_bytes, dpi=150, first_page=1, last_page=3)
                         for i, img in enumerate(pdf_images):
-                            # Convert PIL image to bytes
                             img_buffer = io.BytesIO()
                             img.save(img_buffer, format='PNG')
                             img_bytes = img_buffer.getvalue()
@@ -3985,7 +3998,6 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
                         extraction_log.ai_error = f"PDF to image conversion failed: {str(pdf_err)}"
                         logger.warning(f"Failed to convert PDF to images: {pdf_err}")
                 else:
-                    # Direct image - use as-is
                     images_to_process.append(base64.b64encode(file_bytes).decode('utf-8'))
                 
                 if images_to_process:
@@ -3997,26 +4009,44 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
                             session_id=f"extraction-{uuid.uuid4()}",
                             system_message="""You are a document data extraction specialist. Extract all visible text and data from the provided document image.
 Focus on identifying form fields, their labels, and the values filled in.
-Return the extracted content in a structured, readable format."""
+Return the extracted content in a structured, readable format.
+At the end, rate your confidence in the extraction quality from 0-100 on a new line like: CONFIDENCE_SCORE: 85"""
                         ).with_model("openai", "gpt-5.2")
                         
                         image_content = ImageContent(image_base64=image_base64)
                         user_message = UserMessage(
-                            text=f"Extract all text and data from this document image (page {i+1}). Include form field labels and their values.",
+                            text=f"Extract all text and data from this document image (page {i+1}). Include form field labels and their values. End with CONFIDENCE_SCORE: X (0-100).",
                             file_contents=[image_content]
                         )
                         
                         page_text = await chat.send_message(user_message)
                         if page_text and page_text.strip():
+                            # Extract confidence score if present
+                            confidence_match = re.search(r'CONFIDENCE_SCORE:\s*(\d+)', page_text)
+                            if confidence_match:
+                                page_confidence = int(confidence_match.group(1))
+                                ai_quality_score = max(ai_quality_score, page_confidence)
+                                # Remove confidence line from text
+                                page_text = re.sub(r'\n*CONFIDENCE_SCORE:\s*\d+\s*$', '', page_text).strip()
                             all_extracted_text.append(f"--- Page {i+1} ---\n{page_text}")
                     
                     ai_text = "\n\n".join(all_extracted_text)
                     
                     if ai_text and len(ai_text.strip()) > 20:
                         extraction_log.ai_extraction_success = True
-                        extraction_log.final_method = "ai"
-                        logger.info(f"AI extraction successful - extracted {len(ai_text)} characters from {len(images_to_process)} page(s)")
-                        return ai_text, extraction_log
+                        extraction_log.ai_overall_confidence = ai_quality_score / 100.0 if ai_quality_score else 0.7
+                        logger.info(f"AI extraction successful - {len(ai_text)} chars, confidence: {ai_quality_score}")
+                        
+                        # SMART OCR DECISION:
+                        # If AI confidence is LOW (< 50), run OCR to supplement
+                        if ai_quality_score < 50:
+                            extraction_log.ocr_retry_reason = f"AI confidence too low ({ai_quality_score})"
+                            logger.info(f"AI confidence low ({ai_quality_score}), running OCR supplement...")
+                            # Continue to OCR section below
+                        else:
+                            # High confidence - return AI result
+                            extraction_log.final_method = "ai"
+                            return ai_text, extraction_log
                     else:
                         extraction_log.ai_error = "AI returned insufficient text"
                         logger.warning("AI extraction returned insufficient text, trying OCR fallback")
@@ -4027,19 +4057,35 @@ Return the extracted content in a structured, readable format."""
             extraction_log.ai_error = str(ai_err)
             logger.warning(f"AI extraction failed: {ai_err}, trying OCR fallback")
         
-        # Step 2: OCR Fallback
+        # Step 2: OCR Fallback (or supplement for low-confidence AI)
         extraction_log.ocr_attempted = True
-        logger.info("Attempting OCR fallback extraction...")
+        logger.info("Attempting OCR extraction...")
         
         ocr_text, ocr_error = perform_ocr_extraction(file_bytes, content_type)
         
         if ocr_text and len(ocr_text.strip()) > 20:
             extraction_log.ocr_success = True
-            extraction_log.final_method = "ocr"
-            logger.info(f"OCR extraction successful - extracted {len(ocr_text)} characters")
-            return ocr_text, extraction_log
+            
+            # Merge results if we have both AI and OCR
+            if ai_text and extraction_log.ai_extraction_success:
+                extraction_log.final_method = "ai+ocr"
+                # Combine AI and OCR results with priority to AI
+                combined_text = f"=== AI EXTRACTION ===\n{ai_text}\n\n=== OCR SUPPLEMENT ===\n{ocr_text}"
+                logger.info(f"Combined AI+OCR extraction - total {len(combined_text)} characters")
+                return combined_text, extraction_log
+            else:
+                extraction_log.final_method = "ocr"
+                logger.info(f"OCR extraction successful - extracted {len(ocr_text)} characters")
+                return ocr_text, extraction_log
         else:
             extraction_log.ocr_error = ocr_error or "OCR produced no readable text"
+            
+            # If we have AI text (even low confidence), use it
+            if ai_text and extraction_log.ai_extraction_success:
+                extraction_log.final_method = "ai"
+                logger.info("Using AI extraction (OCR failed to supplement)")
+                return ai_text, extraction_log
+            
             extraction_log.final_method = "failed"
             extraction_log.failure_reason = f"AI: {extraction_log.ai_error or 'N/A'}, OCR: {extraction_log.ocr_error}"
             logger.error(f"Both extraction methods failed - AI: {extraction_log.ai_error}, OCR: {extraction_log.ocr_error}")
@@ -4052,12 +4098,17 @@ Return the extracted content in a structured, readable format."""
         return "", extraction_log
 
 
-async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str) -> List[ExtractedField]:
-    """Parse extracted text into structured profile fields using AI"""
+async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str, extraction_method: str = "ai") -> tuple[List[ExtractedField], List[str]]:
+    """
+    Parse extracted text into structured profile fields using AI.
+    Returns (list of extracted fields, list of low confidence field names)
+    """
+    low_confidence_fields = []
+    
     try:
         api_key = os.environ.get('EMERGENT_LLM_KEY')
         if not api_key:
-            return []
+            return [], []
         
         # Get current employee data for comparison
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -4070,7 +4121,11 @@ async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str) 
             api_key=api_key,
             session_id=f"parsing-{uuid.uuid4()}",
             system_message="""You are a data parsing specialist. Parse the extracted document text into structured profile fields.
-Return a JSON array of objects, each with: field_name, extracted_value, confidence (low/medium/high).
+Return a JSON array of objects with NUMERIC confidence scores.
+Each object has: field_name, extracted_value, confidence (0.0 to 1.0 number).
+- confidence 0.9-1.0 = clearly visible and readable
+- confidence 0.6-0.89 = partially visible or slightly unclear
+- confidence 0.0-0.59 = unclear, guessed, or uncertain
 Only include fields where you found data. Use exact field names from the allowed list."""
         ).with_model("openai", "gpt-5.2")
         
@@ -4090,9 +4145,16 @@ Extracted text:
 
 Return ONLY a JSON array like:
 [
-  {{"field_name": "first_name", "extracted_value": "John", "confidence": "high"}},
-  {{"field_name": "postcode", "extracted_value": "SW1A 1AA", "confidence": "medium"}}
+  {{"field_name": "first_name", "extracted_value": "John", "confidence": 0.95}},
+  {{"field_name": "postcode", "extracted_value": "SW1A 1AA", "confidence": 0.72}},
+  {{"field_name": "ni_number", "extracted_value": "AB123456C", "confidence": 0.55}}
 ]
+
+Rules for confidence scoring:
+- 0.9-1.0: Text is clearly printed/typed, fully visible, unambiguous
+- 0.7-0.89: Text is readable but has minor issues (slight blur, handwriting)
+- 0.5-0.69: Text is partially unclear, some guessing involved
+- Below 0.5: Significant uncertainty, may be wrong
 
 If no data can be extracted, return an empty array: []"""
 
@@ -4123,15 +4185,36 @@ If no data can be extracted, return an empty array: []"""
                 if current_val is not None and not isinstance(current_val, str):
                     current_val = str(current_val)
                 
+                # Handle confidence - could be string or number
+                raw_confidence = field_data.get('confidence', 0.5)
+                if isinstance(raw_confidence, str):
+                    # Convert old string format to numeric
+                    confidence_map = {'high': 0.9, 'medium': 0.7, 'low': 0.4}
+                    confidence_score = confidence_map.get(raw_confidence.lower(), 0.5)
+                else:
+                    confidence_score = float(raw_confidence) if raw_confidence else 0.5
+                
+                # Determine confidence label
+                if confidence_score >= 0.8:
+                    confidence_label = "high"
+                elif confidence_score >= 0.5:
+                    confidence_label = "medium"
+                else:
+                    confidence_label = "low"
+                    low_confidence_fields.append(field_name)
+                
                 result.append(ExtractedField(
                     field_name=field_name,
                     extracted_value=extracted_val,
                     current_value=current_val,
-                    confidence=field_data.get('confidence', 'medium'),
-                    apply=True if not current_val else False  # Default apply only if field is empty
+                    confidence=confidence_score,
+                    confidence_label=confidence_label,
+                    apply=True if not current_val else False,  # Default apply only if field is empty
+                    extraction_method=extraction_method
                 ))
         
-        return result
+        logger.info(f"Parsed {len(result)} fields, {len(low_confidence_fields)} with low confidence")
+        return result, low_confidence_fields
     except Exception as e:
         logger.error(f"Failed to parse extracted text: {e}")
         return []
@@ -4255,7 +4338,15 @@ async def extract_from_application_form(
     
     # Step 2: Parse text into structured fields
     logger.info(f"Parsing extracted text into profile fields for employee {employee_id}")
-    extracted_fields = await parse_extracted_text_to_fields(extracted_text, employee_id)
+    extracted_fields, low_confidence_fields = await parse_extracted_text_to_fields(
+        extracted_text, 
+        employee_id,
+        extraction_method=extraction_log.final_method or "unknown"
+    )
+    
+    # Update extraction log with field info
+    extraction_log.fields_extracted = len(extracted_fields)
+    extraction_log.low_confidence_fields = low_confidence_fields
     
     if not extracted_fields:
         # Still don't block - return graceful failure with options
@@ -4293,7 +4384,10 @@ async def extract_from_application_form(
         "file_url": file_url,
         "fields": [f.model_dump() for f in extracted_fields],
         "extracted_text_preview": extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text,
-        "extraction_method": extraction_log.final_method,  # Track which method worked
+        "extraction_method": extraction_log.final_method,
+        "low_confidence_fields": low_confidence_fields,
+        "ai_overall_confidence": extraction_log.ai_overall_confidence,
+        "ocr_retry_reason": extraction_log.ocr_retry_reason,
         "status": "pending_review",
         "extracted_at": now,
         "extracted_by": user['user_id'],
@@ -4312,7 +4406,9 @@ async def extract_from_application_form(
         {
             "extraction_id": extraction_id,
             "document_id": doc_id,
-            "fields_count": len(extracted_fields)
+            "fields_count": len(extracted_fields),
+            "low_confidence_count": len(low_confidence_fields),
+            "extraction_method": extraction_log.final_method
         }
     )
     
@@ -4321,6 +4417,8 @@ async def extract_from_application_form(
         "employee_id": employee_id,
         "document_id": doc_id,
         "fields": extracted_fields,
+        "low_confidence_fields": low_confidence_fields,
+        "extraction_method": extraction_log.final_method,
         "status": "pending_review",
         "message": "Extraction complete. Review fields below and apply selected values to profile.",
         "compliance_note": "Extracted values update PROFILE DATA only. They do NOT complete compliance evidence requirements."

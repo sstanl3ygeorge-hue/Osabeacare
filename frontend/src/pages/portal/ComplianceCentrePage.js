@@ -16,7 +16,7 @@ import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
   RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
-  Edit, History, Save, BookOpen
+  Edit, History, Save, BookOpen, ArrowRight, TrendingUp, Bell, Mail, Send
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -33,8 +33,10 @@ export default function ComplianceCentrePage() {
   const [policies, setPolicies] = useState([]);
   const [insurance, setInsurance] = useState([]);
   const [incidents, setIncidents] = useState([]);
+  const [incidentFilter, setIncidentFilter] = useState({ status: 'all', severity: 'all' }); // Incident filters
   const [dbsReport, setDbsReport] = useState(null);
   const [trainingReport, setTrainingReport] = useState(null);
+  const [complianceAlerts, setComplianceAlerts] = useState(null); // For Insights tab
   
   // Document preview modal state
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -772,8 +774,8 @@ export default function ComplianceCentrePage() {
             onClick={() => fetchReports('dbs')}
             data-testid="tab-reports"
           >
-            <ClipboardList className="h-4 w-4 mr-2" />
-            Reports
+            <TrendingUp className="h-4 w-4 mr-2" />
+            Insights
           </TabsTrigger>
           <TabsTrigger 
             value="cqc-view" 
@@ -1422,16 +1424,104 @@ export default function ComplianceCentrePage() {
 
         {/* Incidents Tab */}
         <TabsContent value="incidents">
-          <Card className="border-[#E4E8EB] shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="font-heading text-lg">Incident & Outbreak Logs</CardTitle>
-              <Dialog open={incidentDialogOpen} onOpenChange={setIncidentDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Report Incident
-                  </Button>
-                </DialogTrigger>
+          <div className="space-y-4">
+            {/* Incidents KPI Summary Bar */}
+            {(() => {
+              const openCount = incidents.filter(i => i.status === 'open' || i.status === 'investigating').length;
+              const closedCount = incidents.filter(i => i.status === 'closed' || i.status === 'resolved').length;
+              const overdueCount = incidents.filter(i => {
+                if (i.status === 'closed' || i.status === 'resolved') return false;
+                const daysOld = Math.ceil((new Date() - new Date(i.date_occurred)) / (1000 * 60 * 60 * 24));
+                return daysOld > 7; // Overdue if open for more than 7 days
+              }).length;
+              
+              return (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <Card className="border-amber-200 bg-amber-50/50">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-amber-600 font-medium">Open</p>
+                          <p className="text-2xl font-bold text-amber-700">{openCount}</p>
+                        </div>
+                        <AlertCircle className="h-8 w-8 text-amber-400" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-green-200 bg-green-50/50">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-green-600 font-medium">Closed</p>
+                          <p className="text-2xl font-bold text-green-700">{closedCount}</p>
+                        </div>
+                        <CheckCircle className="h-8 w-8 text-green-400" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className={`border-${overdueCount > 0 ? 'red' : 'gray'}-200 bg-${overdueCount > 0 ? 'red' : 'gray'}-50/50`}>
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className={`text-xs ${overdueCount > 0 ? 'text-red-600' : 'text-gray-600'} font-medium`}>Overdue (&gt;7d)</p>
+                          <p className={`text-2xl font-bold ${overdueCount > 0 ? 'text-red-700' : 'text-gray-700'}`}>{overdueCount}</p>
+                        </div>
+                        <Clock className={`h-8 w-8 ${overdueCount > 0 ? 'text-red-400' : 'text-gray-400'}`} />
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-blue-200 bg-blue-50/50">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-blue-600 font-medium">Total</p>
+                          <p className="text-2xl font-bold text-blue-700">{incidents.length}</p>
+                        </div>
+                        <ClipboardList className="h-8 w-8 text-blue-400" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              );
+            })()}
+            
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="font-heading text-lg">Incident & Outbreak Logs</CardTitle>
+                <div className="flex items-center gap-3">
+                  {/* Filters */}
+                  <Select value={incidentFilter.status} onValueChange={(v) => setIncidentFilter({...incidentFilter, status: v})}>
+                    <SelectTrigger className="w-32 rounded-lg h-9">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="investigating">Investigating</SelectItem>
+                      <SelectItem value="resolved">Resolved</SelectItem>
+                      <SelectItem value="closed">Closed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={incidentFilter.severity} onValueChange={(v) => setIncidentFilter({...incidentFilter, severity: v})}>
+                    <SelectTrigger className="w-32 rounded-lg h-9">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="incident">Incident</SelectItem>
+                      <SelectItem value="outbreak">Outbreak</SelectItem>
+                      <SelectItem value="near_miss">Near Miss</SelectItem>
+                      <SelectItem value="complaint">Complaint</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  
+                  <Dialog open={incidentDialogOpen} onOpenChange={setIncidentDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Report Incident
+                      </Button>
+                    </DialogTrigger>
                 <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
                     <DialogTitle className="font-heading">Report Incident/Outbreak</DialogTitle>
@@ -1555,86 +1645,378 @@ export default function ComplianceCentrePage() {
                   </form>
                 </DialogContent>
               </Dialog>
+                </div>
             </CardHeader>
             <CardContent>
-              {incidents.length === 0 ? (
-                <div className="text-center py-12">
-                  <AlertCircle className="h-12 w-12 mx-auto text-text-muted/50 mb-3" />
-                  <p className="text-text-muted">No incidents recorded</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {incidents.map((incident) => (
-                    <div 
-                      key={incident.id}
-                      className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
-                      data-testid={`incident-${incident.id}`}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-mono text-text-muted">{incident.reference_number}</span>
-                            {getStatusBadge(incident.status)}
-                            <span className={`text-xs px-2 py-0.5 rounded ${
-                              incident.incident_type === 'outbreak' ? 'bg-error/10 text-error' :
-                              incident.incident_type === 'complaint' ? 'bg-warning/10 text-warning' :
-                              'bg-info/10 text-info'
-                            }`}>
-                              {incident.incident_type}
-                            </span>
-                          </div>
-                          <p className="font-medium text-text-primary">{incident.title}</p>
-                          <p className="text-sm text-text-muted mt-1 line-clamp-2">{incident.description}</p>
-                          <div className="flex items-center gap-3 text-xs text-text-muted mt-2">
-                            <span>Date: {new Date(incident.date_occurred).toLocaleDateString()}</span>
-                            {incident.location && <span>Location: {incident.location}</span>}
-                          </div>
-                        </div>
-                        {/* Edit/History buttons for incidents */}
-                        {isAdmin() && (
-                          <div className="flex items-center gap-2 ml-4">
-                            <Button 
-                              size="sm"
-                              variant="outline"
-                              className="rounded-lg"
-                              onClick={() => openAmendDialog('incident', incident)}
-                              data-testid={`edit-incident-${incident.id}`}
-                            >
-                              <Edit className="h-4 w-4 mr-1" />
-                              Edit
-                            </Button>
-                            <Button 
-                              size="sm"
-                              variant="ghost"
-                              className="rounded-lg text-text-muted hover:text-text-primary"
-                              onClick={() => loadHistory('incident', incident.id)}
-                              data-testid={`history-incident-${incident.id}`}
-                              title="View amendment history"
-                            >
-                              <History className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                      {incident.root_cause && (
-                        <div className="mt-3 pt-3 border-t border-[#E4E8EB]">
-                          <p className="text-xs text-text-muted">Root Cause:</p>
-                          <p className="text-sm text-text-primary">{incident.root_cause}</p>
-                        </div>
-                      )}
+              {(() => {
+                // Apply filters
+                const filteredIncidents = incidents.filter(incident => {
+                  if (incidentFilter.status !== 'all' && incident.status !== incidentFilter.status) return false;
+                  if (incidentFilter.severity !== 'all' && incident.incident_type !== incidentFilter.severity) return false;
+                  return true;
+                });
+                
+                if (filteredIncidents.length === 0) {
+                  return (
+                    <div className="text-center py-12">
+                      <AlertCircle className="h-12 w-12 mx-auto text-text-muted/50 mb-3" />
+                      <p className="text-text-muted">
+                        {incidents.length === 0 ? 'No incidents recorded' : 'No incidents match filters'}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+                
+                return (
+                  <div className="space-y-3">
+                    {filteredIncidents.map((incident) => {
+                      const daysOld = Math.ceil((new Date() - new Date(incident.date_occurred)) / (1000 * 60 * 60 * 24));
+                      const isOverdue = (incident.status === 'open' || incident.status === 'investigating') && daysOld > 7;
+                      
+                      return (
+                        <div 
+                          key={incident.id}
+                          className={`p-4 rounded-xl border ${isOverdue ? 'bg-red-50/50 border-red-200' : 'bg-[#F8FAFA] border-[#E4E8EB]'}`}
+                          data-testid={`incident-${incident.id}`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                <span className="text-xs font-mono text-text-muted">{incident.reference_number}</span>
+                                {getStatusBadge(incident.status)}
+                                <span className={`text-xs px-2 py-0.5 rounded ${
+                                  incident.incident_type === 'outbreak' ? 'bg-error/10 text-error' :
+                                  incident.incident_type === 'complaint' ? 'bg-warning/10 text-warning' :
+                                  incident.incident_type === 'near_miss' ? 'bg-amber-100 text-amber-700' :
+                                  'bg-info/10 text-info'
+                                }`}>
+                                  {incident.incident_type?.replace('_', ' ')}
+                                </span>
+                                {isOverdue && (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 font-medium">
+                                    Overdue ({daysOld}d)
+                                  </span>
+                                )}
+                              </div>
+                              <p className="font-medium text-text-primary">{incident.title}</p>
+                              <p className="text-sm text-text-muted mt-1 line-clamp-2">{incident.description}</p>
+                              <div className="flex items-center gap-3 text-xs text-text-muted mt-2">
+                                <span>Date: {new Date(incident.date_occurred).toLocaleDateString()}</span>
+                                {incident.location && <span>Location: {incident.location}</span>}
+                              </div>
+                            </div>
+                            {/* Action buttons for incidents */}
+                            <div className="flex items-center gap-2 ml-4">
+                              <Button 
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg"
+                                onClick={() => {/* View details */}}
+                                data-testid={`view-incident-${incident.id}`}
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                View
+                              </Button>
+                              {isAdmin() && (
+                                <>
+                                  <Button 
+                                    size="sm"
+                                    variant="outline"
+                                    className="rounded-lg"
+                                    onClick={() => openAmendDialog('incident', incident)}
+                                    data-testid={`edit-incident-${incident.id}`}
+                                  >
+                                    <Edit className="h-4 w-4 mr-1" />
+                                    Edit
+                                  </Button>
+                                  {(incident.status === 'open' || incident.status === 'investigating') && (
+                                    <Button 
+                                      size="sm"
+                                      variant="default"
+                                      className="rounded-lg bg-green-600 hover:bg-green-700"
+                                      onClick={() => {
+                                        // Quick close incident
+                                        openAmendDialog('incident', {...incident, status: 'closed'});
+                                      }}
+                                      data-testid={`close-incident-${incident.id}`}
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-1" />
+                                      Close
+                                    </Button>
+                                  )}
+                                  <Button 
+                                    size="sm"
+                                    variant="ghost"
+                                    className="rounded-lg text-text-muted hover:text-text-primary"
+                                    onClick={() => loadHistory('incident', incident.id)}
+                                    data-testid={`history-incident-${incident.id}`}
+                                    title="View amendment history"
+                                  >
+                                    <History className="h-4 w-4" />
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {incident.root_cause && (
+                            <div className="mt-3 pt-3 border-t border-[#E4E8EB]">
+                              <p className="text-xs text-text-muted">Root Cause:</p>
+                              <p className="text-sm text-text-primary">{incident.root_cause}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
+          </div>
         </TabsContent>
 
-        {/* Reports Tab */}
+        {/* Compliance Insights Tab (formerly Reports) */}
         <TabsContent value="reports">
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Staff DBS Report */}
+          <div className="space-y-6">
+            {/* Compliance Alerts Section */}
             <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader>
+                <CardTitle className="font-heading text-lg flex items-center gap-2">
+                  <Bell className="h-5 w-5 text-amber-500" />
+                  Active Alerts
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const alerts = [];
+                  
+                  // Add DBS alerts
+                  if (dbsReport?.report) {
+                    const expiringDbs = dbsReport.report.filter(s => 
+                      s.dbs_status === 'expiring_soon' || s.dbs_status === 'expired'
+                    );
+                    expiringDbs.forEach(s => alerts.push({
+                      type: 'dbs',
+                      severity: s.dbs_status === 'expired' ? 'high' : 'medium',
+                      title: `${s.name} - DBS ${s.dbs_status === 'expired' ? 'Expired' : 'Expiring'}`,
+                      date: s.dbs_expiry
+                    }));
+                  }
+                  
+                  // Add Training alerts
+                  if (trainingReport?.report) {
+                    trainingReport.report.forEach(s => {
+                      if (s.expiring_soon?.length > 0) {
+                        s.expiring_soon.forEach(t => alerts.push({
+                          type: 'training',
+                          severity: 'medium',
+                          title: `${s.name} - ${t} expiring`,
+                          employee: s.name
+                        }));
+                      }
+                    });
+                  }
+                  
+                  // Add policy/certificate expiry alerts from dashboard
+                  if (dashboard?.expiring_policies?.length > 0) {
+                    dashboard.expiring_policies.forEach(p => alerts.push({
+                      type: 'policy',
+                      severity: 'medium',
+                      title: `Policy "${p.title}" expiring`,
+                      date: p.review_date
+                    }));
+                  }
+                  
+                  if (alerts.length === 0) {
+                    return (
+                      <div className="text-center py-8 text-text-muted">
+                        <CheckCircle className="h-12 w-12 mx-auto text-green-400 mb-3" />
+                        <p className="font-medium text-green-700">No Active Alerts</p>
+                        <p className="text-sm">All compliance items are up to date</p>
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {alerts.slice(0, 10).map((alert, idx) => (
+                        <div 
+                          key={idx} 
+                          className={`flex items-center justify-between p-3 rounded-lg border ${
+                            alert.severity === 'high' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <AlertTriangle className={`h-4 w-4 ${alert.severity === 'high' ? 'text-red-500' : 'text-amber-500'}`} />
+                            <div>
+                              <p className={`font-medium text-sm ${alert.severity === 'high' ? 'text-red-700' : 'text-amber-700'}`}>
+                                {alert.title}
+                              </p>
+                              {alert.date && (
+                                <p className="text-xs text-text-muted">
+                                  {new Date(alert.date).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            alert.type === 'dbs' ? 'bg-purple-100 text-purple-700' :
+                            alert.type === 'training' ? 'bg-blue-100 text-blue-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {alert.type.toUpperCase()}
+                          </span>
+                        </div>
+                      ))}
+                      {alerts.length > 10 && (
+                        <p className="text-xs text-text-muted text-center py-2">
+                          + {alerts.length - 10} more alerts
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+            
+            {/* Action Cards Grid */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {/* DBS Register Card */}
+              <Card className="border-[#E4E8EB] shadow-sm hover:shadow-md transition-shadow cursor-pointer" 
+                    onClick={() => window.location.href = '/portal/dbs-register'}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+                      <Shield className="h-6 w-6 text-purple-600" />
+                    </div>
+                    <ArrowRight className="h-5 w-5 text-text-muted" />
+                  </div>
+                  <h3 className="font-semibold text-text-primary mb-1">DBS Register</h3>
+                  <p className="text-sm text-text-muted mb-3">View and manage DBS checks</p>
+                  {dbsReport && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+                        {dbsReport.report?.filter(s => s.dbs_status === 'valid').length || 0} Valid
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">
+                        {dbsReport.report?.filter(s => s.dbs_status === 'expiring_soon').length || 0} Expiring
+                      </span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              
+              {/* Training Matrix Card */}
+              <Card className="border-[#E4E8EB] shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                    onClick={() => window.location.href = '/portal/training'}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-blue-100 flex items-center justify-center">
+                      <BookOpen className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <ArrowRight className="h-5 w-5 text-text-muted" />
+                  </div>
+                  <h3 className="font-semibold text-text-primary mb-1">Training Matrix</h3>
+                  <p className="text-sm text-text-muted mb-3">Track staff training status</p>
+                  {trainingReport && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+                        {trainingReport.report?.reduce((sum, s) => sum + s.completed_count, 0) || 0} Completed
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">
+                        {trainingReport.report?.reduce((sum, s) => sum + s.pending_count, 0) || 0} Pending
+                      </span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+              
+              {/* Policies Card */}
+              <Card className="border-[#E4E8EB] shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                    onClick={() => handleTabChange('policies')}>
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center">
+                      <FileText className="h-6 w-6 text-green-600" />
+                    </div>
+                    <ArrowRight className="h-5 w-5 text-text-muted" />
+                  </div>
+                  <h3 className="font-semibold text-text-primary mb-1">Policies</h3>
+                  <p className="text-sm text-text-muted mb-3">Manage organisational policies</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-0.5 rounded bg-green-100 text-green-700">
+                      {policies.filter(p => p.status === 'active').length} Active
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">
+                      {policies.filter(p => p.status === 'review_due').length} Review Due
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+            
+            {/* Quick Actions */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader>
+                <CardTitle className="font-heading text-lg">Quick Actions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <Button 
+                    variant="outline" 
+                    className="justify-start h-auto py-4 px-4 rounded-xl"
+                    onClick={() => window.location.href = '/portal/employees'}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
+                        <FileText className="h-5 w-5 text-red-600" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium">Request Documents</p>
+                        <p className="text-xs text-text-muted">Request missing documents from staff</p>
+                      </div>
+                    </div>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    className="justify-start h-auto py-4 px-4 rounded-xl"
+                    onClick={() => handleTabChange('policies')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                        <Plus className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium">Assign Policies</p>
+                        <p className="text-xs text-text-muted">Upload and assign new policies</p>
+                      </div>
+                    </div>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline" 
+                    className="justify-start h-auto py-4 px-4 rounded-xl"
+                    onClick={() => toast.info('Email reminders feature coming soon')}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
+                        <Send className="h-5 w-5 text-amber-600" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium">Send Reminders</p>
+                        <p className="text-xs text-text-muted">Notify staff about pending items</p>
+                      </div>
+                    </div>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            
+            {/* Original Reports Grid (kept for data reference) */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Staff DBS Report */}
+              <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Staff DBS Dates</CardTitle>
                 <Button 
@@ -1720,6 +2102,7 @@ export default function ComplianceCentrePage() {
                 )}
               </CardContent>
             </Card>
+          </div>
           </div>
         </TabsContent>
         

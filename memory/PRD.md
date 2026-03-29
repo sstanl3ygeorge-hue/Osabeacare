@@ -15,12 +15,49 @@ Full audit report available at `/app/AUDIT_REPORT.md`
 | Single Source of Truth | ✅ PASS |
 | State Machine Integrity | ✅ PASS |
 | UI Trust | ✅ PASS |
+| Date Handling | ✅ PASS (patched 2025-12-29) |
 
 ### Components Refactored
 - `StatusBadge` - Single styling system for all status badges
 - `ProgressBar` - Single progress calculation logic  
 - `ComplianceCard` - Unified dashboard cards
 - `RequirementRow` - Unified row for documents/training
+
+---
+
+## Date Handling Patch (2025-12-29)
+
+### Canonical Date Storage Rules
+| Field | Format | Example |
+|-------|--------|---------|
+| `expiry_date` | YYYY-MM-DD | `2027-03-15` |
+| `completion_date` | YYYY-MM-DD | `2026-03-28` |
+| `created_at`, `updated_at`, `verified_at` | Full ISO | `2026-03-28T11:01:37.623448+00:00` |
+
+### Files Changed
+
+**Backend (`/app/backend/server.py`)**:
+- Added `normalize_date_only()` function for consistent YYYY-MM-DD storage
+- Updated `calculate_training_expiry()` to return YYYY-MM-DD format
+- Training record PATCH endpoint now normalizes dates before storage
+
+**Frontend (`/app/frontend/src/lib/dateUtils.js`)** - NEW:
+- `parseBackendDate()` - Safe parsing of both YYYY-MM-DD and ISO formats
+- `formatBackendDate()` - Consistent display (e.g., "15 Mar 2027")
+- `formatBackendDateTime()` - For full timestamps
+- `toBackendDateOnly()` - Convert to YYYY-MM-DD for API calls
+
+**Frontend Pages Updated**:
+- `TrainingPage.js` - Uses `formatBackendDate()` for expiry dates
+- `EmployeeProfilePage.js` - Uses `formatBackendDate()` for all dates
+- `ComplianceCentrePage.js` - Import added (ready for migration)
+
+### Local Status Calculation REMOVED
+All frontend pages now use backend-computed fields ONLY:
+- `computed_status` - not_started/expired/needs_renewal/completed
+- `renewal_status` - expired/expiring_soon/valid/no_expiry
+- `status_label` - Human readable (e.g., "Valid (350d left)")
+- `days_until_expiry` - Integer (negative if expired)
 
 ---
 

@@ -19,6 +19,7 @@ import {
   RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
   Edit, History, Save, BookOpen, ArrowRight, TrendingUp, Bell, Mail, Send
 } from 'lucide-react';
+import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 

@@ -15,6 +15,7 @@ import {
   GraduationCap, Plus, CheckCircle, Clock, AlertTriangle, Loader2, 
   MoreVertical, Edit, History, Filter, CalendarClock, ShieldCheck
 } from 'lucide-react';
+import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -41,13 +42,15 @@ const additionalTraining = [
   'Dying, Death and Bereavement'
 ];
 
-// REMOVED: Local expiry status calculation
+// ═══════════════════════════════════════════════════════════════════════════════
+// SINGLE SOURCE OF TRUTH: Status comes from backend ONLY
 // Frontend MUST use backend-computed status (computed_status, renewal_status, status_label, status_color)
-// This ensures single source of truth across all pages
+// NO local date calculations for expired/valid/renewal status
+// ═══════════════════════════════════════════════════════════════════════════════
 
-// Helper to get expiry display from backend-computed fields
+// Helper to get expiry display from backend-computed fields ONLY
 const getBackendExpiryStatus = (record) => {
-  // Use backend-computed fields if available
+  // Use backend-computed fields - NO LOCAL CALCULATION
   if (record.computed_status) {
     return {
       status: record.renewal_status || record.computed_status,
@@ -59,20 +62,18 @@ const getBackendExpiryStatus = (record) => {
     };
   }
   
-  // Fallback for backward compatibility (should not happen with updated backend)
+  // No computed status and no expiry = no expiry badge needed
   if (!record.expiry_date) return null;
   
-  const now = new Date();
-  const expiry = new Date(record.expiry_date);
-  const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-  
-  if (daysUntilExpiry < 0) {
-    return { status: 'expired', label: 'Expired', daysText: `${Math.abs(daysUntilExpiry)} days ago`, color: 'red' };
-  } else if (daysUntilExpiry <= 30) {
-    return { status: 'expiring_soon', label: 'Needs Renewal', daysText: `${daysUntilExpiry} days left`, color: 'amber' };
-  } else {
-    return { status: 'valid', label: 'Valid', daysText: `${daysUntilExpiry} days`, color: 'green' };
-  }
+  // Backend should always provide computed_status for records with expiry_date
+  // If we reach here, it's a data issue - return safe default
+  console.warn('Training record missing computed_status:', record.id);
+  return {
+    status: 'unknown',
+    label: 'Status pending',
+    daysText: '',
+    color: 'gray'
+  };
 };
 
 export default function TrainingPage() {
@@ -493,7 +494,7 @@ export default function TrainingPage() {
                           </span>
                         </td>
                         <td className="p-4 text-text-muted text-sm">
-                          {record.expiry_date ? new Date(record.expiry_date).toLocaleDateString() : '-'}
+                          {formatBackendDate(record.expiry_date, { format: 'medium', fallback: '-' })}
                         </td>
                         <td className="p-4">
                           {expiryStatus ? (

@@ -3560,7 +3560,47 @@ def calculate_training_expiry(completion_date: str, requirement_id: str) -> str:
     validity_days = get_training_validity_days(requirement_id)
     completion = datetime.fromisoformat(completion_date.replace('Z', '+00:00')) if 'T' in completion_date else datetime.strptime(completion_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
     expiry = completion + timedelta(days=validity_days)
-    return expiry.isoformat()
+    return expiry.strftime('%Y-%m-%d')  # Return date-only format
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CANONICAL DATE STORAGE RULES
+# ═══════════════════════════════════════════════════════════════════════════════
+# - expiry_date: YYYY-MM-DD (date-only, no timezone)
+# - completion_date: YYYY-MM-DD (date-only, no timezone)  
+# - created_at, updated_at, verified_at: Full ISO with timezone
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def normalize_date_only(date_value: str) -> Optional[str]:
+    """
+    Normalize a date value to YYYY-MM-DD format.
+    Used for expiry_date and completion_date fields.
+    
+    Accepts:
+    - YYYY-MM-DD: returns as-is
+    - Full ISO: extracts date part
+    - None/empty: returns None
+    """
+    if not date_value:
+        return None
+    
+    if isinstance(date_value, str):
+        # Already in correct format
+        if len(date_value) == 10 and date_value[4] == '-' and date_value[7] == '-':
+            return date_value
+        
+        # Full ISO format - extract date part
+        if 'T' in date_value:
+            return date_value.split('T')[0]
+        
+        # Try parsing other formats
+        try:
+            dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
+            return dt.strftime('%Y-%m-%d')
+        except Exception:
+            pass
+    
+    return date_value  # Return as-is if can't parse
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -11166,16 +11206,20 @@ async def update_employee_training_record(
     changes = {}
     
     if update.completion_date is not None:
-        changes["completion_date"] = {"old": record.get('completion_date'), "new": update.completion_date}
-        update_data["completion_date"] = update.completion_date
+        # CANONICAL: Normalize to YYYY-MM-DD format
+        normalized_completion = normalize_date_only(update.completion_date)
+        changes["completion_date"] = {"old": record.get('completion_date'), "new": normalized_completion}
+        update_data["completion_date"] = normalized_completion
         # Auto-calculate expiry if completion date changes
-        if update.completion_date and not update.expiry_date:
-            update_data["expiry_date"] = calculate_training_expiry(update.completion_date, requirement_id)
+        if normalized_completion and not update.expiry_date:
+            update_data["expiry_date"] = calculate_training_expiry(normalized_completion, requirement_id)
             changes["expiry_date"] = {"old": record.get('expiry_date'), "new": update_data["expiry_date"]}
     
     if update.expiry_date is not None:
-        changes["expiry_date"] = {"old": record.get('expiry_date'), "new": update.expiry_date}
-        update_data["expiry_date"] = update.expiry_date
+        # CANONICAL: Normalize to YYYY-MM-DD format
+        normalized_expiry = normalize_date_only(update.expiry_date)
+        changes["expiry_date"] = {"old": record.get('expiry_date'), "new": normalized_expiry}
+        update_data["expiry_date"] = normalized_expiry
     elif update.clear_expiry_date:
         # Explicitly clear expiry date
         changes["expiry_date"] = {"old": record.get('expiry_date'), "new": None}

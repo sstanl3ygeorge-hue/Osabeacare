@@ -25,6 +25,7 @@ import {
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
+import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -3658,18 +3659,18 @@ export default function EmployeeProfilePage() {
                                       {req.training.completed_at && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-1">
                                           <Calendar className="h-2.5 w-2.5" />
-                                          Completed: {new Date(req.training.completed_at).toLocaleDateString()}
+                                          Completed: {formatBackendDate(req.training.completed_at, { format: 'medium' })}
                                         </span>
                                       )}
-                                      {/* Expiry Date */}
+                                      {/* Expiry Date - Use backend-computed status */}
                                       {req.training.expiry_date && (
                                         <span className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-1 ${
-                                          new Date(req.training.expiry_date) < new Date() 
+                                          req.training.computed_status === 'expired' || req.training.renewal_status === 'expired'
                                             ? 'bg-red-50 text-red-700' 
                                             : 'bg-green-50 text-green-700'
                                         }`}>
                                           <Clock className="h-2.5 w-2.5" />
-                                          Expires: {new Date(req.training.expiry_date).toLocaleDateString()}
+                                          Expires: {formatBackendDate(req.training.expiry_date, { format: 'medium' })}
                                         </span>
                                       )}
                                       {/* Verification Status */}
@@ -4421,12 +4422,12 @@ export default function EmployeeProfilePage() {
                                           </span>
                                         )}
                                         {doc.uploaded_at && (
-                                          <span>Uploaded: {new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                                          <span>Uploaded: {formatBackendDate(doc.uploaded_at, { format: 'medium' })}</span>
                                         )}
-                                        {/* Expiry Date - show actual date */}
+                                        {/* Expiry Date - show actual date, use backend expiry_status */}
                                         {doc.expiry_date && (
                                           <span className={doc.expiry_status?.status === 'expired' ? 'text-red-600 font-medium' : ''}>
-                                            Expires: {new Date(doc.expiry_date).toLocaleDateString()}
+                                            Expires: {formatBackendDate(doc.expiry_date, { format: 'medium' })}
                                           </span>
                                         )}
                                         {isFileBroken && (
@@ -4815,11 +4816,13 @@ export default function EmployeeProfilePage() {
               ) : (
                 <div className="space-y-3">
                   {training.map((record) => {
-                    // Use backend-computed status - SINGLE SOURCE OF TRUTH
-                    // DO NOT compute locally - use record.computed_status, record.renewal_status, etc.
+                    // ═══════════════════════════════════════════════════════════════
+                    // SINGLE SOURCE OF TRUTH: Use backend-computed status ONLY
+                    // NO local date calculations for expired/valid/renewal status
+                    // ═══════════════════════════════════════════════════════════════
                     let expiryStatus = null;
                     if (record.computed_status || record.renewal_status) {
-                      // Use backend-computed values
+                      // Use backend-computed values - NO LOCAL CALCULATION
                       expiryStatus = {
                         status: record.renewal_status || record.computed_status,
                         label: record.status_label || (record.renewal_status === 'expired' ? 'Expired' : record.renewal_status === 'expiring_soon' ? 'Needs Renewal' : 'Valid'),
@@ -4827,18 +4830,15 @@ export default function EmployeeProfilePage() {
                         days: record.days_until_expiry !== null && record.days_until_expiry !== undefined ? Math.abs(record.days_until_expiry) : null
                       };
                     } else if (record.expiry_date) {
-                      // Fallback for backward compatibility (should not happen with updated backend)
-                      const now = new Date();
-                      const expiry = new Date(record.expiry_date);
-                      const daysUntilExpiry = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-                      
-                      if (daysUntilExpiry < 0) {
-                        expiryStatus = { status: 'expired', label: 'Expired', color: 'red', days: Math.abs(daysUntilExpiry) };
-                      } else if (daysUntilExpiry <= 30) {
-                        expiryStatus = { status: 'expiring_soon', label: 'Needs Renewal', color: 'amber', days: daysUntilExpiry };
-                      } else {
-                        expiryStatus = { status: 'valid', label: 'Valid', color: 'green', days: daysUntilExpiry };
-                      }
+                      // Backend should always provide computed_status for records with expiry_date
+                      // If we reach here, it's a data issue - return safe default
+                      console.warn('Training record missing computed_status:', record.id);
+                      expiryStatus = {
+                        status: 'unknown',
+                        label: 'Status pending',
+                        color: 'gray',
+                        days: null
+                      };
                     }
                     
                     const hasEvidence = record.certificate_url || (record.evidence_files && record.evidence_files.length > 0);
@@ -4860,10 +4860,10 @@ export default function EmployeeProfilePage() {
                             </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-muted mt-1">
                               {record.completion_date && (
-                                <span>Completed: {new Date(record.completion_date).toLocaleDateString()}</span>
+                                <span>Completed: {formatBackendDate(record.completion_date, { format: 'medium' })}</span>
                               )}
                               {record.expiry_date && (
-                                <span>Expires: {new Date(record.expiry_date).toLocaleDateString()}</span>
+                                <span>Expires: {formatBackendDate(record.expiry_date, { format: 'medium' })}</span>
                               )}
                             </div>
                           </div>

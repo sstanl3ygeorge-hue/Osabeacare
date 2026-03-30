@@ -4,6 +4,99 @@
 **Osabea Healthcare Solutions**
 
 
+## NHS-Level Digital Application Intake (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Implement online applicant submission from the website while preserving the existing uploaded/prefilled application flow. Both intake paths land in the same underlying recruitment model.
+
+### Implementation Summary
+
+#### Files Changed
+| File | Changes |
+|------|---------|
+| `/app/backend/server.py` | Added StructuredApplicationForm models, POST /api/applications/structured endpoint, POST /api/applications/cv-upload endpoint, GET /api/applications/{reference} endpoint, updated legacy /apply to NOT create user accounts |
+| `/app/frontend/src/pages/public/ApplyPage.js` | Complete rewrite with 6-step NHS-level structured form |
+| `/app/frontend/src/pages/auth/LoginPage.js` | Removed demo credentials from UI |
+
+#### Endpoints Added/Extended
+| Endpoint | Type | Purpose |
+|----------|------|---------|
+| `POST /api/applications/structured` | NEW | NHS-level structured application submission |
+| `POST /api/applications/cv-upload` | NEW | CV upload before application (returns file_id) |
+| `GET /api/applications/{reference}` | NEW | Public application status check |
+| `POST /api/apply` | MODIFIED | Removed user account creation |
+
+#### Field Mapping: Online Form → Existing Collections
+
+**employees collection:**
+```
+form.first_name → first_name
+form.last_name → last_name
+form.email → email
+form.phone → phone
+form.address_line_1 + city + postcode → address
+form.role_applied → role
+form.availability → availability
+form.has_driving_licence → driver_status
+status = "new" (ALWAYS applicant stage)
+recruitment_approved = False (ALWAYS)
+employee_code = None (NEVER assigned at application)
+```
+
+**form_submissions collection:**
+```
+template_name = "Structured Application Form"
+form_data = {
+  personal_details, contact_details, address,
+  role_availability, employment_history, references,
+  qualifications, health_declaration, criminal_declaration,
+  right_to_work, declarations
+}
+status = "completed" (submitted by applicant)
+verified = False (requires manual review)
+```
+
+**employee_documents collection (follow-up slots):**
+- Reference 1 (status: requested)
+- Reference 2 (status: requested)
+- DBS Certificate (status: not_started)
+- Right to Work (status: not_started)
+
+#### Follow-Up Items Auto-Created
+1. Reference verification for Referee 1
+2. Reference verification for Referee 2
+3. Enhanced DBS check required
+4. Right to work evidence required
+5. Photo ID verification required
+6. Professional registration verification (if declared)
+7. Health declaration review (if conditions declared)
+8. Address history verification (if < 5 years at current address)
+9. Employment gap review (if gaps declared)
+
+### Strict Recruitment Rules Enforced ✅
+| Rule | Implementation |
+|------|---------------|
+| No employee_code at application | ✅ employee_code = None always |
+| No user account at application | ✅ Removed from both endpoints |
+| No clearance from submission | ✅ recruitment_approved = False, verified = False |
+| Mandatory declarations | ✅ Server-side validation before acceptance |
+| Minimum 2 references | ✅ Validated server-side |
+| References structured & traceable | ✅ Full referee contact details stored |
+| Employment history for gap analysis | ✅ start_date/end_date in YYYY-MM format |
+| Health screening mapped to workflows | ✅ Creates follow-up for OH review if conditions |
+
+### Legacy Flow Preserved ✅
+- `POST /api/apply` still works
+- Creates applicant in same `employees` collection
+- Returns applicant_reference
+- No breaking changes to existing applicants
+
+### Security Fix ✅
+- Removed demo credentials from login page
+- No pre-filled email/password
+
+
 ## Applicant vs Employee Separation (2026-03-30)
 **Status**: COMPLETE ✅
 

@@ -4381,6 +4381,7 @@ class ContactForm(BaseModel):
     message: str
 
 class ApplicationForm(BaseModel):
+    """Legacy simple application form - kept for backward compatibility"""
     first_name: str
     last_name: str
     email: EmailStr
@@ -4393,6 +4394,184 @@ class ApplicationForm(BaseModel):
     has_dbs: bool = False
     experience_summary: Optional[str] = None
     how_heard: Optional[str] = None
+
+
+# ==================== NHS-LEVEL STRUCTURED APPLICATION MODELS ====================
+
+class EmploymentHistoryEntry(BaseModel):
+    """Structured employment history for gap analysis"""
+    employer_name: str
+    job_title: str
+    start_date: str  # YYYY-MM format for gap analysis
+    end_date: Optional[str] = None  # None = current employment
+    is_current: bool = False
+    duties: Optional[str] = None
+    reason_for_leaving: Optional[str] = None
+    employer_address: Optional[str] = None
+    employer_phone: Optional[str] = None
+    can_contact: bool = True  # Permission to contact employer
+
+class ReferenceEntry(BaseModel):
+    """Structured reference for verification - NHS requires traceable references"""
+    referee_name: str
+    referee_job_title: str
+    referee_organisation: str
+    referee_email: EmailStr
+    referee_phone: str
+    relationship: str  # e.g., "Line Manager", "Supervisor", "HR Department"
+    years_known: int
+    is_professional: bool = True  # Professional vs personal reference
+    can_contact_before_offer: bool = True
+
+class HealthDeclaration(BaseModel):
+    """Health screening questions appropriate at application stage"""
+    # Physical capability questions
+    can_perform_physical_tasks: bool  # Lifting, moving, standing for long periods
+    has_back_problems: bool = False
+    has_mobility_issues: bool = False
+    
+    # Infectious disease screening
+    had_recent_infectious_illness: bool = False
+    infectious_illness_details: Optional[str] = None
+    
+    # Vaccinations
+    hepatitis_b_vaccinated: bool = False
+    flu_vaccinated: bool = False
+    covid_vaccinated: bool = False
+    
+    # Pre-existing conditions that may affect work
+    has_condition_affecting_work: bool = False
+    condition_details: Optional[str] = None
+    
+    # Adjustments needed
+    requires_reasonable_adjustments: bool = False
+    adjustment_details: Optional[str] = None
+    
+    # Declaration
+    health_declaration_accurate: bool  # Must be True to submit
+
+class CriminalDeclaration(BaseModel):
+    """Criminal record declaration - required for care sector"""
+    has_criminal_convictions: bool = False
+    conviction_details: Optional[str] = None
+    has_pending_charges: bool = False
+    pending_charges_details: Optional[str] = None
+    has_cautions_warnings: bool = False
+    cautions_details: Optional[str] = None
+    # Declaration that applicant understands DBS check will be conducted
+    understands_dbs_required: bool
+    consents_to_dbs_check: bool
+
+class RightToWorkDeclaration(BaseModel):
+    """Right to work declaration"""
+    has_right_to_work_uk: bool
+    citizenship_status: str  # "uk_citizen", "eu_settled", "eu_pre_settled", "visa_holder", "other"
+    visa_type: Optional[str] = None  # If applicable
+    visa_expiry: Optional[str] = None  # If applicable
+    share_code: Optional[str] = None  # For online RTW check
+    requires_sponsorship: bool = False
+
+class ApplicationDeclarations(BaseModel):
+    """Combined declarations section"""
+    # Accuracy declaration
+    information_accurate: bool  # Must be True
+    understands_false_info_consequences: bool  # Must be True
+    
+    # Consent declarations
+    consents_to_reference_checks: bool  # Must be True
+    consents_to_background_checks: bool  # Must be True
+    consents_to_data_processing: bool  # Must be True - GDPR
+    
+    # Professional registration (if applicable)
+    has_professional_registration: bool = False
+    registration_body: Optional[str] = None  # e.g., "NMC", "HCPC"
+    registration_number: Optional[str] = None
+    registration_expiry: Optional[str] = None
+    
+    # Disciplinary history
+    has_disciplinary_history: bool = False
+    disciplinary_details: Optional[str] = None
+    
+    # Previous NHS/care employment
+    previously_worked_nhs: bool = False
+    previous_nhs_employer: Optional[str] = None
+    left_nhs_in_good_standing: Optional[bool] = None
+
+class StructuredApplicationForm(BaseModel):
+    """
+    NHS-Level Structured Application Form
+    
+    This is the comprehensive online application form that maps directly
+    into the existing recruitment model. All submissions require human
+    verification and recruitment approval - submission alone does NOT
+    create any clearance or activation.
+    """
+    # === SECTION 1: Personal Details ===
+    title: Optional[str] = None  # Mr, Mrs, Ms, Dr, etc.
+    first_name: str
+    middle_name: Optional[str] = None
+    last_name: str
+    preferred_name: Optional[str] = None
+    date_of_birth: str  # Required for DBS checks
+    national_insurance: Optional[str] = None  # For identity verification
+    
+    # === SECTION 2: Contact Details ===
+    email: EmailStr
+    phone: str
+    phone_secondary: Optional[str] = None
+    
+    # === SECTION 3: Address ===
+    address_line_1: str
+    address_line_2: Optional[str] = None
+    city: str
+    county: Optional[str] = None
+    postcode: str
+    
+    # Previous addresses (required if at current address < 5 years - for DBS)
+    years_at_current_address: int
+    previous_addresses: Optional[List[Dict[str, Any]]] = None
+    
+    # === SECTION 4: Role & Availability ===
+    role_applied: str
+    availability: str  # full_time, part_time, flexible, etc.
+    earliest_start_date: str
+    preferred_locations: Optional[List[str]] = None
+    has_driving_licence: bool = False
+    has_own_transport: bool = False
+    
+    # === SECTION 5: Employment History (Structured for gap analysis) ===
+    employment_history: List[EmploymentHistoryEntry]
+    has_employment_gaps: bool = False
+    employment_gap_explanation: Optional[str] = None
+    
+    # === SECTION 6: References (Structured and traceable) ===
+    references: List[ReferenceEntry]  # Minimum 2 required
+    
+    # === SECTION 7: Qualifications & Training ===
+    highest_qualification: Optional[str] = None
+    relevant_qualifications: Optional[List[str]] = None
+    care_certificate_completed: bool = False
+    mandatory_training_completed: Optional[List[str]] = None
+    
+    # === SECTION 8: Health Declaration ===
+    health_declaration: HealthDeclaration
+    
+    # === SECTION 9: Criminal Record Declaration ===
+    criminal_declaration: CriminalDeclaration
+    
+    # === SECTION 10: Right to Work ===
+    right_to_work: RightToWorkDeclaration
+    
+    # === SECTION 11: Declarations & Consent ===
+    declarations: ApplicationDeclarations
+    
+    # === SECTION 12: Additional Information ===
+    how_heard: Optional[str] = None
+    additional_info: Optional[str] = None
+    
+    # === CV Upload Reference (file uploaded separately) ===
+    cv_file_id: Optional[str] = None
+
 
 # Dashboard Stats Model
 class DashboardStats(BaseModel):
@@ -18153,11 +18332,21 @@ async def submit_contact_form(form: ContactForm):
 @api_router.post("/apply")
 async def submit_application(form: ApplicationForm):
     """
-    Public application submission endpoint.
+    Legacy simple application submission endpoint.
     
     Creates applicant record with applicant_reference (NOT employee_code).
     Employee_code is only assigned on recruitment approval.
+    
+    CONSTRAINT: NO user account created at application stage.
     """
+    # Check for existing application with same email
+    existing = await db.employees.find_one({"email": form.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"An application with this email already exists. Reference: {existing.get('applicant_reference', 'Unknown')}"
+        )
+    
     app_id = str(uuid.uuid4())
     applicant_ref = f"APP-{uuid.uuid4().hex[:8].upper()}"  # Applicant reference, not employee code
     now = datetime.now(timezone.utc).isoformat()
@@ -18174,40 +18363,549 @@ async def submit_application(form: ApplicationForm):
         "role": form.role_applied,
         "assignment": "Unassigned",
         "status": EmployeeStatus.NEW,  # Applicant stage
+        "onboarding_status": OnboardingStatus.NEW,
         "start_date": None,
         "manager_name": None,
         "driver_status": False,
-        "notes": f"Application received. Availability: {form.availability or 'Not specified'}. Experience: {form.experience_summary or 'Not provided'}. How heard: {form.how_heard or 'Not specified'}",
+        "notes": f"Application received (legacy form). Availability: {form.availability or 'Not specified'}. Experience: {form.experience_summary or 'Not provided'}. How heard: {form.how_heard or 'Not specified'}",
         "completion_percentage": 0,
-        "right_to_work": form.right_to_work,
-        "has_dbs": form.has_dbs,
+        "right_to_work_declared": form.right_to_work,
+        "has_dbs_declared": form.has_dbs,
         "address": form.address,
         "postcode": form.postcode,
-        "recruitment_approved": False,  # Explicitly false
+        "recruitment_approved": False,  # Explicitly false - NOT approved
+        "application_source": "online_legacy",
+        "application_submitted_at": now,
         "created_at": now,
         "updated_at": now
     }
     await db.employees.insert_one(employee_doc)
     
-    # Create user account for applicant
-    user_id = f"user_{uuid.uuid4().hex[:12]}"
-    temp_password = str(uuid.uuid4())[:8]
-    user_doc = {
-        "user_id": user_id,
-        "email": form.email,
-        "password": hash_password(temp_password),
-        "name": f"{form.first_name} {form.last_name}",
-        "role": UserRole.EMPLOYEE,
-        "assignment": "Unassigned",
-        "picture": None,
-        "employee_id": app_id,
-        "created_at": now
-    }
-    await db.users.insert_one(user_doc)
+    # NO user account created - per constraint "Do NOT create employee user accounts at application stage"
+    # User account will be created only when needed for portal access after recruitment approval
+    
+    # Log audit trail
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": "system",
+        "action": "application_submitted",
+        "entity_type": "applicant",
+        "entity_id": app_id,
+        "details": {
+            "applicant_reference": applicant_ref,
+            "email": form.email,
+            "role_applied": form.role_applied,
+            "application_source": "online_legacy",
+            "clearance_granted": False,
+            "approval_granted": False,
+            "user_account_created": False
+        },
+        "timestamp": now
+    })
     
     return {"message": "Your application has been submitted successfully. We will review it and be in touch.", "reference": applicant_ref}
 
-@api_router.get("/assignments")
+
+# ==================== NHS-LEVEL STRUCTURED APPLICATION ENDPOINT ====================
+
+@api_router.post("/applications/structured")
+async def submit_structured_application(form: StructuredApplicationForm):
+    """
+    NHS-Level Structured Application Submission
+    
+    This endpoint receives comprehensive online applications and maps them
+    into the existing recruitment model. 
+    
+    CRITICAL CONSTRAINTS:
+    - NO employee_code assigned (assigned only on recruitment approval)
+    - NO user account created (created only when needed for portal access)
+    - NO clearance, approval, or work-ready status implied
+    - Status is explicitly 'new' (applicant-stage)
+    - recruitment_approved is explicitly False
+    - All verification and approval remains manual
+    
+    This creates:
+    1. Applicant record in employees collection
+    2. Structured form_submission with all application data
+    3. CV document in employee_documents (if uploaded)
+    4. Follow-up requirement slots for missing items
+    
+    Returns applicant reference and list of follow-up items.
+    """
+    # Validation: Required declarations must be True
+    if not form.declarations.information_accurate:
+        raise HTTPException(status_code=400, detail="You must confirm the information is accurate")
+    if not form.declarations.consents_to_reference_checks:
+        raise HTTPException(status_code=400, detail="Consent to reference checks is required")
+    if not form.declarations.consents_to_background_checks:
+        raise HTTPException(status_code=400, detail="Consent to background checks is required")
+    if not form.declarations.consents_to_data_processing:
+        raise HTTPException(status_code=400, detail="Consent to data processing is required (GDPR)")
+    if not form.health_declaration.health_declaration_accurate:
+        raise HTTPException(status_code=400, detail="Health declaration must be confirmed accurate")
+    if not form.criminal_declaration.understands_dbs_required:
+        raise HTTPException(status_code=400, detail="You must acknowledge DBS check requirement")
+    if not form.criminal_declaration.consents_to_dbs_check:
+        raise HTTPException(status_code=400, detail="Consent to DBS check is required")
+    
+    # Validation: Minimum 2 references required for NHS-level compliance
+    if len(form.references) < 2:
+        raise HTTPException(status_code=400, detail="Minimum 2 references required")
+    
+    # Check for existing application with same email
+    existing = await db.employees.find_one({"email": form.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"An application with this email already exists. Reference: {existing.get('applicant_reference', 'Unknown')}"
+        )
+    
+    app_id = str(uuid.uuid4())
+    applicant_ref = f"APP-{uuid.uuid4().hex[:8].upper()}"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # ==================== 1. CREATE APPLICANT RECORD ====================
+    # Maps into existing employees collection with applicant-stage status
+    
+    # Build full address
+    full_address = form.address_line_1
+    if form.address_line_2:
+        full_address += f", {form.address_line_2}"
+    full_address += f", {form.city}"
+    if form.county:
+        full_address += f", {form.county}"
+    
+    employee_doc = {
+        "id": app_id,
+        "applicant_reference": applicant_ref,
+        "employee_code": None,  # NEVER assigned at application - only on recruitment approval
+        
+        # Personal details
+        "title": form.title,
+        "first_name": form.first_name,
+        "middle_name": form.middle_name,
+        "last_name": form.last_name,
+        "preferred_name": form.preferred_name,
+        "date_of_birth": form.date_of_birth,
+        "national_insurance": form.national_insurance,
+        
+        # Contact
+        "email": form.email,
+        "phone": form.phone,
+        "phone_secondary": form.phone_secondary,
+        
+        # Address
+        "address": full_address,
+        "postcode": form.postcode,
+        
+        # Role & availability
+        "role": form.role_applied,
+        "assignment": "Unassigned",
+        "availability": form.availability,
+        "earliest_start_date": form.earliest_start_date,
+        "preferred_locations": form.preferred_locations,
+        "driver_status": form.has_driving_licence,
+        "has_own_transport": form.has_own_transport,
+        
+        # Status - ALWAYS applicant stage, NEVER approved/cleared
+        "status": EmployeeStatus.NEW,
+        "onboarding_status": OnboardingStatus.NEW,
+        "recruitment_approved": False,  # EXPLICIT: Not approved
+        "recruitment_approved_by": None,
+        "recruitment_approved_at": None,
+        
+        # Flags from declarations (for quick filtering - NOT verification)
+        "right_to_work_declared": form.right_to_work.has_right_to_work_uk,
+        "citizenship_status_declared": form.right_to_work.citizenship_status,
+        "has_dbs_declared": form.criminal_declaration.consents_to_dbs_check,
+        "has_criminal_convictions_declared": form.criminal_declaration.has_criminal_convictions,
+        "has_professional_registration_declared": form.declarations.has_professional_registration,
+        "professional_registration_body": form.declarations.registration_body,
+        "professional_registration_number": form.declarations.registration_number,
+        
+        # Application metadata
+        "application_source": "online_structured",
+        "application_submitted_at": now,
+        "how_heard": form.how_heard,
+        
+        # System fields
+        "notes": f"Online application submitted. Role: {form.role_applied}. Availability: {form.availability}.",
+        "completion_percentage": 0,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.employees.insert_one(employee_doc)
+    
+    # ==================== 2. CREATE STRUCTURED FORM SUBMISSION ====================
+    # Stores complete application data for review in existing form_submissions
+    
+    form_submission_id = str(uuid.uuid4())
+    
+    form_submission = {
+        "id": form_submission_id,
+        "employee_id": app_id,
+        "template_id": "structured_application_form",  # Virtual template ID
+        "template_name": "Structured Application Form",
+        "form_data": {
+            # All structured data preserved for review
+            "personal_details": {
+                "title": form.title,
+                "first_name": form.first_name,
+                "middle_name": form.middle_name,
+                "last_name": form.last_name,
+                "preferred_name": form.preferred_name,
+                "date_of_birth": form.date_of_birth,
+                "national_insurance": form.national_insurance,
+            },
+            "contact_details": {
+                "email": form.email,
+                "phone": form.phone,
+                "phone_secondary": form.phone_secondary,
+            },
+            "address": {
+                "address_line_1": form.address_line_1,
+                "address_line_2": form.address_line_2,
+                "city": form.city,
+                "county": form.county,
+                "postcode": form.postcode,
+                "years_at_current_address": form.years_at_current_address,
+                "previous_addresses": form.previous_addresses,
+            },
+            "role_availability": {
+                "role_applied": form.role_applied,
+                "availability": form.availability,
+                "earliest_start_date": form.earliest_start_date,
+                "preferred_locations": form.preferred_locations,
+                "has_driving_licence": form.has_driving_licence,
+                "has_own_transport": form.has_own_transport,
+            },
+            "employment_history": [eh.model_dump() for eh in form.employment_history],
+            "has_employment_gaps": form.has_employment_gaps,
+            "employment_gap_explanation": form.employment_gap_explanation,
+            "references": [ref.model_dump() for ref in form.references],
+            "qualifications": {
+                "highest_qualification": form.highest_qualification,
+                "relevant_qualifications": form.relevant_qualifications,
+                "care_certificate_completed": form.care_certificate_completed,
+                "mandatory_training_completed": form.mandatory_training_completed,
+            },
+            "health_declaration": form.health_declaration.model_dump(),
+            "criminal_declaration": form.criminal_declaration.model_dump(),
+            "right_to_work": form.right_to_work.model_dump(),
+            "declarations": form.declarations.model_dump(),
+            "additional_info": form.additional_info,
+            "how_heard": form.how_heard,
+        },
+        "status": FormStatus.COMPLETED,  # Completed by applicant, awaiting review
+        "submitted_by_applicant": True,
+        "submitted_at": now,
+        "verified": False,  # NOT verified - requires manual review
+        "verified_by": None,
+        "verified_at": None,
+        "requires_reverification": False,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.form_submissions.insert_one(form_submission)
+    
+    # ==================== 3. LINK CV IF UPLOADED ====================
+    
+    if form.cv_file_id:
+        # Update the CV document to link to this applicant
+        await db.employee_documents.update_one(
+            {"id": form.cv_file_id},
+            {"$set": {
+                "employee_id": app_id,
+                "status": DocumentStatus.UPLOADED,
+                "verified": False,
+                "updated_at": now
+            }}
+        )
+    
+    # ==================== 4. CREATE FOLLOW-UP REQUIREMENT SLOTS ====================
+    # These are items that need to be collected/verified after application
+    
+    follow_up_items = []
+    
+    # Reference 1 - Needs verification
+    ref1 = form.references[0]
+    ref1_doc_id = str(uuid.uuid4())
+    await db.employee_documents.insert_one({
+        "id": ref1_doc_id,
+        "employee_id": app_id,
+        "document_type_id": None,  # Will be linked to Reference doc type
+        "document_type_name": "Reference 1",
+        "category": "References",
+        "status": DocumentStatus.REQUESTED,
+        "verified": False,
+        "notes": f"Referee: {ref1.referee_name} ({ref1.referee_organisation}). Contact: {ref1.referee_email}",
+        "metadata": ref1.model_dump(),
+        "created_at": now,
+        "updated_at": now
+    })
+    follow_up_items.append({
+        "type": "reference",
+        "description": f"Reference verification required from {ref1.referee_name} ({ref1.referee_organisation})",
+        "status": "pending"
+    })
+    
+    # Reference 2 - Needs verification
+    ref2 = form.references[1]
+    ref2_doc_id = str(uuid.uuid4())
+    await db.employee_documents.insert_one({
+        "id": ref2_doc_id,
+        "employee_id": app_id,
+        "document_type_id": None,
+        "document_type_name": "Reference 2",
+        "category": "References",
+        "status": DocumentStatus.REQUESTED,
+        "verified": False,
+        "notes": f"Referee: {ref2.referee_name} ({ref2.referee_organisation}). Contact: {ref2.referee_email}",
+        "metadata": ref2.model_dump(),
+        "created_at": now,
+        "updated_at": now
+    })
+    follow_up_items.append({
+        "type": "reference",
+        "description": f"Reference verification required from {ref2.referee_name} ({ref2.referee_organisation})",
+        "status": "pending"
+    })
+    
+    # DBS Check - Always required
+    dbs_doc_id = str(uuid.uuid4())
+    dbs_notes = "DBS check required"
+    if form.criminal_declaration.has_criminal_convictions:
+        dbs_notes += " - Applicant declared convictions (requires review)"
+    await db.employee_documents.insert_one({
+        "id": dbs_doc_id,
+        "employee_id": app_id,
+        "document_type_id": None,
+        "document_type_name": "DBS Certificate",
+        "category": "Identity & DBS",
+        "status": DocumentStatus.NOT_STARTED,
+        "verified": False,
+        "notes": dbs_notes,
+        "metadata": form.criminal_declaration.model_dump(),
+        "created_at": now,
+        "updated_at": now
+    })
+    follow_up_items.append({
+        "type": "dbs",
+        "description": "Enhanced DBS check required",
+        "status": "required"
+    })
+    
+    # Right to Work - Needs verification
+    rtw_doc_id = str(uuid.uuid4())
+    rtw_notes = f"Right to work verification required. Declared status: {form.right_to_work.citizenship_status}"
+    if form.right_to_work.requires_sponsorship:
+        rtw_notes += " - SPONSORSHIP MAY BE REQUIRED"
+    await db.employee_documents.insert_one({
+        "id": rtw_doc_id,
+        "employee_id": app_id,
+        "document_type_id": None,
+        "document_type_name": "Right to Work",
+        "category": "Right to Work",
+        "status": DocumentStatus.NOT_STARTED,
+        "verified": False,
+        "notes": rtw_notes,
+        "metadata": form.right_to_work.model_dump(),
+        "created_at": now,
+        "updated_at": now
+    })
+    follow_up_items.append({
+        "type": "right_to_work",
+        "description": "Right to work evidence required",
+        "status": "required"
+    })
+    
+    # Health Declaration Review
+    if form.health_declaration.has_condition_affecting_work or form.health_declaration.requires_reasonable_adjustments:
+        follow_up_items.append({
+            "type": "health_review",
+            "description": "Health declaration requires Occupational Health review",
+            "status": "review_required"
+        })
+    
+    # ID Verification
+    follow_up_items.append({
+        "type": "id_verification",
+        "description": "Photo ID verification required (Passport/Driving Licence)",
+        "status": "required"
+    })
+    
+    # Professional Registration (if declared)
+    if form.declarations.has_professional_registration:
+        follow_up_items.append({
+            "type": "professional_registration",
+            "description": f"Verify {form.declarations.registration_body} registration: {form.declarations.registration_number}",
+            "status": "verification_required"
+        })
+    
+    # Address Verification (if at current address < 5 years)
+    if form.years_at_current_address < 5:
+        follow_up_items.append({
+            "type": "address_history",
+            "description": "5-year address history verification required for DBS",
+            "status": "required"
+        })
+    
+    # Employment Gap Review (if declared)
+    if form.has_employment_gaps:
+        follow_up_items.append({
+            "type": "employment_gaps",
+            "description": "Employment gap explanation requires review",
+            "status": "review_required"
+        })
+    
+    # ==================== 5. LOG AUDIT TRAIL ====================
+    
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": "system",
+        "action": "application_submitted",
+        "entity_type": "applicant",
+        "entity_id": app_id,
+        "details": {
+            "applicant_reference": applicant_ref,
+            "email": form.email,
+            "role_applied": form.role_applied,
+            "application_source": "online_structured",
+            "follow_up_items_count": len(follow_up_items),
+            # Explicit audit that NO clearance was granted
+            "clearance_granted": False,
+            "approval_granted": False,
+            "work_ready_status": False,
+            "employee_code_assigned": False,
+            "user_account_created": False
+        },
+        "timestamp": now
+    })
+    
+    logger.info(f"Structured application submitted: {applicant_ref} for {form.email}")
+    
+    return {
+        "status": "submitted",
+        "message": "Your application has been submitted successfully. Our recruitment team will review it and contact you regarding next steps.",
+        "reference": applicant_ref,
+        "applicant_id": app_id,
+        "next_steps": [
+            "Our team will review your application within 5 working days",
+            "We will contact your references for verification",
+            "You may be invited for an interview",
+            "A DBS check will be required before any offer is made",
+            "Right to work evidence will need to be verified in person"
+        ],
+        "follow_up_items": follow_up_items,
+        "important_notes": [
+            "This submission does NOT constitute a job offer",
+            "All information will be verified before any employment decision",
+            "You will be contacted if any additional information is required"
+        ]
+    }
+
+
+@api_router.post("/applications/cv-upload")
+async def upload_application_cv(file: UploadFile = File(...)):
+    """
+    Upload CV for application (before full submission).
+    Returns a file_id that can be included in the application form.
+    
+    This is a public endpoint - no authentication required.
+    The CV is stored in a pending state until linked to an application.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    
+    # Validate file type
+    allowed_types = ['.pdf', '.doc', '.docx']
+    file_ext = '.' + file.filename.split('.')[-1].lower() if '.' in file.filename else ''
+    if file_ext not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"File type not allowed. Accepted: {', '.join(allowed_types)}")
+    
+    # Validate file size (max 10MB)
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size: 10MB")
+    await file.seek(0)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    doc_id = str(uuid.uuid4())
+    
+    # Upload to storage
+    try:
+        from emergentintegrations.file_storage import upload_file
+        upload_result = upload_file(content, file.filename)
+        file_url = upload_result.get('url') if isinstance(upload_result, dict) else str(upload_result)
+    except Exception as e:
+        logger.error(f"CV upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file")
+    
+    # Create pending document record
+    doc_data = {
+        "id": doc_id,
+        "employee_id": None,  # Will be linked on application submission
+        "document_type_id": None,
+        "document_type_name": "CV / Resume",
+        "category": "Application Documents",
+        "file_name": file.filename,
+        "file_url": file_url,
+        "file_size": len(content),
+        "file_type": file_ext,
+        "status": DocumentStatus.UPLOADED,
+        "verified": False,
+        "upload_source": "application_cv",
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.employee_documents.insert_one(doc_data)
+    
+    return {
+        "file_id": doc_id,
+        "file_name": file.filename,
+        "message": "CV uploaded successfully. Include this file_id in your application."
+    }
+
+
+@api_router.get("/applications/{reference}")
+async def get_application_status(reference: str):
+    """
+    Public endpoint to check application status by reference.
+    Returns limited information - no sensitive data exposed.
+    """
+    applicant = await db.employees.find_one(
+        {"applicant_reference": reference.upper()},
+        {"_id": 0, "id": 1, "applicant_reference": 1, "first_name": 1, "last_name": 1, 
+         "status": 1, "application_submitted_at": 1, "role": 1}
+    )
+    
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
+    # Map status to user-friendly message
+    status_messages = {
+        EmployeeStatus.NEW: "Under Review",
+        EmployeeStatus.SCREENING: "Screening in Progress",
+        EmployeeStatus.INTERVIEW: "Interview Stage",
+        EmployeeStatus.COMPLIANCE_REVIEW: "Compliance Review",
+        EmployeeStatus.ONBOARDING: "Offer Accepted - Onboarding",
+        EmployeeStatus.ACTIVE: "Employed",
+    }
+    
+    return {
+        "reference": applicant["applicant_reference"],
+        "name": f"{applicant['first_name']} {applicant['last_name']}",
+        "role_applied": applicant.get("role"),
+        "submitted_at": applicant.get("application_submitted_at"),
+        "current_status": status_messages.get(applicant.get("status"), "Processing"),
+        "message": "Your application is being processed. We will contact you if any additional information is required."
+    }
+
+
+
 async def get_assignments():
     """Get all unique assignments/placements"""
     assignments = await db.employees.distinct("assignment")

@@ -16397,6 +16397,72 @@ async def verify_service_user_document(
     return {"message": "Document verified successfully"}
 
 
+
+# ==================== TEST DATA CLEANUP ENDPOINTS ====================
+
+@api_router.delete("/service-users/{service_user_id}")
+async def delete_service_user(
+    service_user_id: str,
+    user: dict = Depends(require_admin)
+):
+    """Delete a service user (admin only - for test data cleanup)"""
+    service_user = await db.service_users.find_one({"id": service_user_id})
+    
+    if not service_user:
+        raise HTTPException(status_code=404, detail="Service user not found")
+    
+    # Delete associated documents first
+    await db.service_user_documents.delete_many({"service_user_id": service_user_id})
+    
+    # Delete the service user
+    await db.service_users.delete_one({"id": service_user_id})
+    
+    # Log audit entry
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "entity_type": "service_user",
+        "entity_id": service_user_id,
+        "action": "deleted",
+        "performed_by": user.get("user_id"),
+        "details": {"name": service_user.get("full_name"), "reason": "Test data cleanup"},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {"message": "Service user deleted successfully", "id": service_user_id}
+
+
+@api_router.delete("/policies/{policy_id}")
+async def delete_policy(
+    policy_id: str,
+    user: dict = Depends(require_admin)
+):
+    """Delete a policy (admin only - for test data cleanup)"""
+    policy = await db.policies.find_one({"id": policy_id})
+    
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    # Delete associated assignments
+    await db.employee_policy_assignments.delete_many({"policy_id": policy_id})
+    
+    # Delete the policy
+    await db.policies.delete_one({"id": policy_id})
+    
+    # Log audit entry
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "entity_type": "policy",
+        "entity_id": policy_id,
+        "action": "deleted",
+        "performed_by": user.get("user_id"),
+        "details": {"title": policy.get("title"), "reason": "Test data cleanup"},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    })
+    
+    return {"message": "Policy deleted successfully", "id": policy_id}
+
+
+
 @api_router.delete("/service-users/{service_user_id}/documents/{document_id}")
 async def delete_service_user_document(
     service_user_id: str,

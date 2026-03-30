@@ -4,6 +4,112 @@
 **Osabea Healthcare Solutions**
 
 
+## Applicant vs Employee Separation (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Implement minimal, safe applicant-vs-employee separation hardening without creating new collections, migrating data, or rewriting document foreign keys.
+
+### Implementation
+
+#### 1. Recruitment Approval Gate ✅
+Added fields to employees collection:
+- `recruitment_approved` (boolean) - Whether person has been approved for hire
+- `recruitment_approved_by` (string) - User ID who approved
+- `recruitment_approved_at` (string) - ISO timestamp of approval
+- `recruitment_approval_notes` (string) - Optional notes about approval
+
+**Rules Enforced:**
+- No person can become ACTIVE without recruitment approval
+- Audit log captures every approval action
+- Admin+ role required for approval
+
+#### 2. Applicant vs Employee Query Separation ✅
+Created helpers and endpoints so applicant-stage people are not mixed into staff views by default.
+
+**Applicant Statuses:** new, screening, interview, compliance_review
+**Employee Statuses:** onboarding, active, inactive
+
+**New Endpoints:**
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/recruitment/applicants` | Returns only applicant-stage people |
+| `GET /api/recruitment/pipeline` | Recruitment pipeline with stage groupings |
+| `GET /api/staff/employees` | Returns only employee-stage staff |
+| `GET /api/employees?stage=applicant` | Filter by person stage |
+| `GET /api/employees?stage=employee` | Filter by person stage |
+
+#### 3. Frontend Separation ✅
+- **Staff Page** (`/portal/employees`) - Shows only employee-stage people
+- **Recruitment Pipeline** (`/portal/recruitment`) - Shows only applicant-stage people
+- **Profile View** - Clearly shows person_stage badge (Applicant/Employee)
+
+**New Sidebar Navigation:**
+- Dashboard
+- Employees (renamed to Staff internally)
+- **Recruitment** (NEW)
+- Service Users
+- Compliance Centre
+- Training
+- DBS Register
+- Audit View
+- Settings
+
+#### 4. Employee Code Timing ✅
+**Before:** Employee code assigned at initial applicant creation
+**After:** Employee code assigned ONLY on recruitment approval
+
+- Applicants get `applicant_reference` (format: APP-XXXXXXXX)
+- `employee_code` is null until recruitment approval
+- On approval, employee_code is generated (format: OCS-XXXX)
+
+#### 5. Person Stage Clarity ✅
+- `person_stage` is derived at runtime from status (not stored)
+- Single source of truth function: `get_person_stage(status)`
+- Returns "applicant" for new/screening/interview/compliance_review
+- Returns "employee" for onboarding/active/inactive
+
+### API Changes
+
+**POST /api/employees/{id}/approve-recruitment**
+```json
+Request: {"notes": "Optional approval notes"}
+Response: {
+  "status": "approved",
+  "employee_code": "OCS-0008",  // Assigned on approval
+  "recruitment_approved": true,
+  "stage_transition": {"from": "new", "to": "onboarding"}
+}
+```
+
+**GET /api/recruitment/pipeline**
+```json
+{
+  "summary": {"total_applicants": 5, "counts_by_status": {...}},
+  "stages": [
+    {"status": "new", "label": "New Applications", "applicants": [...]},
+    {"status": "screening", "label": "Screening", "applicants": []},
+    {"status": "interview", "label": "Interview", "applicants": []},
+    {"status": "compliance_review", "label": "Compliance Review", "applicants": []}
+  ]
+}
+```
+
+### Constraints Followed ✅
+- ❌ No new collections created
+- ❌ No data migration
+- ❌ No document foreign key changes
+- ✅ Preserves existing compliance/document links
+- ✅ Backward compatible with existing records
+
+### Test Results
+- Backend: 100% (17/17 tests passed)
+- Frontend: 100% (all UI flows verified)
+- Test report: `/app/test_reports/iteration_65.json`
+
+---
+
+
 ## UI Miscommunication Audit (2026-03-30)
 **Status**: COMPLETE ✅
 

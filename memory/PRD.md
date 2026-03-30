@@ -3,6 +3,31 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Delete/Replace Action Integrity Fix (2026-03-30)
+**Status**: FIXED ✅
+
+### Issue
+Delete File / Replace File actions were not functioning reliably. Clicking "Delete File" on form-filled items resulted in silent no-op.
+
+### Root Cause
+The delete endpoint only checked `training_records` and `employee_documents` collections, but **NOT** `form_submissions`. Form-generated items (structured forms) were never deleted.
+
+### Fix Applied
+1. **Backend**: Added form submission handling to delete endpoint - now properly archives form submissions and marks PDF exports as deleted
+2. **Frontend**: Conditional action rendering - "Edit Details" and "Replace File" hidden for form-generated items (not applicable), only "Delete Submission" and "View History" shown
+3. **Removed**: "Made with Emergent" badge from bottom-right corner
+
+### Action Rules
+| Item Type | Delete | Replace | Edit Details |
+|-----------|--------|---------|--------------|
+| Uploaded files | ✅ Show | ✅ Show | ✅ Show |
+| Form submissions | ✅ Show (as "Delete Submission") | ❌ Hide | ❌ Hide |
+| Training certs | ✅ Show | ✅ Show | ✅ Show |
+
+Full report: `/app/DELETE_REPLACE_FIX.md`
+
+---
+
 ## File Retrieval Integrity Fix (2026-03-30)
 **Status**: FIXED ✅
 

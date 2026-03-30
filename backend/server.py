@@ -7356,6 +7356,39 @@ async def delete_requirement_evidence_permanently(
                     {"id": doc['id']},
                     {"$set": update_data}
                 )
+        else:
+            # Not found in employee_documents - check if it's a form submission
+            # Form submissions use the submission ID as the file_id
+            submission = await db.form_submissions.find_one({
+                "employee_id": employee_id,
+                "id": file_id
+            }, {"_id": 0})
+            
+            if submission:
+                deleted_file_info = {
+                    "filename": f"{submission.get('template_name', 'Form')} (Form Submission)",
+                    "file_id": file_id,
+                    "uploaded_at": submission.get('submitted_at') or submission.get('created_at'),
+                    "file_url": None,
+                    "source_type": "form_submission"
+                }
+                
+                # Archive the form submission (soft delete)
+                await db.form_submissions.update_one(
+                    {"id": file_id},
+                    {"$set": {
+                        "status": "deleted",
+                        "deleted_at": now,
+                        "deleted_by": user['user_id'],
+                        "deleted_reason": request.reason.strip() if request.reason else None
+                    }}
+                )
+                
+                # Also remove any associated PDF exports
+                await db.form_pdf_exports.update_many(
+                    {"submission_id": file_id},
+                    {"$set": {"deleted_at": now}}
+                )
     
     # Create detailed audit log entry
     audit_metadata = {

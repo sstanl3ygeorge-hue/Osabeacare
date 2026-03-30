@@ -4137,45 +4137,49 @@ export default function EmployeeProfilePage() {
                                       ) : (
                                         <>
                                           {/* DOCUMENT ACTIONS - For non-training requirements */}
-                                          {/* Edit Details */}
-                                          {!isAuditor() && (
-                                            <DropdownMenuItem 
-                                              onClick={() => openEditEvidence(req.id, evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0])}
-                                              data-testid={`edit-details-${req.id}`}
-                                            >
-                                              <Edit className="h-4 w-4 mr-2" />
-                                              Edit Details
-                                            </DropdownMenuItem>
-                                          )}
-                                          
-                                          {/* Replace File */}
-                                          {!isAuditor() && (
-                                            <DropdownMenuItem 
-                                              onClick={() => openReplaceDialog(
-                                                evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
-                                                req.id
-                                              )}
-                                              data-testid={`replace-file-${req.id}`}
-                                            >
-                                              <RefreshCw className="h-4 w-4 mr-2" />
-                                              Replace File
-                                            </DropdownMenuItem>
-                                          )}
-                                          
-                                          {/* Remove File */}
-                                          {!isAuditor() && (
-                                            <DropdownMenuItem 
-                                              onClick={() => openRemoveDialog(
-                                                evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0],
-                                                req.id
-                                              )}
-                                              className="text-red-600"
-                                              data-testid={`remove-file-${req.id}`}
-                                            >
-                                              <Trash2 className="h-4 w-4 mr-2" />
-                                              Delete File
-                                            </DropdownMenuItem>
-                                          )}
+                                          {/* Check if this is a form-generated item (structured form, not uploaded file) */}
+                                          {(() => {
+                                            const activeFile = evidenceFiles.find(f => f.status === 'active' || !f.status) || evidenceFiles[0];
+                                            const isFormGenerated = activeFile?.source_type === 'structured_form' || req.type === 'form-generated';
+                                            
+                                            return (
+                                              <>
+                                                {/* Edit Details - Only for uploaded files */}
+                                                {!isAuditor() && !isFormGenerated && (
+                                                  <DropdownMenuItem 
+                                                    onClick={() => openEditEvidence(req.id, activeFile)}
+                                                    data-testid={`edit-details-${req.id}`}
+                                                  >
+                                                    <Edit className="h-4 w-4 mr-2" />
+                                                    Edit Details
+                                                  </DropdownMenuItem>
+                                                )}
+                                                
+                                                {/* Replace File - Only for uploaded files (not form submissions) */}
+                                                {!isAuditor() && !isFormGenerated && (
+                                                  <DropdownMenuItem 
+                                                    onClick={() => openReplaceDialog(activeFile, req.id)}
+                                                    data-testid={`replace-file-${req.id}`}
+                                                  >
+                                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                                    Replace File
+                                                  </DropdownMenuItem>
+                                                )}
+                                                
+                                                {/* Delete - Works for both uploaded files and form submissions */}
+                                                {!isAuditor() && (
+                                                  <DropdownMenuItem 
+                                                    onClick={() => openRemoveDialog(activeFile, req.id)}
+                                                    className="text-red-600"
+                                                    data-testid={`remove-file-${req.id}`}
+                                                  >
+                                                    <Trash2 className="h-4 w-4 mr-2" />
+                                                    {isFormGenerated ? 'Delete Submission' : 'Delete File'}
+                                                  </DropdownMenuItem>
+                                                )}
+                                              </>
+                                            );
+                                          })()}
                                           
                                           <DropdownMenuSeparator />
                                           

@@ -18,7 +18,7 @@ import {
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
   RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
   Edit, History, Save, BookOpen, ArrowRight, TrendingUp, Bell, Mail, Send,
-  Trash2
+  Trash2, Package
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
 
@@ -152,6 +152,9 @@ export default function ComplianceCentrePage() {
   // CQC Evidence Mapping state
   const [cqcEvidenceMap, setCqcEvidenceMap] = useState(null);
   const [cqcLoading, setCqcLoading] = useState(false);
+  
+  // Inspection Pack generation state
+  const [generatingPack, setGeneratingPack] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -213,6 +216,51 @@ export default function ComplianceCentrePage() {
       fetchData();
     } catch (error) {
       toast.error('Failed to seed compliance items');
+    }
+  };
+
+  // Handle generating inspection pack (REUSES existing data endpoints)
+  const handleGenerateInspectionPack = async () => {
+    setGeneratingPack(true);
+    try {
+      const response = await axios.get(`${API}/inspection-pack/generate`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob',
+        params: {
+          include_policies: true,
+          include_certificates: true,
+          include_staff_summary: true
+        }
+      });
+      
+      // Create download link
+      const blob = new Blob([response.data], { type: 'application/zip' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response headers or generate default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = 'CQC_Inspection_Pack.zip';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=([^;]+)/);
+        if (filenameMatch) {
+          filename = filenameMatch[1].replace(/"/g, '');
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Inspection Pack generated successfully');
+    } catch (error) {
+      console.error('Failed to generate inspection pack:', error);
+      toast.error('Failed to generate Inspection Pack');
+    } finally {
+      setGeneratingPack(false);
     }
   };
 
@@ -2267,14 +2315,30 @@ export default function ComplianceCentrePage() {
                       Read-only view — does not affect compliance calculations or employee readiness status
                     </p>
                   </div>
-                  {cqcEvidenceMap && (
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-text-primary">
-                        {cqcEvidenceMap.summary.present}/{cqcEvidenceMap.summary.total_items - cqcEvidenceMap.summary.n_a}
-                      </p>
-                      <p className="text-xs text-text-muted">Evidence Items Present</p>
-                    </div>
-                  )}
+                  <div className="flex flex-col items-end gap-2">
+                    {cqcEvidenceMap && (
+                      <div className="text-right">
+                        <p className="text-2xl font-bold text-text-primary">
+                          {cqcEvidenceMap.summary.present}/{cqcEvidenceMap.summary.total_items - cqcEvidenceMap.summary.n_a}
+                        </p>
+                        <p className="text-xs text-text-muted">Evidence Items Present</p>
+                      </div>
+                    )}
+                    {/* Generate Inspection Pack Button */}
+                    <Button
+                      onClick={handleGenerateInspectionPack}
+                      disabled={generatingPack}
+                      className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                      data-testid="generate-inspection-pack-btn"
+                    >
+                      {generatingPack ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Package className="mr-2 h-4 w-4" />
+                      )}
+                      Generate Inspection Pack
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

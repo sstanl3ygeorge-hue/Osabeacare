@@ -110,6 +110,67 @@ Progress/completion percentage inconsistent across pages (83% on employees list 
 2. **Superseded evidence counted**: `check_item_completion()` checked for `file_url` but didn't verify `evidence_files` had active (non-superseded) status
 
 ### Fix Applied
+
+## CQC Inspection Features Implementation (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Implement 5 inspection-readiness features using a reuse-first approach. No parallel systems, no new collections, no duplicate logic.
+
+---
+
+### Feature 1: Training Matrix Export ✅
+**Reused**: `training_records`, `MANDATORY_ITEMS["training"]`, ReportLab, `TrainingPage.js`
+**New**: `/api/training-matrix/export` endpoint, Export dropdown in UI
+**Files**: `server.py` (lines 16218-16488), `TrainingPage.js`
+**Test**: CSV and PDF exports working correctly
+
+### Feature 2: Verification Stamp System ✅
+**Reused**: `verified`, `verified_by`, `verified_at` fields, ReportLab
+**New**: `generate_verification_stamp()`, `create_verification_footer_elements()` helpers
+**Files**: `server.py` (lines 1213-1325)
+**Test**: PDF footers now include verification stamp with hash
+
+### Feature 3: Well-Led Hub ✅
+**Status**: ALREADY EXISTS - No new code needed
+**Location**: CQC View tab in Compliance Centre
+**Existing**: `CQC_EVIDENCE_MAPPING["well_led"]` with 13 items, `/api/compliance/cqc-evidence-map`
+
+### Feature 4: Inspection Mode ✅
+**Reused**: React Router URL params, existing pages
+**New**: `InspectionModeContext.js`, `inspection-banner.jsx`, inspection CSS
+**Files**: `PortalLayout.js`, `index.css`
+**Test**: Mode toggle, banner display, print button working
+
+### Feature 5: Inspection Pack ✅
+**Reused**: `org_policies`, `insurance_docs`, `CQC_EVIDENCE_MAPPING`, verification stamps
+**New**: `/api/inspection-pack/generate` endpoint, Generate button in CQC View
+**Files**: `server.py` (lines 18094-18392), `ComplianceCentrePage.js`
+**Test**: ZIP generation with cover sheet, 28 policies, 2 certificates, staff summary
+
+---
+
+### Endpoints Added
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/training-matrix/export` | GET | Export training matrix as CSV/PDF |
+| `/api/inspection-pack/generate` | GET | Generate CQC Inspection Pack ZIP |
+
+### Components Added
+| Component | Purpose |
+|-----------|---------|
+| `InspectionModeContext` | URL-based inspection mode state |
+| `InspectionBanner` | Visual banner for inspection mode |
+| Export dropdown (Training) | CSV/PDF export buttons |
+| Generate Pack button (CQC View) | Inspection pack generation |
+
+### Collections Status
+- **NO NEW COLLECTIONS CREATED**
+- All features reuse: `training_records`, `org_policies`, `insurance_docs`, `employees`
+
+---
+
+
 1. Added `archived_count` tracking and exclusion from total
 2. Fixed evidence_files status check to only count active files
 3. Updated total calculation: `total = mandatory - optional - archived`

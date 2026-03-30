@@ -162,3 +162,83 @@ code {
         border-bottom-color: inherit;
     }
 }
+
+
+/* ============================================================================
+   INSPECTION MODE STYLES
+   Purpose: Read-only mode for CQC inspections
+   - Hides edit/delete actions
+   - Print-friendly styling
+   ============================================================================ */
+
+/* Hide all edit/delete/action buttons in inspection mode */
+.inspection-mode [data-action="edit"],
+.inspection-mode [data-action="delete"],
+.inspection-mode [data-action="admin-only"],
+.inspection-mode .admin-action,
+.inspection-mode button[data-testid*="delete"],
+.inspection-mode button[data-testid*="edit"],
+.inspection-mode button[data-testid*="add-"],
+.inspection-mode [data-testid="add-training-btn"],
+.inspection-mode [data-testid="add-employee-btn"],
+.inspection-mode a[data-testid="add-employee-btn"],
+.inspection-mode [data-testid="enter-inspection-mode-btn"] {
+    display: none !important;
+}
+
+/* Inspection mode banner styles */
+.inspection-banner {
+    background: linear-gradient(90deg, #0F5C5E 0%, #163A70 100%);
+    color: white;
+    padding: 8px 16px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.inspection-banner .exit-btn {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.inspection-banner .exit-btn:hover {
+    background: rgba(255,255,255,0.3);
+}
+
+/* Print styles for inspection mode */
+@media print {
+    .inspection-mode .sidebar,
+    .inspection-mode nav,
+    .inspection-mode [data-testid*="btn"],
+    .inspection-mode button:not(.print-include),
+    .inspection-banner .exit-btn {
+        display: none !important;
+    }
+    
+    .inspection-mode .main-content {
+        margin: 0;
+        padding: 20px;
+    }
+    
+    .inspection-mode {
+        font-size: 11pt;
+    }
+    
+    .inspection-banner {
+        background: #17324D !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+}

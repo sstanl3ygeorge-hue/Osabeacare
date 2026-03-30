@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { InspectionModeProvider, useInspectionMode } from '../../context/InspectionModeContext';
+import { InspectionBanner } from '../ui/inspection-banner';
 import { Button } from '../ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '../ui/avatar';
 import { Sheet, SheetContent, SheetTrigger } from '../ui/sheet';
@@ -13,7 +15,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye
 } from 'lucide-react';
 
 const navigation = [
@@ -71,10 +73,17 @@ export default function PortalLayout() {
     </nav>
   );
 
-  return (
+  // Inner component that uses inspection mode context
+  const PortalContent = () => {
+    const { isInspectionMode, enableInspectionMode } = useInspectionMode();
+    
+    return (
     <div className="min-h-screen bg-[#F8FAFA]">
+      {/* Inspection Banner - shows when in inspection mode */}
+      <InspectionBanner />
+      
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col">
+      <aside className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-64 lg:flex-col sidebar">
         <div className="flex flex-col flex-grow bg-white border-r border-[#E4E8EB]">
           {/* Logo */}
           <div className="flex items-center gap-3 px-6 py-5 border-b border-[#E4E8EB]">
@@ -173,6 +182,19 @@ export default function PortalLayout() {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Inspection Mode Toggle - only show when NOT in inspection mode */}
+            {!isInspectionMode && (
+              <Button 
+                variant="outline" 
+                className="rounded-xl border-primary/30 text-primary hover:bg-primary/10"
+                onClick={enableInspectionMode}
+                data-testid="enter-inspection-mode-btn"
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Inspection Mode
+              </Button>
+            )}
+            
             {!isAuditor() && (
               <Link to="/portal/employees">
                 <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="add-employee-btn">
@@ -222,10 +244,18 @@ export default function PortalLayout() {
         </header>
 
         {/* Page Content */}
-        <main className="p-4 lg:p-8">
+        <main className="p-4 lg:p-8 main-content">
           <Outlet />
         </main>
       </div>
     </div>
+    );
+  };
+
+  // Wrap everything in InspectionModeProvider
+  return (
+    <InspectionModeProvider>
+      <PortalContent />
+    </InspectionModeProvider>
   );
 }

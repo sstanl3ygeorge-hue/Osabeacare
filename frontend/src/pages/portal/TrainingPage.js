@@ -13,7 +13,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from 'sonner';
 import { 
   GraduationCap, Plus, CheckCircle, Clock, AlertTriangle, Loader2, 
-  MoreVertical, Edit, History, Filter, CalendarClock, ShieldCheck
+  MoreVertical, Edit, History, Filter, CalendarClock, ShieldCheck,
+  Download, FileSpreadsheet, FileText
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
 
@@ -110,6 +111,9 @@ export default function TrainingPage() {
   const [historyRecord, setHistoryRecord] = useState(null);
   const [historyData, setHistoryData] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  
+  // Export state
+  const [exporting, setExporting] = useState(false);
 
   const [newRecord, setNewRecord] = useState({
     employee_id: '',
@@ -226,6 +230,49 @@ export default function TrainingPage() {
     return emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown';
   };
 
+  // Export training matrix - uses existing backend endpoint
+  const handleExport = async (format) => {
+    setExporting(true);
+    try {
+      const response = await axios.get(`${API}/training-matrix/export`, {
+        params: { format },
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      // Create download link
+      const blob = new Blob([response.data], { 
+        type: format === 'csv' ? 'text/csv' : 'application/pdf' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response headers or generate default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `training_matrix.${format}`;
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename=([^;]+)/);
+        if (filenameMatch) {
+          filename = filenameMatch[1].replace(/"/g, '');
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success(`Training matrix exported as ${format.toUpperCase()}`);
+    } catch (error) {
+      console.error('Export failed:', error);
+      toast.error('Failed to export training matrix');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   // Filter training records using backend-computed status
   const filteredTraining = training.filter(record => {
     if (filter === 'all') return true;
@@ -256,14 +303,44 @@ export default function TrainingPage() {
           </p>
         </div>
         
-        {!isAuditor() && (
-          <Dialog open={addOpen} onOpenChange={setAddOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="add-training-btn">
-                <Plus className="mr-2 h-4 w-4" />
-                Add Training
+        <div className="flex items-center gap-2">
+          {/* Export Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="outline" 
+                className="rounded-xl" 
+                disabled={exporting}
+                data-testid="export-matrix-btn"
+              >
+                {exporting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Export
               </Button>
-            </DialogTrigger>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('csv')} data-testid="export-csv">
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Export as CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')} data-testid="export-pdf">
+                <FileText className="mr-2 h-4 w-4" />
+                Export as PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          
+          {!isAuditor() && (
+            <Dialog open={addOpen} onOpenChange={setAddOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="add-training-btn">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Training
+                </Button>
+              </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle className="font-heading">Add Training Record</DialogTitle>
@@ -340,7 +417,8 @@ export default function TrainingPage() {
               </form>
             </DialogContent>
           </Dialog>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Stats */}

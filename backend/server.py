@@ -4377,7 +4377,9 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
         "requirement_id": {"$in": list(training_ids)},
         "verified": True,
         # HARDENING: Check for completion_date instead of status field
-        "completion_date": {"$exists": True, "$ne": None}
+        "completion_date": {"$exists": True, "$ne": None},
+        # HARDENING: Exclude superseded/deleted records
+        "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0, "requirement_id": 1}).to_list(100)
     
     verified_ids = {d['requirement_id'] for d in docs}
@@ -7013,8 +7015,10 @@ async def get_requirement_evidence(
     
     if req_type == 'training':
         training_name = requirement.get('training_name', requirement['name'])
+        # HARDENING: Exclude superseded/deleted training records
         record = await db.training_records.find_one({
             "employee_id": employee_id,
+            "record_status": {"$nin": ["superseded", "deleted"]},
             "$or": [
                 {"requirement_id": requirement_id},
                 {"training_name": {"$regex": training_name, "$options": "i"}}
@@ -7053,9 +7057,11 @@ async def get_requirement_evidence(
         if isinstance(req_ids_to_search, str):
             req_ids_to_search = [req_ids_to_search]
         
+        # HARDENING: Exclude superseded/archived documents
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
-            "requirement_id": {"$in": req_ids_to_search}
+            "requirement_id": {"$in": req_ids_to_search},
+            "status": {"$nin": ["superseded", "archived", "deleted"]}
         }, {"_id": 0}).to_list(100)
         
         for doc in docs:
@@ -8532,7 +8538,11 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     all_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
     
     # Get all training records - ENRICH WITH COMPUTED STATUS (SINGLE SOURCE OF TRUTH)
-    raw_training = await db.training_records.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    # HARDENING: Exclude superseded/deleted records from compliance calculations
+    raw_training = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0}).to_list(100)
     all_training = [enrich_training_record_with_computed_status(t) for t in raw_training]
     
     # Get all acknowledgements for this employee
@@ -8725,7 +8735,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                         "doc_id": doc['id'],
                         "verified": doc.get('verified', False),
                         "expiry_date": doc_expiry_date,
-                        "expiry_status": calculate_expiry_status(doc_expiry_date) if doc_expiry_date else None
+                        "expiry_status": calculate_expiry_status(doc_expiry_date) if doc_expiry_date else None,
+                        "status": "active"  # HARDENING: Explicitly mark as active
                     })
             
             req['documents'] = linked_docs
@@ -8774,7 +8785,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                             "uploaded_at": linked_form.get('completed_at') or linked_form.get('updated_at'),
                             "source_type": "form_submission",
                             "file_label": f"Completed {linked_form.get('template_name', 'Form')}",
-                            "verified": False  # Forms need separate verification
+                            "verified": False,  # Forms need separate verification
+                            "status": "active"  # HARDENING: Explicitly mark as active
                         })
             
             # NEW: Check for structured form submissions (from form_submissions collection)
@@ -8815,7 +8827,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     "uploaded_by_name": form_submission.get('submitted_by_name'),
                     "source_type": "structured_form",
                     "file_label": f"Submitted {item['name']}",
-                    "verified": form_submission.get('verified', False)
+                    "verified": form_submission.get('verified', False),
+                    "status": "active"  # HARDENING: Explicitly mark as active
                 })
                 
                 # Update verified status if form is verified
@@ -8878,7 +8891,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                         "file_label": "Training Certificate",
                         "verified": linked_training.get('verified', False),
                         "expiry_date": training_expiry_date,
-                        "expiry_status": calculate_expiry_status(training_expiry_date) if training_expiry_date else None
+                        "expiry_status": calculate_expiry_status(training_expiry_date) if training_expiry_date else None,
+                        "status": "active"  # HARDENING: Explicitly mark as active
                     })
                 
                 req['training'] = {

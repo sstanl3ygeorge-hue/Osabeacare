@@ -7456,9 +7456,12 @@ async def remove_requirement_evidence_soft(
                 active_files = [f for f in evidence_files if f.get('status', 'active') == 'active']
                 update_data = {"evidence_files": evidence_files, "updated_at": now}
                 
+                # HARDENING: If no active files remain, reset the training record
                 if not active_files:
                     update_data["verified"] = False
                     update_data["completion_method"] = "manual"
+                    update_data["completion_date"] = None  # Reset so status derives to "not_started"
+                    update_data["certificate_url"] = None
                 
                 await db.training_records.update_one(
                     {"id": record['id']},
@@ -8689,6 +8692,11 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                 # Check for evidence_files array (new format)
                 if doc.get('evidence_files'):
                     for ef in doc['evidence_files']:
+                        # HARDENING: Skip removed/superseded files - only include active files
+                        file_status = ef.get('status', 'active')
+                        if file_status not in ['active', None]:
+                            continue  # Skip removed/superseded/archived files
+                        
                         file_expiry = ef.get('expiry_date') or doc_expiry_date
                         evidence_files.append({
                             "file_id": ef.get('file_id', doc['id']),
@@ -8701,7 +8709,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                             "doc_id": doc['id'],
                             "verified": doc.get('verified', False),
                             "expiry_date": file_expiry,
-                            "expiry_status": calculate_expiry_status(file_expiry) if file_expiry else None
+                            "expiry_status": calculate_expiry_status(file_expiry) if file_expiry else None,
+                            "status": "active"  # Explicitly mark as active
                         })
                 # Fallback to file_url (legacy format)
                 elif doc.get('file_url'):
@@ -8838,9 +8847,14 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                 # Get expiry date from training record
                 training_expiry_date = linked_training.get('expiry_date')
                 
-                # Extract evidence files from training
+                # Extract evidence files from training - FILTER TO ACTIVE ONLY
                 if linked_training.get('evidence_files'):
                     for ef in linked_training['evidence_files']:
+                        # HARDENING: Skip removed/superseded files - only include active files
+                        file_status = ef.get('status', 'active')
+                        if file_status not in ['active', None]:
+                            continue  # Skip removed/superseded/archived files
+                        
                         file_expiry = ef.get('expiry_date') or training_expiry_date
                         evidence_files.append({
                             "file_id": ef.get('file_id', linked_training['id']),
@@ -8851,7 +8865,8 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                             "file_label": ef.get('file_label', 'Training Certificate'),
                             "verified": linked_training.get('verified', False),
                             "expiry_date": file_expiry,
-                            "expiry_status": calculate_expiry_status(file_expiry) if file_expiry else None
+                            "expiry_status": calculate_expiry_status(file_expiry) if file_expiry else None,
+                            "status": "active"  # Explicitly mark as active
                         })
                 elif linked_training.get('certificate_url'):
                     evidence_files.append({

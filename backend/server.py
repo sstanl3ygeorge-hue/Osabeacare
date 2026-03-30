@@ -1374,32 +1374,52 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
-            "file_url": {"$exists": True, "$ne": None},
             "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
             "$or": [
                 {"active": {"$exists": False}},
                 {"active": True}
             ]
-        }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "expiry_date": 1}).to_list(20)
+        }, {"_id": 0}).to_list(20)
         
-        if len(docs) >= min_count:
+        # Count documents with active evidence (file_url or active evidence_files)
+        active_docs_count = 0
+        for doc in docs:
+            has_active_evidence = False
+            
+            # Check evidence_files array for active files
+            evidence_files = doc.get('evidence_files', [])
+            if evidence_files:
+                for ef in evidence_files:
+                    ef_status = ef.get('status', 'active')
+                    if ef_status in ['active', None] and ef.get('file_url'):
+                        has_active_evidence = True
+                        break
+            # Fallback: check file_url (legacy format) only if no evidence_files with any status
+            elif doc.get('file_url'):
+                has_active_evidence = True
+            
+            if has_active_evidence:
+                active_docs_count += 1
+        
+        if active_docs_count >= min_count:
             result["status"] = "complete"
-            result["verified"] = all(d.get("verified") or d.get("status") == "approved" for d in docs)
+            result["verified"] = all(d.get("verified") or d.get("status") == "approved" for d in docs if d.get("file_url") or d.get("evidence_files"))
             result["has_evidence"] = True
-            result["details"] = f"{len(docs)} document(s) uploaded"
+            result["details"] = f"{active_docs_count} document(s) with active evidence"
             
             # Check for expiring documents
             for doc in docs:
-                if doc.get("expiry_date"):
+                exp_date_str = doc.get("expiry_date")
+                if exp_date_str:
                     try:
-                        exp_date = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
+                        exp_date = datetime.fromisoformat(exp_date_str.replace('Z', '+00:00'))
                         if exp_date < datetime.now(timezone.utc):
                             result["status"] = "expired"
-                            result["expiry_date"] = doc["expiry_date"]
+                            result["expiry_date"] = exp_date_str
                             break
                         elif exp_date < datetime.now(timezone.utc) + timedelta(days=30):
                             result["status"] = "expiring"
-                            result["expiry_date"] = doc["expiry_date"]
+                            result["expiry_date"] = exp_date_str
                     except:
                         pass
         return result
@@ -1479,8 +1499,14 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
     expiring_count = 0
     missing_count = 0
     optional_count = 0  # Track optional items to exclude from total
+    archived_count = 0  # Track archived items to exclude from total
     
     for item in mandatory_items:
+        # Skip archived items from compliance calculation (hidden from UI, historical only)
+        if item.get("archived", False):
+            archived_count += 1
+            continue
+        
         # Skip optional items from compliance calculation
         is_optional = item.get("optional", False)
         if is_optional:
@@ -1504,8 +1530,8 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
             else:
                 missing_count += 1
     
-    # Total excludes optional items
-    total_items = len(mandatory_items) - optional_count
+    # Total excludes optional and archived items
+    total_items = len(mandatory_items) - optional_count - archived_count
     
     # Calculate percentages
     completion_percentage = int((complete_count / total_items) * 100) if total_items > 0 else 0

@@ -3,6 +3,28 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Completion Percentage Consistency Fix (2026-03-30)
+**Status**: FIXED ✅
+
+### Issue
+Progress/completion percentage inconsistent across pages (83% on employees list vs 86% on employee profile).
+
+### Root Causes
+1. **Archived items not excluded**: `calculate_employee_compliance()` didn't exclude `archived: true` items (e.g., `health_screening`) from the total count
+2. **Superseded evidence counted**: `check_item_completion()` checked for `file_url` but didn't verify `evidence_files` had active (non-superseded) status
+
+### Fix Applied
+1. Added `archived_count` tracking and exclusion from total
+2. Fixed evidence_files status check to only count active files
+3. Updated total calculation: `total = mandatory - optional - archived`
+
+### Verification
+All 7 employees now show consistent percentages across list view and profile view.
+
+Full report: `/app/PERCENTAGE_CONSISTENCY_FIX.md`
+
+---
+
 ## Delete/Replace Action Integrity Fix (2026-03-30)
 **Status**: FIXED ✅
 

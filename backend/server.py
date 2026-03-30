@@ -247,6 +247,19 @@ MANDATORY_ITEMS = {
          "description": "Internal DBS verification - update service check result",
          "work_ready_hint": "Required before employee can start work"},
         
+        # ======== PROOF OF ADDRESS (NHS Standard - Requires 2 Documents) ========
+        {"id": "proof_of_address", "name": "Proof of Address", 
+         "category": "1_Legal_Safety", "type": "document", "source": "employee",
+         "document_types": ["utility_bill", "bank_statement", "council_tax", "tenancy_agreement"],
+         "allow_multiple_files": True, 
+         "min_files": 2,  # NHS standard: requires 2 separate documents
+         "required_count": 2,
+         "priority": "start_required", "priority_order": 6,
+         "status_group": "start_status",
+         "description": "2 separate documents required: utility bill, bank statement, council tax, or tenancy agreement (dated within 3 months)",
+         "work_ready_hint": "NHS Standard: 2 verified documents required before employee can start work",
+         "verification_required": True},
+        
         # ======== CATEGORY 2: CORE TRAINING (Required to Start Work) ========
         # (Defined in "training" section below)
         
@@ -1359,6 +1372,225 @@ def create_verification_footer_elements(
         elements.append(Paragraph(hash_text, stamp_style))
     
     return elements
+
+
+# ============================================================================
+# REFERENCE INTEGRITY SYSTEM
+# Ensures references match CV OR require documented justification
+# ============================================================================
+
+def validate_reference_integrity(reference_num: int, employee_data: dict) -> dict:
+    """
+    Validate reference integrity rules.
+    
+    CRITICAL RULES:
+    1. Cannot verify reference unless from_cv=True OR override_reason exists
+    2. If from_cv=False, override_reason is REQUIRED
+    
+    Returns dict with:
+    - is_valid: bool
+    - can_verify: bool
+    - errors: list of error messages
+    - warnings: list of warning messages
+    """
+    prefix = f"reference_{reference_num}"
+    
+    from_cv = employee_data.get(f"{prefix}_from_cv")
+    override_reason = employee_data.get(f"{prefix}_override_reason")
+    verified = employee_data.get(f"{prefix}_verified", False)
+    has_name = bool(employee_data.get(f"{prefix}_name"))
+    
+    result = {
+        "is_valid": True,
+        "can_verify": False,
+        "errors": [],
+        "warnings": [],
+        "reference_num": reference_num
+    }
+    
+    if not has_name:
+        # No reference data yet - nothing to validate
+        return result
+    
+    # Check if reference can be verified
+    if from_cv is True:
+        result["can_verify"] = True
+    elif from_cv is False:
+        if override_reason and len(override_reason.strip()) > 10:
+            result["can_verify"] = True
+        else:
+            result["can_verify"] = False
+            result["errors"].append(f"Reference {reference_num} does not match CV - justification required (min 10 characters)")
+            result["is_valid"] = False
+    else:
+        # from_cv not set - warn but allow
+        result["warnings"].append(f"Reference {reference_num} CV match status not confirmed")
+        result["can_verify"] = True  # Allow verification but warn
+    
+    # Check if verified without meeting requirements
+    if verified and not result["can_verify"]:
+        result["errors"].append(f"Reference {reference_num} cannot be verified without CV match or documented justification")
+        result["is_valid"] = False
+    
+    return result
+
+
+def check_all_references_integrity(employee_data: dict) -> dict:
+    """
+    Check integrity of all references for an employee.
+    
+    Returns dict with:
+    - all_valid: bool
+    - can_complete_recruitment: bool
+    - reference_1: validation result
+    - reference_2: validation result
+    """
+    ref1 = validate_reference_integrity(1, employee_data)
+    ref2 = validate_reference_integrity(2, employee_data)
+    
+    all_errors = ref1["errors"] + ref2["errors"]
+    all_warnings = ref1["warnings"] + ref2["warnings"]
+    
+    return {
+        "all_valid": ref1["is_valid"] and ref2["is_valid"],
+        "can_complete_recruitment": len(all_errors) == 0,
+        "reference_1": ref1,
+        "reference_2": ref2,
+        "errors": all_errors,
+        "warnings": all_warnings
+    }
+
+
+# ============================================================================
+# CV GAP ANALYSIS SYSTEM
+# Detects and requires explanation of employment gaps
+# ============================================================================
+
+MIN_GAP_DAYS = 30  # Gaps less than 30 days are not flagged
+
+def detect_cv_gaps(employment_history: List[dict]) -> List[dict]:
+    """
+    Detect gaps in employment history.
+    
+    Employment history format:
+    [
+        {
+            "company": "...",
+            "role": "...",
+            "start_date": "YYYY-MM-DD",
+            "end_date": "YYYY-MM-DD" or None (current job),
+            ...
+        }
+    ]
+    
+    Returns list of detected gaps:
+    [
+        {
+            "gap_id": "gap_1",
+            "previous_job": {"company": "...", "end_date": "..."},
+            "next_job": {"company": "...", "start_date": "..."},
+            "gap_start": "YYYY-MM-DD",
+            "gap_end": "YYYY-MM-DD",
+            "gap_duration_days": 45,
+            "explanation": None,
+            "verified": False,
+            "verified_by": None,
+            "verified_at": None
+        }
+    ]
+    """
+    if not employment_history or len(employment_history) < 2:
+        return []
+    
+    # Sort by start date descending (most recent first)
+    def parse_date(date_str):
+        if not date_str:
+            return datetime.now(timezone.utc)
+        try:
+            if isinstance(date_str, str):
+                if 'T' in date_str:
+                    return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                return datetime.fromisoformat(f"{date_str}T00:00:00+00:00")
+            return date_str if date_str.tzinfo else date_str.replace(tzinfo=timezone.utc)
+        except:
+            return datetime.now(timezone.utc)
+    
+    sorted_jobs = sorted(
+        [j for j in employment_history if j.get("start_date")],
+        key=lambda x: parse_date(x.get("start_date")),
+        reverse=True  # Most recent first
+    )
+    
+    gaps = []
+    
+    for i in range(len(sorted_jobs) - 1):
+        current_job = sorted_jobs[i]
+        previous_job = sorted_jobs[i + 1]
+        
+        # Get dates
+        current_start = parse_date(current_job.get("start_date"))
+        previous_end = parse_date(previous_job.get("end_date"))
+        
+        # Calculate gap
+        gap_days = (current_start - previous_end).days
+        
+        if gap_days > MIN_GAP_DAYS:
+            gaps.append({
+                "gap_id": f"gap_{i+1}",
+                "previous_job": {
+                    "company": previous_job.get("company", "Unknown"),
+                    "role": previous_job.get("role", ""),
+                    "end_date": previous_job.get("end_date")
+                },
+                "next_job": {
+                    "company": current_job.get("company", "Unknown"),
+                    "role": current_job.get("role", ""),
+                    "start_date": current_job.get("start_date")
+                },
+                "gap_start": previous_job.get("end_date"),
+                "gap_end": current_job.get("start_date"),
+                "gap_duration_days": gap_days,
+                "explanation": current_job.get("gap_explanation") or previous_job.get("gap_after_explanation"),
+                "verified": False,
+                "verified_by": None,
+                "verified_at": None
+            })
+    
+    return gaps
+
+
+def check_cv_gaps_complete(employee_data: dict) -> dict:
+    """
+    Check if all CV gaps have required explanations.
+    
+    Returns:
+    - all_gaps_explained: bool
+    - unexplained_gaps: list
+    - can_complete_recruitment: bool
+    """
+    gaps = employee_data.get("cv_gaps_detected", [])
+    
+    if not gaps:
+        return {
+            "all_gaps_explained": True,
+            "unexplained_gaps": [],
+            "total_gaps": 0,
+            "can_complete_recruitment": True
+        }
+    
+    unexplained = []
+    for gap in gaps:
+        explanation = gap.get("explanation")
+        if not explanation or len(str(explanation).strip()) < 10:
+            unexplained.append(gap)
+    
+    return {
+        "all_gaps_explained": len(unexplained) == 0,
+        "unexplained_gaps": unexplained,
+        "total_gaps": len(gaps),
+        "explained_gaps": len(gaps) - len(unexplained),
+        "can_complete_recruitment": len(unexplained) == 0
+    }
 
 
 
@@ -2650,12 +2882,28 @@ class EmployeeUpdate(BaseModel):
     reference_1_email: Optional[str] = None
     reference_1_start_date: Optional[str] = None
     reference_1_end_date: Optional[str] = None
+    # Reference 1 Integrity Fields (CRITICAL FOR AUDIT)
+    reference_1_from_cv: Optional[bool] = None  # True if reference matches CV, False if different
+    reference_1_override_reason: Optional[str] = None  # Required if from_cv=False - explains why different
+    reference_1_verified: Optional[bool] = False
+    reference_1_verified_by: Optional[str] = None
+    reference_1_verified_at: Optional[str] = None
     reference_2_name: Optional[str] = None
     reference_2_company: Optional[str] = None
     reference_2_phone: Optional[str] = None
     reference_2_email: Optional[str] = None
     reference_2_start_date: Optional[str] = None
     reference_2_end_date: Optional[str] = None
+    # Reference 2 Integrity Fields (CRITICAL FOR AUDIT)
+    reference_2_from_cv: Optional[bool] = None  # True if reference matches CV, False if different
+    reference_2_override_reason: Optional[str] = None  # Required if from_cv=False - explains why different
+    reference_2_verified: Optional[bool] = False
+    reference_2_verified_by: Optional[str] = None
+    reference_2_verified_at: Optional[str] = None
+    # Employment History & CV Gap Analysis (CRITICAL FOR AUDIT)
+    employment_history: Optional[List[dict]] = None  # List of employment records with gap analysis
+    cv_gaps_detected: Optional[List[dict]] = None  # Detected gaps requiring explanation
+    cv_gaps_all_explained: Optional[bool] = None  # True if all gaps have explanations
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
@@ -2730,12 +2978,28 @@ class EmployeeResponse(BaseModel):
     reference_1_email: Optional[str] = None
     reference_1_start_date: Optional[str] = None
     reference_1_end_date: Optional[str] = None
+    # Reference 1 Integrity Fields (CRITICAL FOR AUDIT)
+    reference_1_from_cv: Optional[bool] = None  # True if reference matches CV, False if different
+    reference_1_override_reason: Optional[str] = None  # Required if from_cv=False - explains why different
+    reference_1_verified: Optional[bool] = False
+    reference_1_verified_by: Optional[str] = None
+    reference_1_verified_at: Optional[str] = None
     reference_2_name: Optional[str] = None
     reference_2_company: Optional[str] = None
     reference_2_phone: Optional[str] = None
     reference_2_email: Optional[str] = None
     reference_2_start_date: Optional[str] = None
     reference_2_end_date: Optional[str] = None
+    # Reference 2 Integrity Fields (CRITICAL FOR AUDIT)
+    reference_2_from_cv: Optional[bool] = None  # True if reference matches CV, False if different
+    reference_2_override_reason: Optional[str] = None  # Required if from_cv=False - explains why different
+    reference_2_verified: Optional[bool] = False
+    reference_2_verified_by: Optional[str] = None
+    reference_2_verified_at: Optional[str] = None
+    # Employment History & CV Gap Analysis (CRITICAL FOR AUDIT)
+    employment_history: Optional[List[dict]] = None  # List of employment records with gap analysis
+    cv_gaps_detected: Optional[List[dict]] = None  # Detected gaps requiring explanation
+    cv_gaps_all_explained: Optional[bool] = None  # True if all gaps have explanations
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
@@ -4898,7 +5162,368 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
         }
     }
 
-# ==================== EMPLOYEE COMPLIANCE ROUTES ====================
+
+# ============================================================================
+# REFERENCE INTEGRITY ENDPOINTS
+# Ensures references match CV OR require documented justification
+# ============================================================================
+
+class ReferenceVerificationRequest(BaseModel):
+    reference_num: int  # 1 or 2
+    from_cv: bool
+    override_reason: Optional[str] = None  # Required if from_cv=False
+
+@api_router.post("/employees/{employee_id}/verify-reference")
+async def verify_reference(
+    employee_id: str,
+    request: ReferenceVerificationRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Verify a reference with integrity check.
+    
+    CRITICAL RULES:
+    1. If from_cv=False, override_reason is REQUIRED (min 10 chars)
+    2. Cannot verify without meeting integrity requirements
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if request.reference_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="Reference number must be 1 or 2")
+    
+    prefix = f"reference_{request.reference_num}"
+    
+    # Check if reference exists
+    if not employee.get(f"{prefix}_name"):
+        raise HTTPException(status_code=400, detail=f"Reference {request.reference_num} has no data to verify")
+    
+    # INTEGRITY CHECK: If not from CV, require override reason
+    if not request.from_cv:
+        if not request.override_reason or len(request.override_reason.strip()) < 10:
+            raise HTTPException(
+                status_code=400, 
+                detail="Reference does not match CV - justification required (minimum 10 characters explaining why this reference differs from CV)"
+            )
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update employee with reference integrity fields
+    update_data = {
+        f"{prefix}_from_cv": request.from_cv,
+        f"{prefix}_override_reason": request.override_reason if not request.from_cv else None,
+        f"{prefix}_verified": True,
+        f"{prefix}_verified_by": user['user_id'],
+        f"{prefix}_verified_at": now,
+        "updated_at": now
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'],
+        "verify_reference",
+        "employee",
+        employee_id,
+        {
+            "reference_num": request.reference_num,
+            "from_cv": request.from_cv,
+            "override_reason": request.override_reason if not request.from_cv else None,
+            "reference_name": employee.get(f"{prefix}_name"),
+            "reference_company": employee.get(f"{prefix}_company")
+        }
+    )
+    
+    return {
+        "message": f"Reference {request.reference_num} verified successfully",
+        "reference_num": request.reference_num,
+        "from_cv": request.from_cv,
+        "has_override": not request.from_cv,
+        "verified_by": user.get('name', user.get('email')),
+        "verified_at": now
+    }
+
+
+@api_router.get("/employees/{employee_id}/reference-integrity")
+async def get_reference_integrity_status(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get reference integrity status for an employee.
+    Returns validation status for both references.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    integrity_status = check_all_references_integrity(employee)
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+        "reference_integrity": integrity_status,
+        "references": {
+            "reference_1": {
+                "name": employee.get("reference_1_name"),
+                "company": employee.get("reference_1_company"),
+                "from_cv": employee.get("reference_1_from_cv"),
+                "override_reason": employee.get("reference_1_override_reason"),
+                "verified": employee.get("reference_1_verified", False),
+                "verified_by": employee.get("reference_1_verified_by"),
+                "verified_at": employee.get("reference_1_verified_at")
+            },
+            "reference_2": {
+                "name": employee.get("reference_2_name"),
+                "company": employee.get("reference_2_company"),
+                "from_cv": employee.get("reference_2_from_cv"),
+                "override_reason": employee.get("reference_2_override_reason"),
+                "verified": employee.get("reference_2_verified", False),
+                "verified_by": employee.get("reference_2_verified_by"),
+                "verified_at": employee.get("reference_2_verified_at")
+            }
+        }
+    }
+
+
+# ============================================================================
+# CV GAP ANALYSIS ENDPOINTS
+# Detects and requires explanation of employment gaps
+# ============================================================================
+
+class EmploymentRecord(BaseModel):
+    company: str
+    role: Optional[str] = None
+    start_date: str  # YYYY-MM-DD
+    end_date: Optional[str] = None  # None = current job
+    gap_after_explanation: Optional[str] = None  # Explanation for gap after this job
+
+class UpdateEmploymentHistoryRequest(BaseModel):
+    employment_history: List[EmploymentRecord]
+
+@api_router.post("/employees/{employee_id}/employment-history")
+async def update_employment_history(
+    employee_id: str,
+    request: UpdateEmploymentHistoryRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update employment history and auto-detect gaps.
+    
+    Gaps > 30 days are flagged and require explanation.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Convert to dict format
+    history_data = [r.model_dump() for r in request.employment_history]
+    
+    # Detect gaps automatically
+    gaps = detect_cv_gaps(history_data)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update employee with history and detected gaps
+    update_data = {
+        "employment_history": history_data,
+        "cv_gaps_detected": gaps,
+        "cv_gaps_all_explained": all(g.get("explanation") and len(str(g.get("explanation", "")).strip()) >= 10 for g in gaps) if gaps else True,
+        "updated_at": now
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    await log_audit_action(
+        user['user_id'],
+        "update_employment_history",
+        "employee",
+        employee_id,
+        {
+            "job_count": len(history_data),
+            "gaps_detected": len(gaps),
+            "gaps_explained": sum(1 for g in gaps if g.get("explanation"))
+        }
+    )
+    
+    return {
+        "message": "Employment history updated",
+        "employment_history": history_data,
+        "gaps_detected": gaps,
+        "gaps_all_explained": update_data["cv_gaps_all_explained"],
+        "gaps_requiring_explanation": [g for g in gaps if not g.get("explanation") or len(str(g.get("explanation", "")).strip()) < 10]
+    }
+
+
+class ExplainGapRequest(BaseModel):
+    gap_id: str
+    explanation: str  # Required, min 10 characters
+
+@api_router.post("/employees/{employee_id}/explain-cv-gap")
+async def explain_cv_gap(
+    employee_id: str,
+    request: ExplainGapRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Provide explanation for a CV gap.
+    
+    REQUIRED: Explanation must be at least 10 characters.
+    """
+    if len(request.explanation.strip()) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Gap explanation must be at least 10 characters"
+        )
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    gaps = employee.get("cv_gaps_detected", [])
+    if not gaps:
+        raise HTTPException(status_code=400, detail="No gaps detected for this employee")
+    
+    # Find and update the specific gap
+    gap_found = False
+    for gap in gaps:
+        if gap.get("gap_id") == request.gap_id:
+            gap["explanation"] = request.explanation
+            gap["verified"] = True
+            gap["verified_by"] = user['user_id']
+            gap["verified_at"] = datetime.now(timezone.utc).isoformat()
+            gap_found = True
+            break
+    
+    if not gap_found:
+        raise HTTPException(status_code=404, detail=f"Gap '{request.gap_id}' not found")
+    
+    # Check if all gaps now explained
+    all_explained = all(
+        g.get("explanation") and len(str(g.get("explanation", "")).strip()) >= 10 
+        for g in gaps
+    )
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "cv_gaps_detected": gaps,
+            "cv_gaps_all_explained": all_explained,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "explain_cv_gap",
+        "employee",
+        employee_id,
+        {
+            "gap_id": request.gap_id,
+            "explanation": request.explanation,
+            "all_gaps_explained": all_explained
+        }
+    )
+    
+    return {
+        "message": "Gap explanation recorded",
+        "gap_id": request.gap_id,
+        "explanation": request.explanation,
+        "all_gaps_explained": all_explained,
+        "remaining_unexplained": len([g for g in gaps if not g.get("explanation") or len(str(g.get("explanation", "")).strip()) < 10])
+    }
+
+
+@api_router.get("/employees/{employee_id}/cv-gaps")
+async def get_cv_gaps_status(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get CV gap analysis status for an employee.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    gaps_status = check_cv_gaps_complete(employee)
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+        "employment_history": employee.get("employment_history", []),
+        "gaps_detected": employee.get("cv_gaps_detected", []),
+        "gaps_status": gaps_status,
+        "can_complete_recruitment": gaps_status["can_complete_recruitment"]
+    }
+
+
+@api_router.get("/employees/{employee_id}/recruitment-status")
+async def get_recruitment_status(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get full recruitment status including reference integrity and CV gaps.
+    
+    Shows all blockers that prevent recruitment from being marked complete.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get compliance requirements which now includes recruitment status
+    compliance = await get_compliance_requirements(employee_id, user)
+    
+    # Build comprehensive recruitment status
+    reference_integrity = compliance.get("reference_integrity", {})
+    cv_gaps_status = compliance.get("cv_gaps_status", {})
+    recruitment_status = compliance.get("recruitment_status", {})
+    
+    # Check proof of address requirement
+    proof_of_address_req = None
+    for req in compliance.get("requirements", []):
+        if req.get("id") == "proof_of_address":
+            proof_of_address_req = req
+            break
+    
+    proof_of_address_status = {
+        "required_count": 2,
+        "current_count": proof_of_address_req.get("document_count", 0) if proof_of_address_req else 0,
+        "verified_count": len([d for d in (proof_of_address_req or {}).get("documents", []) if d.get("verified")]) if proof_of_address_req else 0,
+        "complete": proof_of_address_req.get("verified", False) if proof_of_address_req else False
+    }
+    
+    # Calculate overall recruitment readiness
+    recruitment_blockers = recruitment_status.get("blockers", [])
+    if not proof_of_address_status["complete"]:
+        if proof_of_address_status["current_count"] < 2:
+            recruitment_blockers.append(f"Proof of Address: {proof_of_address_status['current_count']}/2 documents uploaded")
+        elif proof_of_address_status["verified_count"] < 2:
+            recruitment_blockers.append(f"Proof of Address: {proof_of_address_status['verified_count']}/2 documents verified")
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+        "recruitment_complete": len(recruitment_blockers) == 0,
+        "blockers": recruitment_blockers,
+        "details": {
+            "reference_integrity": reference_integrity,
+            "cv_gaps": cv_gaps_status,
+            "proof_of_address": proof_of_address_status
+        },
+        "summary": {
+            "references_valid": reference_integrity.get("all_valid", False),
+            "cv_gaps_explained": cv_gaps_status.get("all_gaps_explained", True),
+            "proof_of_address_complete": proof_of_address_status["complete"]
+        }
+    }
+
+
+
 
 @api_router.post("/employees/{employee_id}/profile-photo")
 async def upload_profile_photo(
@@ -9378,6 +10003,28 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         "training_blocking": training_blocking,
         "blocking_reasons": blocking_reasons,
         "summary": "Ready to Work" if not any_blocking else blocking_reasons[0] if blocking_reasons else "Safety check failed"
+    }
+    
+    # === REFERENCE INTEGRITY CHECK ===
+    reference_integrity = check_all_references_integrity(employee)
+    result["reference_integrity"] = reference_integrity
+    
+    # === CV GAP ANALYSIS CHECK ===
+    cv_gaps_status = check_cv_gaps_complete(employee)
+    result["cv_gaps_status"] = cv_gaps_status
+    
+    # Add recruitment blocking reasons
+    recruitment_blockers = []
+    if not reference_integrity["can_complete_recruitment"]:
+        recruitment_blockers.extend(reference_integrity["errors"])
+    if not cv_gaps_status["can_complete_recruitment"]:
+        recruitment_blockers.append(f"{len(cv_gaps_status['unexplained_gaps'])} unexplained employment gap(s)")
+    
+    result["recruitment_status"] = {
+        "can_complete": len(recruitment_blockers) == 0,
+        "blockers": recruitment_blockers,
+        "reference_issues": reference_integrity["errors"],
+        "cv_gap_issues": cv_gaps_status["unexplained_gaps"]
     }
     
     return result

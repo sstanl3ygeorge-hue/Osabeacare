@@ -22,7 +22,8 @@ import {
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer,
-  Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight
+  Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight,
+  Briefcase, UserCheck, FileWarning
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
@@ -127,6 +128,19 @@ export default function EmployeeProfilePage() {
   const [trainingCorrectionField, setTrainingCorrectionField] = useState('expiry_date');
   const [trainingCorrectionValue, setTrainingCorrectionValue] = useState('');
   const [trainingCorrectionReason, setTrainingCorrectionReason] = useState('');
+  
+  // Recruitment Checks states (Reference Integrity, CV Gaps, Proof of Address)
+  const [recruitmentStatus, setRecruitmentStatus] = useState(null);
+  const [loadingRecruitment, setLoadingRecruitment] = useState(false);
+  const [verifyRefDialogOpen, setVerifyRefDialogOpen] = useState(false);
+  const [selectedRefNum, setSelectedRefNum] = useState(null);
+  const [refFromCv, setRefFromCv] = useState(true);
+  const [refOverrideReason, setRefOverrideReason] = useState('');
+  const [isVerifyingRef, setIsVerifyingRef] = useState(false);
+  const [explainGapDialogOpen, setExplainGapDialogOpen] = useState(false);
+  const [selectedGap, setSelectedGap] = useState(null);
+  const [gapExplanation, setGapExplanation] = useState('');
+  const [isExplainingGap, setIsExplainingGap] = useState(false);
   const [trainingHistoryDialogOpen, setTrainingHistoryDialogOpen] = useState(false);
   const [trainingHistory, setTrainingHistory] = useState([]);
   
@@ -197,6 +211,80 @@ export default function EmployeeProfilePage() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   const [previewFiles, setPreviewFiles] = useState([]); // For multi-file navigation
+  
+  // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
+  const fetchRecruitmentStatus = async () => {
+    if (!employeeId) return;
+    setLoadingRecruitment(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/recruitment-status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setRecruitmentStatus(response.data);
+    } catch (err) {
+      console.error('Failed to fetch recruitment status:', err);
+    } finally {
+      setLoadingRecruitment(false);
+    }
+  };
+  
+  // Verify reference with integrity check
+  const handleVerifyReference = async () => {
+    if (!refFromCv && refOverrideReason.length < 10) {
+      toast.error('Override reason must be at least 10 characters');
+      return;
+    }
+    
+    setIsVerifyingRef(true);
+    try {
+      await axios.post(`${API}/employees/${employeeId}/verify-reference`, {
+        reference_num: selectedRefNum,
+        from_cv: refFromCv,
+        override_reason: refFromCv ? null : refOverrideReason
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      toast.success(`Reference ${selectedRefNum} verified successfully`);
+      setVerifyRefDialogOpen(false);
+      setRefFromCv(true);
+      setRefOverrideReason('');
+      fetchRecruitmentStatus();
+      fetchEmployee();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to verify reference');
+    } finally {
+      setIsVerifyingRef(false);
+    }
+  };
+  
+  // Explain CV gap
+  const handleExplainGap = async () => {
+    if (gapExplanation.length < 10) {
+      toast.error('Explanation must be at least 10 characters');
+      return;
+    }
+    
+    setIsExplainingGap(true);
+    try {
+      await axios.post(`${API}/employees/${employeeId}/explain-cv-gap`, {
+        gap_id: selectedGap?.gap_id,
+        explanation: gapExplanation
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      toast.success('Gap explanation recorded');
+      setExplainGapDialogOpen(false);
+      setGapExplanation('');
+      setSelectedGap(null);
+      fetchRecruitmentStatus();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to record explanation');
+    } finally {
+      setIsExplainingGap(false);
+    }
+  };
   
   // Sync tab changes to URL
   const handleTabChange = (value) => {
@@ -319,6 +407,7 @@ export default function EmployeeProfilePage() {
   useEffect(() => {
     fetchData();
     fetchCompliance();
+    fetchRecruitmentStatus();
   }, [employeeId, token]);
 
   // Fetch profile photo when employee has one
@@ -2825,6 +2914,10 @@ export default function EmployeeProfilePage() {
             <History className="h-4 w-4 mr-2" />
             Audit Log
           </TabsTrigger>
+          <TabsTrigger value="recruitment" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <UserCheck className="h-4 w-4 mr-2" />
+            Recruitment
+          </TabsTrigger>
         </TabsList>
 
         {/* Generated Forms Tab - Admin Internal Workflow */}
@@ -5201,6 +5294,271 @@ export default function EmployeeProfilePage() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Recruitment Checks Tab - Reference Integrity, CV Gaps, Proof of Address */}
+        <TabsContent value="recruitment">
+          <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader>
+              <CardTitle className="font-heading text-lg flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <UserCheck className="h-5 w-5 text-primary" />
+                  Recruitment Checks
+                </span>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={fetchRecruitmentStatus}
+                  disabled={loadingRecruitment}
+                  className="rounded-xl"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${loadingRecruitment ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </CardTitle>
+              <p className="text-sm text-text-muted mt-1">
+                Reference integrity, employment history gaps, and proof of address verification
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {loadingRecruitment ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                </div>
+              ) : recruitmentStatus ? (
+                <>
+                  {/* Recruitment Status Overview */}
+                  <div className={`p-4 rounded-xl border ${
+                    recruitmentStatus.recruitment_complete 
+                      ? 'bg-green-50 border-green-200' 
+                      : 'bg-amber-50 border-amber-200'
+                  }`}>
+                    <div className="flex items-center gap-3">
+                      {recruitmentStatus.recruitment_complete ? (
+                        <CheckCircle className="h-6 w-6 text-green-600" />
+                      ) : (
+                        <AlertTriangle className="h-6 w-6 text-amber-600" />
+                      )}
+                      <div>
+                        <p className={`font-medium ${recruitmentStatus.recruitment_complete ? 'text-green-700' : 'text-amber-700'}`}>
+                          {recruitmentStatus.recruitment_complete ? 'Recruitment Checks Complete' : 'Recruitment Checks Incomplete'}
+                        </p>
+                        {recruitmentStatus.blockers?.length > 0 && (
+                          <ul className="text-sm text-amber-600 mt-1 list-disc list-inside">
+                            {recruitmentStatus.blockers.map((blocker, idx) => (
+                              <li key={idx}>{blocker}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Reference Integrity Section */}
+                  <div className="space-y-4">
+                    <h3 className="font-medium flex items-center gap-2">
+                      <FileCheck className="h-5 w-5 text-blue-600" />
+                      Reference Integrity
+                    </h3>
+                    <p className="text-sm text-text-muted -mt-2">
+                      References must match CV OR require documented justification
+                    </p>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {[1, 2].map(refNum => {
+                        const ref = recruitmentStatus.details?.reference_integrity?.[`reference_${refNum}`];
+                        const refData = {
+                          name: employee?.[`reference_${refNum}_name`],
+                          company: employee?.[`reference_${refNum}_company`],
+                          from_cv: employee?.[`reference_${refNum}_from_cv`],
+                          override_reason: employee?.[`reference_${refNum}_override_reason`],
+                          verified: employee?.[`reference_${refNum}_verified`],
+                          verified_by: employee?.[`reference_${refNum}_verified_by`],
+                          verified_at: employee?.[`reference_${refNum}_verified_at`]
+                        };
+                        
+                        return (
+                          <div key={refNum} className={`p-4 rounded-xl border ${
+                            refData.verified ? 'bg-green-50 border-green-200' :
+                            refData.name ? 'bg-amber-50 border-amber-200' :
+                            'bg-gray-50 border-gray-200'
+                          }`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium">Reference {refNum}</span>
+                              {refData.verified ? (
+                                <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-lg flex items-center gap-1">
+                                  <CheckCircle className="h-3 w-3" /> Verified
+                                </span>
+                              ) : refData.name ? (
+                                <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs rounded-lg flex items-center gap-1">
+                                  <Clock className="h-3 w-3" /> Awaiting Verification
+                                </span>
+                              ) : (
+                                <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-lg">
+                                  No Data
+                                </span>
+                              )}
+                            </div>
+                            
+                            {refData.name ? (
+                              <>
+                                <p className="text-sm font-medium">{refData.name}</p>
+                                <p className="text-sm text-text-muted">{refData.company}</p>
+                                
+                                {refData.from_cv === false && refData.override_reason && (
+                                  <div className="mt-2 p-2 bg-blue-50 rounded text-xs">
+                                    <p className="font-medium text-blue-700">⚠️ Does not match CV</p>
+                                    <p className="text-blue-600">Justification: {refData.override_reason}</p>
+                                  </div>
+                                )}
+                                
+                                {refData.verified && (
+                                  <p className="text-xs text-green-600 mt-2">
+                                    Verified by {refData.verified_by} on {refData.verified_at?.split('T')[0]}
+                                  </p>
+                                )}
+                                
+                                {!refData.verified && !isAuditor() && (
+                                  <Button
+                                    size="sm"
+                                    className="mt-3 w-full rounded-lg bg-primary hover:bg-primary-hover"
+                                    onClick={() => {
+                                      setSelectedRefNum(refNum);
+                                      setRefFromCv(true);
+                                      setRefOverrideReason('');
+                                      setVerifyRefDialogOpen(true);
+                                    }}
+                                  >
+                                    Verify Reference
+                                  </Button>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-sm text-text-muted">No reference data provided</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* CV Gap Analysis Section */}
+                  <div className="space-y-4">
+                    <h3 className="font-medium flex items-center gap-2">
+                      <Briefcase className="h-5 w-5 text-purple-600" />
+                      Employment History & Gap Analysis
+                    </h3>
+                    <p className="text-sm text-text-muted -mt-2">
+                      Gaps {'>'}30 days require documented explanation
+                    </p>
+                    
+                    {recruitmentStatus.details?.cv_gaps?.total_gaps > 0 ? (
+                      <div className="space-y-3">
+                        <div className={`p-3 rounded-lg ${
+                          recruitmentStatus.details?.cv_gaps?.all_gaps_explained 
+                            ? 'bg-green-50 border border-green-200' 
+                            : 'bg-red-50 border border-red-200'
+                        }`}>
+                          <p className={`text-sm font-medium ${
+                            recruitmentStatus.details?.cv_gaps?.all_gaps_explained 
+                              ? 'text-green-700' 
+                              : 'text-red-700'
+                          }`}>
+                            {recruitmentStatus.details?.cv_gaps?.explained_gaps}/{recruitmentStatus.details?.cv_gaps?.total_gaps} gaps explained
+                          </p>
+                        </div>
+                        
+                        {recruitmentStatus.details?.cv_gaps?.unexplained_gaps?.map((gap, idx) => (
+                          <div key={idx} className="p-4 bg-red-50 rounded-xl border border-red-200">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <p className="font-medium text-red-700">
+                                  <FileWarning className="h-4 w-4 inline mr-1" />
+                                  Gap Detected: {gap.gap_duration_days} days
+                                </p>
+                                <p className="text-sm text-red-600 mt-1">
+                                  {gap.previous_job?.company} → {gap.next_job?.company}
+                                </p>
+                                <p className="text-xs text-red-500 mt-1">
+                                  {gap.gap_start} to {gap.gap_end}
+                                </p>
+                              </div>
+                              {!isAuditor() && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="rounded-lg border-red-300 text-red-700 hover:bg-red-100"
+                                  onClick={() => {
+                                    setSelectedGap(gap);
+                                    setGapExplanation('');
+                                    setExplainGapDialogOpen(true);
+                                  }}
+                                >
+                                  Explain
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-4 bg-gray-50 rounded-xl border border-gray-200 text-center">
+                        <p className="text-sm text-text-muted">
+                          No employment history recorded or no gaps detected
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Proof of Address Section */}
+                  <div className="space-y-4">
+                    <h3 className="font-medium flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-teal-600" />
+                      Proof of Address (NHS Standard)
+                    </h3>
+                    <p className="text-sm text-text-muted -mt-2">
+                      2 separate documents required: utility bill, bank statement, council tax, or tenancy agreement
+                    </p>
+                    
+                    <div className={`p-4 rounded-xl border ${
+                      recruitmentStatus.details?.proof_of_address?.complete 
+                        ? 'bg-green-50 border-green-200' 
+                        : 'bg-amber-50 border-amber-200'
+                    }`}>
+                      <div className="flex items-center gap-3">
+                        {recruitmentStatus.details?.proof_of_address?.complete ? (
+                          <CheckCircle className="h-6 w-6 text-green-600" />
+                        ) : (
+                          <AlertTriangle className="h-6 w-6 text-amber-600" />
+                        )}
+                        <div>
+                          <p className="font-medium">
+                            {recruitmentStatus.details?.proof_of_address?.verified_count || 0}/2 Documents Verified
+                          </p>
+                          <p className="text-sm text-text-muted">
+                            {recruitmentStatus.details?.proof_of_address?.current_count || 0} uploaded, {recruitmentStatus.details?.proof_of_address?.verified_count || 0} verified
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {!recruitmentStatus.details?.proof_of_address?.complete && (
+                        <p className="text-sm text-amber-600 mt-2">
+                          ⚠️ Upload and verify {2 - (recruitmentStatus.details?.proof_of_address?.verified_count || 0)} more document(s) in the "What's Needed" tab
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 text-text-muted">
+                  <p>No recruitment data available</p>
+                  <Button variant="outline" onClick={fetchRecruitmentStatus} className="mt-4">
+                    Load Recruitment Status
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Edit Employee Dialog */}
@@ -6954,6 +7312,135 @@ export default function EmployeeProfilePage() {
               <p>No extraction data available.</p>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Verify Reference Dialog */}
+      <Dialog open={verifyRefDialogOpen} onOpenChange={setVerifyRefDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Shield className="h-5 w-5 text-primary" />
+              Verify Reference {selectedRefNum}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-sm text-blue-700">
+                <strong>Reference Integrity Rule:</strong> References must match the applicant's CV, 
+                or you must document why they differ.
+              </p>
+            </div>
+            
+            <div className="space-y-3">
+              <label className="block text-sm font-medium">Does this reference match the CV?</label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="radio" 
+                    name="fromCv" 
+                    checked={refFromCv === true}
+                    onChange={() => setRefFromCv(true)}
+                    className="h-4 w-4 text-primary"
+                  />
+                  <span>Yes, matches CV</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="radio" 
+                    name="fromCv" 
+                    checked={refFromCv === false}
+                    onChange={() => setRefFromCv(false)}
+                    className="h-4 w-4 text-primary"
+                  />
+                  <span>No, different from CV</span>
+                </label>
+              </div>
+            </div>
+            
+            {refFromCv === false && (
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-red-700">
+                  ⚠️ Justification Required
+                </label>
+                <Textarea
+                  value={refOverrideReason}
+                  onChange={(e) => setRefOverrideReason(e.target.value)}
+                  placeholder="Explain why this reference differs from the CV (min 10 characters)..."
+                  className="min-h-[100px] rounded-xl"
+                />
+                <p className="text-xs text-text-muted">
+                  {refOverrideReason.length}/10 characters minimum
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setVerifyRefDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleVerifyReference}
+              disabled={isVerifyingRef || (!refFromCv && refOverrideReason.length < 10)}
+              className="rounded-xl bg-primary hover:bg-primary-hover"
+            >
+              {isVerifyingRef ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Verify Reference
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Explain CV Gap Dialog */}
+      <Dialog open={explainGapDialogOpen} onOpenChange={setExplainGapDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Briefcase className="h-5 w-5 text-purple-600" />
+              Explain Employment Gap
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {selectedGap && (
+              <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                <p className="text-sm font-medium text-amber-700">Gap Duration: {selectedGap.gap_duration_days} days</p>
+                <p className="text-sm text-amber-600 mt-1">
+                  From: {selectedGap.previous_job?.company} ({selectedGap.gap_start})
+                </p>
+                <p className="text-sm text-amber-600">
+                  To: {selectedGap.next_job?.company} ({selectedGap.gap_end})
+                </p>
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <label className="block text-sm font-medium">
+                Explanation for this gap <span className="text-red-500">*</span>
+              </label>
+              <Textarea
+                value={gapExplanation}
+                onChange={(e) => setGapExplanation(e.target.value)}
+                placeholder="E.g., Career break for family care, further education, travel, etc. (min 10 characters)..."
+                className="min-h-[120px] rounded-xl"
+              />
+              <p className="text-xs text-text-muted">
+                {gapExplanation.length}/10 characters minimum
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setExplainGapDialogOpen(false)} className="rounded-xl">
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleExplainGap}
+              disabled={isExplainingGap || gapExplanation.length < 10}
+              className="rounded-xl bg-purple-600 hover:bg-purple-700"
+            >
+              {isExplainingGap ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Save Explanation
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

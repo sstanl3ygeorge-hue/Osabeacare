@@ -4,6 +4,43 @@
 **Osabea Healthcare Solutions**
 
 
+## Recurring Compliance Engine - Frontend UI (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Implementation Summary
+Built the frontend UI layer for the Recurring Compliance Engine and Admin Document Request system:
+
+### Components Implemented
+
+#### 1. Recurring Compliance Tab (Employee Profile)
+- **File**: `/app/frontend/src/components/portal/RecurringComplianceSection.js`
+- **Location**: New "Recurring" tab in `EmployeeProfilePage.js`
+- **Features**:
+  - Summary cards (Overdue/Due Now/Upcoming/Total Active)
+  - Item list with status badges and expand/collapse
+  - "Record" completion button per item
+  - Completion history with outcome badges
+  - Modal for recording completion (Date, Outcome, Notes, Support Action)
+
+#### 2. Dashboard Recurring Compliance Card
+- **File**: `/app/frontend/src/pages/portal/DashboardPage.js`
+- **Conditionally shown** when recurring items exist
+- Shows summary counts (Overdue/Due/Upcoming)
+- Links to urgent items with employee names
+
+#### 3. Document Request UI
+- **Per-row Request Button**: Send icon appears for "Still Needed" document requirements
+- **Bulk Request Button**: "Request Missing Items" in What's Needed header
+- **Request Modal**: Allows custom message before sending
+- **APIs Used**: `POST /api/employees/{id}/request-document`, `POST /api/employees/{id}/request-missing-items`
+
+### Test Results
+- Backend: 100% (24/24 tests passed)
+- Frontend: 100% (all UI flows verified)
+- Test report: `/app/test_reports/iteration_66.json`
+
+---
+
 ## Recurring Compliance Engine - Phase 1 (2026-03-30)
 **Status**: COMPLETE ✅
 

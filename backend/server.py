@@ -1157,6 +1157,217 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
         "is_fully_compliant": all_verified and all_complete
     }
 
+
+# ============================================================================
+# 3-TIER WORK READINESS ENFORCEMENT
+# ============================================================================
+# Statuses:
+#   - NOT_READY: Hard blocks - cannot work until resolved
+#   - READY_WITH_CONDITIONS: Can work but has warnings that need attention
+#   - READY_TO_WORK: Fully compliant for active work
+# ============================================================================
+
+HARD_BLOCK_REQUIREMENTS = {
+    # Legal requirements - missing/expired = NOT_READY
+    "right_to_work_documents",
+    "right_to_work_check",
+    "identity_documents",
+    # Safety requirements - missing/expired = NOT_READY  
+    "dbs_certificate",
+    "dbs_check",
+    # References - BOTH required and VERIFIED
+    "reference_1",
+    "reference_2",
+}
+
+async def calculate_work_readiness_3tier(
+    employee_id: str,
+    requirements: List[dict],
+    employee_data: dict,
+    role: str
+) -> dict:
+    """
+    Calculate 3-tier work readiness status.
+    
+    Returns:
+        {
+            "status": "NOT_READY" | "READY_WITH_CONDITIONS" | "READY_TO_WORK",
+            "label": "Human-readable label",
+            "reasons": [{"type": "hard_block"|"conditional", "code": "...", "message": "..."}]
+        }
+    
+    Hard Blocks (NOT_READY):
+        - Missing/expired right_to_work_documents or right_to_work_check
+        - Missing/expired dbs_certificate or dbs_check
+        - Missing identity_documents
+        - Missing OR unverified reference_1 and reference_2
+        - recruitment_approved = false
+        
+    Conditional (READY_WITH_CONDITIONS):
+        - Overdue recurring compliance: supervision, competency_assessment, spot_check, training_refresh
+        - Competency outcome = needs_improvement or action_required
+        - Open/overdue report_followup
+    """
+    from datetime import datetime, timezone
+    
+    hard_block_reasons = []
+    conditional_reasons = []
+    
+    # Build requirement lookup
+    req_lookup = {r.get('id'): r for r in requirements}
+    
+    # =========================================================================
+    # HARD BLOCK CHECKS
+    # =========================================================================
+    
+    # 1. Check recruitment_approved status
+    if not employee_data.get('recruitment_approved', False):
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "recruitment_not_approved",
+            "message": "Recruitment not yet approved"
+        })
+    
+    # 2. Check hard block requirements
+    hard_block_reqs = [
+        ("right_to_work_documents", "Right to Work documents missing or not verified"),
+        ("right_to_work_check", "Right to Work verification missing or not verified"),
+        ("identity_documents", "Identity documents missing or not verified"),
+        ("dbs_certificate", "DBS certificate missing, expired, or not verified"),
+        ("dbs_check", "DBS check missing, expired, or not verified"),
+    ]
+    
+    today = datetime.now(timezone.utc).date()
+    
+    for req_id, message in hard_block_reqs:
+        req = req_lookup.get(req_id)
+        if not req:
+            continue
+            
+        has_evidence = req.get('has_evidence', False)
+        is_verified = req.get('verified', False)
+        
+        # Check expiry for document types
+        expiry_date = req.get('expiry_date')
+        is_expired = False
+        if expiry_date:
+            try:
+                exp_date = datetime.fromisoformat(expiry_date.replace('Z', '+00:00')).date() if isinstance(expiry_date, str) else expiry_date
+                is_expired = exp_date < today
+            except:
+                pass
+        
+        if not has_evidence or not is_verified or is_expired:
+            reason_msg = message
+            if is_expired:
+                reason_msg = f"{req.get('name', req_id)} expired"
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": f"{req_id}_missing_or_invalid",
+                "message": reason_msg
+            })
+    
+    # 3. Check references - BOTH must be present AND verified
+    ref1 = req_lookup.get('reference_1')
+    ref2 = req_lookup.get('reference_2')
+    
+    ref1_ok = ref1 and ref1.get('has_evidence') and ref1.get('verified')
+    ref2_ok = ref2 and ref2.get('has_evidence') and ref2.get('verified')
+    
+    if not ref1_ok or not ref2_ok:
+        missing_refs = []
+        if not ref1_ok:
+            missing_refs.append("Reference 1")
+        if not ref2_ok:
+            missing_refs.append("Reference 2")
+        hard_block_reasons.append({
+            "type": "hard_block", 
+            "code": "references_incomplete",
+            "message": f"{', '.join(missing_refs)} missing or not verified"
+        })
+    
+    # =========================================================================
+    # CONDITIONAL CHECKS (only if no hard blocks)
+    # =========================================================================
+    
+    # 4. Check recurring compliance items
+    recurring_items = await db.recurring_compliance.find({
+        "employee_id": employee_id,
+        "is_active": True
+    }, {"_id": 0}).to_list(100)
+    
+    for item in recurring_items:
+        item_type = item.get('item_type')
+        next_due = item.get('next_due_date')
+        
+        if not next_due:
+            continue
+            
+        try:
+            due_date = datetime.fromisoformat(next_due.replace('Z', '+00:00')).date() if isinstance(next_due, str) else next_due
+            days_until = (due_date - today).days
+        except:
+            continue
+        
+        # Check for overdue items
+        if days_until < 0:
+            item_name = item.get('item_name', item_type.replace('_', ' ').title())
+            days_overdue = abs(days_until)
+            
+            if item_type in ['supervision', 'competency_assessment', 'spot_check', 'training_refresh']:
+                conditional_reasons.append({
+                    "type": "conditional",
+                    "code": f"{item_type}_overdue",
+                    "message": f"{item_name} overdue by {days_overdue} day(s)"
+                })
+            elif item_type == 'report_followup':
+                conditional_reasons.append({
+                    "type": "conditional",
+                    "code": "report_followup_overdue", 
+                    "message": f"Report follow-up overdue by {days_overdue} day(s)"
+                })
+    
+    # 5. Check for poor competency outcomes (last outcome from completion_history)
+    for item in recurring_items:
+        if item.get('item_type') == 'competency_assessment':
+            history = item.get('completion_history', [])
+            if history:
+                last_completion = history[-1]
+                outcome = last_completion.get('outcome')
+                if outcome in ['needs_improvement', 'action_required']:
+                    conditional_reasons.append({
+                        "type": "conditional",
+                        "code": "competency_needs_attention",
+                        "message": f"Competency assessment outcome: {outcome.replace('_', ' ')}"
+                    })
+    
+    # =========================================================================
+    # DETERMINE FINAL STATUS
+    # =========================================================================
+    
+    if hard_block_reasons:
+        return {
+            "status": "NOT_READY",
+            "label": "Not Ready to Work",
+            "color": "error",
+            "reasons": hard_block_reasons + conditional_reasons
+        }
+    elif conditional_reasons:
+        return {
+            "status": "READY_WITH_CONDITIONS",
+            "label": "Ready with Conditions",
+            "color": "warning",
+            "reasons": conditional_reasons
+        }
+    else:
+        return {
+            "status": "READY_TO_WORK",
+            "label": "Ready to Work",
+            "color": "success",
+            "reasons": []
+        }
+
+
 async def calculate_expiry_alerts_quick(employee_id: str) -> dict:
     """Quick expiry alerts calculation for list views.
     Only includes ACTIVE, CURRENT records - excludes test, deleted, replaced records.
@@ -3033,6 +3244,7 @@ class EmployeeResponse(BaseModel):
     completion_percentage: int = 0
     profile_photo_url: Optional[str] = None
     work_readiness: Optional[dict] = None  # Work readiness status for list view
+    work_readiness_3tier: Optional[dict] = None  # 3-tier work readiness status
     expiry_alerts: Optional[dict] = None  # Expiry alerts count for list view
     # RECRUITMENT APPROVAL GATE fields
     recruitment_approved: Optional[bool] = False
@@ -5214,6 +5426,123 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     else:
         return {"status": "not_started", "label": "Not Ready", "color": "error", "reason": get_missing_reason()}
 
+
+async def calculate_work_readiness_3tier_quick(employee_id: str, employee_data: dict, role: str) -> dict:
+    """
+    Quick 3-tier work readiness for list views. 
+    Returns simplified status without full requirements computation.
+    """
+    from datetime import datetime, timezone
+    today = datetime.now(timezone.utc)
+    today_str = today.strftime('%Y-%m-%d')
+    
+    hard_block_reasons = []
+    conditional_reasons = []
+    
+    # 1. Check recruitment_approved
+    if not employee_data.get('recruitment_approved', False):
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "recruitment_not_approved",
+            "message": "Recruitment not approved"
+        })
+    
+    # 2. Check hard block documents
+    hard_block_reqs = ["right_to_work_documents", "right_to_work_check", "identity_documents", "dbs_certificate", "dbs_check"]
+    
+    verified_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": hard_block_reqs},
+        "verified": True,
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+    }, {"_id": 0, "requirement_id": 1, "expiry_date": 1}).to_list(20)
+    
+    verified_doc_ids = set()
+    for doc in verified_docs:
+        req_id = doc.get('requirement_id')
+        expiry = doc.get('expiry_date')
+        # Check if expired
+        if expiry and expiry < today_str:
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": f"{req_id}_expired",
+                "message": f"{req_id.replace('_', ' ').title()} expired"
+            })
+        else:
+            verified_doc_ids.add(req_id)
+    
+    # Check missing hard block docs
+    for req_id in hard_block_reqs:
+        if req_id not in verified_doc_ids:
+            # Check if we haven't already flagged it as expired
+            if not any(r['code'] == f"{req_id}_expired" for r in hard_block_reasons):
+                hard_block_reasons.append({
+                    "type": "hard_block",
+                    "code": f"{req_id}_missing",
+                    "message": f"{req_id.replace('_', ' ').title()} missing"
+                })
+    
+    # 3. Check references (both must be verified)
+    ref_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": ["reference_1", "reference_2"]},
+        "verified": True,
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+    }, {"_id": 0, "requirement_id": 1}).to_list(10)
+    
+    ref_ids = {d['requirement_id'] for d in ref_docs}
+    if "reference_1" not in ref_ids or "reference_2" not in ref_ids:
+        missing = []
+        if "reference_1" not in ref_ids:
+            missing.append("Reference 1")
+        if "reference_2" not in ref_ids:
+            missing.append("Reference 2")
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "references_incomplete",
+            "message": f"{', '.join(missing)} missing"
+        })
+    
+    # 4. Check overdue recurring compliance (conditional)
+    recurring_items = await db.recurring_compliance.find({
+        "employee_id": employee_id,
+        "is_active": True,
+        "next_due_date": {"$lt": today_str}
+    }, {"_id": 0, "item_type": 1, "item_name": 1, "next_due_date": 1}).to_list(20)
+    
+    for item in recurring_items:
+        item_type = item.get('item_type')
+        if item_type in ['supervision', 'competency_assessment', 'spot_check', 'training_refresh', 'report_followup']:
+            conditional_reasons.append({
+                "type": "conditional",
+                "code": f"{item_type}_overdue",
+                "message": f"{item.get('item_name', item_type.replace('_', ' ').title())} overdue"
+            })
+    
+    # Determine status
+    if hard_block_reasons:
+        return {
+            "status": "NOT_READY",
+            "label": "Not Ready",
+            "color": "error",
+            "reasons": hard_block_reasons[:3]  # Limit for list view
+        }
+    elif conditional_reasons:
+        return {
+            "status": "READY_WITH_CONDITIONS",
+            "label": "Ready*",
+            "color": "warning",
+            "reasons": conditional_reasons[:2]  # Limit for list view
+        }
+    else:
+        return {
+            "status": "READY_TO_WORK",
+            "label": "Ready",
+            "color": "success",
+            "reasons": []
+        }
+
+
 @api_router.post("/employees", response_model=EmployeeResponse)
 async def create_employee(employee: EmployeeCreate, user: dict = Depends(require_manager_or_admin)):
     """
@@ -5317,6 +5646,7 @@ async def get_employees(
     for emp in employees:
         emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
         emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
+        emp['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(emp['id'], emp, emp.get('role', ''))
         emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
         # Derive person_stage from status (SINGLE SOURCE OF TRUTH)
         emp['person_stage'] = get_person_stage(emp.get('status', EmployeeStatus.NEW))
@@ -5473,6 +5803,7 @@ async def get_staff_employees(
         emp['person_stage'] = PersonStage.EMPLOYEE
         emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
         emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
+        emp['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(emp['id'], emp, emp.get('role', ''))
         emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
     
     return [EmployeeResponse(**emp) for emp in employees]
@@ -5558,6 +5889,12 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     employee['completion_percentage'] = await calculate_completion_percentage(employee_id)
     # Derive person_stage from status (SINGLE SOURCE OF TRUTH)
     employee['person_stage'] = get_person_stage(employee.get('status', EmployeeStatus.NEW))
+    
+    # Add 3-tier work readiness status
+    employee['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(
+        employee_id, employee, employee.get('role', '')
+    )
+    
     return EmployeeResponse(**employee)
 
 @api_router.put("/employees/{employee_id}", response_model=EmployeeResponse)
@@ -10768,6 +11105,15 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         "reference_issues": reference_integrity["errors"],
         "cv_gap_issues": cv_gaps_status["unexplained_gaps"]
     }
+    
+    # === 3-TIER WORK READINESS ENFORCEMENT ===
+    work_readiness_3tier = await calculate_work_readiness_3tier(
+        employee_id=employee_id,
+        requirements=requirements,
+        employee_data=employee,
+        role=role
+    )
+    result["work_readiness_3tier"] = work_readiness_3tier
     
     return result
 
@@ -19748,6 +20094,406 @@ async def get_employee_document_requests(employee_id: str, user: dict = Depends(
         req["requirement_name"] = doc_types.get(req_id, req_id)
     
     return requests
+
+
+# ==================== SEND FORM VIA EMAIL ====================
+
+FORM_TO_REQUIREMENT_MAPPING = {
+    "staff_health_questionnaire": "staff_health_questionnaire",
+    "staff_personal_info": "staff_personal_information",
+    "hmrc_starter_checklist": "hmrc_starter_checklist",
+    "interview_record": "interview_record",
+}
+
+@api_router.post("/employees/{employee_id}/send-form")
+async def send_form_to_employee_email(
+    employee_id: str,
+    form_type: str = Query(..., description="Form type: staff_health_questionnaire, staff_personal_info, hmrc_starter_checklist, interview_record"),
+    message: Optional[str] = Query(None, description="Optional custom message"),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send a form request to an employee via email.
+    
+    Creates an email request with a secure token link for form completion.
+    The employee can complete the form without logging in.
+    
+    Forms are linked to requirement slots and appear in What's Needed after submission.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if not employee.get('email'):
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    # Validate form type
+    if form_type not in FORM_BASED_REQUIREMENTS:
+        raise HTTPException(status_code=400, detail=f"Invalid form type: {form_type}")
+    
+    form_template = FORM_BASED_REQUIREMENTS[form_type]
+    form_name = form_template.get('name', form_type.replace('_', ' ').title())
+    
+    # Map to requirement ID
+    requirement_id = FORM_TO_REQUIREMENT_MAPPING.get(form_type, form_type)
+    
+    # Check for existing pending request
+    existing = await db.email_requests.find_one({
+        "person_id": employee_id,
+        "requirement_id": requirement_id,
+        "request_type": RequestType.COMPLETE_FORM.value,
+        "status": {"$in": ["pending_send", "sent", "clicked", "action_started"]}
+    })
+    
+    if existing:
+        return {
+            "status": "duplicate",
+            "message": f"A form request for {form_name} is already pending",
+            "existing_request_id": existing.get("id")
+        }
+    
+    # Create email request via EmailRequestService
+    result = await EmailRequestService.create_request(
+        person_id=employee_id,
+        person_type="employee",
+        requirement_id=requirement_id,
+        request_type=RequestType.COMPLETE_FORM,
+        due_days=14,
+        context={"custom_message": message, "form_name": form_name} if message else {"form_name": form_name},
+        admin_id=user.get('user_id')
+    )
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message", "Failed to create request"))
+    
+    # Send the email with form link
+    token = result.get("token")
+    request_id = result.get("request_id")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    form_url = f"{PORTAL_URL}/forms/complete/{token}"
+    
+    email_subject = f"Please Complete: {form_name}"
+    email_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #0d6c6c;">Form Completion Required</h2>
+        <p>Dear {employee_name},</p>
+        <p>Please complete the <strong>{form_name}</strong> form at your earliest convenience.</p>
+        {f'<p style="color: #555;">{message}</p>' if message else ''}
+        <p>Click the button below to open and complete the form:</p>
+        <p style="text-align: center; margin: 30px 0;">
+            <a href="{form_url}" style="background-color: #0d6c6c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                Complete Form
+            </a>
+        </p>
+        <p style="color: #888; font-size: 12px;">This link will expire in 30 days. If you have any questions, please contact us.</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        <p style="color: #888; font-size: 12px;">Osabea Healthcare Solutions</p>
+    </div>
+    """
+    
+    # Send email
+    try:
+        if resend.api_key:
+            resend.Emails.send({
+                "from": f"Osabea Healthcare <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                "to": [employee['email']],
+                "subject": email_subject,
+                "html": email_body
+            })
+            
+            # Update request status to sent
+            await db.email_requests.update_one(
+                {"id": request_id},
+                {"$set": {"status": "sent", "sent_at": datetime.now(timezone.utc).isoformat()}}
+            )
+    except Exception as e:
+        logger.error(f"Failed to send form email: {e}")
+    
+    await log_audit_action(user['user_id'], "send_form_request", "employee", employee_id, {
+        "form_type": form_type,
+        "form_name": form_name,
+        "request_id": request_id
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Form request sent to {employee['email']}",
+        "request_id": request_id,
+        "form_type": form_type,
+        "form_name": form_name
+    }
+
+
+# ==================== PUBLIC FORM COMPLETION ====================
+
+@api_router.get("/forms/complete/{token}")
+async def get_form_for_completion(token: str):
+    """
+    Public endpoint - Get form data for completion using token.
+    No authentication required.
+    """
+    # Validate token
+    result = await EmailRequestService.validate_and_use_token(token)
+    
+    if result.get("status") not in ["valid", "valid_no_request"]:
+        raise HTTPException(status_code=400, detail=result.get("reason", "Invalid or expired token"))
+    
+    request_data = result.get("request")
+    token_data = result.get("token_data", {})
+    
+    # Handle both EmailRequest object and dict from token_data
+    if request_data:
+        # EmailRequest object - access attributes directly
+        request_type = getattr(request_data, 'request_type', None)
+        if hasattr(request_type, 'value'):
+            request_type = request_type.value
+        if request_type != RequestType.COMPLETE_FORM.value:
+            raise HTTPException(status_code=400, detail="This token is not for form completion")
+        employee_id = getattr(request_data, 'person_id', None)
+        requirement_id = getattr(request_data, 'requirement_id', None)
+        request_id_val = getattr(request_data, 'id', None)
+    elif token_data:
+        # Fallback to token_data dict
+        if token_data.get("action_type") != "complete_form":
+            raise HTTPException(status_code=400, detail="This token is not for form completion")
+        employee_id = token_data.get("person_id")
+        requirement_id = token_data.get("requirement_id")
+        request_id_val = None
+    else:
+        raise HTTPException(status_code=400, detail="Request not found")
+    
+    # Get employee data for auto-fill
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Determine form type from requirement_id
+    form_type = requirement_id
+    for ft, req_id in FORM_TO_REQUIREMENT_MAPPING.items():
+        if req_id == requirement_id:
+            form_type = ft
+            break
+    
+    if form_type not in FORM_BASED_REQUIREMENTS:
+        raise HTTPException(status_code=400, detail=f"Form type not found: {form_type}")
+    
+    form_template = FORM_BASED_REQUIREMENTS[form_type]
+    
+    # Build auto-fill data from employee
+    auto_fill_data = {}
+    for field_id in form_template.get("auto_fill_fields", []):
+        value = employee.get(field_id)
+        if field_id == "full_name":
+            value = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+        if value:
+            auto_fill_data[field_id] = value
+    
+    return {
+        "request_id": request_id_val,
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "form_type": form_type,
+        "form_template": form_template,
+        "auto_fill_data": auto_fill_data,
+        "requirement_id": requirement_id
+    }
+
+
+@api_router.post("/forms/complete/{token}")
+async def submit_form_completion(token: str, form_data: dict):
+    """
+    Public endpoint - Submit completed form.
+    No authentication required - uses token for verification.
+    
+    Creates form_submission, generates PDF, links to requirement.
+    """
+    # Validate token
+    result = await EmailRequestService.validate_and_use_token(token)
+    
+    if result.get("status") not in ["valid", "valid_no_request"]:
+        raise HTTPException(status_code=400, detail=result.get("reason", "Invalid or expired token"))
+    
+    request_data = result.get("request")
+    token_data = result.get("token_data", {})
+    
+    # Handle both EmailRequest object and dict from token_data
+    if request_data:
+        # EmailRequest object - access attributes directly
+        employee_id = getattr(request_data, 'person_id', None)
+        requirement_id = getattr(request_data, 'requirement_id', None)
+        request_id = getattr(request_data, 'id', None)
+    elif token_data:
+        # Fallback to token_data dict
+        employee_id = token_data.get("person_id")
+        requirement_id = token_data.get("requirement_id")
+        request_id = None
+    else:
+        raise HTTPException(status_code=400, detail="Request not found")
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Determine form type
+    form_type = requirement_id
+    for ft, req_id in FORM_TO_REQUIREMENT_MAPPING.items():
+        if req_id == requirement_id:
+            form_type = ft
+            break
+    
+    now = datetime.now(timezone.utc).isoformat()
+    submission_id = str(uuid.uuid4())
+    
+    # Check for existing submission
+    existing = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "status": {"$ne": "superseded"}
+    })
+    
+    if existing:
+        # Supersede old submission
+        await db.form_submissions.update_one(
+            {"id": existing["id"]},
+            {"$set": {"status": "superseded", "superseded_at": now}}
+        )
+    
+    # Create new form submission
+    submission_doc = {
+        "id": submission_id,
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "form_type": form_type,
+        "data": form_data,
+        "submitted_at": now,
+        "submitted_by": None,  # Self-submitted
+        "submitted_by_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "verified": False,
+        "verified_by": None,
+        "verified_at": None,
+        "status": "submitted",
+        "version": (existing.get("version", 0) + 1) if existing else 1,
+        "source": "email_form_request",
+        "email_request_id": request_id
+    }
+    
+    await db.form_submissions.insert_one(submission_doc)
+    
+    # Link submission to request
+    await EmailRequestService.link_submission(
+        request_id=request_id,
+        submission_id=submission_id,
+        submission_type="form_submission"
+    )
+    
+    # Mark request as submitted
+    await db.email_requests.update_one(
+        {"id": request_id},
+        {"$set": {"status": "submitted", "resolved_at": now}}
+    )
+    
+    # Try to generate PDF
+    pdf_export_id = None
+    try:
+        # Get form template for PDF mapping
+        form_template = FORM_BASED_REQUIREMENTS.get(form_type, {})
+        mapping_config = form_template.get("pdf_mapping")
+        
+        if form_type == "staff_health_questionnaire":
+            pdf_bytes = await generate_staff_health_pdf(form_data, employee, mapping_config)
+        else:
+            # Generic PDF generation
+            pdf_bytes = await generate_generic_form_pdf(form_data, employee, form_template)
+        
+        if pdf_bytes:
+            # Upload PDF to storage
+            pdf_filename = f"{form_type}_{employee_id}_{submission_id[:8]}.pdf"
+            try:
+                from emergentintegrations.file_storage import upload_file
+                pdf_url = await upload_file(pdf_bytes, pdf_filename, "application/pdf")
+            except Exception as upload_err:
+                logger.error(f"PDF upload failed: {upload_err}")
+                pdf_url = None
+            
+            if pdf_url:
+                # Create PDF export record
+                pdf_export_id = str(uuid.uuid4())
+                await db.form_pdf_exports.insert_one({
+                    "id": pdf_export_id,
+                    "submission_id": submission_id,
+                    "employee_id": employee_id,
+                    "form_type": form_type,
+                    "pdf_url": pdf_url,
+                    "generated_at": now,
+                    "generated_by": None,
+                    "status": "generated"
+                })
+    except Exception as e:
+        logger.error(f"PDF generation failed: {e}")
+    
+    return {
+        "status": "success",
+        "message": "Form submitted successfully. It will be reviewed by the team.",
+        "submission_id": submission_id,
+        "pdf_generated": pdf_export_id is not None
+    }
+
+
+async def generate_generic_form_pdf(form_data: dict, employee: dict, form_template: dict) -> bytes:
+    """Generate a simple PDF for forms without custom templates."""
+    from io import BytesIO
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm, leftMargin=20*mm, rightMargin=20*mm)
+    
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=16, spaceAfter=20, textColor=colors.HexColor('#0d6c6c'))
+    section_style = ParagraphStyle('Section', parent=styles['Heading2'], fontSize=12, spaceBefore=15, spaceAfter=10, textColor=colors.HexColor('#333'))
+    field_style = ParagraphStyle('Field', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#555'))
+    value_style = ParagraphStyle('Value', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#000'))
+    
+    elements = []
+    
+    # Title
+    form_name = form_template.get('name', 'Form Submission')
+    elements.append(Paragraph(form_name, title_style))
+    
+    # Employee info
+    emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    elements.append(Paragraph(f"<b>Employee:</b> {emp_name}", field_style))
+    elements.append(Paragraph(f"<b>Date:</b> {datetime.now().strftime('%d/%m/%Y')}", field_style))
+    elements.append(Spacer(1, 15))
+    
+    # Form sections
+    for section in form_template.get('sections', []):
+        elements.append(Paragraph(section.get('title', ''), section_style))
+        
+        for field in section.get('fields', []):
+            field_id = field.get('id')
+            field_label = field.get('label', field_id)
+            field_value = form_data.get(field_id, '')
+            
+            if field.get('type') == 'info':
+                continue
+            
+            if isinstance(field_value, bool):
+                field_value = 'Yes' if field_value else 'No'
+            elif isinstance(field_value, list):
+                field_value = ', '.join(str(v) for v in field_value)
+            
+            elements.append(Paragraph(f"<b>{field_label}:</b> {field_value or '-'}", value_style))
+        
+        elements.append(Spacer(1, 10))
+    
+    doc.build(elements)
+    return buffer.getvalue()
 
 
 # ==================== EMAIL NOTIFICATION ENGINE ====================

@@ -204,6 +204,12 @@ export default function EmployeeProfilePage() {
   const [requestDocMessage, setRequestDocMessage] = useState('');
   const [isRequestingDoc, setIsRequestingDoc] = useState(false);
   
+  // Send Form state
+  const [sendFormDialogOpen, setSendFormDialogOpen] = useState(false);
+  const [selectedFormType, setSelectedFormType] = useState('');
+  const [sendFormMessage, setSendFormMessage] = useState('');
+  const [isSendingForm, setIsSendingForm] = useState(false);
+  
   // Profile extraction from application form state
   const [extractionDialogOpen, setExtractionDialogOpen] = useState(false);
   const [extractionResult, setExtractionResult] = useState(null);
@@ -1516,6 +1522,57 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  // ========== Send Form via Email Handlers ==========
+  
+  const FORM_OPTIONS = [
+    { value: 'staff_health_questionnaire', label: 'Health Questionnaire' },
+    { value: 'staff_personal_info', label: 'Personal Details Form' },
+    { value: 'hmrc_starter_checklist', label: 'HMRC Starter Checklist' },
+    { value: 'interview_record', label: 'Interview Record' }
+  ];
+  
+  const openSendFormDialog = (formType) => {
+    setSelectedFormType(formType || '');
+    setSendFormMessage('');
+    setSendFormDialogOpen(true);
+  };
+  
+  const handleSendForm = async () => {
+    if (!selectedFormType) {
+      toast.error('Please select a form type');
+      return;
+    }
+    
+    setIsSendingForm(true);
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/send-form`,
+        null,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            form_type: selectedFormType,
+            message: sendFormMessage || undefined
+          }
+        }
+      );
+      
+      if (response.data.status === 'duplicate') {
+        toast.info(response.data.message || 'Form request already pending');
+      } else {
+        toast.success(response.data.message || 'Form request sent');
+      }
+      
+      setSendFormDialogOpen(false);
+      setSelectedFormType('');
+      setSendFormMessage('');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to send form request');
+    } finally {
+      setIsSendingForm(false);
+    }
+  };
+
   // ========== Application Form Extraction Handlers ==========
   
   // Start extraction from application form
@@ -2065,17 +2122,42 @@ export default function EmployeeProfilePage() {
                       Awaiting Approval
                     </span>
                   )}
-                  {/* File Status Badge - Uses API work_readiness status (single source of truth) */}
+                  {/* 3-Tier Work Readiness Status Badge */}
                   {employee.person_stage === 'employee' && (() => {
-                    const workReadiness = complianceRequirements?.work_readiness || {};
-                    const statusLabel = workReadiness.status_label || 'Unknown';
-                    const statusColor = workReadiness.status_color === 'success' ? 'bg-success/10 text-success' : 
-                                       workReadiness.status_color === 'warning' ? 'bg-warning/10 text-warning' : 
-                                       'bg-gray-100 text-gray-600';
+                    const workReadiness3tier = complianceRequirements?.work_readiness_3tier || {};
+                    const status = workReadiness3tier.status;
+                    const statusLabel = workReadiness3tier.label || 'Unknown';
+                    const statusColor = workReadiness3tier.color === 'success' ? 'bg-success/10 text-success' : 
+                                       workReadiness3tier.color === 'warning' ? 'bg-warning/10 text-warning' : 
+                                       'bg-error/10 text-error';
+                    const reasons = workReadiness3tier.reasons || [];
+                    
                     return (
-                      <span className={`px-2 py-1 rounded-lg text-xs font-medium ${statusColor}`}>
-                        {statusLabel}
-                      </span>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${statusColor}`} data-testid="work-readiness-badge">
+                          {status === 'READY_TO_WORK' ? (
+                            <Shield className="h-3.5 w-3.5" />
+                          ) : (
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                          )}
+                          {statusLabel}
+                        </span>
+                        {reasons.length > 0 && status !== 'READY_TO_WORK' && (
+                          <div className="flex flex-wrap gap-1 max-w-md">
+                            {reasons.slice(0, 3).map((reason, idx) => (
+                              <span 
+                                key={idx} 
+                                className={`text-[10px] px-1.5 py-0.5 rounded ${reason.type === 'hard_block' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}
+                              >
+                                {reason.message}
+                              </span>
+                            ))}
+                            {reasons.length > 3 && (
+                              <span className="text-[10px] text-gray-500">+{reasons.length - 3} more</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     );
                   })()}
                 </div>
@@ -3389,6 +3471,34 @@ export default function EmployeeProfilePage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {/* Send Form Button */}
+                {!isAuditor() && employee?.email && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/5"
+                        data-testid="send-form-dropdown"
+                      >
+                        <FileText className="h-3 w-3 mr-1.5" />
+                        Send Form
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      {FORM_OPTIONS.map((form) => (
+                        <DropdownMenuItem 
+                          key={form.value} 
+                          onClick={() => openSendFormDialog(form.value)}
+                          data-testid={`send-form-${form.value}`}
+                        >
+                          <Mail className="h-4 w-4 mr-2" />
+                          {form.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
                 {/* Request All Missing Items Button */}
                 {!isAuditor() && complianceRequirements?.summary?.missing > 0 && employee?.email && (
                   <Button 
@@ -7625,6 +7735,73 @@ export default function EmployeeProfilePage() {
                 <Send className="h-4 w-4 mr-2" />
               )}
               Send Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send Form Dialog */}
+      <Dialog open={sendFormDialogOpen} onOpenChange={setSendFormDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <FileText className="h-5 w-5 text-primary" />
+              Send Form to Employee
+            </DialogTitle>
+            <DialogDescription>
+              Send a form request to {employee?.first_name} via email. They can complete it without logging in.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <p className="text-sm text-blue-800">
+                An email will be sent to <strong>{employee?.email}</strong> with a secure link to complete the form.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-gray-700 font-medium">Form Type</Label>
+              <Select value={selectedFormType} onValueChange={setSelectedFormType}>
+                <SelectTrigger className="bg-white border-[#E4E8EB]">
+                  <SelectValue placeholder="Select form to send..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {FORM_OPTIONS.map((form) => (
+                    <SelectItem key={form.value} value={form.value}>{form.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-gray-700 font-medium">Additional Message (Optional)</Label>
+              <Textarea
+                value={sendFormMessage}
+                onChange={(e) => setSendFormMessage(e.target.value)}
+                placeholder="Add any specific instructions or context..."
+                rows={3}
+                className="bg-white border-[#E4E8EB]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setSendFormDialogOpen(false)}
+              className="border-[#E4E8EB]"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSendForm}
+              disabled={isSendingForm || !selectedFormType}
+              className="bg-primary hover:bg-primary-hover text-white"
+              data-testid="send-form-btn"
+            >
+              {isSendingForm ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              Send Form
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -516,15 +516,18 @@ export default function EmployeesPage() {
                 </thead>
                 <tbody>
                   {filteredEmployees.map((emp) => {
-                    // Use work_readiness from API (single source of truth)
-                    const workReadiness = emp.work_readiness || {};
-                    // UI INTEGRITY: Show reason when Not Ready (never hide risk)
-                    const workStatusLabel = workReadiness.reason 
-                      ? `${workReadiness.label}: ${workReadiness.reason.replace('Missing: ', '')}`
-                      : workReadiness.label || 'Unknown';
-                    const workStatusColor = workReadiness.color === 'success' ? 'bg-success/10 text-success' :
-                                           workReadiness.color === 'warning' ? 'bg-warning/10 text-warning' :
-                                           'bg-error/10 text-error';
+                    // Use 3-tier work readiness from API (new model)
+                    const workReadiness3tier = emp.work_readiness_3tier || {};
+                    const status3tier = workReadiness3tier.status;
+                    
+                    // Determine display based on 3-tier status
+                    let statusLabel = workReadiness3tier.label || 'Unknown';
+                    let statusColor = workReadiness3tier.color === 'success' ? 'bg-success/10 text-success' :
+                                      workReadiness3tier.color === 'warning' ? 'bg-warning/10 text-warning' :
+                                      'bg-error/10 text-error';
+                    
+                    // Get first reason for display
+                    const firstReason = workReadiness3tier.reasons?.[0]?.message;
                     
                     return (
                     <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
@@ -549,34 +552,35 @@ export default function EmployeesPage() {
                         <span className="text-text-primary">{emp.role}</span>
                       </td>
                       <td className="p-4">
-                        {/* Work Status Badge - Uses API work_readiness (single source of truth) */}
-                        {/* UI INTEGRITY: Shows WHY someone is Not Ready */}
+                        {/* 3-Tier Work Readiness Badge */}
                         <div 
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}
-                          title={workReadiness.reason || workReadiness.label}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusColor}`}
+                          title={firstReason || statusLabel}
+                          data-testid={`work-status-${emp.id}`}
                         >
-                          {workReadiness.status === 'work_ready' || workReadiness.status === 'fully_compliant' ? (
+                          {status3tier === 'READY_TO_WORK' ? (
                             <Shield className="h-3.5 w-3.5" />
+                          ) : status3tier === 'READY_WITH_CONDITIONS' ? (
+                            <AlertTriangle className="h-3.5 w-3.5" />
                           ) : (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           )}
-                          {/* Show condensed label in table, full reason in tooltip */}
-                          {workReadiness.label || 'Unknown'}
+                          {statusLabel}
                         </div>
-                        {/* Show reason on separate line if Not Ready */}
-                        {workReadiness.reason && workReadiness.color === 'error' && (
-                          <p className="text-[10px] text-red-600 mt-0.5 max-w-[150px] truncate" title={workReadiness.reason}>
-                            {workReadiness.reason}
+                        {/* Show first reason on separate line if NOT_READY or conditional */}
+                        {firstReason && status3tier !== 'READY_TO_WORK' && (
+                          <p className={`text-[10px] mt-0.5 max-w-[150px] truncate ${status3tier === 'NOT_READY' ? 'text-red-600' : 'text-amber-600'}`} title={firstReason}>
+                            {firstReason}
                           </p>
                         )}
                       </td>
                       <td className="p-4 hidden lg:table-cell">
                         {/* Recruitment File Status - Same info in condensed form */}
                         <span 
-                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}
-                          title={workReadiness.reason || workReadiness.label}
+                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusColor}`}
+                          title={firstReason || statusLabel}
                         >
-                          {workReadiness.label || 'Unknown'}
+                          {statusLabel}
                         </span>
                       </td>
                       <td className="p-4">

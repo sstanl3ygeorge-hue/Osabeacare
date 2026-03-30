@@ -3227,3 +3227,177 @@ Implement 3 real-agency compliance rules that ensure employees are "safe, tracea
 
 ---
 
+
+
+## Email Service Architecture (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Build a scalable, reuse-first email foundation supporting:
+- Purpose-based senders
+- Reusable templates with metadata
+- Comprehensive audit logging
+- Secure action links with JWT tokens
+- Provider abstraction (Resend underneath)
+
+---
+
+### Architecture Overview
+
+#### 1. Sender Configuration Layer
+```python
+# Config structure in email_service.py
+@dataclass
+class SenderConfig:
+    sender_key: str      # e.g., "recruitment"
+    from_address: str    # e.g., "recruitment@osabeacares.co.uk"
+    from_name: str       # e.g., "Osabea Recruitment Team"
+    reply_to: str        # e.g., "info@osabeacaresolutions.co.uk"
+
+# Active Sender:
+SENDER_REGISTRY = {
+    "recruitment": SenderConfig(
+        sender_key="recruitment",
+        from_address="recruitment@osabeacares.co.uk",
+        from_name="Osabea Recruitment Team",
+        reply_to="info@osabeacaresolutions.co.uk"
+    )
+}
+```
+
+#### 2. Template Registry
+```python
+# Template structure
+@dataclass
+class EmailTemplate:
+    template_key: str                    # e.g., "recruitment.missing_proof_of_address"
+    category: EmailCategory              # recruitment, documents, training, compliance, shifts, system
+    sender_key: str                      # References SENDER_REGISTRY
+    subject_template: str                # "{employee_name} - Action Required"
+    employee_body_template: str          # HTML template for employee
+    admin_body_template: str             # HTML template for admin
+    requires_secure_link: bool           # True if CTA needs JWT token
+    secure_link_action: str              # e.g., "upload_proof_of_address"
+    description: str                     # Human-readable description
+
+# Seeded Templates:
+- recruitment.missing_proof_of_address
+- recruitment.reference_verification_required
+- recruitment.cv_gap_explanation_required
+- documents.expiring_60_days
+- documents.expiring_30_days
+- documents.missing_mandatory
+- training.expired
+- compliance.unverified_submission
+```
+
+#### 3. Email Log Model (Collection: `email_logs`)
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Unique log ID |
+| template_key | string | Template used |
+| email_type | string | Alias for template_key |
+| category | string | recruitment/documents/training/compliance |
+| from_address | string | Sender email |
+| from_name | string | Sender display name |
+| reply_to | string | Reply-to address |
+| to_address | string | Recipient email |
+| subject | string | Email subject |
+| employee_id | string | Linked employee |
+| applicant_id | string | Linked applicant (future) |
+| related_entity_type | string | e.g., "reference", "cv_gap" |
+| related_entity_id | string | e.g., "reference_2" |
+| requirement_id | string | Compliance requirement ID |
+| provider | string | "resend" |
+| provider_message_id | string | Resend message ID |
+| status | string | pending/sent/failed/bounced |
+| error_message | string | Error details if failed |
+| created_at | datetime | Log creation time |
+| sent_at | datetime | Email sent time |
+| context_summary | object | Non-sensitive template data |
+
+#### 4. Secure Action Links
+```python
+# JWT-based secure links for email CTAs
+def generate_secure_action_token(
+    person_id: str,              # employee_id or applicant_id
+    person_type: str,            # "employee" or "applicant"
+    action_type: str,            # "upload_proof_of_address", "explain_cv_gap", etc.
+    requirement_id: str = None,  # Optional requirement link
+    related_entity_type: str = None,
+    related_entity_id: str = None,
+    expiry_hours: int = 72       # Default 72-hour expiry
+) -> str
+
+# Token payload includes:
+- person_id, person_type
+- action_type
+- requirement_id
+- related_entity_type, related_entity_id
+- exp (expiry timestamp)
+- jti (unique token ID)
+```
+
+#### 5. Provider Abstraction (EmailService class)
+```python
+class EmailService:
+    @classmethod
+    async def send_template(
+        template_key: str,
+        recipient_email: str,
+        recipient_type: str,      # "employee" or "admin"
+        context: dict,            # Template variables
+        employee_id: str = None,
+        requirement_id: str = None,
+        related_entity_type: str = None,
+        related_entity_id: str = None
+    ) -> dict
+
+    @classmethod
+    async def send_raw(...) -> dict  # For custom emails
+
+    @classmethod
+    async def get_logs(...) -> List[dict]  # Query logs
+```
+
+---
+
+### Files Changed/Created
+| File | Change |
+|------|--------|
+| `/app/backend/email_service.py` | **NEW** - Complete email architecture module |
+| `/app/backend/server.py` | Updated - Import EmailService, migrate notification triggers |
+| `/app/backend/.env` | Updated - SENDER_EMAIL, REPLY_TO_EMAIL |
+
+### New API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/email/senders` | GET | List configured senders |
+| `/api/email/templates` | GET | List template registry |
+| `/api/email/logs` | GET | Query email logs |
+| `/api/email/categories` | GET | List email categories |
+| `/api/email/send` | POST | Send via template (admin) |
+| `/api/email/verify-action-token` | POST | Verify JWT action token |
+
+### Migration: Old Triggers → New Architecture
+| Old NotificationType | New template_key |
+|---------------------|------------------|
+| cv_gap_detected | recruitment.cv_gap_explanation_required |
+| reference_not_verified | recruitment.reference_verification_required |
+| missing_proof_of_address | recruitment.missing_proof_of_address |
+| document_expiring_60_days | documents.expiring_60_days |
+| document_expiring_30_days | documents.expiring_30_days |
+| training_expired | training.expired |
+| missing_mandatory_item | documents.missing_mandatory |
+| unverified_submission | compliance.unverified_submission |
+
+### Verification
+- ✅ Sender registry returns recruitment sender
+- ✅ Template registry returns 3 recruitment templates
+- ✅ Emails sent via new architecture
+- ✅ Logs stored in `email_logs` collection with full audit trail
+- ✅ Secure action links generated with JWT tokens
+- ✅ Old notification triggers migrated to EmailService
+
+---
+

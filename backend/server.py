@@ -26,6 +26,18 @@ from reportlab.lib.units import mm, inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
+from email_service import (
+    EmailService, 
+    get_template, 
+    get_sender, 
+    list_templates,
+    verify_secure_action_token,
+    build_secure_action_link,
+    EmailCategory,
+    LEGACY_TYPE_TO_TEMPLATE,
+    SENDER_REGISTRY,
+    TEMPLATE_REGISTRY
+)
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 import pytesseract
 from PIL import Image as PILImage
@@ -43,6 +55,9 @@ logger = logging.getLogger(__name__)
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Initialize EmailService with database reference
+EmailService.set_db(db)
 
 # JWT Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'care-recruitment-jwt-secret-key-2024')
@@ -17956,9 +17971,9 @@ async def send_notification_email(
         
         return {"status": "failed", "error": str(e)}
 
-# Trigger notification for recruitment issues
+# Trigger notification for recruitment issues - MIGRATED TO EmailService
 async def trigger_recruitment_notifications(employee_id: str, issues: dict):
-    """Trigger notifications for recruitment compliance issues"""
+    """Trigger notifications for recruitment compliance issues using EmailService"""
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         return
@@ -17966,16 +17981,10 @@ async def trigger_recruitment_notifications(employee_id: str, issues: dict):
     employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
     employee_email = employee.get('email')
     
-    base_data = {
-        "employee_name": employee_name,
-        "portal_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=recruitment",
-        "admin_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=recruitment"
-    }
-    
     # CV Gap notifications
     for gap in issues.get('cv_gaps', []):
-        template_data = {
-            **base_data,
+        context = {
+            "employee_name": employee_name,
             "gap_start": gap.get('gap_start', 'Unknown'),
             "gap_end": gap.get('gap_end', 'Unknown'),
             "gap_days": gap.get('gap_duration_days', 0),
@@ -17985,73 +17994,83 @@ async def trigger_recruitment_notifications(employee_id: str, issues: dict):
         
         # Send to employee
         if employee_email:
-            await send_notification_email(
-                NotificationType.CV_GAP_DETECTED,
-                employee_email,
-                "employee",
-                template_data,
-                employee_id
+            await EmailService.send_template(
+                template_key="recruitment.cv_gap_explanation_required",
+                recipient_email=employee_email,
+                recipient_type="employee",
+                context=context,
+                employee_id=employee_id,
+                related_entity_type="cv_gap",
+                related_entity_id=gap.get('gap_id')
             )
         
         # Send to admin
-        await send_notification_email(
-            NotificationType.CV_GAP_DETECTED,
-            ADMIN_EMAIL,
-            "admin",
-            template_data,
-            employee_id
+        await EmailService.send_template(
+            template_key="recruitment.cv_gap_explanation_required",
+            recipient_email=ADMIN_EMAIL,
+            recipient_type="admin",
+            context=context,
+            employee_id=employee_id,
+            related_entity_type="cv_gap",
+            related_entity_id=gap.get('gap_id')
         )
     
     # Reference notifications
     for ref in issues.get('unverified_references', []):
-        template_data = {
-            **base_data,
+        context = {
+            "employee_name": employee_name,
             "reference_num": ref.get('reference_num', 1),
             "reference_name": ref.get('name', 'Unknown'),
             "reference_company": ref.get('company', 'Unknown')
         }
         
         if employee_email:
-            await send_notification_email(
-                NotificationType.REFERENCE_NOT_VERIFIED,
-                employee_email,
-                "employee",
-                template_data,
-                employee_id
+            await EmailService.send_template(
+                template_key="recruitment.reference_verification_required",
+                recipient_email=employee_email,
+                recipient_type="employee",
+                context=context,
+                employee_id=employee_id,
+                related_entity_type="reference",
+                related_entity_id=f"reference_{ref.get('reference_num', 1)}"
             )
         
-        await send_notification_email(
-            NotificationType.REFERENCE_NOT_VERIFIED,
-            ADMIN_EMAIL,
-            "admin",
-            template_data,
-            employee_id
+        await EmailService.send_template(
+            template_key="recruitment.reference_verification_required",
+            recipient_email=ADMIN_EMAIL,
+            recipient_type="admin",
+            context=context,
+            employee_id=employee_id,
+            related_entity_type="reference",
+            related_entity_id=f"reference_{ref.get('reference_num', 1)}"
         )
     
     # Proof of Address notifications
     poa = issues.get('proof_of_address', {})
     if poa.get('missing', False):
-        template_data = {
-            **base_data,
+        context = {
+            "employee_name": employee_name,
             "current_count": poa.get('current_count', 0),
             "verified_count": poa.get('verified_count', 0)
         }
         
         if employee_email:
-            await send_notification_email(
-                NotificationType.MISSING_PROOF_OF_ADDRESS,
-                employee_email,
-                "employee",
-                template_data,
-                employee_id
+            await EmailService.send_template(
+                template_key="recruitment.missing_proof_of_address",
+                recipient_email=employee_email,
+                recipient_type="employee",
+                context=context,
+                employee_id=employee_id,
+                requirement_id="proof_of_address"
             )
         
-        await send_notification_email(
-            NotificationType.MISSING_PROOF_OF_ADDRESS,
-            ADMIN_EMAIL,
-            "admin",
-            template_data,
-            employee_id
+        await EmailService.send_template(
+            template_key="recruitment.missing_proof_of_address",
+            recipient_email=ADMIN_EMAIL,
+            recipient_type="admin",
+            context=context,
+            employee_id=employee_id,
+            requirement_id="proof_of_address"
         )
 
 # API endpoint to manually trigger recruitment notifications
@@ -18363,6 +18382,130 @@ async def notify_unverified_submissions(user: dict = Depends(require_admin)):
         notifications_sent += 1
     
     return {"message": "Unverified submission check complete", "notifications_sent": notifications_sent}
+
+# ==================== EMAIL SERVICE ARCHITECTURE API ====================
+# Endpoints for the scalable email foundation
+
+@api_router.get("/email/senders")
+async def get_email_senders(user: dict = Depends(require_admin)):
+    """Get all configured email senders"""
+    senders = []
+    for key, config in SENDER_REGISTRY.items():
+        senders.append({
+            "sender_key": config.sender_key,
+            "from_address": config.from_address,
+            "from_name": config.from_name,
+            "reply_to": config.reply_to,
+            "from_header": config.from_header
+        })
+    return {"senders": senders}
+
+@api_router.get("/email/templates")
+async def get_email_templates(
+    category: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """Get all registered email templates, optionally filtered by category"""
+    templates = []
+    for key, template in TEMPLATE_REGISTRY.items():
+        if category and template.category.value != category:
+            continue
+        templates.append({
+            "template_key": template.template_key,
+            "category": template.category.value,
+            "sender_key": template.sender_key,
+            "subject_template": template.subject_template,
+            "requires_secure_link": template.requires_secure_link,
+            "secure_link_action": template.secure_link_action,
+            "description": template.description,
+            "has_employee_template": template.employee_body_template is not None,
+            "has_admin_template": template.admin_body_template is not None
+        })
+    return {"templates": templates, "count": len(templates)}
+
+@api_router.get("/email/logs")
+async def get_email_logs(
+    employee_id: Optional[str] = None,
+    template_key: Optional[str] = None,
+    category: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    user: dict = Depends(require_admin)
+):
+    """Get email logs from the new email_logs collection"""
+    logs = await EmailService.get_logs(
+        employee_id=employee_id,
+        template_key=template_key,
+        category=category,
+        status=status,
+        limit=limit
+    )
+    return {"logs": logs, "count": len(logs)}
+
+@api_router.post("/email/verify-action-token")
+async def verify_action_token(token: str):
+    """Verify a secure action token from an email link"""
+    result = verify_secure_action_token(token)
+    if not result:
+        raise HTTPException(status_code=400, detail="Invalid or expired action token")
+    
+    return {
+        "valid": True,
+        "person_id": result.person_id,
+        "person_type": result.person_type,
+        "action_type": result.action_type,
+        "requirement_id": result.requirement_id,
+        "related_entity_type": result.related_entity_type,
+        "related_entity_id": result.related_entity_id,
+        "expires_at": result.expires_at.isoformat() if result.expires_at else None
+    }
+
+@api_router.post("/email/send")
+async def send_email_via_service(
+    template_key: str,
+    recipient_email: EmailStr,
+    recipient_type: str,
+    employee_id: Optional[str] = None,
+    requirement_id: Optional[str] = None,
+    context: Dict[str, Any] = {},
+    user: dict = Depends(require_admin)
+):
+    """Send an email using the EmailService (admin only)"""
+    # Validate template exists
+    template = get_template(template_key)
+    if not template:
+        raise HTTPException(status_code=400, detail=f"Unknown template: {template_key}")
+    
+    # If employee_id provided, get employee name automatically
+    if employee_id and "employee_name" not in context:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if employee:
+            context["employee_name"] = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    result = await EmailService.send_template(
+        template_key=template_key,
+        recipient_email=recipient_email,
+        recipient_type=recipient_type,
+        context=context,
+        employee_id=employee_id,
+        requirement_id=requirement_id
+    )
+    
+    return result
+
+@api_router.get("/email/categories")
+async def get_email_categories(user: dict = Depends(require_admin)):
+    """Get all email categories"""
+    return {
+        "categories": [
+            {"key": "recruitment", "name": "Recruitment", "description": "Recruitment-related notifications"},
+            {"key": "documents", "name": "Documents", "description": "Document expiry and upload requests"},
+            {"key": "training", "name": "Training", "description": "Training certification notifications"},
+            {"key": "compliance", "name": "Compliance", "description": "Compliance/audit notifications (admin)"},
+            {"key": "shifts", "name": "Shifts", "description": "Shift-related notifications (future)"},
+            {"key": "system", "name": "System", "description": "System notifications"}
+        ]
+    }
 
 # ==================== SERVICE USERS (CQC Care Records) ====================
 # Service User File structure aligned with CQC expectations

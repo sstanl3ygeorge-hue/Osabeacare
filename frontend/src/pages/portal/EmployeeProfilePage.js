@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { Progress } from '../../components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '../../components/ui/dialog';
@@ -2094,14 +2095,14 @@ export default function EmployeeProfilePage() {
                   {employee.employee_code || employee.applicant_reference || 'No ID assigned'} · {employee.role}
                 </p>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  {/* Person Stage Badge - CRITICAL FOR APPLICANT VS EMPLOYEE CLARITY */}
+                  {/* Person Stage Badge - CLEAR APPLICANT VS STAFF DISTINCTION */}
                   {employee.person_stage === 'applicant' ? (
-                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-purple-100 text-purple-800">
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
                       Applicant
                     </span>
                   ) : (
-                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-800">
-                      Employee
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                      Staff
                     </span>
                   )}
                   <span className={`status-chip ${
@@ -2110,7 +2111,7 @@ export default function EmployeeProfilePage() {
                     employee.status === 'screening' || employee.status === 'interview' || employee.status === 'compliance_review' ? 'status-warning' :
                     'status-neutral'
                   }`}>
-                    {employee.status?.replace('_', ' ')}
+                    {employee.status === 'compliance_review' ? 'Awaiting Approval' : employee.status?.replace('_', ' ')}
                   </span>
                   {/* Recruitment Approval Status */}
                   {employee.recruitment_approved ? (
@@ -3065,11 +3066,11 @@ export default function EmployeeProfilePage() {
           {/* Forms tab hidden for Audit Mode - forms system hidden from UI */}
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
-            What's Needed
+            Compliance File
           </TabsTrigger>
           <TabsTrigger value="documents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileText className="h-4 w-4 mr-2" />
-            Documents
+            All Files
           </TabsTrigger>
           <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileCheck className="h-4 w-4 mr-2" />
@@ -3455,18 +3456,18 @@ export default function EmployeeProfilePage() {
           />
         </TabsContent>
 
-        {/* What's Needed Tab - Mandatory Items */}
+        {/* Compliance File Tab - Primary Requirements & Evidence Management */}
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
               <div>
-                <CardTitle className="font-heading text-lg">What's Needed</CardTitle>
+                <CardTitle className="font-heading text-lg">Compliance File</CardTitle>
                 <p className="text-xs text-text-muted mt-1">
-                  Upload each required document, then verify it. Only verified documents count towards compliance.
+                  Upload evidence, send forms, request documents. Verify each item for audit readiness.
                 </p>
                 {complianceRequirements && (
                   <p className="text-sm text-text-muted mt-1">
-                    {complianceRequirements.summary.verified} approved · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} ready for review · {complianceRequirements.summary.missing} still needed
+                    {complianceRequirements.summary.verified} verified · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} awaiting review · {complianceRequirements.summary.missing} required
                   </p>
                 )}
               </div>
@@ -3837,8 +3838,7 @@ export default function EmployeeProfilePage() {
                               return 'bg-error/5 border-error/20';
                             };
                             
-                            // Determine status badge - CARE-FOCUSED: Still Needed, Ready for Review, Checked & Approved
-                            // UI INTEGRITY: Include expiry context when showing green status
+                            // Determine status badge - Clear language: Required, Awaiting Review, Verified
                             const getStatusBadge = () => {
                               if (isVerified) {
                                 // If there's an expiry date that's soon or expired, show amber/red
@@ -3846,12 +3846,12 @@ export default function EmployeeProfilePage() {
                                   return { text: 'Verified (Expired)', style: 'bg-red-100 text-red-700' };
                                 }
                                 if (req.expiry_status?.status === 'expiring_soon') {
-                                  return { text: 'Verified (Expiring Soon)', style: 'bg-amber-100 text-amber-700' };
+                                  return { text: 'Verified (Expiring)', style: 'bg-amber-100 text-amber-700' };
                                 }
-                                return { text: 'Checked & Approved', style: 'bg-success/10 text-success' };
+                                return { text: 'Verified', style: 'bg-success/10 text-success' };
                               }
-                              if (hasEvidence) return { text: 'Ready for Review', style: 'bg-info/10 text-info' };
-                              return { text: 'Still Needed', style: 'bg-error/10 text-error' };
+                              if (hasEvidence) return { text: 'Awaiting Review', style: 'bg-info/10 text-info' };
+                              return { text: 'Required', style: 'bg-error/10 text-error' };
                             };
                             
                             const statusBadge = getStatusBadge();
@@ -4357,15 +4357,15 @@ export default function EmployeeProfilePage() {
                                           await fetchCompliance();
                                         }
                                       } catch (e) {
-                                        toast.error(e.response?.data?.detail || 'Could not approve - please try again');
+                                        toast.error(e.response?.data?.detail || 'Verification failed');
                                       }
                                     }}
                                     className="text-xs h-7 text-success border-success hover:bg-success/10 rounded-lg"
                                     data-testid={`verify-${req.id}`}
-                                    title="Mark as Checked & Approved"
+                                    title="Verify this evidence"
                                   >
                                     <Shield className="h-3 w-3 mr-1" />
-                                    Mark as Approved
+                                    Verify
                                   </Button>
                                 )}
                                 
@@ -4639,14 +4639,19 @@ export default function EmployeeProfilePage() {
           </Card>
         </TabsContent>
 
-        {/* Documents Tab - Requirement-based view (supports multi-file requirements) */}
+        {/* All Files Tab - Read-only file library view */}
         <TabsContent value="documents">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="flex flex-row items-center justify-between border-b border-[#E4E8EB]">
               <div>
-                <CardTitle className="font-heading text-lg">Documents</CardTitle>
+                <CardTitle className="font-heading text-lg flex items-center gap-2">
+                  All Files
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-gray-50 text-gray-500 border-gray-200 font-normal">
+                    Library View
+                  </Badge>
+                </CardTitle>
                 <p className="text-xs text-text-muted mt-1">
-                  Upload and verify documents. Only verified documents count towards compliance.
+                  View all uploaded files. Use the Compliance File tab to upload, verify and manage evidence.
                 </p>
               </div>
               {complianceRequirements && (

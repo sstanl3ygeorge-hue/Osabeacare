@@ -215,10 +215,16 @@ export default function EmployeesPage() {
     <div className="space-y-6" data-testid="employees-page">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">
+          <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary flex items-center gap-3">
             Staff
+            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs font-normal">
+              Recruited
+            </Badge>
           </h1>
-          <p className="text-text-muted mt-1">{employees.length} employees (recruited staff only)</p>
+          <p className="text-text-muted mt-1">{employees.length} staff members with approved recruitment</p>
+          <p className="text-xs text-text-muted/70 mt-0.5">
+            Staff appear here after recruitment approval. Applicants are in the Recruitment Pipeline.
+          </p>
         </div>
         
         <div className="flex items-center gap-2">
@@ -360,7 +366,7 @@ export default function EmployeesPage() {
                 data-testid="employees-search"
               />
             </div>
-            {/* Work Status Filter */}
+            {/* Work Status Filter - 3-tier model */}
             <Select value={workReadinessFilter || "all"} onValueChange={(v) => setWorkReadinessFilter(v === "all" ? "" : v)}>
               <SelectTrigger className="w-full sm:w-48 rounded-xl" data-testid="work-readiness-filter">
                 <Shield className="h-4 w-4 mr-2" />
@@ -368,19 +374,19 @@ export default function EmployeesPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Work Status</SelectItem>
-                <SelectItem value="ready_to_work">
+                <SelectItem value="READY_TO_WORK">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-success"></span>
                     Ready to Work
                   </span>
                 </SelectItem>
-                <SelectItem value="supervised_start">
+                <SelectItem value="READY_WITH_CONDITIONS">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning"></span>
-                    Supervised Start
+                    Ready with Conditions
                   </span>
                 </SelectItem>
-                <SelectItem value="not_ready">
+                <SelectItem value="NOT_READY">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-error"></span>
                     Not Ready
@@ -436,19 +442,13 @@ export default function EmployeesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              {/* Filter employees by work readiness and requirement */}
+              {/* Filter employees by work readiness (3-tier) and requirement */}
               {(() => {
                 let filteredEmployees = workReadinessFilter 
                   ? employees.filter(emp => {
-                      const status = emp.work_readiness?.status;
-                      if (workReadinessFilter === 'ready_to_work') {
-                        return status === 'work_ready' || status === 'fully_compliant';
-                      } else if (workReadinessFilter === 'supervised_start') {
-                        return status === 'supervised_start' || status === 'almost_ready';
-                      } else if (workReadinessFilter === 'not_ready') {
-                        return status === 'not_started' || status === 'in_progress' || !status;
-                      }
-                      return true;
+                      // Use 3-tier status from API
+                      const status3tier = emp.work_readiness_3tier?.status;
+                      return status3tier === workReadinessFilter;
                     })
                   : employees;
                 
@@ -543,7 +543,12 @@ export default function EmployeesPage() {
                             className={emp.status === 'archived' ? 'grayscale opacity-60' : ''}
                           />
                           <div>
-                            <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
+                              <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200 text-[9px] px-1.5 py-0">
+                                Staff
+                              </Badge>
+                            </div>
                             <p className="text-sm text-text-muted">{emp.employee_code}</p>
                           </div>
                         </Link>

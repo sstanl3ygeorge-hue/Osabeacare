@@ -17,9 +17,9 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const statusLabels = {
   new: 'New Application',
-  screening: 'Screening',
-  interview: 'Interview',
-  compliance_review: 'Compliance Review'
+  screening: 'Under Review',
+  interview: 'Interview Stage',
+  compliance_review: 'Awaiting Approval'
 };
 
 const statusColors = {
@@ -112,7 +112,10 @@ export default function RecruitmentPage() {
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Recruitment Pipeline</h1>
           <p className="text-text-muted mt-1">
-            {pipeline?.summary?.total_applicants || 0} applicants in pipeline
+            {pipeline?.summary?.total_applicants || 0} applicants awaiting recruitment approval
+          </p>
+          <p className="text-xs text-text-muted/70 mt-0.5">
+            Applicants appear here until recruitment is approved. After approval, they move to Staff.
           </p>
         </div>
         <Button onClick={() => navigate('/portal/employees')} variant="outline">
@@ -184,9 +187,12 @@ export default function RecruitmentPage() {
       {/* Applicants List */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Applicants</CardTitle>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">Applicants</Badge>
+            Recruitment Pipeline
+          </CardTitle>
           <CardDescription>
-            People in the recruitment process. Approve to convert to employee status.
+            People awaiting recruitment approval. Once approved, they move to Staff with an employee code assigned.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -235,10 +241,15 @@ export default function RecruitmentPage() {
                   </div>
                   
                   <div className="flex items-center gap-2">
+                    {/* Stage Badge */}
+                    <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 text-[10px]">
+                      Applicant
+                    </Badge>
+                    
                     {applicant.recruitment_approved ? (
                       <Badge className="bg-green-100 text-green-800">
                         <CheckCircle className="w-3 h-3 mr-1" />
-                        Approved
+                        Recruitment Approved
                       </Badge>
                     ) : canApprove ? (
                       <Button
@@ -248,14 +259,15 @@ export default function RecruitmentPage() {
                           setApprovalDialogOpen(true);
                         }}
                         data-testid={`approve-btn-${applicant.id}`}
+                        className="bg-primary hover:bg-primary-hover"
                       >
                         <CheckCircle className="w-4 h-4 mr-1" />
-                        Approve
+                        Approve Recruitment
                       </Button>
                     ) : (
                       <Badge variant="outline" className="text-amber-600 border-amber-300">
                         <Clock className="w-3 h-3 mr-1" />
-                        Pending Approval
+                        Awaiting Approval
                       </Badge>
                     )}
                     <Button
@@ -275,16 +287,22 @@ export default function RecruitmentPage() {
 
       {/* Approval Dialog */}
       <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Approve Recruitment</DialogTitle>
-            <DialogDescription>
-              Approving will:
-              <ul className="list-disc ml-4 mt-2 space-y-1">
-                <li>Assign an employee code</li>
-                <li>Move person from applicant to employee stage</li>
-                <li>Enable them for work activation</li>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-primary" />
+              Approve Recruitment
+            </DialogTitle>
+            <DialogDescription className="text-left">
+              <p className="mb-3">This action will:</p>
+              <ul className="list-disc ml-4 space-y-1 text-sm">
+                <li>Assign an official employee code</li>
+                <li>Move this person from <strong>Applicant</strong> to <strong>Staff</strong> stage</li>
+                <li>Enable them for work assignment once checks are verified</li>
               </ul>
+              <p className="mt-3 text-amber-700 bg-amber-50 p-2 rounded text-sm">
+                Ensure all recruitment checks (references, DBS, right to work, interview) are complete before approving.
+              </p>
             </DialogDescription>
           </DialogHeader>
           
@@ -301,6 +319,9 @@ export default function RecruitmentPage() {
                     {selectedApplicant.first_name} {selectedApplicant.last_name}
                   </p>
                   <p className="text-sm text-text-muted">{selectedApplicant.role}</p>
+                  <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 text-[10px] mt-1">
+                    Applicant → Staff
+                  </Badge>
                 </div>
               </div>
               
@@ -324,6 +345,7 @@ export default function RecruitmentPage() {
               onClick={handleApproveRecruitment} 
               disabled={isApproving}
               data-testid="confirm-approve-btn"
+              className="bg-primary hover:bg-primary-hover"
             >
               {isApproving ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

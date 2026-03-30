@@ -4,6 +4,88 @@
 **Osabea Healthcare Solutions**
 
 
+## 3-Tier Work Readiness Enforcement & Send Forms via Email (2026-03-30)
+**Status**: COMPLETE ✅
+
+### 1. 3-Tier Work Readiness Enforcement
+
+#### Statuses
+- **NOT_READY** (Hard Block): Cannot work until resolved
+- **READY_WITH_CONDITIONS** (Warning): Can work but has attention items
+- **READY_TO_WORK** (Fully Compliant): All requirements met
+
+#### Hard Blocks (NOT_READY)
+- `recruitment_approved = false`
+- Missing/expired `right_to_work_documents` or `right_to_work_check`
+- Missing/expired `dbs_certificate` or `dbs_check`
+- Missing `identity_documents`
+- Missing OR unverified `reference_1` and `reference_2`
+
+#### Conditional (READY_WITH_CONDITIONS)
+- Overdue recurring compliance: supervision, competency_assessment, spot_check, training_refresh
+- Competency outcome = needs_improvement or action_required
+- Open/overdue report_followup
+
+#### API Response
+```json
+{
+  "status": "NOT_READY",
+  "label": "Not Ready",
+  "color": "error",
+  "reasons": [
+    {"type": "hard_block", "code": "recruitment_not_approved", "message": "Recruitment not approved"},
+    {"type": "hard_block", "code": "right_to_work_documents_missing", "message": "Right to Work documents missing"}
+  ]
+}
+```
+
+#### UI Display
+- Employee list: Status badge with first reason shown below
+- Employee profile: Badge with up to 3 reason tags displayed
+- Dashboard: Status summary via existing compliance cards
+
+### 2. Send Forms via Email
+
+#### Supported Form Types
+- `staff_health_questionnaire` → Health Questionnaire
+- `staff_personal_info` → Personal Details Form
+- `hmrc_starter_checklist` → HMRC Starter Checklist
+- `interview_record` → Interview Record
+
+#### Flow
+1. Admin clicks "Send Form" in What's Needed tab
+2. Email sent with secure token link (no login required)
+3. Employee completes form at `/forms/complete/:token`
+4. Form submission saved to `form_submissions`
+5. PDF auto-generated
+6. Appears in What's Needed as "Awaiting Verification"
+
+#### Endpoints
+- `POST /api/employees/{id}/send-form?form_type=...`
+- `GET /api/forms/complete/{token}` (public)
+- `POST /api/forms/complete/{token}` (public)
+
+### 3. Homepage Repositioning
+
+Repositioned from generic recruitment to care-sector safer recruitment partner:
+
+**Hero Changes:**
+- Badge: "Safer Recruitment & Care Staffing Partner"
+- Headline: "Safeguarded staffing for quality care delivery"
+- Trust badges: DBS Verified, Right to Work Checked, References Confirmed, Training Tracked
+
+**New Sections:**
+- "Why care providers trust Osabea" (Safer Recruitment, Accountable Onboarding, Audit-Ready Records, Quality-Focused Care)
+- "Safer Recruitment" section with 6 pillars
+- "Compliance & Governance" section
+
+### Test Results
+- Backend: 100% (19/19 tests passed)
+- Frontend: 100% (all UI flows verified)
+- Test report: `/app/test_reports/iteration_67.json`
+
+---
+
 ## Recurring Compliance Engine - Frontend UI (2026-03-30)
 **Status**: COMPLETE ✅
 

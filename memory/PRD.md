@@ -4,6 +4,55 @@
 **Osabea Healthcare Solutions**
 
 
+## Integrity Hardening Pass (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Work Status Engine Contradiction - FIXED
+
+**Problem**: Applicants could show "Ready to Work" despite missing recruitment approval and being at applicant stage.
+
+**Solution**: Enhanced 3-tier work readiness logic with strict blocking rules.
+
+### Final Readiness Logic
+
+#### NOT_READY (Hard Blocks) - Cannot work until resolved:
+| Category | Blocking Conditions |
+|----------|---------------------|
+| **Recruitment Stage** | `person_stage = applicant`, `recruitment_approved = false` |
+| **Legal/Safety** | RTW docs missing/expired, DBS missing/expired, Identity docs missing |
+| **References** | Reference 1 not verified, Reference 2 not verified (separate checks) |
+| **Recruitment File** | Proof of address < 2 verified, Health questionnaire missing (employees), Interview record missing (employees) |
+
+#### READY_WITH_CONDITIONS (Warnings) - Can work with attention:
+| Condition | Trigger |
+|-----------|---------|
+| Overdue recurring | supervision, competency_assessment, spot_check, training_refresh |
+| Poor competency | `outcome = needs_improvement` or `action_required` |
+| Report followup | Open and overdue |
+
+#### READY_TO_WORK - Fully compliant:
+All hard blocks cleared and no critical conditional issues.
+
+### Send Form Placement - MOVED TO ROW LEVEL
+
+**Before**: Send Form dropdown at top of Compliance File tab (detached from requirements).
+
+**After**: Send button appears at row level for form-based requirements:
+- `staff_health_questionnaire` - "Fill Form" + "Send" buttons
+- `staff_personal_information` - "Fill Form" + "Send" buttons
+- `hmrc_starter_checklist` - "Fill Form" + "Send" buttons
+- `interview_record` - "Fill Form" + "Send" buttons
+
+### Bug Fixed
+**ComplianceOverview.js**: Was using `statuses.start_status` (old logic). Fixed to use `work_readiness_3tier` (new 3-tier logic with applicant/recruitment checks).
+
+### Test Results
+- Backend: 100% (10/10 tests passed)
+- Frontend: 100% (9/9 features verified)
+- Test report: `/app/test_reports/iteration_69.json`
+
+---
+
 ## UI + Logic Alignment Pass (2026-03-30)
 **Status**: COMPLETE ✅
 

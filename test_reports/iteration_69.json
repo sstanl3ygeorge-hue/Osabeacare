@@ -1,0 +1,77 @@
+{
+  "summary": "Integrity hardening pass testing completed. Fixed critical bug where Overview tab showed incorrect 'Ready to Work' status for applicants. All 9 features verified: (1) Applicant profile shows 'Not Ready to Work', (2) 'Applicant - not yet recruited' blocking reason present, (3) Unapproved staff shows 'Recruitment not approved', (4) Proof of address (2 required) in blocking reasons, (5) Reference 1 and Reference 2 as separate blocking reasons, (6) 3-tier model working (NOT_READY/READY_WITH_CONDITIONS/READY_TO_WORK), (7) Compliance File summary shows blocking reasons with tags, (8) Send Form button at row level for form-based requirements, (9) Row-level Send button opens dialog with correct form type pre-selected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_3tier_integrity_hardening.py",
+    "/app/test_reports/pytest/3tier_integrity_hardening_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fixed: ComplianceOverview component was using statuses.start_status (old logic) instead of work_readiness_3tier (new 3-tier logic with applicant/recruitment checks)"
+  ],
+  "updated_files": [
+    "/app/frontend/src/components/portal/ComplianceOverview.js"
+  ],
+  "success_rate": {
+    "backend": "100% (10/10 tests passed)",
+    "frontend": "100% (9/9 features verified)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "No new seed data created. Used existing: Applicant ID: 8f351317-8623-4df5-8788-c6a3ce5364cf (Olumide), Employee ID: d88335f6-1b18-435a-8086-28af4a583f77 (Olakunle)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Integrity hardening pass completed. Key fix: ComplianceOverview.js now uses work_readiness_3tier instead of statuses.start_status for Work Status display. This ensures applicants and unapproved staff always show 'Not Ready to Work' with appropriate blocking reasons. Row-level Send Form buttons work correctly for form-based requirements (staff_health_questionnaire, staff_personal_info, hmrc_starter_checklist, interview_record).",
+  "features_tested": {
+    "applicant_not_ready_to_work": {
+      "status": "PASS",
+      "details": "Applicant profile shows 'Not Ready to Work' status in both Overview and Compliance File tabs"
+    },
+    "applicant_blocking_reason": {
+      "status": "PASS",
+      "details": "Shows 'Applicant - not yet recruited' as hard_block reason"
+    },
+    "unapproved_staff_blocking_reason": {
+      "status": "PASS",
+      "details": "Shows 'Recruitment not approved' as hard_block reason"
+    },
+    "proof_of_address_blocking": {
+      "status": "PASS",
+      "details": "Shows 'Proof of address (0/2 required)' blocking reason"
+    },
+    "reference_1_and_2_separate": {
+      "status": "PASS",
+      "details": "Reference 1 and Reference 2 appear as separate blocking reasons"
+    },
+    "3tier_status_model": {
+      "status": "PASS",
+      "details": "Uses NOT_READY/READY_WITH_CONDITIONS/READY_TO_WORK with correct labels and colors"
+    },
+    "compliance_file_summary_tags": {
+      "status": "PASS",
+      "details": "Blocking reasons displayed as tags with red/amber styling"
+    },
+    "send_form_row_level": {
+      "status": "PASS",
+      "details": "Send Form button appears at row level for form-based requirements"
+    },
+    "send_form_dialog_preselect": {
+      "status": "PASS",
+      "details": "Row-level Send button opens dialog with correct form type pre-selected"
+    }
+  },
+  "bug_fixed": {
+    "description": "ComplianceOverview component was using statuses.start_status which didn't include applicant/recruitment_approved checks. Fixed to use work_readiness_3tier.",
+    "root_cause": "The Overview tab's Work Status card was reading from statuses.start_status (old logic) instead of work_readiness_3tier (new 3-tier logic)",
+    "fix_applied": "Updated ComplianceOverview.js to use work_readiness_3tier for Work Status display, including blocking reasons"
+  }
+}

@@ -35,6 +35,27 @@ export default function ComplianceOverview({
     return complianceRequirements.statuses;
   }, [complianceRequirements?.statuses]);
 
+  // Use 3-tier work readiness for Work Status (includes applicant/recruitment checks)
+  const workReadiness3tier = useMemo(() => {
+    if (!complianceRequirements?.work_readiness_3tier) {
+      return { status: 'NOT_READY', label: 'Loading...', color: 'neutral', reasons: [] };
+    }
+    return complianceRequirements.work_readiness_3tier;
+  }, [complianceRequirements?.work_readiness_3tier]);
+
+  // Map 3-tier status to color
+  const getWorkReadinessColor = (status) => {
+    switch(status) {
+      case 'READY_TO_WORK':
+        return 'success';
+      case 'READY_WITH_CONDITIONS':
+        return 'warning';
+      case 'NOT_READY':
+      default:
+        return 'error';
+    }
+  };
+
   // Extract missing blockers (start status items)
   const missingBlockers = useMemo(() => {
     return statuses.start_status?.missing || [];
@@ -66,7 +87,7 @@ export default function ComplianceOverview({
     );
   }
 
-  const startColors = getStatusColorClasses(statuses.start_status?.color);
+  const workStatusColors = getStatusColorClasses(getWorkReadinessColor(workReadiness3tier.status));
   const recruitmentColors = getStatusColorClasses(statuses.recruitment_file?.color);
   const policiesColors = getStatusColorClasses(statuses.policies?.color);
   const docStatusColors = getStatusColorClasses(statuses.document_status?.color);
@@ -76,34 +97,46 @@ export default function ComplianceOverview({
       {/* Primary Status Cards - Separated Model */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
-        {/* Work Status */}
-        <Card className={`rounded-2xl border ${startColors.border} shadow-sm ${startColors.bg}`}>
+        {/* Work Status - Uses 3-tier work readiness (includes applicant/recruitment checks) */}
+        <Card className={`rounded-2xl border ${workStatusColors.border} shadow-sm ${workStatusColors.bg}`}>
           <CardContent className="p-5">
             <div className="flex items-start gap-4">
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${startColors.bg} border ${startColors.border}`}>
-                {statuses.start_status?.status === 'ready_to_work' ? (
-                  <ShieldCheck className={`h-6 w-6 ${startColors.icon}`} />
-                ) : statuses.start_status?.status === 'supervised_start_only' ? (
-                  <Shield className={`h-6 w-6 ${startColors.icon}`} />
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${workStatusColors.bg} border ${workStatusColors.border}`}>
+                {workReadiness3tier.status === 'READY_TO_WORK' ? (
+                  <ShieldCheck className={`h-6 w-6 ${workStatusColors.icon}`} />
+                ) : workReadiness3tier.status === 'READY_WITH_CONDITIONS' ? (
+                  <Shield className={`h-6 w-6 ${workStatusColors.icon}`} />
                 ) : (
-                  <AlertTriangle className={`h-6 w-6 ${startColors.icon}`} />
+                  <AlertTriangle className={`h-6 w-6 ${workStatusColors.icon}`} />
                 )}
               </div>
               <div className="flex-1">
                 <p className="text-xs text-text-muted font-medium uppercase tracking-wide">Work Status</p>
-                <p className={`text-lg font-semibold ${startColors.text} mt-0.5`}>
-                  {statuses.start_status?.status === 'ready_to_work' ? 'Ready to Work' :
-                   statuses.start_status?.status === 'supervised_start_only' ? 'Supervised Start' :
-                   'Not Ready'}
+                <p className={`text-lg font-semibold ${workStatusColors.text} mt-0.5`}>
+                  {workReadiness3tier.label || 'Not Ready'}
                 </p>
                 <p className="text-xs text-text-muted mt-1">
                   Shows whether this employee can safely start work.
                 </p>
-                {statuses.start_status?.status !== 'ready_to_work' && (
-                  <p className="text-xs mt-2">
-                    <span className={startColors.text}>{statuses.start_status?.verified || 0}/{statuses.start_status?.total || 0}</span>
-                    <span className="text-text-muted"> required items verified</span>
-                  </p>
+                {/* Show blocking reasons for NOT_READY or READY_WITH_CONDITIONS */}
+                {workReadiness3tier.reasons?.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {workReadiness3tier.reasons.slice(0, 2).map((reason, idx) => (
+                      <span 
+                        key={idx} 
+                        className={`text-xs px-1.5 py-0.5 rounded ${
+                          reason.type === 'hard_block' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                        }`}
+                      >
+                        {reason.message}
+                      </span>
+                    ))}
+                    {workReadiness3tier.reasons.length > 2 && (
+                      <span className="text-xs text-text-muted">
+                        +{workReadiness3tier.reasons.length - 2} more
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

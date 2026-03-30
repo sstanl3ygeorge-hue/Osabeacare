@@ -3533,89 +3533,94 @@ export default function EmployeeProfilePage() {
               </div>
             </CardHeader>
             <CardContent>
-              {/* START STATUS ALERT PANEL - Using new statuses model */}
-              {complianceRequirements?.statuses?.start_status && (
+              {/* START STATUS ALERT PANEL - Using 3-tier work readiness model */}
+              {complianceRequirements?.work_readiness_3tier && (
                 <div className={`mb-6 p-4 rounded-xl border ${
-                  complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'bg-green-50 border-green-200' :
-                  complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'bg-amber-50 border-amber-200' :
+                  complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'bg-green-50 border-green-200' :
+                  complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-50 border-amber-200' :
                   'bg-red-50 border-red-200'
                 }`}>
                   <div className="flex items-start gap-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'bg-green-100' :
-                      complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'bg-amber-100' :
+                      complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'bg-green-100' :
+                      complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-100' :
                       'bg-red-100'
                     }`}>
-                      {complianceRequirements.statuses.start_status.status === 'ready_to_work' ? (
+                      {complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? (
                         <Shield className="h-5 w-5 text-green-600" />
-                      ) : complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? (
-                        <Shield className="h-5 w-5 text-amber-600" />
+                      ) : complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? (
+                        <AlertTriangle className="h-5 w-5 text-amber-600" />
                       ) : (
                         <AlertTriangle className="h-5 w-5 text-red-600" />
                       )}
                     </div>
                     <div className="flex-1">
                       <h4 className={`font-semibold ${
-                        complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'text-green-900' :
-                        complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-900' :
+                        complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'text-green-900' :
+                        complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-900' :
                         'text-red-900'
                       }`}>
-                        Start Status: {complianceRequirements.statuses.start_status.label}
+                        Work Status: {complianceRequirements.work_readiness_3tier.label}
                       </h4>
                       <p className={`text-sm mt-1 ${
-                        complianceRequirements.statuses.start_status.status === 'ready_to_work' ? 'text-green-800' :
-                        complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-800' :
+                        complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'text-green-800' :
+                        complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-800' :
                         'text-red-800'
                       }`}>
-                        {complianceRequirements.statuses.start_status.status === 'ready_to_work' ? (
-                          "All legal, safety, and core training requirements are verified. This employee can safely start work."
-                        ) : complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? (
-                          "Legal and safety basics are complete but health/competency items are still incomplete. Employee can start with supervision."
+                        {complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? (
+                          "All legal, safety, and recruitment requirements verified. This person can safely be assigned work."
+                        ) : complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? (
+                          "Core requirements verified but some items need attention. Can work with conditions."
                         ) : (
-                          <>
-                            <strong>{complianceRequirements.statuses.start_status.verified || 0} of {complianceRequirements.statuses.start_status.total || 0}</strong> required items verified
-                          </>
+                          "Required items outstanding. Cannot be assigned work until resolved."
                         )}
                       </p>
                       
-                      {/* Missing Required Items */}
-                      {complianceRequirements.statuses.start_status.missing?.length > 0 && (
+                      {/* Blocking Reasons */}
+                      {complianceRequirements.work_readiness_3tier.reasons?.length > 0 && (
                         <div className="mt-3">
                           <p className={`text-sm font-medium ${
-                            complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-900' : 'text-red-900'
+                            complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-900' : 'text-red-900'
                           }`}>
-                            Missing items (required to start work):
+                            {complianceRequirements.work_readiness_3tier.status === 'NOT_READY' ? 'Blocking issues:' : 'Attention needed:'}
                           </p>
-                          <ul className={`mt-1 space-y-1 text-sm ${
-                            complianceRequirements.statuses.start_status.status === 'supervised_start_only' ? 'text-amber-800' : 'text-red-800'
-                          }`}>
-                            {complianceRequirements.statuses.start_status.missing.map((item, idx) => (
-                              <li key={idx} className="flex items-center gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                                {item.name}
-                              </li>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {complianceRequirements.work_readiness_3tier.reasons.slice(0, 6).map((reason, idx) => (
+                              <span 
+                                key={idx} 
+                                className={`text-xs px-2 py-1 rounded ${
+                                  reason.type === 'hard_block' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                                }`}
+                              >
+                                {reason.message}
+                              </span>
                             ))}
-                          </ul>
+                            {complianceRequirements.work_readiness_3tier.reasons.length > 6 && (
+                              <span className="text-xs text-gray-500">
+                                +{complianceRequirements.work_readiness_3tier.reasons.length - 6} more
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
 
                       {/* Overall Compliance Score */}
                       <div className="mt-3 flex items-center gap-3">
                         <div className={`text-sm font-medium ${
-                          (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 80 ? 'text-green-700' :
-                          (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 50 ? 'text-amber-700' :
+                          (complianceRequirements.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'text-green-700' :
+                          (complianceRequirements.statuses?.overall_compliance?.percentage || 0) >= 50 ? 'text-amber-700' :
                           'text-red-700'
                         }`}>
-                          Overall Compliance: {complianceRequirements.statuses.overall_compliance?.percentage || 0}%
+                          File Completion: {complianceRequirements.statuses?.overall_compliance?.percentage || 0}%
                         </div>
                         <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
                           <div 
                             className={`h-full rounded-full transition-all ${
-                              (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 80 ? 'bg-green-500' :
-                              (complianceRequirements.statuses.overall_compliance?.percentage || 0) >= 50 ? 'bg-amber-500' :
+                              (complianceRequirements.statuses?.overall_compliance?.percentage || 0) >= 80 ? 'bg-green-500' :
+                              (complianceRequirements.statuses?.overall_compliance?.percentage || 0) >= 50 ? 'bg-amber-500' :
                               'bg-red-500'
                             }`}
-                            style={{ width: `${complianceRequirements.statuses.overall_compliance?.percentage || 0}%` }}
+                            style={{ width: `${complianceRequirements.statuses?.overall_compliance?.percentage || 0}%` }}
                           />
                         </div>
                       </div>
@@ -4145,17 +4150,47 @@ export default function EmployeeProfilePage() {
                                         Generate PDF
                                       </Button>
                                     ) : req.type !== 'acknowledgement' && !hasEvidence && FORM_BASED_REQUIREMENTS.includes(req.id) ? (
-                                      /* FORM-BASED REQUIREMENT: Show "Fill Form" button */
-                                      <Button 
-                                        size="sm" 
-                                        variant="default"
-                                        onClick={() => openFormModal(req.id)}
-                                        className="text-xs h-7 bg-primary hover:bg-primary-hover text-white rounded-lg"
-                                        data-testid={`fill-form-${req.id}`}
-                                      >
-                                        <ClipboardCheck className="h-3 w-3 mr-1" />
-                                        Fill Form
-                                      </Button>
+                                      /* FORM-BASED REQUIREMENT: Show "Fill Form" and "Send Form" buttons */
+                                      <>
+                                        <Button 
+                                          size="sm" 
+                                          variant="default"
+                                          onClick={() => openFormModal(req.id)}
+                                          className="text-xs h-7 bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                          data-testid={`fill-form-${req.id}`}
+                                        >
+                                          <ClipboardCheck className="h-3 w-3 mr-1" />
+                                          Fill Form
+                                        </Button>
+                                        {/* Row-level Send Form - sends form to employee via email */}
+                                        {employee?.email && (
+                                          <Button 
+                                            size="sm" 
+                                            variant="outline"
+                                            onClick={() => {
+                                              // Map requirement ID to form type
+                                              const formTypeMap = {
+                                                'staff_health_questionnaire': 'staff_health_questionnaire',
+                                                'staff_personal_information': 'staff_personal_info',
+                                                'hmrc_starter_checklist': 'hmrc_starter_checklist',
+                                                'interview_record': 'interview_record'
+                                              };
+                                              const formType = formTypeMap[req.id];
+                                              if (formType) {
+                                                setSelectedFormType(formType);
+                                                setSendFormMessage('');
+                                                setSendFormDialogOpen(true);
+                                              }
+                                            }}
+                                            className="text-xs h-7 text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg"
+                                            data-testid={`send-form-row-${req.id}`}
+                                            title="Send form to employee via email"
+                                          >
+                                            <Mail className="h-3 w-3 mr-1" />
+                                            Send
+                                          </Button>
+                                        )}
+                                      </>
                                     ) : req.type !== 'acknowledgement' && !hasEvidence ? (
                                       <Button 
                                         size="sm" 

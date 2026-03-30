@@ -1196,17 +1196,30 @@ async def calculate_work_readiness_3tier(
             "reasons": [{"type": "hard_block"|"conditional", "code": "...", "message": "..."}]
         }
     
-    Hard Blocks (NOT_READY):
-        - Missing/expired right_to_work_documents or right_to_work_check
-        - Missing/expired dbs_certificate or dbs_check
-        - Missing identity_documents
-        - Missing OR unverified reference_1 and reference_2
-        - recruitment_approved = false
+    HARD BLOCKS (NOT_READY) - Cannot work until resolved:
+        A. Recruitment Stage Blocks:
+           - person_stage = "applicant" (auto-block)
+           - recruitment_approved = false
+        B. Legal/Safety Blocks:
+           - Missing/expired right_to_work_documents or right_to_work_check
+           - Missing/expired dbs_certificate or dbs_check
+           - Missing identity_documents
+        C. Reference Blocks:
+           - reference_1 not verified
+           - reference_2 not verified
+        D. Recruitment File Blocks:
+           - proof_of_address incomplete (need 2)
+           - health questionnaire not submitted
+           - interview record not submitted (for employees)
         
-    Conditional (READY_WITH_CONDITIONS):
+    CONDITIONAL (READY_WITH_CONDITIONS) - Can work but needs attention:
         - Overdue recurring compliance: supervision, competency_assessment, spot_check, training_refresh
         - Competency outcome = needs_improvement or action_required
         - Open/overdue report_followup
+        
+    READY_TO_WORK - Fully compliant for active work:
+        - All hard blocks cleared
+        - No critical conditional issues
     """
     from datetime import datetime, timezone
     
@@ -1217,29 +1230,41 @@ async def calculate_work_readiness_3tier(
     req_lookup = {r.get('id'): r for r in requirements}
     
     # =========================================================================
-    # HARD BLOCK CHECKS
+    # HARD BLOCK A: RECRUITMENT STAGE BLOCKS
     # =========================================================================
     
-    # 1. Check recruitment_approved status
+    # 1. Person stage check - applicants NEVER ready to work
+    person_stage = employee_data.get('person_stage') or get_person_stage(employee_data.get('status', ''))
+    if person_stage == 'applicant':
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "applicant_stage",
+            "message": "Applicant - not yet recruited"
+        })
+    
+    # 2. Recruitment approval check
     if not employee_data.get('recruitment_approved', False):
         hard_block_reasons.append({
             "type": "hard_block",
             "code": "recruitment_not_approved",
-            "message": "Recruitment not yet approved"
+            "message": "Recruitment not approved"
         })
     
-    # 2. Check hard block requirements
-    hard_block_reqs = [
-        ("right_to_work_documents", "Right to Work documents missing or not verified"),
-        ("right_to_work_check", "Right to Work verification missing or not verified"),
-        ("identity_documents", "Identity documents missing or not verified"),
-        ("dbs_certificate", "DBS certificate missing, expired, or not verified"),
-        ("dbs_check", "DBS check missing, expired, or not verified"),
-    ]
+    # =========================================================================
+    # HARD BLOCK B: LEGAL/SAFETY BLOCKS
+    # =========================================================================
     
     today = datetime.now(timezone.utc).date()
     
-    for req_id, message in hard_block_reqs:
+    legal_safety_reqs = [
+        ("right_to_work_documents", "Right to Work evidence"),
+        ("right_to_work_check", "Right to Work verification"),
+        ("identity_documents", "Identity documents"),
+        ("dbs_certificate", "DBS certificate"),
+        ("dbs_check", "DBS check"),
+    ]
+    
+    for req_id, req_name in legal_safety_reqs:
         req = req_lookup.get(req_id)
         if not req:
             continue
@@ -1247,7 +1272,7 @@ async def calculate_work_readiness_3tier(
         has_evidence = req.get('has_evidence', False)
         is_verified = req.get('verified', False)
         
-        # Check expiry for document types
+        # Check expiry
         expiry_date = req.get('expiry_date')
         is_expired = False
         if expiry_date:
@@ -1257,40 +1282,83 @@ async def calculate_work_readiness_3tier(
             except:
                 pass
         
-        if not has_evidence or not is_verified or is_expired:
-            reason_msg = message
-            if is_expired:
-                reason_msg = f"{req.get('name', req_id)} expired"
+        if not has_evidence or not is_verified:
             hard_block_reasons.append({
                 "type": "hard_block",
-                "code": f"{req_id}_missing_or_invalid",
-                "message": reason_msg
+                "code": f"{req_id}_missing",
+                "message": f"{req_name} required"
+            })
+        elif is_expired:
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": f"{req_id}_expired",
+                "message": f"{req_name} expired"
             })
     
-    # 3. Check references - BOTH must be present AND verified
+    # =========================================================================
+    # HARD BLOCK C: REFERENCE BLOCKS
+    # =========================================================================
+    
     ref1 = req_lookup.get('reference_1')
     ref2 = req_lookup.get('reference_2')
     
     ref1_ok = ref1 and ref1.get('has_evidence') and ref1.get('verified')
     ref2_ok = ref2 and ref2.get('has_evidence') and ref2.get('verified')
     
-    if not ref1_ok or not ref2_ok:
-        missing_refs = []
-        if not ref1_ok:
-            missing_refs.append("Reference 1")
-        if not ref2_ok:
-            missing_refs.append("Reference 2")
+    if not ref1_ok:
         hard_block_reasons.append({
             "type": "hard_block", 
-            "code": "references_incomplete",
-            "message": f"{', '.join(missing_refs)} missing or not verified"
+            "code": "reference_1_incomplete",
+            "message": "Reference 1 required"
+        })
+    if not ref2_ok:
+        hard_block_reasons.append({
+            "type": "hard_block", 
+            "code": "reference_2_incomplete",
+            "message": "Reference 2 required"
         })
     
     # =========================================================================
-    # CONDITIONAL CHECKS (only if no hard blocks)
+    # HARD BLOCK D: RECRUITMENT FILE BLOCKS
     # =========================================================================
     
-    # 4. Check recurring compliance items
+    # Proof of address - need 2 verified
+    poa = req_lookup.get('proof_of_address')
+    if poa:
+        poa_count = poa.get('document_count', 0)
+        poa_verified = poa.get('verified', False)
+        if poa_count < 2 or not poa_verified:
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "proof_of_address_incomplete",
+                "message": f"Proof of address ({poa_count}/2 required)"
+            })
+    
+    # Health questionnaire - for staff (not applicants, they may not have it yet)
+    if person_stage == 'employee':
+        health_req = req_lookup.get('staff_health_questionnaire')
+        if health_req and not health_req.get('has_evidence'):
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "health_questionnaire_missing",
+                "message": "Health questionnaire required"
+            })
+    
+    # Interview record - for staff
+    if person_stage == 'employee':
+        interview_req = req_lookup.get('interview_record')
+        if interview_req and not interview_req.get('has_evidence'):
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "interview_record_missing",
+                "message": "Interview record required"
+            })
+    
+    # =========================================================================
+    # CONDITIONAL CHECKS (only matter if no hard blocks)
+    # =========================================================================
+    
+    # Overdue recurring compliance items
     recurring_items = await db.recurring_compliance.find({
         "employee_id": employee_id,
         "is_active": True
@@ -1318,16 +1386,16 @@ async def calculate_work_readiness_3tier(
                 conditional_reasons.append({
                     "type": "conditional",
                     "code": f"{item_type}_overdue",
-                    "message": f"{item_name} overdue by {days_overdue} day(s)"
+                    "message": f"{item_name} overdue ({days_overdue}d)"
                 })
             elif item_type == 'report_followup':
                 conditional_reasons.append({
                     "type": "conditional",
                     "code": "report_followup_overdue", 
-                    "message": f"Report follow-up overdue by {days_overdue} day(s)"
+                    "message": f"Report follow-up overdue ({days_overdue}d)"
                 })
     
-    # 5. Check for poor competency outcomes (last outcome from completion_history)
+    # Poor competency outcomes
     for item in recurring_items:
         if item.get('item_type') == 'competency_assessment':
             history = item.get('completion_history', [])
@@ -1338,7 +1406,7 @@ async def calculate_work_readiness_3tier(
                     conditional_reasons.append({
                         "type": "conditional",
                         "code": "competency_needs_attention",
-                        "message": f"Competency assessment outcome: {outcome.replace('_', ' ')}"
+                        "message": f"Competency: {outcome.replace('_', ' ')}"
                     })
     
     # =========================================================================
@@ -2196,6 +2264,17 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
     completion_percentage = int((complete_count / total_items) * 100) if total_items > 0 else 0
     verification_percentage = int((verified_count / complete_count) * 100) if complete_count > 0 else 0
     
+    # Get employee data for 3-tier calculation
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    
+    # Calculate 3-tier work readiness
+    work_readiness_3tier = await calculate_work_readiness_3tier(
+        employee_id=employee_id,
+        requirements=results,
+        employee_data=employee or {},
+        role=role
+    )
+    
     return {
         "items": results,
         "total_items": total_items,
@@ -2205,7 +2284,8 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
         "missing_count": missing_count,
         "optional_count": optional_count,
         "completion_percentage": completion_percentage,
-        "verification_percentage": verification_percentage
+        "verification_percentage": verification_percentage,
+        "work_readiness_3tier": work_readiness_3tier
     }
 
 
@@ -5431,6 +5511,8 @@ async def calculate_work_readiness_3tier_quick(employee_id: str, employee_data: 
     """
     Quick 3-tier work readiness for list views. 
     Returns simplified status without full requirements computation.
+    
+    CRITICAL: Applicants NEVER ready to work.
     """
     from datetime import datetime, timezone
     today = datetime.now(timezone.utc)
@@ -5439,7 +5521,16 @@ async def calculate_work_readiness_3tier_quick(employee_id: str, employee_data: 
     hard_block_reasons = []
     conditional_reasons = []
     
-    # 1. Check recruitment_approved
+    # 1. CRITICAL: Person stage check - applicants NEVER ready
+    person_stage = employee_data.get('person_stage') or get_person_stage(employee_data.get('status', ''))
+    if person_stage == 'applicant':
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "applicant_stage",
+            "message": "Applicant - not recruited"
+        })
+    
+    # 2. Check recruitment_approved
     if not employee_data.get('recruitment_approved', False):
         hard_block_reasons.append({
             "type": "hard_block",
@@ -5447,7 +5538,7 @@ async def calculate_work_readiness_3tier_quick(employee_id: str, employee_data: 
             "message": "Recruitment not approved"
         })
     
-    # 2. Check hard block documents
+    # 3. Check hard block documents
     hard_block_reqs = ["right_to_work_documents", "right_to_work_check", "identity_documents", "dbs_certificate", "dbs_check"]
     
     verified_docs = await db.employee_documents.find({
@@ -7654,7 +7745,8 @@ async def get_employee_compliance(employee_id: str, user: dict = Depends(get_cur
         "role": employee.get("role"),
         "current_onboarding_status": employee.get("onboarding_status", "New"),
         "derived_onboarding_status": derived_status,
-        "compliance": compliance
+        "compliance": compliance,
+        "work_readiness_3tier": compliance.get("work_readiness_3tier")
     }
 
 @api_router.post("/employees/{employee_id}/refresh-status")

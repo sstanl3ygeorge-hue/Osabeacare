@@ -22,6 +22,7 @@ import {
 } from '../../components/ui/dropdown-menu';
 import { Label } from '../../components/ui/label';
 import { toast } from 'sonner';
+import { parseBackendDate } from '../../lib/dateUtils';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -128,9 +129,11 @@ export default function ServiceUsersPage() {
     );
   };
 
+  // HARDENING: Use parseBackendDate for safe age calculation
   const calculateAge = (dob) => {
     if (!dob) return null;
-    const birth = new Date(dob);
+    const birth = parseBackendDate(dob);
+    if (!birth) return null;
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
     const monthDiff = today.getMonth() - birth.getMonth();

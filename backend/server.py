@@ -3787,6 +3787,7 @@ async def get_or_create_training_record(
         return None
     
     # Create new record
+    # HARDENING: Do not store derived status - will be computed at runtime
     now = datetime.now(timezone.utc).isoformat()
     new_record = {
         "id": str(uuid.uuid4()),
@@ -3794,7 +3795,7 @@ async def get_or_create_training_record(
         "requirement_id": requirement_id,
         "training_name": training_name,
         "mandatory": True,
-        "status": "not_started",
+        # REMOVED: "status": "not_started" - derived from completion_date being None
         "record_status": "active",
         "completion_date": None,
         "expiry_date": None,
@@ -4303,8 +4304,62 @@ async def calculate_completion_percentage(employee_id: str) -> int:
     return compliance["completion_percentage"]
 
 async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
-    """Quick work readiness calculation for list views"""
+    """
+    Quick work readiness calculation for list views.
+    HARDENING: Now includes critical expiry check to match full readiness logic.
+    """
     work_ready_ids = get_work_ready_items_for_role(role)
+    
+    # ===== CRITICAL EXPIRY CHECK (HARDENING) =====
+    # Check for expired critical documents FIRST - this overrides everything
+    # Reuses CRITICAL_EXPIRY_DOCS from calculate_separated_statuses()
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    
+    # Check documents for critical expiry
+    critical_expired_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": list(CRITICAL_EXPIRY_DOCS)},
+        "expiry_date": {"$exists": True, "$ne": None, "$lt": today_str},
+        "verified": True,  # Only verified docs count for work readiness
+        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+    }, {"_id": 0, "requirement_id": 1, "expiry_date": 1}).to_list(10)
+    
+    if critical_expired_docs:
+        expired_req = critical_expired_docs[0].get('requirement_id', 'document')
+        return {
+            "status": "not_ready", 
+            "label": f"Critical Doc Expired", 
+            "color": "error",
+            "reason": f"Expired: {expired_req}"
+        }
+    
+    # Also check training records for critical training expiry
+    critical_training_ids = {"safeguarding", "manual_handling", "infection_control"}
+    critical_expired_training = []
+    
+    for train_id in critical_training_ids:
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "requirement_id": train_id,
+            "verified": True,
+            "expiry_date": {"$exists": True, "$ne": None}
+        }, {"_id": 0, "expiry_date": 1, "requirement_id": 1, "completion_date": 1})
+        
+        if record and record.get('expiry_date'):
+            # Check if expired using canonical logic
+            exp_date = record['expiry_date']
+            if isinstance(exp_date, str) and exp_date < today_str:
+                critical_expired_training.append(record)
+    
+    if critical_expired_training:
+        expired_req = critical_expired_training[0].get('requirement_id', 'training')
+        return {
+            "status": "not_ready",
+            "label": "Training Expired",
+            "color": "error", 
+            "reason": f"Expired: {expired_req}"
+        }
+    # ===== END CRITICAL EXPIRY CHECK =====
     
     # Get documents for mandatory items
     docs = await db.employee_documents.find({
@@ -4321,8 +4376,8 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
         "employee_id": employee_id,
         "requirement_id": {"$in": list(training_ids)},
         "verified": True,
-        # Exclude deleted records (though they shouldn't exist after delete)
-        "status": {"$nin": ["deleted", "superseded", "archived"]}
+        # HARDENING: Check for completion_date instead of status field
+        "completion_date": {"$exists": True, "$ne": None}
     }, {"_id": 0, "requirement_id": 1}).to_list(100)
     
     verified_ids = {d['requirement_id'] for d in docs}
@@ -6782,6 +6837,7 @@ async def upload_requirement_evidence(
             evidence_files.append(evidence_file)
             
             # Update the SINGLE training record
+            # HARDENING: Store only canonical fields, NOT derived status
             await db.training_records.update_one(
                 {"id": existing['id']},
                 {"$set": {
@@ -6789,7 +6845,7 @@ async def upload_requirement_evidence(
                     "certificate_url": result["path"],  # Keep for backward compat
                     "original_filename": file.filename,
                     "uploaded_at": now,
-                    "status": "completed",
+                    # REMOVED: "status": "completed" - derived at runtime from completion_date/expiry_date
                     "record_status": "active",  # Ensure active
                     "completion_date": now,
                     "completion_method": "certificate",
@@ -6810,13 +6866,14 @@ async def upload_requirement_evidence(
             })
         else:
             # Create new training record (SINGLE ACTIVE record)
+            # HARDENING: Store only canonical fields, NOT derived status
             record_id = str(uuid.uuid4())
             new_record = {
                 "id": record_id,
                 "employee_id": employee_id,
                 "training_name": training_name,
                 "mandatory": True,
-                "status": "completed",
+                # REMOVED: "status": "completed" - derived at runtime from completion_date/expiry_date
                 "record_status": "active",  # SINGLE ACTIVE record
                 "completion_date": now,
                 "expiry_date": calculated_expiry,
@@ -7231,11 +7288,13 @@ async def delete_requirement_evidence_permanently(
             update_data = {"evidence_files": evidence_files, "updated_at": now}
             
             # If no more evidence files, reset the record
+            # HARDENING: Clear completion_date instead of writing derived status
             if not evidence_files:
                 update_data["certificate_url"] = None
                 update_data["completion_method"] = "manual"
                 update_data["verified"] = False
-                update_data["status"] = "not_started"
+                update_data["completion_date"] = None  # Reset to derive "not_started" status
+                # REMOVED: "status": "not_started" - derived from completion_date being None
             
             await db.training_records.update_one(
                 {"id": record['id']},
@@ -11343,11 +11402,13 @@ async def upload_training_certificate(
     result = put_object(path, data, file.content_type or "application/pdf")
     
     now = datetime.now(timezone.utc).isoformat()
+    # HARDENING: Store only canonical fields, NOT derived status
+    # Status is computed at runtime via compute_training_record_status()
     update_data = {
         "certificate_url": result["path"], 
         "original_filename": file.filename,
         "uploaded_at": now,
-        "status": "completed",
+        # REMOVED: "status": "completed" - derived from completion_date/expiry_date
         "completion_date": now,
         "completion_method": "certificate",
         "updated_at": now
@@ -11560,11 +11621,12 @@ async def upload_training_certificate_for_requirement(
     
     if existing_record:
         # Update existing record
+        # HARDENING: Store only canonical fields, NOT derived status
         update_data = {
             "certificate_url": result["path"],
             "original_filename": file.filename,
             "uploaded_at": now,
-            "status": "completed",
+            # REMOVED: "status": "completed" - derived at runtime
             "completion_date": now,
             "completion_method": "certificate",
             "requirement_id": requirement_id,
@@ -11590,13 +11652,14 @@ async def upload_training_certificate_for_requirement(
         action = "updated"
     else:
         # Create new training record with certificate
+        # HARDENING: Store only canonical fields, NOT derived status
         record_id = str(uuid.uuid4())
         new_record = {
             "id": record_id,
             "employee_id": employee_id,
             "training_name": training_name,
             "mandatory": True,
-            "status": "completed",
+            # REMOVED: "status": "completed" - derived at runtime from completion_date/expiry_date
             "completion_date": now,
             "expiry_date": expiry_date,
             "certificate_url": result["path"],
@@ -11686,14 +11749,15 @@ async def complete_training_requirement(
     completion_date = request.completion_date or now
     
     # Check if there's already a completed training record for this requirement
-    # Use the same matching logic as check_item_completion
+    # HARDENING: Check for completion_date existence instead of stored status
+    # Status is derived at runtime from completion_date/expiry_date
     existing_training = await db.training_records.find_one({
         "employee_id": employee_id,
         "$or": [
             {"training_name": {"$regex": training_name, "$options": "i"}},
             {"training_name": {"$regex": training_name.replace(" ", ""), "$options": "i"}}
         ],
-        "status": "completed"
+        "completion_date": {"$exists": True, "$ne": None}  # Has completion = "completed"
     }, {"_id": 0})
     
     if existing_training:
@@ -11714,10 +11778,11 @@ async def complete_training_requirement(
             raise HTTPException(status_code=400, detail="Training record belongs to a different employee")
         
         # Update the existing record to mark it completed and link to requirement
+        # HARDENING: Store only canonical fields, NOT derived status
         await db.training_records.update_one(
             {"id": request.link_existing_id},
             {"$set": {
-                "status": "completed",
+                # REMOVED: "status": "completed" - derived at runtime
                 "completion_date": completion_date,
                 "expiry_date": request.expiry_date,
                 "requirement_id": request.requirement_id,
@@ -11757,10 +11822,11 @@ async def complete_training_requirement(
     
     if existing_incomplete:
         # Update the existing record instead of creating a new one
+        # HARDENING: Store only canonical fields, NOT derived status
         await db.training_records.update_one(
             {"id": existing_incomplete['id']},
             {"$set": {
-                "status": "completed",
+                # REMOVED: "status": "completed" - derived at runtime
                 "completion_date": completion_date,
                 "expiry_date": request.expiry_date,
                 "requirement_id": request.requirement_id,
@@ -11789,13 +11855,14 @@ async def complete_training_requirement(
         }
     
     # Create brand new training record
+    # HARDENING: Store only canonical fields, NOT derived status
     record_id = str(uuid.uuid4())
     new_record = {
         "id": record_id,
         "employee_id": employee_id,
         "training_name": training_name,
         "mandatory": True,
-        "status": "completed",
+        # REMOVED: "status": "completed" - derived at runtime from completion_date/expiry_date
         "completion_date": completion_date,
         "expiry_date": request.expiry_date,
         "certificate_url": None,

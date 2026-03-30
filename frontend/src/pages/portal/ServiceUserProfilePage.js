@@ -32,6 +32,7 @@ import {
 } from '../../components/ui/select';
 import { toast } from 'sonner';
 import FileUploader from '../../components/ui/file-uploader';
+import { formatBackendDate, parseBackendDate } from '../../lib/dateUtils';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -228,9 +229,11 @@ export default function ServiceUserProfilePage() {
     setShowUploadDialog(true);
   };
 
+  // HARDENING: Use parseBackendDate for safe age calculation
   const calculateAge = (dob) => {
     if (!dob) return null;
-    const birth = new Date(dob);
+    const birth = parseBackendDate(dob);
+    if (!birth) return null;
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
     const monthDiff = today.getMonth() - birth.getMonth();
@@ -803,9 +806,9 @@ function SectionTab({ section, sectionId, onUpload, onVerify, onDelete }) {
                         {doc.document_type.replace(/_/g, ' ')}
                       </span>
                     )}
-                    <span>Uploaded {new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                    <span>Uploaded {formatBackendDate(doc.uploaded_at)}</span>
                     {doc.expiry_date && (
-                      <span className="text-amber-600">Expires {new Date(doc.expiry_date).toLocaleDateString()}</span>
+                      <span className="text-amber-600">Expires {formatBackendDate(doc.expiry_date)}</span>
                     )}
                   </div>
                 </div>

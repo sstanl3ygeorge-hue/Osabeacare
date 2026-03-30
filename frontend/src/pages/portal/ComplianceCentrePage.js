@@ -19,7 +19,7 @@ import {
   RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
   Edit, History, Save, BookOpen, ArrowRight, TrendingUp, Bell, Mail, Send
 } from 'lucide-react';
-import { formatBackendDate } from '../../lib/dateUtils';
+import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -915,13 +915,13 @@ export default function ComplianceCentrePage() {
                                         policy.review_status === 'due_soon' ? 'text-warning' : ''
                                       }`}>
                                         <Calendar className="h-3 w-3" />
-                                        Next review: {new Date(policy.review_date).toLocaleDateString()}
+                                        Next review: {formatBackendDate(policy.review_date)}
                                       </span>
                                     )}
                                     {policy.last_reviewed_at && (
                                       <span className="flex items-center gap-1 text-success">
                                         <CheckCircle className="h-3 w-3" />
-                                        Last: {new Date(policy.last_reviewed_at).toLocaleDateString()}
+                                        Last: {formatBackendDate(policy.last_reviewed_at)}
                                       </span>
                                     )}
                                     {policy.assigned_staff_count > 0 && (
@@ -1173,7 +1173,7 @@ export default function ComplianceCentrePage() {
                                     {cert.policy_number && <span>Ref #: {cert.policy_number}</span>}
                                     {cert.issue_date && (
                                       <span className="flex items-center gap-1">
-                                        Issued: {new Date(cert.issue_date).toLocaleDateString()}
+                                        Issued: {formatBackendDate(cert.issue_date)}
                                       </span>
                                     )}
                                     {cert.expiry_date && (
@@ -1183,7 +1183,7 @@ export default function ComplianceCentrePage() {
                                       }`}>
                                         <Calendar className="h-3 w-3" />
                                         {cert.status === 'expired' ? 'Expired: ' : 'Expires: '}
-                                        {new Date(cert.expiry_date).toLocaleDateString()}
+                                        {formatBackendDate(cert.expiry_date)}
                                       </span>
                                     )}
                                     {cert.renewal_period_months && cert.renewal_period_months > 0 && (
@@ -1444,7 +1444,10 @@ export default function ComplianceCentrePage() {
               const closedCount = incidents.filter(i => i.status === 'closed' || i.status === 'resolved').length;
               const overdueCount = incidents.filter(i => {
                 if (i.status === 'closed' || i.status === 'resolved') return false;
-                const daysOld = Math.ceil((new Date() - new Date(i.date_occurred)) / (1000 * 60 * 60 * 24));
+                // HARDENING: Use parseBackendDate for safe calculation
+                const dateOccurred = parseBackendDate(i.date_occurred);
+                if (!dateOccurred) return false;
+                const daysOld = Math.ceil((new Date() - dateOccurred) / (1000 * 60 * 60 * 24));
                 return daysOld > 7; // Overdue if open for more than 7 days
               }).length;
               
@@ -1683,7 +1686,9 @@ export default function ComplianceCentrePage() {
                 return (
                   <div className="space-y-3">
                     {filteredIncidents.map((incident) => {
-                      const daysOld = Math.ceil((new Date() - new Date(incident.date_occurred)) / (1000 * 60 * 60 * 24));
+                      // HARDENING: Use parseBackendDate for safe calculation
+                      const dateOccurred = parseBackendDate(incident.date_occurred);
+                      const daysOld = dateOccurred ? Math.ceil((new Date() - dateOccurred) / (1000 * 60 * 60 * 24)) : 0;
                       const isOverdue = (incident.status === 'open' || incident.status === 'investigating') && daysOld > 7;
                       
                       return (
@@ -1714,7 +1719,7 @@ export default function ComplianceCentrePage() {
                               <p className="font-medium text-text-primary">{incident.title}</p>
                               <p className="text-sm text-text-muted mt-1 line-clamp-2">{incident.description}</p>
                               <div className="flex items-center gap-3 text-xs text-text-muted mt-2">
-                                <span>Date: {new Date(incident.date_occurred).toLocaleDateString()}</span>
+                                <span>Date: {formatBackendDate(incident.date_occurred)}</span>
                                 {incident.location && <span>Location: {incident.location}</span>}
                               </div>
                             </div>
@@ -1867,7 +1872,7 @@ export default function ComplianceCentrePage() {
                               </p>
                               {alert.date && (
                                 <p className="text-xs text-text-muted">
-                                  {new Date(alert.date).toLocaleDateString()}
+                                  {formatBackendDate(alert.date)}
                                 </p>
                               )}
                             </div>
@@ -2055,7 +2060,7 @@ export default function ComplianceCentrePage() {
                           {getStatusBadge(staff.dbs_status)}
                           {staff.dbs_expiry && (
                             <p className="text-xs text-text-muted mt-1">
-                              Exp: {new Date(staff.dbs_expiry).toLocaleDateString()}
+                              Exp: {formatBackendDate(staff.dbs_expiry)}
                             </p>
                           )}
                         </div>
@@ -2275,8 +2280,8 @@ export default function ComplianceCentrePage() {
                                     'text-text-muted'
                                   }`}>
                                     <Calendar className="h-3 w-3" />
-                                    {item.review_date ? `Review: ${new Date(item.review_date).toLocaleDateString()}` :
-                                     item.expiry_date ? `Expires: ${new Date(item.expiry_date).toLocaleDateString()}` : ''}
+                                    {item.review_date ? `Review: ${formatBackendDate(item.review_date)}` :
+                                     item.expiry_date ? `Expires: ${formatBackendDate(item.expiry_date)}` : ''}
                                   </span>
                                 )}
                                 
@@ -2325,7 +2330,7 @@ export default function ComplianceCentrePage() {
                     <span className="font-medium">Note:</span> This view maps existing system evidence to CQC Key Questions for inspection preparation. 
                     It does not change employee compliance calculations, progress percentages, or Ready to Work status.
                     <br />
-                    Generated: {new Date(cqcEvidenceMap.generated_at).toLocaleString()}
+                    Generated: {formatBackendDateTime(cqcEvidenceMap.generated_at)}
                   </p>
                 </div>
               </div>
@@ -2908,7 +2913,7 @@ export default function ComplianceCentrePage() {
                           Amendment #{historyData.length - index}
                         </p>
                         <p className="text-xs text-text-muted">
-                          {entry.amended_at ? new Date(entry.amended_at).toLocaleString() : 'Unknown date'}
+                          {entry.amended_at ? formatBackendDateTime(entry.amended_at) : 'Unknown date'}
                         </p>
                       </div>
                     </div>
@@ -2926,13 +2931,13 @@ export default function ComplianceCentrePage() {
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
                           {entry.name && <p className="truncate"><span className="font-medium">Name:</span> {entry.name}</p>}
                           {entry.version && <p><span className="font-medium">Version:</span> {entry.version}</p>}
-                          {entry.review_date && <p><span className="font-medium">Review Date:</span> {new Date(entry.review_date).toLocaleDateString()}</p>}
+                          {entry.review_date && <p><span className="font-medium">Review Date:</span> {formatBackendDate(entry.review_date)}</p>}
                         </div>
                       )}
                       {historyType === 'insurance' && (
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
                           {entry.name && <p className="truncate"><span className="font-medium">Name:</span> {entry.name}</p>}
-                          {entry.expiry_date && <p><span className="font-medium">Expiry:</span> {new Date(entry.expiry_date).toLocaleDateString()}</p>}
+                          {entry.expiry_date && <p><span className="font-medium">Expiry:</span> {formatBackendDate(entry.expiry_date)}</p>}
                           {entry.provider && <p className="truncate"><span className="font-medium">Provider:</span> {entry.provider}</p>}
                           {entry.policy_number && <p><span className="font-medium">Policy #:</span> {entry.policy_number}</p>}
                         </div>
@@ -2941,7 +2946,7 @@ export default function ComplianceCentrePage() {
                         <div className="text-xs text-text-muted space-y-1 pt-2 border-t border-[#E4E8EB]">
                           {entry.title && <p className="truncate"><span className="font-medium">Title:</span> {entry.title}</p>}
                           {entry.incident_type && <p><span className="font-medium">Type:</span> {entry.incident_type}</p>}
-                          {entry.date_occurred && <p><span className="font-medium">Date:</span> {new Date(entry.date_occurred).toLocaleDateString()}</p>}
+                          {entry.date_occurred && <p><span className="font-medium">Date:</span> {formatBackendDate(entry.date_occurred)}</p>}
                           {entry.status && <p><span className="font-medium">Status:</span> {entry.status}</p>}
                         </div>
                       )}

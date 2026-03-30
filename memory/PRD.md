@@ -3,6 +3,29 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## System Hardening Pass (2025-12-30)
+**Status**: CQC AUDIT-READY ✅✅
+
+Full hardening report available at `/app/HARDENING_REPORT.md`
+
+### Hardening Summary
+| Stage | Status | Key Changes |
+|-------|--------|-------------|
+| Stage 1: Critical Safety | ✅ COMPLETE | Removed 12 stale training status writes, added expiry check to quick readiness |
+| Stage 2: Date Engine | ✅ COMPLETE | Replaced 44 unsafe `new Date()` usages with safe utilities |
+| Stage 3: Status System | ✅ COMPLETE | Created centralized status constants, updated StatusBadge |
+| Stage 4: Data Consistency | ✅ COMPLETE | Date normalization verified in all write paths |
+| Stage 5: Verification Safety | ✅ COMPLETE | Confirmed expiry overrides verification display |
+| Stage 6: UI/Engine Alignment | ✅ COMPLETE | Cross-page consistency verified |
+
+### Critical Fixes Applied
+1. **Training status no longer written to DB** — Status is now computed at runtime from `completion_date` + `expiry_date`
+2. **Quick work readiness checks critical expiry** — Employee list matches profile/compliance views
+3. **All date parsing uses safe utilities** — `formatBackendDate()`, `parseBackendDate()` from `lib/dateUtils.js`
+4. **Status constants centralized** — `lib/statusConstants.js` provides single source of truth
+
+---
+
 ## System Audit (2025-12-29)
 **Status**: CQC AUDIT-READY ✅
 

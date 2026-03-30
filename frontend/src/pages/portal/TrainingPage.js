@@ -15,7 +15,7 @@ import {
   GraduationCap, Plus, CheckCircle, Clock, AlertTriangle, Loader2, 
   MoreVertical, Edit, History, Filter, CalendarClock, ShieldCheck
 } from 'lucide-react';
-import { formatBackendDate } from '../../lib/dateUtils';
+import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -713,7 +713,7 @@ export default function TrainingPage() {
                         </div>
                         <div className="text-right text-xs text-text-muted">
                           <p>{entry.changed_by_name || 'System'}</p>
-                          <p>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''}</p>
+                          <p>{entry.created_at ? formatBackendDateTime(entry.created_at) : ''}</p>
                         </div>
                       </div>
                     </div>

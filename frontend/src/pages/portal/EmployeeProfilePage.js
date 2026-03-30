@@ -25,7 +25,7 @@ import {
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
-import { formatBackendDate } from '../../lib/dateUtils';
+import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -2029,7 +2029,7 @@ export default function EmployeeProfilePage() {
                         dbsSummary.status_band === 'urgent' ? 'text-amber-600 font-medium' : 'text-text-muted'
                       }`}>
                         {dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'Overdue: ' : 'Review: '}
-                        {new Date(dbsExpiry).toLocaleDateString()}
+                        {formatBackendDate(dbsExpiry)}
                         {dbsExpiryDays !== null && dbsExpiryDays > 0 && dbsExpiryDays <= 60 && (
                           <span className="ml-1">({dbsExpiryDays}d)</span>
                         )}
@@ -2066,7 +2066,7 @@ export default function EmployeeProfilePage() {
                         rtwSummary.status_band === 'urgent' ? 'text-amber-600' : 'text-text-muted'
                       }`}>
                         {rtwSummary.status_band === 'expired' ? '⚠ Expired: ' : 'Expires: '}
-                        {new Date(rtwExpiry).toLocaleDateString()}
+                        {formatBackendDate(rtwExpiry)}
                         {rtwExpiryDays !== undefined && rtwExpiryDays !== null && rtwExpiryDays > 0 && (
                           <span className="ml-1">({rtwExpiryDays}d)</span>
                         )}
@@ -2206,9 +2206,10 @@ export default function EmployeeProfilePage() {
                 }
               }
               
-              // Check DBS expiry
+              // Check DBS expiry - HARDENING: Use backend-provided days if available
               if (dbsSummary.next_dbs_review_due) {
-                const days = Math.ceil((new Date(dbsSummary.next_dbs_review_due) - new Date()) / (1000 * 60 * 60 * 24));
+                // Prefer backend-computed days_until_review, fallback to safe local calc
+                const days = dbsSummary.days_until_review ?? Math.ceil((parseBackendDate(dbsSummary.next_dbs_review_due) - new Date()) / (1000 * 60 * 60 * 24));
                 if (days <= 30) {
                   return (
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
@@ -2834,7 +2835,7 @@ export default function EmployeeProfilePage() {
                               <div className="flex items-center gap-2 text-sm text-text-muted">
                                 <span>{form.template_category}</span>
                                 <span>•</span>
-                                <span>{new Date(form.created_at).toLocaleDateString()}</span>
+                              <span>{formatBackendDate(form.created_at)}</span>
                                 <span>•</span>
                                 <span className="text-primary">Uploaded Evidence</span>
                               </div>
@@ -2917,7 +2918,7 @@ export default function EmployeeProfilePage() {
                             <div className="flex items-center gap-2 text-sm text-text-muted">
                               <span>{form.template_category}</span>
                               <span>•</span>
-                              <span>{new Date(form.created_at).toLocaleDateString()}</span>
+                              <span>{formatBackendDate(form.created_at)}</span>
                               {hasPdfEvidence && (
                                 <>
                                   <span>•</span>
@@ -3638,7 +3639,7 @@ export default function EmployeeProfilePage() {
                                       {req.acknowledged_at && (
                                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-1">
                                           <Calendar className="h-2.5 w-2.5" />
-                                          {new Date(req.acknowledged_at).toLocaleDateString()}
+                                          {formatBackendDate(req.acknowledged_at)}
                                         </span>
                                       )}
                                     </div>
@@ -4610,7 +4611,7 @@ export default function EmployeeProfilePage() {
                             </span>
                           </div>
                           <p className="text-sm text-text-muted mt-1">
-                            Assigned: {new Date(policy.assigned_at).toLocaleDateString()} 
+                            Assigned: {formatBackendDate(policy.assigned_at)} 
                             {policy.assigned_by_name && ` by ${policy.assigned_by_name}`}
                           </p>
                           
@@ -4622,8 +4623,8 @@ export default function EmployeeProfilePage() {
                                 {policy.acknowledged_by_employee_name || policy.employee_name || 'Employee'}
                               </p>
                               <p className="text-xs text-green-600">
-                                {policy.acknowledged_at ? new Date(policy.acknowledged_at).toLocaleString() : 
-                                 policy.signed_at ? new Date(policy.signed_at).toLocaleString() : ''}
+                                {policy.acknowledged_at ? formatBackendDateTime(policy.acknowledged_at) : 
+                                 policy.signed_at ? formatBackendDateTime(policy.signed_at) : ''}
                               </p>
                             </div>
                           )}
@@ -4635,7 +4636,7 @@ export default function EmployeeProfilePage() {
                                 {policy.admin_reviewed_by_name || 'Admin'}
                               </p>
                               <p className="text-xs text-green-600">
-                                {policy.admin_reviewed_at ? new Date(policy.admin_reviewed_at).toLocaleString() : ''}
+                                {policy.admin_reviewed_at ? formatBackendDateTime(policy.admin_reviewed_at) : ''}
                               </p>
                             </div>
                           )}
@@ -5112,7 +5113,7 @@ export default function EmployeeProfilePage() {
                                   </div>
                                   <div className="text-right text-xs text-text-muted flex-shrink-0">
                                     <p>{log.user_name || 'System'}</p>
-                                    <p>{new Date(log.created_at).toLocaleString()}</p>
+                                    <p>{formatBackendDateTime(log.created_at)}</p>
                                   </div>
                                 </div>
                               ))}
@@ -5684,7 +5685,7 @@ export default function EmployeeProfilePage() {
                       </span>
                     </div>
                     <span className="text-xs text-text-muted">
-                      {new Date(log.changed_at).toLocaleString()}
+                      {formatBackendDateTime(log.changed_at)}
                     </span>
                   </div>
                   <div className="text-sm space-y-1">
@@ -5752,7 +5753,7 @@ export default function EmployeeProfilePage() {
                 <p className="text-sm font-medium text-red-800">{selectedFileForAction.file_label || selectedFileForAction.original_filename || 'File'}</p>
                 {selectedFileForAction.uploaded_at && (
                   <p className="text-xs text-red-600 mt-1">
-                    Uploaded: {new Date(selectedFileForAction.uploaded_at).toLocaleDateString()}
+                    Uploaded: {formatBackendDate(selectedFileForAction.uploaded_at)}
                   </p>
                 )}
               </div>
@@ -5885,7 +5886,7 @@ export default function EmployeeProfilePage() {
                         </span>
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'Unknown'}
+                        {entry.timestamp ? formatBackendDateTime(entry.timestamp) : 'Unknown'}
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
@@ -6079,7 +6080,7 @@ export default function EmployeeProfilePage() {
                     </div>
                     <div className="text-right text-xs text-text-muted">
                       <p>{entry.changed_by_name || 'System'}</p>
-                      <p>{entry.created_at ? new Date(entry.created_at).toLocaleString() : ''}</p>
+                      <p>{entry.created_at ? formatBackendDateTime(entry.created_at) : ''}</p>
                     </div>
                   </div>
                 </div>
@@ -6551,7 +6552,7 @@ export default function EmployeeProfilePage() {
                   </span>
                 </div>
                 <div className="text-xs text-text-muted">
-                  Submitted: {viewFormData.submitted_at ? new Date(viewFormData.submitted_at).toLocaleString() : 'Unknown'}
+                  Submitted: {viewFormData.submitted_at ? formatBackendDateTime(viewFormData.submitted_at) : 'Unknown'}
                 </div>
                 {viewFormData.submitted_by_name && (
                   <div className="text-xs text-text-muted">
@@ -6579,7 +6580,7 @@ export default function EmployeeProfilePage() {
                 <div className="p-3 bg-green-50 rounded-xl border border-green-200">
                   <p className="text-sm text-green-700">
                     <CheckCircle className="h-4 w-4 inline mr-2" />
-                    Verified by {viewFormData.verified_by_name} on {new Date(viewFormData.verified_at).toLocaleString()}
+                    Verified by {viewFormData.verified_by_name} on {formatBackendDateTime(viewFormData.verified_at)}
                   </p>
                 </div>
               )}

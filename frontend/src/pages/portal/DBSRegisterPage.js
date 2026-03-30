@@ -12,11 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select';
-import { 
-  Shield, Search, AlertTriangle, CheckCircle, Clock, 
+import { Shield, Search, AlertTriangle, CheckCircle, Clock, 
   FileText, Users, Calendar, RefreshCw, ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = process.env.REACT_APP_BACKEND_URL + '/api';
 
@@ -86,17 +86,9 @@ export default function DBSRegisterPage() {
     );
   };
 
+  // HARDENING: Use shared date utility
   const formatDate = (dateStr) => {
-    if (!dateStr) return '-';
-    try {
-      return new Date(dateStr).toLocaleDateString('en-GB', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-    } catch {
-      return '-';
-    }
+    return formatBackendDate(dateStr, { fallback: '-' });
   };
 
   return (

@@ -7,6 +7,7 @@ import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { toast } from 'sonner';
 import { FileText, Search, Filter, Loader2, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -217,7 +218,7 @@ export default function DocumentsPage() {
                         </span>
                       </td>
                       <td className="p-4 text-text-muted text-sm hidden lg:table-cell">
-                        {doc.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : '-'}
+                        {formatBackendDate(doc.uploaded_at, { fallback: '-' })}
                       </td>
                       {!isAuditor() && (
                         <td className="p-4">

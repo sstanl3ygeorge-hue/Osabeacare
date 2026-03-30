@@ -18,6 +18,7 @@ import {
   FileText, User, Calendar, Building, Download, Printer,
   AlertTriangle, Shield, Eye, ExternalLink
 } from 'lucide-react';
+import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -408,7 +409,7 @@ export default function FormEditorPage() {
                         {form.pdf_filename || `${form.template_name}.pdf`}
                       </p>
                       <p className="text-xs text-text-muted">
-                        Uploaded {new Date(form.created_at).toLocaleDateString()}
+                        Uploaded {formatBackendDate(form.created_at)}
                         {form.verified && ` • Verified by ${form.verified_by_name || 'Admin'}`}
                       </p>
                     </div>
@@ -453,7 +454,7 @@ export default function FormEditorPage() {
                 <div>
                   <p className="text-xs text-text-muted">Date</p>
                   <p className="font-medium text-text-primary">
-                    {new Date(form.created_at).toLocaleDateString()}
+                    {formatBackendDate(form.created_at)}
                   </p>
                 </div>
               </div>
@@ -676,7 +677,7 @@ export default function FormEditorPage() {
                 <div>
                   <p className="text-xs text-text-muted">Generated</p>
                   <p className="font-medium text-text-primary">
-                    {new Date(form.created_at).toLocaleDateString()}
+                    {formatBackendDate(form.created_at)}
                   </p>
                 </div>
               </div>
@@ -749,35 +750,35 @@ export default function FormEditorPage() {
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-2 h-2 bg-primary rounded-full"></div>
                     <span className="text-text-muted w-24">Created</span>
-                    <span className="text-text-primary">{new Date(form.created_at).toLocaleString()}</span>
+                    <span className="text-text-primary">{formatBackendDateTime(form.created_at)}</span>
                   </div>
                 )}
                 {form.sent_at && (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-2 h-2 bg-info rounded-full"></div>
                     <span className="text-text-muted w-24">Sent</span>
-                    <span className="text-text-primary">{new Date(form.sent_at).toLocaleString()}</span>
+                    <span className="text-text-primary">{formatBackendDateTime(form.sent_at)}</span>
                   </div>
                 )}
                 {form.viewed_at && (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-2 h-2 bg-warning rounded-full"></div>
                     <span className="text-text-muted w-24">Viewed</span>
-                    <span className="text-text-primary">{new Date(form.viewed_at).toLocaleString()}</span>
+                    <span className="text-text-primary">{formatBackendDateTime(form.viewed_at)}</span>
                   </div>
                 )}
                 {form.completed_at && (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-2 h-2 bg-info rounded-full"></div>
                     <span className="text-text-muted w-24">Completed</span>
-                    <span className="text-text-primary">{new Date(form.completed_at).toLocaleString()}</span>
+                    <span className="text-text-primary">{formatBackendDateTime(form.completed_at)}</span>
                   </div>
                 )}
                 {form.signed_off_at && (
                   <div className="flex items-center gap-3 text-sm">
                     <div className="w-2 h-2 bg-success rounded-full"></div>
                     <span className="text-text-muted w-24">Signed Off</span>
-                    <span className="text-text-primary">{new Date(form.signed_off_at).toLocaleString()}</span>
+                    <span className="text-text-primary">{formatBackendDateTime(form.signed_off_at)}</span>
                   </div>
                 )}
               </div>

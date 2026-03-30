@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '../../lib/utils';
+import { formatBackendDate } from '../../lib/dateUtils';
 import { 
   CheckCircle, 
   AlertTriangle, 
@@ -151,7 +152,8 @@ export const ExpiryBadge = ({
       label = `${daysUntilExpiry}d left`;
     }
   } else if (expiryDate) {
-    label = `Expires: ${new Date(expiryDate).toLocaleDateString()}`;
+    // HARDENING: Use safe date formatting
+    label = `Expires: ${formatBackendDate(expiryDate)}`;
   }
   
   return (

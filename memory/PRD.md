@@ -3,6 +3,30 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Upload-to-Display Regression Fix (2026-03-30)
+**Status**: FIXED ✅
+
+### Issue
+Critical regression after evidence lifecycle hardening: uploaded training certificates showed "success" toast but didn't appear in the UI. Status remained "Still Needed".
+
+### Root Cause
+The training upload endpoint was finding ANY existing record (including deleted ones) and updating it. But compliance-requirements API filters out `record_status: "deleted"` records, causing "silent success".
+
+### Fix Applied
+1. Added `record_status: {"$nin": ["superseded", "deleted"]}` filter to training upload endpoint
+2. Added explicit `record_status: "active"` to update operations
+3. Applied same fix to document upload endpoints
+
+### Files Changed
+- `/app/backend/server.py` (lines ~11643, ~11654, ~6909)
+
+### Verification
+- Upload → file appears immediately with "Ready for Review" status
+- Compliance API returns new evidence
+- All 6 core trainings showing as "completed" for test employee
+
+---
+
 ## All-Pages Operational Audit (2025-12-30)
 **Status**: CQC AUDIT-READY ✅✅✅
 

@@ -6905,10 +6905,13 @@ async def upload_requirement_evidence(
     
     else:
         # For documents/form-generated, create/update employee_documents
-        # Check for existing document for this requirement
+        # Check for existing ACTIVE document for this requirement
+        # BUGFIX: Exclude superseded/archived documents to prevent updating them
+        # while compliance queries filter them out (causing "silent success" bug)
         existing = await db.employee_documents.find_one({
             "employee_id": employee_id,
-            "requirement_id": requirement_id
+            "requirement_id": requirement_id,
+            "status": {"$nin": ["superseded", "archived", "deleted"]}
         }, {"_id": 0})
         
         if existing:
@@ -8438,11 +8441,13 @@ async def create_employee_document(doc: EmployeeDocumentCreate, user: dict = Dep
     if not requirement_id and doc_type_name:
         requirement_id = get_requirement_id_from_doctype(doc_type_name)
     
-    # Check for existing document with same requirement_id to prevent duplicates
+    # Check for existing ACTIVE document with same requirement_id to prevent duplicates
+    # BUGFIX: Exclude superseded/archived documents to prevent updating them
     if requirement_id:
         existing_doc = await db.employee_documents.find_one({
             "employee_id": doc.employee_id,
-            "requirement_id": requirement_id
+            "requirement_id": requirement_id,
+            "status": {"$nin": ["superseded", "archived", "deleted"]}
         }, {"_id": 0})
         
         if existing_doc:
@@ -11639,9 +11644,13 @@ async def upload_training_certificate_for_requirement(
     data = await file.read()
     result = put_object(path, data, file.content_type or "application/pdf")
     
-    # Check for existing training record
+    # Check for existing ACTIVE training record (exclude deleted/superseded)
+    # BUGFIX: Must filter out deleted records to avoid "silent success" where
+    # upload succeeds but file doesn't appear (because deleted record gets updated
+    # but compliance query filters it out)
     existing_record = await db.training_records.find_one({
         "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]},
         "$or": [
             {"training_name": {"$regex": training_name, "$options": "i"}},
             {"requirement_id": requirement_id}
@@ -11659,7 +11668,8 @@ async def upload_training_certificate_for_requirement(
             "completion_date": now,
             "completion_method": "certificate",
             "requirement_id": requirement_id,
-            "updated_at": now
+            "updated_at": now,
+            "record_status": "active"  # BUGFIX: Ensure record remains active
         }
         if expiry_date:
             update_data["expiry_date"] = expiry_date
@@ -11688,6 +11698,7 @@ async def upload_training_certificate_for_requirement(
             "employee_id": employee_id,
             "training_name": training_name,
             "mandatory": True,
+            "record_status": "active",  # Explicit active status for compliance queries
             # REMOVED: "status": "completed" - derived at runtime from completion_date/expiry_date
             "completion_date": now,
             "expiry_date": expiry_date,

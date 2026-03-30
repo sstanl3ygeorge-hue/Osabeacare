@@ -148,6 +148,42 @@ class EmployeeStatus:
     INACTIVE = "inactive"
     ARCHIVED = "archived"
 
+# Stage Classification Constants
+# Applicant = pre-hire decision, Employee = post-hire decision
+APPLICANT_STATUSES = [
+    EmployeeStatus.NEW,
+    EmployeeStatus.SCREENING,
+    EmployeeStatus.INTERVIEW,
+    EmployeeStatus.COMPLIANCE_REVIEW
+]
+
+EMPLOYEE_STATUSES = [
+    EmployeeStatus.ONBOARDING,
+    EmployeeStatus.ACTIVE,
+    EmployeeStatus.INACTIVE
+]
+
+class PersonStage:
+    """Derived from status - not stored, computed at runtime"""
+    APPLICANT = "applicant"
+    EMPLOYEE = "employee"
+
+def get_person_stage(status: str) -> str:
+    """
+    Derive person_stage from status.
+    This is the SINGLE SOURCE of truth for applicant vs employee classification.
+    """
+    if status in APPLICANT_STATUSES:
+        return PersonStage.APPLICANT
+    elif status in EMPLOYEE_STATUSES:
+        return PersonStage.EMPLOYEE
+    elif status == EmployeeStatus.ARCHIVED:
+        # Archived can be either - we default to employee for historical records
+        return PersonStage.EMPLOYEE
+    else:
+        # Unknown status defaults to applicant (safer - can't work without approval)
+        return PersonStage.APPLICANT
+
 class DocumentStatus:
     NOT_STARTED = "not_started"
     REQUESTED = "requested"
@@ -2976,7 +3012,9 @@ class EmployeeUpdate(BaseModel):
 class EmployeeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
-    employee_code: str
+    employee_code: Optional[str] = None  # Changed: nullable until recruitment approved
+    applicant_reference: Optional[str] = None  # NEW: reference for applicant-stage people
+    person_stage: Optional[str] = None  # NEW: derived as "applicant" or "employee"
     first_name: str
     last_name: str
     middle_name: Optional[str] = None
@@ -2995,6 +3033,11 @@ class EmployeeResponse(BaseModel):
     profile_photo_url: Optional[str] = None
     work_readiness: Optional[dict] = None  # Work readiness status for list view
     expiry_alerts: Optional[dict] = None  # Expiry alerts count for list view
+    # RECRUITMENT APPROVAL GATE fields
+    recruitment_approved: Optional[bool] = False
+    recruitment_approved_by: Optional[str] = None
+    recruitment_approved_at: Optional[str] = None
+    recruitment_approval_notes: Optional[str] = None
     created_at: str
     updated_at: str
     # Extended profile fields
@@ -4993,22 +5036,47 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
 
 @api_router.post("/employees", response_model=EmployeeResponse)
 async def create_employee(employee: EmployeeCreate, user: dict = Depends(require_manager_or_admin)):
+    """
+    Create a new employee/applicant record.
+    
+    Employee Code Assignment Rule:
+    - Applicant-stage statuses (new, screening, interview, compliance_review): 
+      NO employee_code assigned yet - they use applicant_reference instead
+    - Employee-stage statuses (onboarding, active, inactive):
+      Employee_code is assigned on recruitment approval or first employee-stage entry
+    """
     employee_id = str(uuid.uuid4())
-    employee_code = await generate_employee_code()
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Determine initial stage based on status
+    initial_status = employee.status or EmployeeStatus.NEW
+    person_stage = get_person_stage(initial_status)
     
     employee_doc = {
         "id": employee_id,
-        "employee_code": employee_code,
         **employee.model_dump(),
         "completion_percentage": 0,
         "created_at": now,
         "updated_at": now
     }
+    
+    # Only assign employee_code if starting at employee stage (rare - usually admin manually adding)
+    # Otherwise, use applicant_reference for applicants
+    if person_stage == PersonStage.EMPLOYEE:
+        employee_code = await generate_employee_code()
+        employee_doc["employee_code"] = employee_code
+        log_details = {"employee_code": employee_code}
+    else:
+        # Applicant stage - generate applicant reference instead
+        applicant_ref = f"APP-{uuid.uuid4().hex[:8].upper()}"
+        employee_doc["applicant_reference"] = applicant_ref
+        employee_doc["employee_code"] = None  # Explicitly null until approved
+        log_details = {"applicant_reference": applicant_ref}
+    
     await db.employees.insert_one(employee_doc)
     
     # Log action
-    await log_audit_action(user['user_id'], "create_employee", "employee", employee_id, {"employee_code": employee_code})
+    await log_audit_action(user['user_id'], "create_employee", "employee", employee_id, log_details)
     
     return EmployeeResponse(**employee_doc)
 
@@ -5024,22 +5092,192 @@ async def get_employees(
     missing_references: bool = False,
     unsigned_policies: bool = False,
     expiring_soon: bool = False,
+    stage: Optional[str] = None,  # NEW: filter by person_stage (applicant/employee)
     user: dict = Depends(get_current_user)
 ):
+    """
+    Get all employees/applicants.
+    
+    Stage Filter:
+    - stage=applicant: Returns only applicant-stage people (new, screening, interview, compliance_review)
+    - stage=employee: Returns only employee-stage people (onboarding, active, inactive)
+    - stage=None: Returns all (default behavior for backward compatibility)
+    """
     query = {}
     
-    # Onboarding status filter
-    if onboarding_status:
-        query["onboarding_status"] = onboarding_status
-    
-    if status:
+    # Stage filter - NEW for applicant vs employee separation
+    if stage == PersonStage.APPLICANT:
+        query["status"] = {"$in": APPLICANT_STATUSES}
+    elif stage == PersonStage.EMPLOYEE:
+        query["status"] = {"$in": EMPLOYEE_STATUSES}
+    elif status:
         query["status"] = status
     elif not include_archived:
         # By default, exclude archived employees unless specifically requested
         query["status"] = {"$ne": EmployeeStatus.ARCHIVED}
     
+    # Onboarding status filter
+    if onboarding_status:
+        query["onboarding_status"] = onboarding_status
+    
     if role:
         query["role"] = role
+    if search:
+        query["$or"] = [
+            {"first_name": {"$regex": search, "$options": "i"}},
+            {"last_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"employee_code": {"$regex": search, "$options": "i"}},
+            {"applicant_reference": {"$regex": search, "$options": "i"}}  # Also search applicant refs
+        ]
+    
+    employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
+    
+    # Calculate completion percentages, work readiness, expiry alerts, and person_stage
+    for emp in employees:
+        emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
+        emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
+        emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
+        # Derive person_stage from status (SINGLE SOURCE OF TRUTH)
+        emp['person_stage'] = get_person_stage(emp.get('status', EmployeeStatus.NEW))
+    
+    return [EmployeeResponse(**emp) for emp in employees]
+
+
+# ==================== RECRUITMENT PIPELINE ENDPOINTS ====================
+
+@api_router.get("/recruitment/applicants")
+async def get_applicants(
+    status: Optional[str] = None,
+    role: Optional[str] = None,
+    search: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get applicant-stage people only.
+    These are candidates who have NOT been recruited yet.
+    
+    Applicant statuses: new, screening, interview, compliance_review
+    """
+    query = {"status": {"$in": APPLICANT_STATUSES}}
+    
+    if status and status in APPLICANT_STATUSES:
+        query["status"] = status
+    
+    if role:
+        query["role"] = role
+    
+    if search:
+        query["$or"] = [
+            {"first_name": {"$regex": search, "$options": "i"}},
+            {"last_name": {"$regex": search, "$options": "i"}},
+            {"email": {"$regex": search, "$options": "i"}},
+            {"applicant_reference": {"$regex": search, "$options": "i"}}
+        ]
+    
+    applicants = await db.employees.find(query, {"_id": 0}).to_list(1000)
+    
+    # Enrich with computed fields
+    result = []
+    for app in applicants:
+        app['person_stage'] = PersonStage.APPLICANT
+        app['completion_percentage'] = await calculate_completion_percentage(app['id'])
+        # Don't compute work_readiness for applicants (irrelevant - they can't work yet)
+        result.append({
+            "id": app["id"],
+            "applicant_reference": app.get("applicant_reference"),
+            "first_name": app["first_name"],
+            "last_name": app["last_name"],
+            "email": app["email"],
+            "phone": app.get("phone"),
+            "role": app.get("role"),
+            "status": app["status"],
+            "person_stage": PersonStage.APPLICANT,
+            "recruitment_approved": app.get("recruitment_approved", False),
+            "completion_percentage": app['completion_percentage'],
+            "created_at": app["created_at"],
+            "updated_at": app["updated_at"]
+        })
+    
+    return result
+
+
+@api_router.get("/recruitment/pipeline")
+async def get_recruitment_pipeline(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get recruitment pipeline summary with counts per status.
+    Shows applicants grouped by their recruitment stage.
+    """
+    pipeline_counts = {}
+    
+    for status in APPLICANT_STATUSES:
+        count = await db.employees.count_documents({"status": status})
+        pipeline_counts[status] = count
+    
+    # Get all applicants for detailed view
+    applicants = await db.employees.find(
+        {"status": {"$in": APPLICANT_STATUSES}},
+        {"_id": 0}
+    ).to_list(1000)
+    
+    # Group by status
+    grouped = {status: [] for status in APPLICANT_STATUSES}
+    for app in applicants:
+        status = app.get("status", EmployeeStatus.NEW)
+        if status in grouped:
+            grouped[status].append({
+                "id": app["id"],
+                "applicant_reference": app.get("applicant_reference"),
+                "name": f"{app['first_name']} {app['last_name']}",
+                "email": app["email"],
+                "role": app.get("role"),
+                "created_at": app["created_at"],
+                "recruitment_approved": app.get("recruitment_approved", False)
+            })
+    
+    return {
+        "summary": {
+            "total_applicants": sum(pipeline_counts.values()),
+            "counts_by_status": pipeline_counts
+        },
+        "stages": [
+            {"status": EmployeeStatus.NEW, "label": "New Applications", "applicants": grouped[EmployeeStatus.NEW]},
+            {"status": EmployeeStatus.SCREENING, "label": "Screening", "applicants": grouped[EmployeeStatus.SCREENING]},
+            {"status": EmployeeStatus.INTERVIEW, "label": "Interview", "applicants": grouped[EmployeeStatus.INTERVIEW]},
+            {"status": EmployeeStatus.COMPLIANCE_REVIEW, "label": "Compliance Review", "applicants": grouped[EmployeeStatus.COMPLIANCE_REVIEW]}
+        ]
+    }
+
+
+@api_router.get("/staff/employees")
+async def get_staff_employees(
+    status: Optional[str] = None,
+    role: Optional[str] = None,
+    search: Optional[str] = None,
+    include_inactive: bool = False,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get employee-stage staff only.
+    These are people who have been recruited and can/have worked.
+    
+    Employee statuses: onboarding, active, inactive
+    
+    By default, excludes inactive employees unless include_inactive=true.
+    """
+    if status and status in EMPLOYEE_STATUSES:
+        query = {"status": status}
+    elif include_inactive:
+        query = {"status": {"$in": EMPLOYEE_STATUSES}}
+    else:
+        # Default: exclude inactive
+        query = {"status": {"$in": [EmployeeStatus.ONBOARDING, EmployeeStatus.ACTIVE]}}
+    
+    if role:
+        query["role"] = role
+    
     if search:
         query["$or"] = [
             {"first_name": {"$regex": search, "$options": "i"}},
@@ -5050,8 +5288,9 @@ async def get_employees(
     
     employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
     
-    # Calculate completion percentages, work readiness, and expiry alerts
+    # Enrich with computed fields
     for emp in employees:
+        emp['person_stage'] = PersonStage.EMPLOYEE
         emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
         emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
         emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
@@ -5137,6 +5376,8 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
         raise HTTPException(status_code=404, detail="Employee not found")
     
     employee['completion_percentage'] = await calculate_completion_percentage(employee_id)
+    # Derive person_stage from status (SINGLE SOURCE OF TRUTH)
+    employee['person_stage'] = get_person_stage(employee.get('status', EmployeeStatus.NEW))
     return EmployeeResponse(**employee)
 
 @api_router.put("/employees/{employee_id}", response_model=EmployeeResponse)
@@ -7030,6 +7271,13 @@ async def approve_recruitment(
     - Compliance = operational readiness (documents, training, etc.)
     - Recruitment Approval = human decision that person should be hired
     
+    EMPLOYEE CODE ASSIGNMENT:
+    - If person doesn't have employee_code yet (was applicant), assign one now.
+    - This is the ONLY place employee_code gets assigned for applicants.
+    
+    STAGE TRANSITION:
+    - On approval, status transitions from applicant-stage to onboarding (employee-stage)
+    
     Both must be satisfied for ACTIVE status.
     Only ADMIN+ can approve recruitment.
     """
@@ -7040,21 +7288,38 @@ async def approve_recruitment(
     if employee.get("recruitment_approved"):
         return {
             "status": "already_approved",
+            "employee_code": employee.get("employee_code"),
             "recruitment_approved_at": employee.get("recruitment_approved_at"),
             "recruitment_approved_by": employee.get("recruitment_approved_by")
         }
     
     now = datetime.now(timezone.utc).isoformat()
     
+    update_data = {
+        "recruitment_approved": True,
+        "recruitment_approved_by": user['user_id'],
+        "recruitment_approved_at": now,
+        "recruitment_approval_notes": approval.notes,
+        "updated_at": now
+    }
+    
+    # CRITICAL: Assign employee_code if not present (applicant → employee transition)
+    employee_code = employee.get("employee_code")
+    if not employee_code:
+        employee_code = await generate_employee_code()
+        update_data["employee_code"] = employee_code
+        logger.info(f"Assigned employee_code {employee_code} on recruitment approval for {employee_id}")
+    
+    # STAGE TRANSITION: Move from applicant status to onboarding
+    current_status = employee.get("status", EmployeeStatus.NEW)
+    if current_status in APPLICANT_STATUSES:
+        update_data["status"] = EmployeeStatus.ONBOARDING
+        update_data["previous_status"] = current_status
+        logger.info(f"Transitioned {employee_id} from {current_status} to onboarding on recruitment approval")
+    
     await db.employees.update_one(
         {"id": employee_id},
-        {"$set": {
-            "recruitment_approved": True,
-            "recruitment_approved_by": user['user_id'],
-            "recruitment_approved_at": now,
-            "recruitment_approval_notes": approval.notes,
-            "updated_at": now
-        }}
+        {"$set": update_data}
     )
     
     await log_audit_action(
@@ -7062,15 +7327,25 @@ async def approve_recruitment(
         "recruitment_approved",
         "employee",
         employee_id,
-        {"notes": approval.notes}
+        {
+            "notes": approval.notes,
+            "employee_code_assigned": employee_code if not employee.get("employee_code") else None,
+            "status_changed_from": current_status if current_status in APPLICANT_STATUSES else None,
+            "status_changed_to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None
+        }
     )
     
     return {
         "status": "approved",
         "employee_id": employee_id,
+        "employee_code": employee_code,
         "recruitment_approved": True,
         "recruitment_approved_by": user['user_id'],
-        "recruitment_approved_at": now
+        "recruitment_approved_at": now,
+        "stage_transition": {
+            "from": current_status if current_status in APPLICANT_STATUSES else None,
+            "to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None
+        }
     }
 
 @api_router.post("/employees/{employee_id}/revoke-recruitment-approval")
@@ -17877,21 +18152,28 @@ async def submit_contact_form(form: ContactForm):
 
 @api_router.post("/apply")
 async def submit_application(form: ApplicationForm):
+    """
+    Public application submission endpoint.
+    
+    Creates applicant record with applicant_reference (NOT employee_code).
+    Employee_code is only assigned on recruitment approval.
+    """
     app_id = str(uuid.uuid4())
-    employee_code = await generate_employee_code()
+    applicant_ref = f"APP-{uuid.uuid4().hex[:8].upper()}"  # Applicant reference, not employee code
     now = datetime.now(timezone.utc).isoformat()
     
-    # Create employee record
+    # Create employee record (applicant stage)
     employee_doc = {
         "id": app_id,
-        "employee_code": employee_code,
+        "applicant_reference": applicant_ref,  # Use applicant reference
+        "employee_code": None,  # NOT assigned until recruitment approval
         "first_name": form.first_name,
         "last_name": form.last_name,
         "email": form.email,
         "phone": form.phone,
         "role": form.role_applied,
         "assignment": "Unassigned",
-        "status": EmployeeStatus.NEW,
+        "status": EmployeeStatus.NEW,  # Applicant stage
         "start_date": None,
         "manager_name": None,
         "driver_status": False,
@@ -17901,6 +18183,7 @@ async def submit_application(form: ApplicationForm):
         "has_dbs": form.has_dbs,
         "address": form.address,
         "postcode": form.postcode,
+        "recruitment_approved": False,  # Explicitly false
         "created_at": now,
         "updated_at": now
     }
@@ -17922,7 +18205,7 @@ async def submit_application(form: ApplicationForm):
     }
     await db.users.insert_one(user_doc)
     
-    return {"message": "Your application has been submitted successfully. We will review it and be in touch.", "reference": employee_code}
+    return {"message": "Your application has been submitted successfully. We will review it and be in touch.", "reference": applicant_ref}
 
 @api_router.get("/assignments")
 async def get_assignments():

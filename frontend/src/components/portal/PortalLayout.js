@@ -15,12 +15,13 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/portal/dashboard', icon: LayoutDashboard },
   { name: 'Employees', href: '/portal/employees', icon: Users },
+  { name: 'Recruitment', href: '/portal/recruitment', icon: UserCheck },
   { name: 'Service Users', href: '/portal/service-users', icon: Heart },
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },

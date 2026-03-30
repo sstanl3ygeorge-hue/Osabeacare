@@ -1969,17 +1969,40 @@ export default function EmployeeProfilePage() {
                 <h1 className="font-heading text-2xl font-bold text-text-primary">
                   {employee.first_name} {employee.last_name}
                 </h1>
-                <p className="text-text-muted">{employee.employee_code} · {employee.role}</p>
-                <div className="flex items-center gap-2 mt-2">
+                <p className="text-text-muted">
+                  {employee.employee_code || employee.applicant_reference || 'No ID assigned'} · {employee.role}
+                </p>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  {/* Person Stage Badge - CRITICAL FOR APPLICANT VS EMPLOYEE CLARITY */}
+                  {employee.person_stage === 'applicant' ? (
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-purple-100 text-purple-800">
+                      Applicant
+                    </span>
+                  ) : (
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-blue-100 text-blue-800">
+                      Employee
+                    </span>
+                  )}
                   <span className={`status-chip ${
                     employee.status === 'active' ? 'status-success' :
                     employee.status === 'onboarding' ? 'status-info' :
+                    employee.status === 'screening' || employee.status === 'interview' || employee.status === 'compliance_review' ? 'status-warning' :
                     'status-neutral'
                   }`}>
                     {employee.status?.replace('_', ' ')}
                   </span>
+                  {/* Recruitment Approval Status */}
+                  {employee.recruitment_approved ? (
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800">
+                      Recruitment Approved
+                    </span>
+                  ) : employee.person_stage === 'applicant' && (
+                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800">
+                      Awaiting Approval
+                    </span>
+                  )}
                   {/* File Status Badge - Uses API work_readiness status (single source of truth) */}
-                  {(() => {
+                  {employee.person_stage === 'employee' && (() => {
                     const workReadiness = complianceRequirements?.work_readiness || {};
                     const statusLabel = workReadiness.status_label || 'Unknown';
                     const statusColor = workReadiness.status_color === 'success' ? 'bg-success/10 text-success' : 
@@ -2287,7 +2310,7 @@ export default function EmployeeProfilePage() {
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
               <User className="h-4 w-4 text-slate-500" />
               <span className="text-sm text-slate-500">Employee ID:</span>
-              <span className="text-sm font-semibold text-slate-700">{employee.employee_code || 'Not assigned'}</span>
+              <span className="text-sm font-semibold text-slate-700">{employee.employee_code || employee.applicant_reference || 'Not assigned'}</span>
             </div>
             
             {/* Missing Items */}
@@ -3124,8 +3147,12 @@ export default function EmployeeProfilePage() {
                     <p className="font-medium text-text-primary">{employee.first_name} {employee.last_name}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-text-muted">Employee ID</p>
-                    <p className="font-medium text-text-primary">{employee.employee_code}</p>
+                    <p className="text-sm text-text-muted">
+                      {employee.person_stage === 'applicant' ? 'Applicant Reference' : 'Employee ID'}
+                    </p>
+                    <p className="font-medium text-text-primary">
+                      {employee.employee_code || employee.applicant_reference || 'Not assigned'}
+                    </p>
                   </div>
                   <div>
                     <p className="text-sm text-text-muted">Role</p>

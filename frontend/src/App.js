@@ -5,7 +5,7 @@ import { Toaster } from "./components/ui/sonner";
 import HomePage from "./pages/public/HomePage";
 import AboutPage from "./pages/public/AboutPage";
 import ServicesPage from "./pages/public/ServicesPage";
-import RecruitmentPage from "./pages/public/RecruitmentPage";
+import PublicRecruitmentPage from "./pages/public/RecruitmentPage";
 import CompliancePage from "./pages/public/CompliancePage";
 import ContactPage from "./pages/public/ContactPage";
 import ApplyPage from "./pages/public/ApplyPage";
@@ -32,6 +32,7 @@ import FormEditorPage from "./pages/portal/FormEditorPage";
 import ComplianceCentrePage from "./pages/portal/ComplianceCentrePage";
 import ServiceUsersPage from "./pages/portal/ServiceUsersPage";
 import ServiceUserProfilePage from "./pages/portal/ServiceUserProfilePage";
+import RecruitmentPipelinePage from "./pages/portal/RecruitmentPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -52,7 +53,7 @@ function AppRouter() {
       <Route path="/" element={<HomePage />} />
       <Route path="/about" element={<AboutPage />} />
       <Route path="/services" element={<ServicesPage />} />
-      <Route path="/recruitment" element={<RecruitmentPage />} />
+      <Route path="/recruitment" element={<PublicRecruitmentPage />} />
       <Route path="/compliance" element={<CompliancePage />} />
       <Route path="/contact" element={<ContactPage />} />
       <Route path="/apply" element={<ApplyPage />} />
@@ -71,6 +72,7 @@ function AppRouter() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
+        <Route path="recruitment" element={<RecruitmentPipelinePage />} />
         {/* Documents route removed - all document management is now per-employee in Employee Profile → Documents tab */}
         {/* <Route path="documents" element={<DocumentsPage />} /> */}
         {/* Policies route removed - policy management consolidated in Compliance Centre */}

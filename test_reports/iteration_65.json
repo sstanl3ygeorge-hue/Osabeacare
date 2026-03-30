@@ -1,0 +1,83 @@
+{
+  "summary": "Tested Recruitment Approval Gate and Applicant/Employee Separation features. All 17 backend tests passed. Frontend UI verified - Recruitment Pipeline shows applicants with Approve buttons, Staff page shows only employees, person_stage badge displays correctly on profiles.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Employee Profile (Applicant)",
+        "issues": ["Existing applicants created before this feature don't have applicant_reference - shows 'Not assigned' which is expected backward compatibility behavior"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_recruitment_approval_separation.py",
+    "/app/test_reports/pytest/recruitment_approval_separation_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_recruitment_approval_separation.py"
+  ],
+  "success_rate": {
+    "backend": "100% (17/17 tests passed)",
+    "frontend": "100% (all UI flows verified)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Created and cleaned up test applicants during testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Recruitment approval gate and applicant/employee separation features are fully implemented and tested. Key endpoints: POST /api/employees/{id}/approve-recruitment, GET /api/recruitment/pipeline, GET /api/recruitment/applicants, GET /api/staff/employees. Employee code is only assigned on recruitment approval. Person stage is derived from status at runtime.",
+  "features_tested": {
+    "recruitment_approval_gate": {
+      "endpoint": "POST /api/employees/{id}/approve-recruitment",
+      "status": "PASS",
+      "details": "Correctly transitions applicant to employee stage, assigns employee_code, sets all approval fields"
+    },
+    "employee_code_timing": {
+      "status": "PASS",
+      "details": "New applicants get applicant_reference (APP-XXXXXXXX), employee_code is null until approval"
+    },
+    "pipeline_endpoint": {
+      "endpoint": "GET /api/recruitment/pipeline",
+      "status": "PASS",
+      "details": "Returns only applicant-stage people with 4 stages (new, screening, interview, compliance_review)"
+    },
+    "applicants_endpoint": {
+      "endpoint": "GET /api/recruitment/applicants",
+      "status": "PASS",
+      "details": "Returns only applicant-stage people"
+    },
+    "staff_endpoint": {
+      "endpoint": "GET /api/staff/employees",
+      "status": "PASS",
+      "details": "Returns only employee-stage people (onboarding, active, inactive)"
+    },
+    "person_stage_derivation": {
+      "status": "PASS",
+      "details": "person_stage correctly derived from status - 'applicant' for new/screening/interview/compliance_review, 'employee' for onboarding/active/inactive"
+    },
+    "status_transition_on_approval": {
+      "status": "PASS",
+      "details": "Status correctly changes to 'onboarding' on recruitment approval"
+    },
+    "frontend_staff_page": {
+      "status": "PASS",
+      "details": "Shows 'Staff' header, displays only employees with employee codes, has 'Recruitment Pipeline' button"
+    },
+    "frontend_recruitment_pipeline": {
+      "status": "PASS",
+      "details": "Shows pipeline stages, applicants list with Approve buttons, approval dialog works correctly"
+    },
+    "frontend_person_stage_badge": {
+      "status": "PASS",
+      "details": "Employee profile shows 'Applicant' badge for applicant-stage people"
+    }
+  }
+}

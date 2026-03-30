@@ -38,6 +38,13 @@ from email_service import (
     SENDER_REGISTRY,
     TEMPLATE_REGISTRY
 )
+from email_automation import (
+    EmailRequestService,
+    RequestType,
+    RequestStatus,
+    EventType,
+    RequestFailureHandler
+)
 from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 import pytesseract
 from PIL import Image as PILImage
@@ -58,6 +65,9 @@ db = client[os.environ['DB_NAME']]
 
 # Initialize EmailService with database reference
 EmailService.set_db(db)
+
+# Initialize EmailRequestService with database and email service
+EmailRequestService.initialize(db, EmailService)
 
 # JWT Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'care-recruitment-jwt-secret-key-2024')
@@ -18506,6 +18516,232 @@ async def get_email_categories(user: dict = Depends(require_admin)):
             {"key": "system", "name": "System", "description": "System notifications"}
         ]
     }
+
+# ==================== EMAIL AUTOMATION API (Phase 2) ====================
+# Request lifecycle, token handling, submission linking, reminders
+
+class CreateRequestPayload(BaseModel):
+    person_id: str
+    person_type: str = "employee"
+    request_type: str  # RequestType value
+    requirement_id: Optional[str] = None
+    related_entity_type: Optional[str] = None
+    related_entity_id: Optional[str] = None
+    template_variant: str = "default"
+    due_days: int = 14
+    expiry_days: int = 30
+    context: Optional[Dict[str, Any]] = None
+    send_immediately: bool = True
+
+@api_router.post("/email-requests")
+async def create_email_request(
+    payload: CreateRequestPayload,
+    user: dict = Depends(require_admin)
+):
+    """Create a new email request with duplicate checking"""
+    try:
+        request_type = RequestType(payload.request_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid request type: {payload.request_type}")
+    
+    result = await EmailRequestService.create_request(
+        person_id=payload.person_id,
+        person_type=payload.person_type,
+        request_type=request_type,
+        requirement_id=payload.requirement_id,
+        related_entity_type=payload.related_entity_type,
+        related_entity_id=payload.related_entity_id,
+        template_variant=payload.template_variant,
+        due_days=payload.due_days,
+        expiry_days=payload.expiry_days,
+        context=payload.context,
+        send_immediately=payload.send_immediately,
+        admin_id=user.get("user_id")
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["reason"])
+    
+    return result
+
+@api_router.get("/email-requests/types")
+async def get_request_types(user: dict = Depends(require_admin)):
+    """Get available request types"""
+    return {
+        "request_types": [
+            {"key": "upload_document", "name": "Upload Document", "description": "Request document upload"},
+            {"key": "explain_gap", "name": "Explain Gap", "description": "Request CV gap explanation"},
+            {"key": "review_reference", "name": "Review Reference", "description": "Request reference update"},
+            {"key": "verify_reference", "name": "Verify Reference", "description": "Verify reference details"},
+            {"key": "upload_training", "name": "Upload Training", "description": "Request training certificate"},
+            {"key": "complete_form", "name": "Complete Form", "description": "Request form completion"},
+            {"key": "confirm_details", "name": "Confirm Details", "description": "Request detail confirmation"},
+        ],
+        "statuses": [
+            {"key": "pending_send", "name": "Pending Send"},
+            {"key": "sent", "name": "Sent"},
+            {"key": "opened", "name": "Opened"},
+            {"key": "clicked", "name": "Clicked"},
+            {"key": "action_started", "name": "Action Started"},
+            {"key": "submitted", "name": "Submitted"},
+            {"key": "completed", "name": "Completed"},
+            {"key": "expired", "name": "Expired"},
+            {"key": "cancelled", "name": "Cancelled"},
+            {"key": "failed", "name": "Failed"},
+            {"key": "superseded", "name": "Superseded"},
+        ]
+    }
+
+@api_router.post("/email-requests/validate-token")
+async def validate_action_token(token: str):
+    """Validate a secure action token from an email link"""
+    result = await EmailRequestService.validate_and_use_token(token)
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["reason"])
+    
+    return result
+
+@api_router.post("/email-requests/process-reminders")
+async def process_email_reminders(user: dict = Depends(require_admin)):
+    """Process scheduled reminders for all active requests"""
+    result = await EmailRequestService.process_reminders()
+    return result
+
+@api_router.post("/email-requests/process-expired")
+async def process_expired_requests(user: dict = Depends(require_admin)):
+    """Mark expired requests"""
+    result = await EmailRequestService.process_expired_requests()
+    return result
+
+@api_router.get("/email-requests")
+async def list_email_requests(
+    status: Optional[str] = None,
+    person_id: Optional[str] = None,
+    limit: int = 100,
+    user: dict = Depends(require_admin)
+):
+    """List email requests with optional filters"""
+    if person_id:
+        requests = await EmailRequestService.get_requests_for_person(
+            person_id=person_id,
+            status=status,
+            limit=limit
+        )
+    elif status:
+        requests = await db.email_requests.find(
+            {"status": status}, {"_id": 0}
+        ).sort("created_at", -1).limit(limit).to_list(limit)
+    else:
+        requests = await EmailRequestService.get_pending_requests(limit=limit)
+    
+    return {"requests": requests, "count": len(requests)}
+
+@api_router.get("/email-requests/{request_id}")
+async def get_email_request(
+    request_id: str,
+    user: dict = Depends(require_admin)
+):
+    """Get a specific email request with events"""
+    request = await EmailRequestService.get_request(request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    events = await EmailRequestService.get_request_events(request_id)
+    
+    return {
+        "request": request.to_dict(),
+        "events": events
+    }
+
+@api_router.post("/email-requests/{request_id}/track")
+async def track_request_event(
+    request_id: str,
+    event_type: str,
+    details: Optional[Dict[str, Any]] = None
+):
+    """Track an event on a request (can be called without auth for click tracking)"""
+    try:
+        evt_type = EventType(event_type)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid event type: {event_type}")
+    
+    result = await EmailRequestService.track_event(
+        request_id=request_id,
+        event_type=evt_type,
+        details=details
+    )
+    
+    return result
+
+@api_router.post("/email-requests/{request_id}/resend")
+async def resend_email_request(
+    request_id: str,
+    user: dict = Depends(require_admin)
+):
+    """Resend email for an existing request"""
+    result = await EmailRequestService.resend_request(
+        request_id=request_id,
+        admin_id=user.get("user_id")
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["reason"])
+    
+    return result
+
+@api_router.post("/email-requests/{request_id}/cancel")
+async def cancel_email_request(
+    request_id: str,
+    reason: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """Cancel an email request"""
+    result = await EmailRequestService.cancel_request(
+        request_id=request_id,
+        admin_id=user.get("user_id"),
+        reason=reason
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["reason"])
+    
+    return result
+
+@api_router.post("/email-requests/{request_id}/complete")
+async def complete_email_request(
+    request_id: str,
+    notes: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """Mark a request as completed (admin verification)"""
+    result = await EmailRequestService.mark_completed(
+        request_id=request_id,
+        admin_id=user.get("user_id"),
+        notes=notes
+    )
+    
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["reason"])
+    
+    return result
+
+@api_router.post("/email-requests/{request_id}/link-submission")
+async def link_submission_to_request(
+    request_id: str,
+    submission_id: str,
+    submission_type: str,
+    user: dict = Depends(get_current_user)
+):
+    """Link a submission to a request"""
+    result = await EmailRequestService.link_submission(
+        request_id=request_id,
+        submission_id=submission_id,
+        submission_type=submission_type,
+        actor_id=user.get("user_id")
+    )
+    
+    return result
 
 # ==================== SERVICE USERS (CQC Care Records) ====================
 # Service User File structure aligned with CQC expectations

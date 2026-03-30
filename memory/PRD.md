@@ -3401,3 +3401,167 @@ class EmailService:
 
 ---
 
+
+
+## Email Automation Architecture - Phase 2 (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Extend the email base architecture into a safe automation layer for recruitment and compliance requests with:
+- Request lifecycle tracking
+- Secure action tokens with usage control
+- Duplicate prevention
+- Reminder scheduling
+- Submission linking
+- Explicit failure handling
+
+---
+
+### Architecture Overview
+
+#### 1. Request Lifecycle Model (Collection: `email_requests`)
+```
+pending_send → sent → opened → clicked → action_started → submitted → completed
+                                                                    ↘ expired
+                                                                    ↘ cancelled
+                                                                    ↘ superseded
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Unique request ID |
+| person_id | string | Employee/applicant ID |
+| person_type | string | "employee" or "applicant" |
+| requirement_id | string | Links to existing requirement (not duplicated) |
+| request_type | enum | upload_document, explain_gap, review_reference, etc. |
+| template_key | string | Email template used |
+| token_id | string | JWT token ID (jti claim) |
+| status | enum | Request lifecycle state |
+| created_at | datetime | Request creation |
+| sent_at | datetime | Email sent |
+| due_at | datetime | When action is due |
+| expires_at | datetime | When token expires |
+| resolved_at | datetime | When completed/cancelled/expired |
+| reminder_count | int | Number of reminders sent |
+| next_reminder_at | datetime | Scheduled reminder time |
+| email_log_id | string | Links to email_logs entry |
+| submission_id | string | Links to where submission landed |
+| submission_type | string | Type of submission (compliance_status, etc.) |
+
+#### 2. Secure Action Tokens (Extended)
+```python
+# Token payload includes request_id for tracking
+{
+    "person_id": "emp-123",
+    "person_type": "employee",
+    "action_type": "upload_document",
+    "requirement_id": "proof_of_address",
+    "exp": 1714492800,  # Expiry timestamp
+    "jti": "token-uuid"  # Links to request.token_id
+}
+```
+
+**Usage control:**
+- Token can only be used for active requests
+- Terminal statuses (completed, expired, cancelled) block token use
+- Each token use is tracked as an event
+
+#### 3. Event Tracking (Collection: `request_events`)
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Event ID |
+| request_id | string | Parent request |
+| event_type | enum | created, sent, clicked, submitted, etc. |
+| timestamp | datetime | Event time |
+| actor_id | string | User who triggered (if applicable) |
+| actor_type | string | system, admin, employee |
+| details | object | Event-specific data |
+
+**Event Types:**
+- created, sent, send_failed
+- opened, clicked, action_started
+- submitted, completed
+- expired, cancelled, superseded
+- reminder_sent, escalation_sent
+- token_used, token_expired, duplicate_blocked
+
+#### 4. Submission Routing (No Duplicate Storage)
+| Request Type | Target Collection | Target Field |
+|--------------|-------------------|--------------|
+| upload_document | compliance_status | evidence_files |
+| explain_gap | employees | employment_history.$.gap_after.explanation |
+| review_reference | employees | reference_N_verified |
+| upload_training | training_records | certificate_url |
+| complete_form | form_submissions | (new document) |
+
+**Key principle:** Email requests track metadata only. Actual submission data lives in existing portal structures.
+
+#### 5. Reminder Schedule
+| Day | Action |
+|-----|--------|
+| 0 | Initial send |
+| 3 | First reminder |
+| 7 | Second reminder |
+| 14 | Escalation (admin notified) |
+| 30 | Request expires |
+
+**Safeguards:**
+- Do not send if request already resolved
+- Do not send if requirement already satisfied (checked live)
+- Check for satisfaction before each reminder
+
+#### 6. Duplicate Prevention
+Before creating a request, system checks:
+1. No active request exists for same (person + requirement + type)
+2. Requirement is not already satisfied
+
+If duplicate found:
+- Returns existing_request_id
+- Logs duplicate_blocked event on existing request
+- Does NOT send another email
+
+---
+
+### Files Created/Changed
+| File | Change |
+|------|--------|
+| `/app/backend/email_automation.py` | **NEW** - Complete automation module |
+| `/app/backend/server.py` | Added EmailRequestService initialization + 12 new endpoints |
+
+### New API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/email-requests` | POST | Create request (with duplicate check) |
+| `/api/email-requests` | GET | List requests (filterable) |
+| `/api/email-requests/types` | GET | Get request types and statuses |
+| `/api/email-requests/{id}` | GET | Get request with events |
+| `/api/email-requests/{id}/track` | POST | Track event (public for click tracking) |
+| `/api/email-requests/{id}/resend` | POST | Resend email |
+| `/api/email-requests/{id}/cancel` | POST | Cancel request |
+| `/api/email-requests/{id}/complete` | POST | Mark completed |
+| `/api/email-requests/{id}/link-submission` | POST | Link submission |
+| `/api/email-requests/validate-token` | POST | Validate action token |
+| `/api/email-requests/process-reminders` | POST | Process scheduled reminders |
+| `/api/email-requests/process-expired` | POST | Mark expired requests |
+
+### Test Scenarios Verified
+| Scenario | Result |
+|----------|--------|
+| Create request → email sent | ✅ Status: sent, email_log_id linked |
+| Duplicate request blocked | ✅ Returns existing_request_id |
+| Resend request | ✅ New email sent, event tracked |
+| Request lifecycle events | ✅ created, sent events logged |
+| Token validation | ✅ Ready for click tracking |
+| Reminder scheduling | ✅ next_reminder_at set to +3 days |
+
+### Failure Handling
+| Scenario | Handling |
+|----------|----------|
+| Email send failure | Status: failed, failure_reason logged |
+| Expired token access | TOKEN_EXPIRED event, 400 error returned |
+| Duplicate submission | DUPLICATE_BLOCKED event on existing |
+| Missing linkage | Event logged, error returned |
+| Superseded request | Status: superseded, resolved_at set |
+
+---
+

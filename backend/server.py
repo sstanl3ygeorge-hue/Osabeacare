@@ -17600,6 +17600,758 @@ async def request_document(
     
     return {"message": "Document request created", "document_id": doc_id}
 
+# ==================== EMAIL NOTIFICATION ENGINE ====================
+# Automated notifications for compliance and recruitment triggers
+
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')
+PORTAL_URL = os.environ.get('PORTAL_URL', 'https://caretrust-portal.preview.emergentagent.com')
+
+# Notification Types Enum
+class NotificationType:
+    # Recruitment triggers
+    CV_GAP_DETECTED = "cv_gap_detected"
+    REFERENCE_NOT_VERIFIED = "reference_not_verified"
+    REFERENCE_MISMATCH = "reference_mismatch"
+    MISSING_PROOF_OF_ADDRESS = "missing_proof_of_address"
+    
+    # Compliance triggers
+    DOCUMENT_EXPIRING_60_DAYS = "document_expiring_60_days"
+    DOCUMENT_EXPIRING_30_DAYS = "document_expiring_30_days"
+    TRAINING_EXPIRED = "training_expired"
+    MISSING_MANDATORY_ITEM = "missing_mandatory_item"
+    UNVERIFIED_SUBMISSION = "unverified_submission"
+
+# Email Templates for Notifications
+NOTIFICATION_TEMPLATES = {
+    NotificationType.CV_GAP_DETECTED: {
+        "subject": "Employment Gap Requires Explanation - {employee_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Employment Gap Detected</h2>
+            <p>Dear {employee_name},</p>
+            <p>We have identified a gap in your employment history that requires explanation:</p>
+            <div style="background: #fef3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
+                <strong>Gap Period:</strong> {gap_start} to {gap_end}<br>
+                <strong>Duration:</strong> {gap_days} days<br>
+                <strong>Between:</strong> {previous_job} → {next_job}
+            </div>
+            <p>Please log in to provide an explanation for this gap:</p>
+            <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Explain Gap</a></p>
+            <p>If you have questions, please contact your recruitment manager.</p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">CV Gap Alert: {employee_name}</h2>
+            <p>An employment gap has been detected for <strong>{employee_name}</strong>:</p>
+            <div style="background: #f8f9fa; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
+                <strong>Gap Period:</strong> {gap_start} to {gap_end}<br>
+                <strong>Duration:</strong> {gap_days} days<br>
+                <strong>Between:</strong> {previous_job} → {next_job}
+            </div>
+            <p>The employee has been notified to provide an explanation.</p>
+            <p><a href="{admin_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Employee Profile</a></p>
+        </div>
+        """
+    },
+    
+    NotificationType.REFERENCE_NOT_VERIFIED: {
+        "subject": "Reference Verification Required - {employee_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Reference Verification Required</h2>
+            <p>Dear {employee_name},</p>
+            <p>Your reference from <strong>{reference_name}</strong> at <strong>{reference_company}</strong> requires verification.</p>
+            <p>Please ensure your reference contact details are correct and that your referee is available to respond.</p>
+            <div style="background: #e8f4f8; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
+                <strong>Reference:</strong> {reference_name}<br>
+                <strong>Company:</strong> {reference_company}
+            </div>
+            <p>If your referee has changed, please update your details in the portal:</p>
+            <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Update Reference</a></p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Reference Pending: {employee_name}</h2>
+            <p>Reference {reference_num} for <strong>{employee_name}</strong> requires verification:</p>
+            <div style="background: #f8f9fa; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
+                <strong>Referee:</strong> {reference_name}<br>
+                <strong>Company:</strong> {reference_company}
+            </div>
+            <p><a href="{admin_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Verify Reference</a></p>
+        </div>
+        """
+    },
+    
+    NotificationType.REFERENCE_MISMATCH: {
+        "subject": "Reference Does Not Match CV - {employee_name}",
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc3545;">Reference Mismatch Alert</h2>
+            <p>A reference for <strong>{employee_name}</strong> does not match their CV:</p>
+            <div style="background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 15px 0;">
+                <strong>Reference {reference_num}:</strong> {reference_name} at {reference_company}<br>
+                <strong>Status:</strong> Does not match CV - requires justification
+            </div>
+            <p>Please review and document the justification for this mismatch.</p>
+            <p><a href="{admin_link}" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Review Now</a></p>
+        </div>
+        """
+    },
+    
+    NotificationType.MISSING_PROOF_OF_ADDRESS: {
+        "subject": "Proof of Address Required - {employee_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Proof of Address Required</h2>
+            <p>Dear {employee_name},</p>
+            <p>To complete your compliance file, we require <strong>2 separate proof of address documents</strong> (NHS Standard).</p>
+            <div style="background: #e8f4f8; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
+                <strong>Current Status:</strong> {current_count}/2 documents uploaded<br>
+                <strong>Accepted Documents:</strong><br>
+                • Utility bill (gas, electric, water)<br>
+                • Bank statement<br>
+                • Council tax bill<br>
+                • Tenancy agreement
+            </div>
+            <p>Please upload the required documents:</p>
+            <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Documents</a></p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Missing Proof of Address: {employee_name}</h2>
+            <p><strong>{employee_name}</strong> has insufficient proof of address documents:</p>
+            <div style="background: #fef3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
+                <strong>Required:</strong> 2 documents<br>
+                <strong>Uploaded:</strong> {current_count}<br>
+                <strong>Verified:</strong> {verified_count}
+            </div>
+            <p>The employee has been notified to upload additional documents.</p>
+        </div>
+        """
+    },
+    
+    NotificationType.DOCUMENT_EXPIRING_60_DAYS: {
+        "subject": "Document Expiring in 60 Days - {document_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #ffc107;">Document Expiring Soon</h2>
+            <p>Dear {employee_name},</p>
+            <p>The following document will expire in <strong>60 days</strong>:</p>
+            <div style="background: #fef3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Expiry Date:</strong> {expiry_date}
+            </div>
+            <p>Please renew this document and upload the new version before it expires.</p>
+            <p><a href="{portal_link}" style="background: #ffc107; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Renewal</a></p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #ffc107;">Expiry Alert (60 Days): {employee_name}</h2>
+            <p>Document expiring for <strong>{employee_name}</strong>:</p>
+            <div style="background: #fef3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 15px 0;">
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Expiry Date:</strong> {expiry_date}
+            </div>
+            <p>The employee has been notified.</p>
+        </div>
+        """
+    },
+    
+    NotificationType.DOCUMENT_EXPIRING_30_DAYS: {
+        "subject": "URGENT: Document Expiring in 30 Days - {document_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc3545;">Urgent: Document Expiring Soon</h2>
+            <p>Dear {employee_name},</p>
+            <p>The following document will expire in <strong>30 days</strong>:</p>
+            <div style="background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 15px 0;">
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Expiry Date:</strong> {expiry_date}
+            </div>
+            <p><strong>Action Required:</strong> Please renew this document immediately to avoid compliance issues.</p>
+            <p><a href="{portal_link}" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Renewal Now</a></p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc3545;">URGENT Expiry Alert (30 Days): {employee_name}</h2>
+            <p>Document expiring soon for <strong>{employee_name}</strong>:</p>
+            <div style="background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 15px 0;">
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Expiry Date:</strong> {expiry_date}
+            </div>
+            <p>The employee has been notified urgently.</p>
+        </div>
+        """
+    },
+    
+    NotificationType.TRAINING_EXPIRED: {
+        "subject": "Training Expired - Action Required - {training_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc3545;">Training Expired</h2>
+            <p>Dear {employee_name},</p>
+            <p>Your training certification has <strong>expired</strong>:</p>
+            <div style="background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 15px 0;">
+                <strong>Training:</strong> {training_name}<br>
+                <strong>Expired On:</strong> {expiry_date}
+            </div>
+            <p><strong>You cannot work until this training is renewed.</strong> Please complete the refresher training and upload your new certificate.</p>
+            <p><a href="{portal_link}" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Certificate</a></p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #dc3545;">Training Expired: {employee_name}</h2>
+            <p><strong>{employee_name}</strong> has expired training:</p>
+            <div style="background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 15px 0;">
+                <strong>Training:</strong> {training_name}<br>
+                <strong>Expired On:</strong> {expiry_date}<br>
+                <strong>Work Status:</strong> Employee should not be allocated shifts
+            </div>
+            <p><a href="{admin_link}" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">View Training Records</a></p>
+        </div>
+        """
+    },
+    
+    NotificationType.MISSING_MANDATORY_ITEM: {
+        "subject": "Missing Compliance Document - {document_name}",
+        "employee_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Missing Compliance Document</h2>
+            <p>Dear {employee_name},</p>
+            <p>We are missing the following mandatory document from your compliance file:</p>
+            <div style="background: #e8f4f8; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Category:</strong> {category}
+            </div>
+            <p>Please upload this document to complete your compliance requirements.</p>
+            <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Document</a></p>
+            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+        </div>
+        """,
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #0d6c6c;">Missing Document: {employee_name}</h2>
+            <p><strong>{employee_name}</strong> is missing a mandatory document:</p>
+            <div style="background: #f8f9fa; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Category:</strong> {category}
+            </div>
+            <p>The employee has been notified.</p>
+        </div>
+        """
+    },
+    
+    NotificationType.UNVERIFIED_SUBMISSION: {
+        "subject": "Document Awaiting Verification - {document_name}",
+        "admin_body": """
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #17a2b8;">Document Awaiting Verification</h2>
+            <p>A document has been uploaded and requires verification:</p>
+            <div style="background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 15px; margin: 15px 0;">
+                <strong>Employee:</strong> {employee_name}<br>
+                <strong>Document:</strong> {document_name}<br>
+                <strong>Uploaded:</strong> {uploaded_at}
+            </div>
+            <p><a href="{admin_link}" style="background: #17a2b8; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Review & Verify</a></p>
+        </div>
+        """
+    }
+}
+
+# Helper function to send notification email
+async def send_notification_email(
+    notification_type: str,
+    recipient_email: str,
+    recipient_type: str,  # "employee" or "admin"
+    template_data: dict,
+    employee_id: str = None
+) -> dict:
+    """Send a notification email and log it"""
+    if not resend.api_key:
+        logger.warning("Email service not configured, skipping notification")
+        return {"status": "skipped", "reason": "Email service not configured"}
+    
+    template = NOTIFICATION_TEMPLATES.get(notification_type)
+    if not template:
+        logger.error(f"Unknown notification type: {notification_type}")
+        return {"status": "error", "reason": f"Unknown notification type: {notification_type}"}
+    
+    # Get the appropriate body template
+    body_key = f"{recipient_type}_body"
+    if body_key not in template:
+        body_key = "admin_body"  # Fallback to admin body
+    
+    try:
+        subject = template["subject"].format(**template_data)
+        body = template[body_key].format(**template_data)
+    except KeyError as e:
+        logger.error(f"Missing template data key: {e}")
+        return {"status": "error", "reason": f"Missing template data: {e}"}
+    
+    try:
+        email_result = await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [recipient_email],
+            "subject": subject,
+            "html": body
+        })
+        
+        # Log the notification
+        notification_log = {
+            "id": str(uuid.uuid4()),
+            "notification_type": notification_type,
+            "recipient_email": recipient_email,
+            "recipient_type": recipient_type,
+            "employee_id": employee_id,
+            "subject": subject,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "email_id": email_result.get("id"),
+            "status": "sent",
+            "template_data": {k: v for k, v in template_data.items() if not k.endswith('_link')}  # Don't log full URLs
+        }
+        await db.notification_logs.insert_one(notification_log)
+        
+        logger.info(f"Notification sent: {notification_type} to {recipient_email}")
+        return {"status": "sent", "email_id": email_result.get("id"), "notification_id": notification_log["id"]}
+        
+    except Exception as e:
+        logger.error(f"Failed to send notification: {e}")
+        
+        # Log the failure
+        notification_log = {
+            "id": str(uuid.uuid4()),
+            "notification_type": notification_type,
+            "recipient_email": recipient_email,
+            "recipient_type": recipient_type,
+            "employee_id": employee_id,
+            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "status": "failed",
+            "error": str(e)
+        }
+        await db.notification_logs.insert_one(notification_log)
+        
+        return {"status": "failed", "error": str(e)}
+
+# Trigger notification for recruitment issues
+async def trigger_recruitment_notifications(employee_id: str, issues: dict):
+    """Trigger notifications for recruitment compliance issues"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        return
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    employee_email = employee.get('email')
+    
+    base_data = {
+        "employee_name": employee_name,
+        "portal_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=recruitment",
+        "admin_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=recruitment"
+    }
+    
+    # CV Gap notifications
+    for gap in issues.get('cv_gaps', []):
+        template_data = {
+            **base_data,
+            "gap_start": gap.get('gap_start', 'Unknown'),
+            "gap_end": gap.get('gap_end', 'Unknown'),
+            "gap_days": gap.get('gap_duration_days', 0),
+            "previous_job": f"{gap.get('previous_job', {}).get('company', 'Unknown')} ({gap.get('previous_job', {}).get('role', '')})",
+            "next_job": f"{gap.get('next_job', {}).get('company', 'Unknown')} ({gap.get('next_job', {}).get('role', '')})"
+        }
+        
+        # Send to employee
+        if employee_email:
+            await send_notification_email(
+                NotificationType.CV_GAP_DETECTED,
+                employee_email,
+                "employee",
+                template_data,
+                employee_id
+            )
+        
+        # Send to admin
+        await send_notification_email(
+            NotificationType.CV_GAP_DETECTED,
+            ADMIN_EMAIL,
+            "admin",
+            template_data,
+            employee_id
+        )
+    
+    # Reference notifications
+    for ref in issues.get('unverified_references', []):
+        template_data = {
+            **base_data,
+            "reference_num": ref.get('reference_num', 1),
+            "reference_name": ref.get('name', 'Unknown'),
+            "reference_company": ref.get('company', 'Unknown')
+        }
+        
+        if employee_email:
+            await send_notification_email(
+                NotificationType.REFERENCE_NOT_VERIFIED,
+                employee_email,
+                "employee",
+                template_data,
+                employee_id
+            )
+        
+        await send_notification_email(
+            NotificationType.REFERENCE_NOT_VERIFIED,
+            ADMIN_EMAIL,
+            "admin",
+            template_data,
+            employee_id
+        )
+    
+    # Proof of Address notifications
+    poa = issues.get('proof_of_address', {})
+    if poa.get('missing', False):
+        template_data = {
+            **base_data,
+            "current_count": poa.get('current_count', 0),
+            "verified_count": poa.get('verified_count', 0)
+        }
+        
+        if employee_email:
+            await send_notification_email(
+                NotificationType.MISSING_PROOF_OF_ADDRESS,
+                employee_email,
+                "employee",
+                template_data,
+                employee_id
+            )
+        
+        await send_notification_email(
+            NotificationType.MISSING_PROOF_OF_ADDRESS,
+            ADMIN_EMAIL,
+            "admin",
+            template_data,
+            employee_id
+        )
+
+# API endpoint to manually trigger recruitment notifications
+@api_router.post("/notifications/trigger-recruitment/{employee_id}")
+async def trigger_recruitment_notification(employee_id: str, user: dict = Depends(require_admin)):
+    """Manually trigger recruitment compliance notifications for an employee"""
+    # Get recruitment status
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    issues = {"cv_gaps": [], "unverified_references": [], "proof_of_address": {}}
+    
+    # Check CV gaps
+    employment_history = employee.get('employment_history', [])
+    for job in employment_history:
+        gap = job.get('gap_after', {})
+        if gap and not gap.get('explanation') and gap.get('gap_duration_days', 0) > 30:
+            issues['cv_gaps'].append(gap)
+    
+    # Check references
+    for ref_num in [1, 2]:
+        ref_name = employee.get(f'reference_{ref_num}_name')
+        if ref_name and not employee.get(f'reference_{ref_num}_verified'):
+            issues['unverified_references'].append({
+                "reference_num": ref_num,
+                "name": ref_name,
+                "company": employee.get(f'reference_{ref_num}_company', '')
+            })
+    
+    # Check proof of address
+    poa_items = await db.compliance_status.find({
+        "employee_id": employee_id,
+        "requirement_id": "proof_of_address"
+    }, {"_id": 0}).to_list(100)
+    
+    verified_count = sum(1 for item in poa_items if item.get('verified'))
+    current_count = len([item for item in poa_items if item.get('evidence_files')])
+    
+    if verified_count < 2:
+        issues['proof_of_address'] = {
+            "missing": True,
+            "current_count": current_count,
+            "verified_count": verified_count
+        }
+    
+    if not any([issues['cv_gaps'], issues['unverified_references'], issues['proof_of_address'].get('missing')]):
+        return {"message": "No recruitment issues found", "issues": issues}
+    
+    await trigger_recruitment_notifications(employee_id, issues)
+    
+    return {"message": "Notifications triggered", "issues_found": {
+        "cv_gaps": len(issues['cv_gaps']),
+        "unverified_references": len(issues['unverified_references']),
+        "missing_proof_of_address": issues['proof_of_address'].get('missing', False)
+    }}
+
+# API endpoint to check and trigger expiry notifications
+@api_router.post("/notifications/check-expiries")
+async def check_expiry_notifications(user: dict = Depends(require_admin)):
+    """Check for expiring documents and training, send notifications"""
+    now = datetime.now(timezone.utc)
+    thirty_days = now + timedelta(days=30)
+    sixty_days = now + timedelta(days=60)
+    
+    notifications_sent = {"60_day": 0, "30_day": 0, "expired": 0}
+    
+    # Get all employees
+    employees = await db.employees.find({}, {"_id": 0}).to_list(1000)
+    
+    for employee in employees:
+        employee_id = employee.get('id')
+        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+        employee_email = employee.get('email')
+        
+        base_data = {
+            "employee_name": employee_name,
+            "portal_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=checklist",
+            "admin_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=checklist"
+        }
+        
+        # Check compliance items for expiry
+        compliance_items = await db.compliance_status.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+        
+        for item in compliance_items:
+            expiry_str = item.get('expiry_date')
+            if not expiry_str:
+                continue
+            
+            try:
+                expiry_date = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+            except:
+                continue
+            
+            # Check if already notified recently (within 7 days)
+            recent_notification = await db.notification_logs.find_one({
+                "employee_id": employee_id,
+                "notification_type": {"$in": [NotificationType.DOCUMENT_EXPIRING_30_DAYS, NotificationType.DOCUMENT_EXPIRING_60_DAYS]},
+                "template_data.document_name": item.get('requirement_id'),
+                "sent_at": {"$gte": (now - timedelta(days=7)).isoformat()}
+            })
+            
+            if recent_notification:
+                continue
+            
+            template_data = {
+                **base_data,
+                "document_name": item.get('requirement_id', '').replace('_', ' ').title(),
+                "expiry_date": expiry_date.strftime('%d %B %Y')
+            }
+            
+            if expiry_date <= thirty_days:
+                notification_type = NotificationType.DOCUMENT_EXPIRING_30_DAYS
+                notifications_sent["30_day"] += 1
+            elif expiry_date <= sixty_days:
+                notification_type = NotificationType.DOCUMENT_EXPIRING_60_DAYS
+                notifications_sent["60_day"] += 1
+            else:
+                continue
+            
+            if employee_email:
+                await send_notification_email(notification_type, employee_email, "employee", template_data, employee_id)
+            await send_notification_email(notification_type, ADMIN_EMAIL, "admin", template_data, employee_id)
+        
+        # Check training for expiry
+        training_records = await db.training_records.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+        
+        for record in training_records:
+            expiry_str = record.get('expiry_date')
+            if not expiry_str:
+                continue
+            
+            try:
+                expiry_date = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+            except:
+                continue
+            
+            template_data = {
+                **base_data,
+                "training_name": record.get('training_id', '').replace('_', ' ').title(),
+                "expiry_date": expiry_date.strftime('%d %B %Y'),
+                "portal_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=training",
+                "admin_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=training"
+            }
+            
+            if expiry_date < now:
+                # Already expired
+                recent_notification = await db.notification_logs.find_one({
+                    "employee_id": employee_id,
+                    "notification_type": NotificationType.TRAINING_EXPIRED,
+                    "template_data.training_name": record.get('training_id'),
+                    "sent_at": {"$gte": (now - timedelta(days=7)).isoformat()}
+                })
+                
+                if not recent_notification:
+                    if employee_email:
+                        await send_notification_email(NotificationType.TRAINING_EXPIRED, employee_email, "employee", template_data, employee_id)
+                    await send_notification_email(NotificationType.TRAINING_EXPIRED, ADMIN_EMAIL, "admin", template_data, employee_id)
+                    notifications_sent["expired"] += 1
+    
+    return {
+        "message": "Expiry check complete",
+        "notifications_sent": notifications_sent,
+        "checked_employees": len(employees)
+    }
+
+# API endpoint to get notification logs
+@api_router.get("/notifications/logs")
+async def get_notification_logs(
+    employee_id: Optional[str] = None,
+    notification_type: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+    user: dict = Depends(require_admin)
+):
+    """Get notification logs with optional filters"""
+    query = {}
+    
+    if employee_id:
+        query["employee_id"] = employee_id
+    if notification_type:
+        query["notification_type"] = notification_type
+    if status:
+        query["status"] = status
+    
+    logs = await db.notification_logs.find(query, {"_id": 0}).sort("sent_at", -1).limit(limit).to_list(limit)
+    
+    return {"logs": logs, "count": len(logs)}
+
+# API endpoint to trigger notifications for missing mandatory items
+@api_router.post("/notifications/trigger-missing-items/{employee_id}")
+async def trigger_missing_items_notification(employee_id: str, user: dict = Depends(require_admin)):
+    """Trigger notifications for missing mandatory compliance items"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    employee_email = employee.get('email')
+    
+    # Get compliance status
+    compliance_items = await db.compliance_status.find({"employee_id": employee_id}, {"_id": 0}).to_list(100)
+    compliance_map = {item['requirement_id']: item for item in compliance_items}
+    
+    missing_items = []
+    
+    for category, items in MANDATORY_ITEMS.items():
+        for item in items:
+            item_id = item['id']
+            status = compliance_map.get(item_id, {})
+            
+            # Check if missing (no evidence files and not verified)
+            if not status.get('evidence_files') and not status.get('verified'):
+                missing_items.append({
+                    "document_name": item.get('name', item_id.replace('_', ' ').title()),
+                    "category": category.replace('_', ' ').title()
+                })
+    
+    if not missing_items:
+        return {"message": "No missing items found", "missing_count": 0}
+    
+    notifications_sent = 0
+    for item in missing_items:
+        template_data = {
+            "employee_name": employee_name,
+            "document_name": item['document_name'],
+            "category": item['category'],
+            "portal_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=checklist",
+            "admin_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=checklist"
+        }
+        
+        if employee_email:
+            await send_notification_email(
+                NotificationType.MISSING_MANDATORY_ITEM,
+                employee_email,
+                "employee",
+                template_data,
+                employee_id
+            )
+        
+        await send_notification_email(
+            NotificationType.MISSING_MANDATORY_ITEM,
+            ADMIN_EMAIL,
+            "admin",
+            template_data,
+            employee_id
+        )
+        notifications_sent += 1
+    
+    return {"message": "Notifications sent", "missing_count": len(missing_items), "notifications_sent": notifications_sent}
+
+# API endpoint to notify about unverified submissions
+@api_router.post("/notifications/unverified-submissions")
+async def notify_unverified_submissions(user: dict = Depends(require_admin)):
+    """Send notifications for all unverified document submissions"""
+    now = datetime.now(timezone.utc)
+    
+    # Find all compliance items with evidence but not verified (uploaded > 24 hours ago)
+    twenty_four_hours_ago = (now - timedelta(hours=24)).isoformat()
+    
+    pipeline = [
+        {"$match": {
+            "evidence_files": {"$exists": True, "$ne": []},
+            "verified": {"$ne": True}
+        }},
+        {"$lookup": {
+            "from": "employees",
+            "localField": "employee_id",
+            "foreignField": "id",
+            "as": "employee"
+        }},
+        {"$unwind": "$employee"}
+    ]
+    
+    unverified_items = await db.compliance_status.aggregate(pipeline).to_list(500)
+    
+    notifications_sent = 0
+    
+    for item in unverified_items:
+        employee = item.get('employee', {})
+        employee_id = employee.get('id')
+        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+        
+        # Check if already notified recently
+        recent_notification = await db.notification_logs.find_one({
+            "employee_id": employee_id,
+            "notification_type": NotificationType.UNVERIFIED_SUBMISSION,
+            "template_data.document_name": item.get('requirement_id'),
+            "sent_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+        })
+        
+        if recent_notification:
+            continue
+        
+        template_data = {
+            "employee_name": employee_name,
+            "document_name": item.get('requirement_id', '').replace('_', ' ').title(),
+            "uploaded_at": item.get('updated_at', 'Unknown'),
+            "admin_link": f"{PORTAL_URL}/portal/employees/{employee_id}?tab=checklist"
+        }
+        
+        await send_notification_email(
+            NotificationType.UNVERIFIED_SUBMISSION,
+            ADMIN_EMAIL,
+            "admin",
+            template_data,
+            employee_id
+        )
+        notifications_sent += 1
+    
+    return {"message": "Unverified submission check complete", "notifications_sent": notifications_sent}
+
 # ==================== SERVICE USERS (CQC Care Records) ====================
 # Service User File structure aligned with CQC expectations
 # Sections 1-10 based on standard care file requirements

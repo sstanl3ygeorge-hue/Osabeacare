@@ -4,6 +4,132 @@
 **Osabea Healthcare Solutions**
 
 
+## Recurring Compliance Engine - Phase 1 (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Implement strict, auditable recurring compliance tracking for continuous workforce monitoring. This proves that staff are monitored, supported, spot-checked, supervised, and competency-reviewed continuously over time.
+
+### Data Model: `recurring_compliance` Collection
+
+```javascript
+{
+  id: "uuid",
+  employee_id: "employee-uuid",  // Links to existing employees collection
+  
+  // Item Classification
+  item_type: "supervision" | "competency_assessment" | "spot_check" | "training_refresh" | "report_followup",
+  item_name: "Monthly Supervision",
+  description: "...",
+  
+  // Frequency & Scheduling
+  frequency: "monthly" | "bi_monthly" | "quarterly" | "six_monthly" | "annual" | "ad_hoc",
+  frequency_days: 30,
+  
+  // Due Tracking
+  next_due_date: "2026-04-15",
+  last_completed_date: "2026-03-15",
+  
+  // Assignment
+  assigned_to: "user_id",  // Manager responsible
+  escalate_to: "admin_user_id",  // For overdue escalation
+  
+  // Reminder Tracking
+  reminder_schedule: [14, 7, 0],
+  reminders_sent: [{days_before: 14, sent_at: "..."}],
+  escalation_threshold_days: 7,
+  escalation_sent: false,
+  
+  // Completion History (immutable append-only)
+  completion_history: [
+    {
+      id: "uuid",
+      completed_date: "2026-03-15",
+      completed_by: "user_id",
+      outcome: "satisfactory" | "needs_improvement" | "action_required",
+      notes: "...",
+      evidence_url: "...",
+      recorded_at: "..."
+    }
+  ],
+  
+  // For report_followup linking
+  linked_report_id: null,
+  linked_incident_id: null,
+  parent_item_id: null,  // For follow-ups from competency assessments
+  
+  // Status
+  is_active: true,
+  
+  // Audit
+  created_at, created_by, updated_at
+}
+```
+
+**Why New Collection?** The `recurring_compliance` collection stores ONLY scheduling/completion metadata for recurring items. It does NOT duplicate:
+- Employee truth (references employee_id)
+- Training truth (training_refresh links to existing training system)
+- Incident truth (report_followup links via linked_report_id)
+
+### Endpoints Added
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/recurring-compliance` | POST | Create recurring item |
+| `/api/recurring-compliance` | GET | List items with filters |
+| `/api/recurring-compliance/dashboard-summary` | GET | Org-wide dashboard summary |
+| `/api/recurring-compliance/{id}` | GET | Get single item with history |
+| `/api/recurring-compliance/{id}` | PUT | Update item |
+| `/api/recurring-compliance/{id}/complete` | POST | Record completion |
+| `/api/employees/{id}/recurring-compliance` | GET | Employee's recurring items |
+| `/api/recurring-compliance/process-reminders` | POST | Process all reminders (daily cron) |
+| `/api/employees/{id}/request-document` | POST | Request specific document |
+| `/api/employees/{id}/request-missing-items` | POST | Request all missing items |
+| `/api/employees/{id}/document-requests` | GET | Get request history |
+
+### Default Frequencies
+| Item Type | Frequency | Days |
+|-----------|-----------|------|
+| supervision | monthly | 30 |
+| competency_assessment | six_monthly | 182 |
+| spot_check | monthly | 30 |
+| training_refresh | annual | 365 |
+| report_followup | ad_hoc | explicit |
+
+### Status Computation (ALWAYS computed, never stored stale)
+```
+days_until_due > 30  →  "scheduled"
+days_until_due 15-30 →  "upcoming"
+days_until_due 1-14  →  "due"
+days_until_due < 0   →  "overdue"
+```
+
+### Next Due Date Recalculation
+On completion, `next_due_date = completed_date + frequency_days`
+
+### Reminder Integration (Uses Existing Email Engine)
+- 14 days before: `compliance_due_14_days` notification
+- 7 days before: `compliance_due_7_days` notification
+- On due date: `compliance_due_now` notification
+- Past due: `compliance_overdue` notification
+- Overdue > 7 days: `compliance_escalation` to admin
+
+### Future UI Integration Points
+1. **Dashboard**: Recurring Compliance card showing overdue/due/upcoming counts
+2. **Employee Profile**: New "Recurring Compliance" section with items and completion buttons
+3. **Audit View**: Recurring compliance evidence for CQC inspection
+
+### Test Scenarios Executed
+1. ✅ Create supervision item - auto-applied defaults
+2. ✅ Create competency assessment - 6-monthly frequency
+3. ✅ Create spot check - status computed as "overdue" when past due
+4. ✅ Complete spot check - next_due_date auto-calculated
+5. ✅ Get employee recurring items - sorted by urgency
+6. ✅ Dashboard summary - shows counts and urgent items
+7. ✅ Request document - uses EmailRequestService
+8. ✅ Get document requests - shows request history
+
+
 ## NHS-Level Digital Application Intake (2026-03-30)
 **Status**: COMPLETE ✅
 

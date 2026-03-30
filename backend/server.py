@@ -2796,12 +2796,23 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
 
 
 async def derive_onboarding_status(employee_id: str, role: str, current_status: str = None) -> str:
-    """Auto-derive onboarding status based on compliance progress"""
+    """
+    Auto-derive onboarding status based on compliance progress.
+    
+    RECRUITMENT APPROVAL GATE:
+    - Employee cannot become ACTIVE without recruitment_approved=True
+    - This is separate from compliance (which handles operational readiness)
+    - Both must be satisfied for ACTIVE status
+    """
     # Don't change archived status
     if current_status == OnboardingStatus.ARCHIVED:
         return OnboardingStatus.ARCHIVED
     
     compliance = await calculate_employee_compliance(employee_id, role)
+    
+    # Get employee record to check recruitment approval
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    recruitment_approved = employee.get("recruitment_approved", False) if employee else False
     
     # Check for any activity
     forms_count = await db.generated_forms.count_documents({"employee_id": employee_id})
@@ -2816,10 +2827,18 @@ async def derive_onboarding_status(employee_id: str, role: str, current_status: 
     # All mandatory items complete and verified
     if compliance["complete_count"] == compliance["total_items"]:
         if compliance["verified_count"] == compliance["total_items"]:
-            # Check if they are actively working (has current assignment or marked active)
+            # RECRUITMENT APPROVAL GATE: Cannot go ACTIVE without approval
             if current_status == OnboardingStatus.ACTIVE:
+                # Already active - check if approval was revoked
+                if not recruitment_approved:
+                    logger.warning(f"Employee {employee_id} is ACTIVE but recruitment_approved=False")
                 return OnboardingStatus.ACTIVE
-            return OnboardingStatus.READY_FOR_PLACEMENT
+            
+            # Not yet active - require recruitment approval to activate
+            if recruitment_approved:
+                return OnboardingStatus.READY_FOR_PLACEMENT  # Still need manual activation
+            else:
+                return OnboardingStatus.READY_FOR_PLACEMENT  # Waiting for approval
         else:
             return OnboardingStatus.UNDER_REVIEW
     
@@ -2948,6 +2967,11 @@ class EmployeeUpdate(BaseModel):
     criminal_offence_declared: Optional[bool] = None
     professional_misconduct_declared: Optional[bool] = None
     health_issue_declared: Optional[bool] = None
+    # RECRUITMENT APPROVAL GATE (CRITICAL - Added for audit hardening)
+    recruitment_approved: Optional[bool] = False
+    recruitment_approved_by: Optional[str] = None
+    recruitment_approved_at: Optional[str] = None
+    recruitment_approval_notes: Optional[str] = None
 
 class EmployeeResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -4651,6 +4675,22 @@ async def require_manager_or_admin(user: dict = Depends(get_current_user)) -> di
 
 @api_router.post("/auth/register")
 async def register(user: UserCreate):
+    """
+    Register a new user account.
+    
+    SECURITY RULES:
+    - admin and super_admin roles CANNOT be created via public registration
+    - Only super_admin can create admin/super_admin accounts (via separate endpoint)
+    - branch_manager cannot self-escalate to admin
+    """
+    # SECURITY: Block privileged role creation via public registration
+    PRIVILEGED_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN]
+    if user.role in PRIVILEGED_ROLES:
+        raise HTTPException(
+            status_code=403, 
+            detail="Admin accounts cannot be created via public registration. Contact a super administrator."
+        )
+    
     existing = await db.users.find_one({"email": user.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -4669,8 +4709,68 @@ async def register(user: UserCreate):
     await db.users.insert_one(user_doc)
     
     token = create_token(user_id, user.email, user.role)
-    user_response = {k: v for k, v in user_doc.items() if k != 'password'}
+    user_response = {k: v for k, v in user_doc.items() if k not in ['password', '_id']}
     return {"token": token, "user": user_response}
+
+# Super Admin only: Create privileged accounts
+class AdminUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    role: str  # Must be admin or super_admin
+
+@api_router.post("/auth/create-admin")
+async def create_admin_user(user_data: AdminUserCreate, user: dict = Depends(get_current_user)):
+    """
+    Create an admin or super_admin account.
+    RESTRICTED: Only super_admin can create privileged accounts.
+    """
+    # SECURITY: Only super_admin can create admin accounts
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(
+            status_code=403, 
+            detail="Only super administrators can create admin accounts"
+        )
+    
+    # Validate target role is privileged
+    PRIVILEGED_ROLES = [UserRole.ADMIN, UserRole.SUPER_ADMIN]
+    if user_data.role not in PRIVILEGED_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail="Use /auth/register for non-admin accounts"
+        )
+    
+    existing = await db.users.find_one({"email": user_data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    now = datetime.now(timezone.utc).isoformat()
+    user_doc = {
+        "user_id": user_id,
+        "email": user_data.email,
+        "password": hash_password(user_data.password),
+        "name": user_data.name,
+        "role": user_data.role,
+        "assignment": "Admin",
+        "picture": None,
+        "created_at": now,
+        "created_by": user.get('user_id'),  # Track who created the admin
+        "created_by_role": user.get('role')
+    }
+    await db.users.insert_one(user_doc)
+    
+    # Audit log
+    await log_audit_action(
+        user.get('user_id'),
+        "create_admin_user",
+        "user",
+        user_id,
+        {"email": user_data.email, "role": user_data.role}
+    )
+    
+    user_response = {k: v for k, v in user_doc.items() if k not in ['password', '_id']}
+    return {"message": "Admin user created", "user": user_response}
 
 @api_router.post("/auth/login")
 async def login(credentials: UserLogin):
@@ -6853,7 +6953,13 @@ async def override_employee_status(
     reason: str = Query(None, description="Reason for override"),
     user: dict = Depends(require_admin)
 ):
-    """Manually override onboarding status (Super Admin only)"""
+    """
+    Manually override onboarding status (Super Admin only).
+    
+    RECRUITMENT APPROVAL GATE:
+    - Setting status to ACTIVE requires recruitment_approved=True
+    - Super Admin can override but recruitment approval is still checked
+    """
     if user.get('role') != UserRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Only Super Admin can override onboarding status")
     
@@ -6866,6 +6972,14 @@ async def override_employee_status(
                      OnboardingStatus.ACTIVE, OnboardingStatus.ARCHIVED]
     if new_status not in valid_statuses:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+    
+    # RECRUITMENT APPROVAL GATE: Cannot set ACTIVE without recruitment approval
+    if new_status == OnboardingStatus.ACTIVE:
+        if not employee.get("recruitment_approved"):
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot activate employee without recruitment approval. Use /approve-recruitment first."
+            )
     
     previous_status = employee.get("onboarding_status", "New")
     
@@ -6897,6 +7011,132 @@ async def override_employee_status(
         "previous_status": previous_status,
         "new_status": new_status,
         "override": True
+    }
+
+# Recruitment Approval Endpoint
+class RecruitmentApprovalRequest(BaseModel):
+    notes: Optional[str] = None
+
+@api_router.post("/employees/{employee_id}/approve-recruitment")
+async def approve_recruitment(
+    employee_id: str,
+    approval: RecruitmentApprovalRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Approve an employee for recruitment/activation.
+    
+    This is a SEPARATE gate from compliance verification:
+    - Compliance = operational readiness (documents, training, etc.)
+    - Recruitment Approval = human decision that person should be hired
+    
+    Both must be satisfied for ACTIVE status.
+    Only ADMIN+ can approve recruitment.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if employee.get("recruitment_approved"):
+        return {
+            "status": "already_approved",
+            "recruitment_approved_at": employee.get("recruitment_approved_at"),
+            "recruitment_approved_by": employee.get("recruitment_approved_by")
+        }
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "recruitment_approved": True,
+            "recruitment_approved_by": user['user_id'],
+            "recruitment_approved_at": now,
+            "recruitment_approval_notes": approval.notes,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "recruitment_approved",
+        "employee",
+        employee_id,
+        {"notes": approval.notes}
+    )
+    
+    return {
+        "status": "approved",
+        "employee_id": employee_id,
+        "recruitment_approved": True,
+        "recruitment_approved_by": user['user_id'],
+        "recruitment_approved_at": now
+    }
+
+@api_router.post("/employees/{employee_id}/revoke-recruitment-approval")
+async def revoke_recruitment_approval(
+    employee_id: str,
+    reason: str = Query(..., description="Reason for revoking approval"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Revoke recruitment approval (ADMIN+ only).
+    This will prevent the employee from being activated.
+    """
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only Super Admin can revoke recruitment approval")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if not employee.get("recruitment_approved"):
+        return {"status": "not_approved", "message": "Employee was not approved"}
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "recruitment_approved": False,
+            "recruitment_approval_revoked_by": user['user_id'],
+            "recruitment_approval_revoked_at": now,
+            "recruitment_approval_revoked_reason": reason,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "recruitment_approval_revoked",
+        "employee",
+        employee_id,
+        {"reason": reason, "previous_approved_by": employee.get("recruitment_approved_by")}
+    )
+    
+    return {
+        "status": "revoked",
+        "employee_id": employee_id,
+        "reason": reason
+    }
+
+@api_router.get("/employees/{employee_id}/recruitment-approval-status")
+async def get_recruitment_approval_status(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get recruitment approval status for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    return {
+        "employee_id": employee_id,
+        "recruitment_approved": employee.get("recruitment_approved", False),
+        "recruitment_approved_by": employee.get("recruitment_approved_by"),
+        "recruitment_approved_at": employee.get("recruitment_approved_at"),
+        "recruitment_approval_notes": employee.get("recruitment_approval_notes"),
+        "can_be_activated": employee.get("recruitment_approved", False)
     }
 
 # ==================== EMPLOYEE EXPORT ROUTES ====================
@@ -9119,10 +9359,31 @@ async def verify_requirement(
     """
     Verify a requirement. REQUIRES evidence to exist.
     Cannot verify empty requirements.
+    
+    LEGAL DOCUMENT RESTRICTION:
+    - Sensitive/legal documents require ADMIN+ to verify
+    - Branch managers cannot final-verify: RTW, DBS, Identity, Proof of Address
     """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # LEGAL DOCUMENT RESTRICTION
+    LEGAL_SENSITIVE_REQUIREMENTS = [
+        "right_to_work_documents",
+        "right_to_work_check",
+        "dbs_certificate",
+        "dbs_check",
+        "identity_documents",
+        "proof_of_address"
+    ]
+    
+    if requirement_id in LEGAL_SENSITIVE_REQUIREMENTS:
+        if user.get('role') == UserRole.BRANCH_MANAGER:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification. Branch managers cannot verify this item."
+            )
     
     all_items = get_mandatory_items_for_role(employee.get('role', ''))
     requirement = next((item for item in all_items if item['id'] == requirement_id), None)
@@ -10253,7 +10514,37 @@ async def upload_employee_document(
 
 @api_router.put("/employee-documents/{doc_id}", response_model=EmployeeDocumentResponse)
 async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, user: dict = Depends(require_manager_or_admin)):
+    """
+    Update a document.
+    
+    EDIT-AFTER-VERIFICATION TRACKING:
+    - If document was verified and material fields are changed, mark requires_reverification=True
+    - Old verification is no longer trustworthy
+    """
+    # Get existing document to check verification state
+    existing_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not existing_doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    
+    # MATERIAL FIELDS that invalidate verification if changed
+    MATERIAL_FIELDS = ['file_url', 'document_type', 'expiry_date', 'document_number']
+    
+    # Check if document was verified and material fields are being changed
+    was_verified = existing_doc.get('verified', False)
+    material_change = any(
+        field in update_data and update_data[field] != existing_doc.get(field)
+        for field in MATERIAL_FIELDS
+    )
+    
+    if was_verified and material_change:
+        update_data['requires_reverification'] = True
+        update_data['reverification_reason'] = f"Material change after verification (fields: {', '.join(f for f in MATERIAL_FIELDS if f in update_data)})"
+        update_data['reverification_triggered_at'] = datetime.now(timezone.utc).isoformat()
+        update_data['reverification_triggered_by'] = user['user_id']
+        # Note: We do NOT clear verified flag - we track that reverification is needed
+        # This preserves audit trail of original verification
     
     if 'status' in update_data and update_data['status'] in [DocumentStatus.APPROVED, DocumentStatus.REJECTED]:
         update_data['reviewed_by'] = user['user_id']
@@ -10263,12 +10554,22 @@ async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, 
     if update_data.get('verified'):
         update_data['verified_by'] = user['user_id']
         update_data['verified_at'] = datetime.now(timezone.utc).isoformat()
+        # Clear reverification flag if re-verifying
+        update_data['requires_reverification'] = False
+        update_data['reverification_reason'] = None
     
     result = await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    await log_audit_action(user['user_id'], "update_document", "employee_document", doc_id, update_data)
+    # Log with edit-after-verification tracking
+    audit_details = update_data.copy()
+    if was_verified and material_change:
+        audit_details['edit_after_verification'] = True
+        audit_details['original_verified_by'] = existing_doc.get('verified_by')
+        audit_details['original_verified_at'] = existing_doc.get('verified_at')
+    
+    await log_audit_action(user['user_id'], "update_document", "employee_document", doc_id, audit_details)
     
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     
@@ -10281,10 +10582,33 @@ async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, 
 
 @api_router.post("/employee-documents/{doc_id}/verify")
 async def verify_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):
-    """Mark a document as verified"""
+    """
+    Mark a document as verified.
+    
+    LEGAL DOCUMENT RESTRICTION:
+    - Sensitive/legal documents require ADMIN+ to verify
+    """
     doc = await db.employee_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    # LEGAL DOCUMENT RESTRICTION
+    LEGAL_SENSITIVE_REQUIREMENTS = [
+        "right_to_work_documents",
+        "right_to_work_check",
+        "dbs_certificate",
+        "dbs_check",
+        "identity_documents",
+        "proof_of_address"
+    ]
+    
+    requirement_id = doc.get("requirement_id", "")
+    if requirement_id in LEGAL_SENSITIVE_REQUIREMENTS:
+        if user.get('role') == UserRole.BRANCH_MANAGER:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification."
+            )
     
     # Ensure document is approved before verification
     if doc.get('status') not in ['approved', 'uploaded']:
@@ -10329,7 +10653,29 @@ async def unverify_employee_document(doc_id: str, user: dict = Depends(require_m
 
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")
 async def verify_all_documents_in_requirement(employee_id: str, requirement_id: str, user: dict = Depends(require_manager_or_admin)):
-    """Verify all documents under a requirement"""
+    """
+    Verify all documents under a requirement.
+    
+    LEGAL DOCUMENT RESTRICTION:
+    - Sensitive/legal documents require ADMIN+ to verify
+    """
+    # LEGAL DOCUMENT RESTRICTION
+    LEGAL_SENSITIVE_REQUIREMENTS = [
+        "right_to_work_documents",
+        "right_to_work_check",
+        "dbs_certificate",
+        "dbs_check",
+        "identity_documents",
+        "proof_of_address"
+    ]
+    
+    if requirement_id in LEGAL_SENSITIVE_REQUIREMENTS:
+        if user.get('role') == UserRole.BRANCH_MANAGER:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification."
+            )
+    
     now = datetime.now(timezone.utc).isoformat()
     
     # Get verifier name
@@ -10737,7 +11083,12 @@ async def update_form_submission(
     update: FormSubmissionUpdate, 
     user: dict = Depends(get_current_user)
 ):
-    """Update a form submission"""
+    """
+    Update a form submission.
+    
+    EDIT-AFTER-VERIFICATION TRACKING:
+    - If form was verified and data is changed, mark requires_reverification=True
+    """
     submission = await db.form_submissions.find_one({"id": submission_id})
     if not submission:
         raise HTTPException(status_code=404, detail="Form submission not found")
@@ -10745,20 +11096,38 @@ async def update_form_submission(
     now = datetime.now(timezone.utc).isoformat()
     update_fields = {"updated_at": now}
     
+    # Check if form was verified and data is being changed
+    was_verified = submission.get('verified', False)
+    material_change = False
+    
     if update.data is not None:
         update_fields["data"] = update.data
+        # Check if data actually changed
+        if update.data != submission.get('data'):
+            material_change = True
     if update.notes is not None:
         update_fields["notes"] = update.notes
+    
+    # EDIT-AFTER-VERIFICATION: Mark as requiring reverification
+    if was_verified and material_change:
+        update_fields['requires_reverification'] = True
+        update_fields['reverification_reason'] = "Form data edited after verification"
+        update_fields['reverification_triggered_at'] = now
+        update_fields['reverification_triggered_by'] = user['user_id']
     
     await db.form_submissions.update_one(
         {"id": submission_id},
         {"$set": update_fields}
     )
     
-    # Log audit action
-    await log_audit_action(user['user_id'], "form_updated", "form_submission", submission_id, {
-        "updated_fields": list(update_fields.keys())
-    })
+    # Log audit action with edit-after-verification tracking
+    audit_details = {"updated_fields": list(update_fields.keys())}
+    if was_verified and material_change:
+        audit_details['edit_after_verification'] = True
+        audit_details['original_verified_by'] = submission.get('verified_by')
+        audit_details['original_verified_at'] = submission.get('verified_at')
+    
+    await log_audit_action(user['user_id'], "form_updated", "form_submission", submission_id, audit_details)
     
     updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
     return FormSubmissionResponse(**updated)
@@ -10766,7 +11135,7 @@ async def update_form_submission(
 
 @api_router.post("/form-submissions/{submission_id}/verify")
 async def verify_form_submission(submission_id: str, user: dict = Depends(require_admin)):
-    """Verify a form submission"""
+    """Verify a form submission. Clears requires_reverification flag."""
     submission = await db.form_submissions.find_one({"id": submission_id})
     if not submission:
         raise HTTPException(status_code=404, detail="Form submission not found")
@@ -10784,14 +11153,18 @@ async def verify_form_submission(submission_id: str, user: dict = Depends(requir
             "verified_by": user['user_id'],
             "verified_by_name": verifier_name,
             "verified_at": now,
-            "status": "verified"
+            "status": "verified",
+            # Clear reverification flag on re-verification
+            "requires_reverification": False,
+            "reverification_reason": None
         }}
     )
     
     # Log audit action
     await log_audit_action(user['user_id'], "form_verified", "form_submission", submission_id, {
         "employee_id": submission["employee_id"],
-        "requirement_id": submission["requirement_id"]
+        "requirement_id": submission["requirement_id"],
+        "was_reverification": submission.get("requires_reverification", False)
     })
     
     updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
@@ -10824,6 +11197,44 @@ async def unverify_form_submission(submission_id: str, user: dict = Depends(requ
     
     updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
     return FormSubmissionResponse(**updated)
+
+# Endpoint to get items needing reverification
+@api_router.get("/employees/{employee_id}/items-needing-reverification")
+async def get_items_needing_reverification(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all documents and forms that have been edited after verification
+    and require reverification.
+    """
+    # Find documents needing reverification
+    docs_needing_reverification = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requires_reverification": True
+    }, {"_id": 0}).to_list(100)
+    
+    # Find forms needing reverification
+    forms_needing_reverification = await db.form_submissions.find({
+        "employee_id": employee_id,
+        "requires_reverification": True
+    }, {"_id": 0}).to_list(100)
+    
+    # Find training records needing reverification (if applicable)
+    training_needing_reverification = await db.training_records.find({
+        "employee_id": employee_id,
+        "requires_reverification": True
+    }, {"_id": 0}).to_list(100)
+    
+    total_count = len(docs_needing_reverification) + len(forms_needing_reverification) + len(training_needing_reverification)
+    
+    return {
+        "employee_id": employee_id,
+        "total_needing_reverification": total_count,
+        "documents": docs_needing_reverification,
+        "forms": forms_needing_reverification,
+        "training": training_needing_reverification
+    }
 
 
 @api_router.delete("/form-submissions/{submission_id}")

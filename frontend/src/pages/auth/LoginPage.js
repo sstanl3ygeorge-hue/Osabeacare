@@ -174,9 +174,6 @@ export default function LoginPage() {
             </a>
           </div>
 
-          <p className="mt-6 text-center text-sm text-text-muted">
-            Demo credentials: admin@osabea.care / admin123
-          </p>
         </div>
       </div>
     </div>

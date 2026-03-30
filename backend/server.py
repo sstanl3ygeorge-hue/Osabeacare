@@ -57,7 +57,8 @@ storage_key = None
 
 # Resend Config
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'onboarding@resend.dev')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'Osabea Recruitment Team <recruitment@osabeacares.co.uk>')
+REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'info@osabeacaresolutions.co.uk')
 
 # Initialize storage
 def init_storage():
@@ -17517,6 +17518,7 @@ async def send_email(request: EmailRequest, user: dict = Depends(require_admin))
         email = await asyncio.to_thread(resend.Emails.send, {
             "from": SENDER_EMAIL,
             "to": [request.recipient_email],
+            "reply_to": REPLY_TO_EMAIL,
             "subject": request.subject,
             "html": request.html_content
         })
@@ -17583,16 +17585,17 @@ async def request_document(
             await asyncio.to_thread(resend.Emails.send, {
                 "from": SENDER_EMAIL,
                 "to": [employee['email']],
-                "subject": "Document request from Osabea Healthcare Solutions",
+                "reply_to": REPLY_TO_EMAIL,
+                "subject": "Document Request - Osabea Recruitment Team",
                 "html": f"""
                 <h2>Document Request</h2>
                 <p>Dear {employee['first_name']},</p>
-                <p>We need you to upload the following document to complete your compliance file:</p>
+                <p>We need you to upload the following document to complete your requirements:</p>
                 <p><strong>{doc_type['name']}</strong></p>
                 {f'<p>{message}</p>' if message else ''}
                 {f'<p>Due date: {due_date}</p>' if due_date else ''}
                 <p>Please log in to your portal and upload the requested document.</p>
-                <p>Thank you,<br>Osabea Healthcare Solutions Team</p>
+                <p>Thank you,<br>Osabea Recruitment Team</p>
                 """
             })
         except Exception as e:
@@ -17638,7 +17641,7 @@ NOTIFICATION_TEMPLATES = {
             <p>Please log in to provide an explanation for this gap:</p>
             <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Explain Gap</a></p>
             <p>If you have questions, please contact your recruitment manager.</p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17670,7 +17673,7 @@ NOTIFICATION_TEMPLATES = {
             </div>
             <p>If your referee has changed, please update your details in the portal:</p>
             <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Update Reference</a></p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17719,7 +17722,7 @@ NOTIFICATION_TEMPLATES = {
             </div>
             <p>Please upload the required documents:</p>
             <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Documents</a></p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17749,7 +17752,7 @@ NOTIFICATION_TEMPLATES = {
             </div>
             <p>Please renew this document and upload the new version before it expires.</p>
             <p><a href="{portal_link}" style="background: #ffc107; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Renewal</a></p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17776,9 +17779,9 @@ NOTIFICATION_TEMPLATES = {
                 <strong>Document:</strong> {document_name}<br>
                 <strong>Expiry Date:</strong> {expiry_date}
             </div>
-            <p><strong>Action Required:</strong> Please renew this document immediately to avoid compliance issues.</p>
+            <p><strong>Action Required:</strong> Please renew this document immediately to remain work-ready.</p>
             <p><a href="{portal_link}" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Renewal Now</a></p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17807,7 +17810,7 @@ NOTIFICATION_TEMPLATES = {
             </div>
             <p><strong>You cannot work until this training is renewed.</strong> Please complete the refresher training and upload your new certificate.</p>
             <p><a href="{portal_link}" style="background: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Certificate</a></p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17825,19 +17828,19 @@ NOTIFICATION_TEMPLATES = {
     },
     
     NotificationType.MISSING_MANDATORY_ITEM: {
-        "subject": "Missing Compliance Document - {document_name}",
+        "subject": "Missing Required Document - {document_name}",
         "employee_body": """
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #0d6c6c;">Missing Compliance Document</h2>
+            <h2 style="color: #0d6c6c;">Missing Required Document</h2>
             <p>Dear {employee_name},</p>
-            <p>We are missing the following mandatory document from your compliance file:</p>
+            <p>We are missing the following mandatory document from your file:</p>
             <div style="background: #e8f4f8; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
                 <strong>Document:</strong> {document_name}<br>
                 <strong>Category:</strong> {category}
             </div>
-            <p>Please upload this document to complete your compliance requirements.</p>
+            <p>Please upload this document to complete your requirements.</p>
             <p><a href="{portal_link}" style="background: #0d6c6c; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Upload Document</a></p>
-            <p>Kind regards,<br><strong>Osabea Healthcare Solutions</strong></p>
+            <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         </div>
         """,
         "admin_body": """
@@ -17878,7 +17881,7 @@ async def send_notification_email(
     template_data: dict,
     employee_id: str = None
 ) -> dict:
-    """Send a notification email and log it"""
+    """Send a notification email and log it with full tracking"""
     if not resend.api_key:
         logger.warning("Email service not configured, skipping notification")
         return {"status": "skipped", "reason": "Email service not configured"}
@@ -17900,43 +17903,52 @@ async def send_notification_email(
         logger.error(f"Missing template data key: {e}")
         return {"status": "error", "reason": f"Missing template data: {e}"}
     
+    email_sent_at = datetime.now(timezone.utc)
+    
     try:
         email_result = await asyncio.to_thread(resend.Emails.send, {
             "from": SENDER_EMAIL,
             "to": [recipient_email],
+            "reply_to": REPLY_TO_EMAIL,
             "subject": subject,
             "html": body
         })
         
-        # Log the notification
+        # Log the notification with full tracking
         notification_log = {
             "id": str(uuid.uuid4()),
             "notification_type": notification_type,
+            "email_type": notification_type,  # Explicit email_type field
             "recipient_email": recipient_email,
             "recipient_type": recipient_type,
             "employee_id": employee_id,
             "subject": subject,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "email_sent_at": email_sent_at.isoformat(),
+            "sent_at": email_sent_at.isoformat(),  # Keep for backwards compatibility
             "email_id": email_result.get("id"),
             "status": "sent",
+            "sender_email": SENDER_EMAIL,
+            "reply_to": REPLY_TO_EMAIL,
             "template_data": {k: v for k, v in template_data.items() if not k.endswith('_link')}  # Don't log full URLs
         }
         await db.notification_logs.insert_one(notification_log)
         
-        logger.info(f"Notification sent: {notification_type} to {recipient_email}")
+        logger.info(f"Notification sent: {notification_type} to {recipient_email} for employee {employee_id}")
         return {"status": "sent", "email_id": email_result.get("id"), "notification_id": notification_log["id"]}
         
     except Exception as e:
         logger.error(f"Failed to send notification: {e}")
         
-        # Log the failure
+        # Log the failure with full tracking
         notification_log = {
             "id": str(uuid.uuid4()),
             "notification_type": notification_type,
+            "email_type": notification_type,
             "recipient_email": recipient_email,
             "recipient_type": recipient_type,
             "employee_id": employee_id,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "email_sent_at": email_sent_at.isoformat(),
+            "sent_at": email_sent_at.isoformat(),
             "status": "failed",
             "error": str(e)
         }

@@ -9,7 +9,7 @@ import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
-  Clock, AlertCircle, CheckCircle, ExternalLink
+  Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -20,19 +20,22 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState(null);
+  const [recurringCompliance, setRecurringCompliance] = useState(null);
   const { token } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, employeesRes, expiryRes] = await Promise.all([
+        const [statsRes, employeesRes, expiryRes, recurringRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
-          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
+          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
+          axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
         ]);
         setStats(statsRes.data);
         setEmployees(employeesRes.data);
         setExpiryAlerts(expiryRes.data);
+        setRecurringCompliance(recurringRes.data);
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
       } finally {
@@ -297,6 +300,91 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Recurring Compliance Summary */}
+      {recurringCompliance && (recurringCompliance.summary?.overdue > 0 || recurringCompliance.summary?.due > 0 || recurringCompliance.summary?.upcoming > 0) && (
+        <Card className="border-[#E4E8EB] shadow-sm">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary" />
+              Recurring Compliance
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              {/* Overdue */}
+              <div className={`p-4 rounded-xl border ${recurringCompliance.summary?.overdue > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-[#E4E8EB]'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${recurringCompliance.summary?.overdue > 0 ? 'text-red-700' : 'text-gray-500'}`}>Overdue</span>
+                  <AlertTriangle className={`h-4 w-4 ${recurringCompliance.summary?.overdue > 0 ? 'text-red-600' : 'text-gray-400'}`} />
+                </div>
+                <p className={`text-2xl font-heading font-bold mt-1 ${recurringCompliance.summary?.overdue > 0 ? 'text-red-700' : 'text-gray-400'}`}>
+                  {recurringCompliance.summary?.overdue || 0}
+                </p>
+              </div>
+              
+              {/* Due */}
+              <div className={`p-4 rounded-xl border ${recurringCompliance.summary?.due > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-[#E4E8EB]'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${recurringCompliance.summary?.due > 0 ? 'text-amber-700' : 'text-gray-500'}`}>Due Now</span>
+                  <Clock className={`h-4 w-4 ${recurringCompliance.summary?.due > 0 ? 'text-amber-600' : 'text-gray-400'}`} />
+                </div>
+                <p className={`text-2xl font-heading font-bold mt-1 ${recurringCompliance.summary?.due > 0 ? 'text-amber-700' : 'text-gray-400'}`}>
+                  {recurringCompliance.summary?.due || 0}
+                </p>
+              </div>
+              
+              {/* Upcoming */}
+              <div className="p-4 rounded-xl border bg-white border-[#E4E8EB]">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-blue-700">Upcoming</span>
+                  <CalendarClock className="h-4 w-4 text-blue-600" />
+                </div>
+                <p className="text-2xl font-heading font-bold mt-1 text-blue-700">
+                  {recurringCompliance.summary?.upcoming || 0}
+                </p>
+              </div>
+            </div>
+
+            {/* Urgent Items List */}
+            {(recurringCompliance.overdue_items?.length > 0 || recurringCompliance.due_items?.length > 0) && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-text-muted">Action Required:</p>
+                {recurringCompliance.overdue_items?.slice(0, 3).map((item, idx) => (
+                  <Link 
+                    key={`overdue-${idx}`}
+                    to={`/portal/employees/${item.employee_id}?tab=recurring`}
+                    className="flex items-center justify-between p-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors"
+                    data-testid={`recurring-overdue-${idx}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600" />
+                      <span className="text-sm text-red-800">{item.item_name}</span>
+                      <span className="text-xs text-red-600">({item.employee_name})</span>
+                    </div>
+                    <span className="text-xs text-red-600">{Math.abs(item.days_value || 0)}d overdue</span>
+                  </Link>
+                ))}
+                {recurringCompliance.due_items?.slice(0, 2).map((item, idx) => (
+                  <Link 
+                    key={`due-${idx}`}
+                    to={`/portal/employees/${item.employee_id}?tab=recurring`}
+                    className="flex items-center justify-between p-2 rounded-lg bg-amber-50 hover:bg-amber-100 transition-colors"
+                    data-testid={`recurring-due-${idx}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-amber-600" />
+                      <span className="text-sm text-amber-800">{item.item_name}</span>
+                      <span className="text-xs text-amber-600">({item.employee_name})</span>
+                    </div>
+                    <span className="text-xs text-amber-600">Due in {item.days_value || 0}d</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Quick Actions & Recent Employees */}
       <div className="grid lg:grid-cols-3 gap-6">

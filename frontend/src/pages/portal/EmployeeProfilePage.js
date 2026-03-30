@@ -16,6 +16,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
+import RecurringComplianceSection from '../../components/portal/RecurringComplianceSection';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -23,7 +24,7 @@ import {
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer,
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight,
-  Briefcase, UserCheck, FileWarning
+  Briefcase, UserCheck, FileWarning, CalendarClock, Send
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
@@ -196,6 +197,12 @@ export default function EmployeeProfilePage() {
   const [isSubmittingForm, setIsSubmittingForm] = useState(false);
   const [viewFormOpen, setViewFormOpen] = useState(false);
   const [viewFormData, setViewFormData] = useState(null);
+  
+  // Document request modal state
+  const [requestDocDialogOpen, setRequestDocDialogOpen] = useState(false);
+  const [requestingRequirement, setRequestingRequirement] = useState(null);
+  const [requestDocMessage, setRequestDocMessage] = useState('');
+  const [isRequestingDoc, setIsRequestingDoc] = useState(false);
   
   // Profile extraction from application form state
   const [extractionDialogOpen, setExtractionDialogOpen] = useState(false);
@@ -1449,6 +1456,63 @@ export default function EmployeeProfilePage() {
       navigate('/portal/employees');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete employee');
+    }
+  };
+
+  // ========== Document Request Handlers ==========
+  
+  // Open request document dialog
+  const openRequestDocDialog = (requirement) => {
+    setRequestingRequirement(requirement);
+    setRequestDocMessage('');
+    setRequestDocDialogOpen(true);
+  };
+  
+  // Send document request email
+  const handleRequestDocument = async () => {
+    if (!requestingRequirement) return;
+    
+    setIsRequestingDoc(true);
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/request-document`,
+        null,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            requirement_id: requestingRequirement.id,
+            message: requestDocMessage || undefined,
+            due_days: 14
+          }
+        }
+      );
+      toast.success(response.data.message || 'Document request sent');
+      setRequestDocDialogOpen(false);
+      setRequestingRequirement(null);
+      setRequestDocMessage('');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to send request');
+    } finally {
+      setIsRequestingDoc(false);
+    }
+  };
+  
+  // Request all missing items for this employee
+  const handleRequestAllMissingItems = async () => {
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/request-missing-items`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.data.requests_created > 0) {
+        toast.success(`${response.data.requests_created} request(s) sent for missing items`);
+      } else {
+        toast.info(response.data.message || 'No missing items to request');
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to send requests');
     }
   };
 
@@ -2941,6 +3005,10 @@ export default function EmployeeProfilePage() {
             <UserCheck className="h-4 w-4 mr-2" />
             Recruitment
           </TabsTrigger>
+          <TabsTrigger value="recurring" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <CalendarClock className="h-4 w-4 mr-2" />
+            Recurring
+          </TabsTrigger>
         </TabsList>
 
         {/* Generated Forms Tab - Admin Internal Workflow */}
@@ -3308,7 +3376,7 @@ export default function EmployeeProfilePage() {
         {/* What's Needed Tab - Mandatory Items */}
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
               <div>
                 <CardTitle className="font-heading text-lg">What's Needed</CardTitle>
                 <p className="text-xs text-text-muted mt-1">
@@ -3320,7 +3388,21 @@ export default function EmployeeProfilePage() {
                   </p>
                 )}
               </div>
-              {complianceRequirements?.work_readiness && (
+              <div className="flex items-center gap-2">
+                {/* Request All Missing Items Button */}
+                {!isAuditor() && complianceRequirements?.summary?.missing > 0 && employee?.email && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={handleRequestAllMissingItems}
+                    className="text-xs h-8 border-blue-200 text-blue-600 hover:bg-blue-50"
+                    data-testid="request-all-missing"
+                  >
+                    <Send className="h-3 w-3 mr-1.5" />
+                    Request Missing Items
+                  </Button>
+                )}
+                {complianceRequirements?.work_readiness && (
                 <div className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg font-medium ${
                   complianceRequirements.work_readiness.status === 'fully_compliant' ? 'bg-success/10 text-success' :
                   complianceRequirements.work_readiness.status === 'work_ready' ? 'bg-success/10 text-success' :
@@ -3337,6 +3419,7 @@ export default function EmployeeProfilePage() {
                   {complianceRequirements.work_readiness.status_label}
                 </div>
               )}
+              </div>
             </CardHeader>
             <CardContent>
               {/* START STATUS ALERT PANEL - Using new statuses model */}
@@ -4414,6 +4497,20 @@ export default function EmployeeProfilePage() {
                                     title="Remove approval"
                                   >
                                     <XCircle className="h-3 w-3" />
+                                  </Button>
+                                )}
+                                
+                                {/* REQUEST DOCUMENT: Trigger email to employee for missing items */}
+                                {!hasEvidence && !isAuditor() && req.type !== 'form-generated' && req.type !== 'acknowledgement' && employee?.email && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="ghost"
+                                    onClick={() => openRequestDocDialog(req)}
+                                    className="text-xs h-7 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg"
+                                    data-testid={`request-doc-${req.id}`}
+                                    title="Send email request to employee"
+                                  >
+                                    <Send className="h-3 w-3" />
                                   </Button>
                                 )}
                                 {/* Training unverify - handled via dropdown for consistency */}
@@ -5585,6 +5682,14 @@ export default function EmployeeProfilePage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Recurring Compliance Tab */}
+        <TabsContent value="recurring">
+          <RecurringComplianceSection 
+            employeeId={employeeId} 
+            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''} 
+          />
         </TabsContent>
       </Tabs>
 
@@ -7466,6 +7571,60 @@ export default function EmployeeProfilePage() {
             >
               {isExplainingGap ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Save Explanation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Document Request Dialog */}
+      <Dialog open={requestDocDialogOpen} onOpenChange={setRequestDocDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <Send className="h-5 w-5 text-blue-600" />
+              Request Document
+            </DialogTitle>
+            <DialogDescription>
+              Send an email request to {employee?.first_name} for {requestingRequirement?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+              <p className="text-sm text-blue-800">
+                An email will be sent to <strong>{employee?.email}</strong> requesting them to upload this document.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-gray-700 font-medium">Additional Message (Optional)</Label>
+              <Textarea
+                value={requestDocMessage}
+                onChange={(e) => setRequestDocMessage(e.target.value)}
+                placeholder="Add any specific instructions or notes..."
+                rows={3}
+                className="bg-white border-[#E4E8EB]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setRequestDocDialogOpen(false)}
+              className="border-[#E4E8EB]"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleRequestDocument}
+              disabled={isRequestingDoc}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              data-testid="send-request-btn"
+            >
+              {isRequestingDoc ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              Send Request
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,6 +3,32 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## File Retrieval Integrity Fix (2026-03-30)
+**Status**: FIXED ✅
+
+### Issue
+Critical bug where "Download PDF" / "View PDF" for Staff Health Questionnaire returned "File wasn't available on site" despite UI showing the document as approved.
+
+### Root Cause
+The `download-pdf` endpoint returned a storage path (`osabea-care/pdf-exports/...`) instead of actual file bytes. The frontend tried to `window.open()` this path, resulting in a 404.
+
+### Fix Applied
+1. **Backend**: Modified endpoints to return actual PDF bytes via `Response(content=..., media_type="application/pdf")`
+2. **Frontend**: Updated handlers to use `responseType: 'blob'` and create proper blob URLs
+3. Added `view-pdf` endpoint for in-browser viewing
+4. Added integrity verification and audit logging for failed retrievals
+
+### Files Changed
+- `/app/backend/server.py` (endpoints at lines ~10408, ~10483)
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` (download/view handlers)
+
+### Integrity Scan
+All file references verified - no broken files found.
+
+Full report: `/app/FILE_RETRIEVAL_FIX.md`
+
+---
+
 ## Full Test/Dummy Data Eradication (2026-03-30)
 **Status**: COMPLETE ✅
 

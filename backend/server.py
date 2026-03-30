@@ -10409,7 +10409,8 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
 async def download_form_pdf(submission_id: str, user: dict = Depends(get_current_user)):
     """
     Download the most recent PDF export for a form submission.
-    If no export exists, generates one on-the-fly.
+    Returns the actual PDF file bytes for download.
+    If no export exists and user is admin, generates one on-the-fly.
     """
     # Check for existing export
     export = await db.form_pdf_exports.find_one(
@@ -10418,25 +10419,111 @@ async def download_form_pdf(submission_id: str, user: dict = Depends(get_current
     )
     
     if export and export.get("file_url"):
-        # Return existing export URL
-        return {
-            "file_url": export["file_url"],
-            "filename": export.get("filename", "form.pdf"),
-            "created_at": export.get("created_at"),
-            "cached": True
-        }
+        # Retrieve and return the actual PDF file
+        file_path = export.get("file_url")
+        filename = export.get("filename", "form.pdf")
+        
+        try:
+            content, content_type = get_object(file_path)
+            safe_filename = filename.replace('"', '\\"')
+            
+            return Response(
+                content=content,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                    "Cache-Control": "private, max-age=3600"
+                }
+            )
+        except Exception as e:
+            # File exists in DB but not in storage - mark as corrupted
+            logger.error(f"PDF file retrieval failed for export {export.get('id')}: {e}")
+            await log_audit_action(
+                user['user_id'], "file_retrieval_failed", "form_pdf_export", export.get('id'),
+                {"file_path": file_path, "error": str(e), "submission_id": submission_id}
+            )
+            raise HTTPException(
+                status_code=500, 
+                detail="PDF file not found in storage. Record may be corrupted. Please regenerate the PDF."
+            )
     
     # No export exists - generate one (requires admin)
     # For non-admins, return error
     if not user.get('role') == 'admin':
         raise HTTPException(status_code=404, detail="No PDF export found. Admin can generate one.")
     
-    # Generate PDF on-the-fly
+    # Generate PDF on-the-fly and return the file bytes directly
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    # Generate the PDF (this also saves to storage)
     result = await generate_form_pdf(submission_id, user)
-    return {
-        **result,
-        "cached": False
-    }
+    
+    # Now retrieve and return the generated file
+    file_path = result.get("file_url")
+    filename = result.get("filename", "form.pdf")
+    
+    try:
+        content, content_type = get_object(file_path)
+        safe_filename = filename.replace('"', '\\"')
+        
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to retrieve newly generated PDF: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve generated PDF")
+
+
+
+@api_router.get("/form-submissions/{submission_id}/view-pdf")
+async def view_form_pdf(submission_id: str, user: dict = Depends(get_current_user)):
+    """
+    View the most recent PDF export for a form submission inline.
+    Returns the actual PDF file for browser viewing (not download).
+    """
+    # Check for existing export
+    export = await db.form_pdf_exports.find_one(
+        {"submission_id": submission_id},
+        sort=[("created_at", -1)]
+    )
+    
+    if not export or not export.get("file_url"):
+        raise HTTPException(status_code=404, detail="No PDF export found for this submission")
+    
+    file_path = export.get("file_url")
+    filename = export.get("filename", "form.pdf")
+    
+    try:
+        content, content_type = get_object(file_path)
+        safe_filename = filename.replace('"', '\\"')
+        
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{safe_filename}"',
+                "Cache-Control": "private, max-age=3600"
+            }
+        )
+    except Exception as e:
+        # File exists in DB but not in storage
+        logger.error(f"PDF file retrieval failed for viewing: {e}")
+        await log_audit_action(
+            user['user_id'], "file_retrieval_failed", "form_pdf_export", export.get('id'),
+            {"file_path": file_path, "error": str(e), "action": "view"}
+        )
+        raise HTTPException(
+            status_code=500, 
+            detail="PDF file not found in storage. Record may be corrupted."
+        )
+
 
 
 @api_router.get("/pdf-exports")

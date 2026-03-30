@@ -1721,16 +1721,63 @@ export default function EmployeeProfilePage() {
   // Download existing PDF export or generate new one
   const handleDownloadFormPDF = async (submissionId) => {
     try {
+      // Use responseType: 'blob' to receive the actual PDF file bytes
       const response = await axios.get(
         `${API}/form-submissions/${submissionId}/download-pdf`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { 
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
       );
       
-      if (response.data.file_url) {
-        window.open(response.data.file_url, '_blank');
+      // Extract filename from Content-Disposition header if available
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = 'form.pdf';
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^";\n]+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
       }
+      
+      // Create a blob URL and trigger download
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('PDF downloaded successfully');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to download PDF');
+    }
+  };
+
+  // View PDF in a new tab
+  const handleViewFormPDF = async (submissionId) => {
+    try {
+      // Fetch the PDF blob and open in new tab
+      const response = await axios.get(
+        `${API}/form-submissions/${submissionId}/view-pdf`,
+        { 
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+      
+      // Create a blob URL and open in new tab
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      
+      // Note: We don't revoke immediately so the tab can load
+      // The blob URL will be garbage collected when the tab closes
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to view PDF');
     }
   };
 
@@ -3883,12 +3930,12 @@ export default function EmployeeProfilePage() {
                                         )}
                                         
                                         {/* Show View PDF if export exists */}
-                                        {req.form_submission.has_pdf_export && req.form_submission.pdf_export_url && (
+                                        {req.form_submission.has_pdf_export && (
                                           <>
                                             <Button
                                               size="sm"
                                               variant="outline"
-                                              onClick={() => window.open(req.form_submission.pdf_export_url, '_blank')}
+                                              onClick={() => handleViewFormPDF(req.form_submission.id)}
                                               className="text-xs h-7 rounded-lg"
                                               data-testid={`view-pdf-${req.id}`}
                                             >
@@ -3898,12 +3945,7 @@ export default function EmployeeProfilePage() {
                                             <Button
                                               size="sm"
                                               variant="outline"
-                                              onClick={() => {
-                                                const link = document.createElement('a');
-                                                link.href = req.form_submission.pdf_export_url;
-                                                link.download = req.form_submission.pdf_export_filename || 'form.pdf';
-                                                link.click();
-                                              }}
+                                              onClick={() => handleDownloadFormPDF(req.form_submission.id)}
                                               className="text-xs h-7 rounded-lg"
                                               data-testid={`download-pdf-${req.id}`}
                                             >

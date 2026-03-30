@@ -3123,28 +3123,32 @@ export default function EmployeeProfilePage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-success/10 border border-success/20 rounded-xl">
-                    <p className="text-sm text-success font-medium">Checked & Approved</p>
+                    <p className="text-sm text-success font-medium">Verified & Complete</p>
                     <p className="text-2xl font-heading font-bold text-success">
                       {complianceRequirements?.summary?.verified || 0}/{complianceRequirements?.summary?.total || 0}
                     </p>
+                    <p className="text-[10px] text-success/70 mt-1">Checked, approved & current</p>
                   </div>
                   <div className="p-4 bg-info/10 border border-info/20 rounded-xl">
-                    <p className="text-sm text-info font-medium">Ready for Review</p>
+                    <p className="text-sm text-info font-medium">Awaiting Review</p>
                     <p className="text-2xl font-heading font-bold text-info">
                       {(complianceRequirements?.summary?.completed || 0) - (complianceRequirements?.summary?.verified || 0)}
                     </p>
+                    <p className="text-[10px] text-info/70 mt-1">Evidence uploaded, needs verification</p>
                   </div>
                   <div className="p-4 bg-error/10 border border-error/20 rounded-xl">
                     <p className="text-sm text-error font-medium">Still Needed</p>
                     <p className="text-2xl font-heading font-bold text-error">
                       {complianceRequirements?.summary?.missing || 0}
                     </p>
+                    <p className="text-[10px] text-error/70 mt-1">No evidence uploaded</p>
                   </div>
                   <div className="p-4 bg-[#F8FAFA] rounded-xl">
                     <p className="text-sm text-text-muted">Policies Signed</p>
                     <p className="text-2xl font-heading font-bold text-text-primary">
                       {policies.filter(p => p.status === 'signed').length}/{policies.length}
                     </p>
+                    <p className="text-[10px] text-text-muted mt-1">Staff policy acknowledgements</p>
                   </div>
                 </div>
               </CardContent>
@@ -3521,8 +3525,18 @@ export default function EmployeeProfilePage() {
                             };
                             
                             // Determine status badge - CARE-FOCUSED: Still Needed, Ready for Review, Checked & Approved
+                            // UI INTEGRITY: Include expiry context when showing green status
                             const getStatusBadge = () => {
-                              if (isVerified) return { text: 'Checked & Approved', style: 'bg-success/10 text-success' };
+                              if (isVerified) {
+                                // If there's an expiry date that's soon or expired, show amber/red
+                                if (req.expiry_status?.status === 'expired') {
+                                  return { text: 'Verified (Expired)', style: 'bg-red-100 text-red-700' };
+                                }
+                                if (req.expiry_status?.status === 'expiring_soon') {
+                                  return { text: 'Verified (Expiring Soon)', style: 'bg-amber-100 text-amber-700' };
+                                }
+                                return { text: 'Checked & Approved', style: 'bg-success/10 text-success' };
+                              }
                               if (hasEvidence) return { text: 'Ready for Review', style: 'bg-info/10 text-info' };
                               return { text: 'Still Needed', style: 'bg-error/10 text-error' };
                             };
@@ -3647,9 +3661,9 @@ export default function EmployeeProfilePage() {
                                                 ? 'bg-amber-100 text-amber-700'
                                                 : 'bg-green-100 text-green-700'
                                             }`} title={file.expiry_status.label}>
-                                              {file.expiry_status.status === 'expired' ? 'Expired' : 
-                                               file.expiry_status.status === 'expiring_soon' ? 'Expiring' : 
-                                               'Valid'}
+                                              {file.expiry_status.status === 'expired' ? `Expired ${formatBackendDate(file.expiry_status.expiry_date, { format: 'short' })}` : 
+                                               file.expiry_status.status === 'expiring_soon' ? `Expiring ${formatBackendDate(file.expiry_status.expiry_date, { format: 'short' })}` : 
+                                               `Valid until ${formatBackendDate(file.expiry_status.expiry_date, { format: 'short' })}`}
                                             </span>
                                           )}
                                         </div>
@@ -4362,14 +4376,23 @@ export default function EmployeeProfilePage() {
                               </p>
                             </div>
                             <div className="flex items-center gap-2">
-                              {/* Status Badge - Care-focused */}
+                              {/* Status Badge - Care-focused with expiry context */}
                               <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                                allVerified ? 'bg-success/10 text-success' :
+                                allVerified ? (
+                                  // Check for expiry issues even when verified
+                                  docs.some(d => d.expiry_status?.status === 'expired') ? 'bg-red-100 text-red-700' :
+                                  docs.some(d => d.expiry_status?.status === 'expiring_soon') ? 'bg-amber-100 text-amber-700' :
+                                  'bg-success/10 text-success'
+                                ) :
                                 hasFiles ? 'bg-info/10 text-info' :
                                 'bg-error/10 text-error'
                               }`}>
-                                {allVerified ? 'Checked & Approved' :
-                                 hasFiles ? 'Ready for Review' :
+                                {allVerified ? (
+                                  docs.some(d => d.expiry_status?.status === 'expired') ? 'Verified (Expired)' :
+                                  docs.some(d => d.expiry_status?.status === 'expiring_soon') ? 'Verified (Expiring Soon)' :
+                                  'Verified & Complete'
+                                ) :
+                                 hasFiles ? 'Awaiting Review' :
                                  'Still Needed'}
                               </span>
                               

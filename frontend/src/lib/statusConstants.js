@@ -1,9 +1,14 @@
 /**
  * Status Constants - SINGLE SOURCE OF TRUTH for status values
  * 
- * HARDENING: Frontend must consume backend-provided status fields.
- * These constants are for safe comparison only, NOT for local derivation.
- * Status computation happens in backend ONLY.
+ * UI INTEGRITY RULES:
+ * 1. Frontend must consume backend-provided status fields
+ * 2. These constants are for safe comparison only, NOT for local derivation
+ * 3. Status computation happens in backend ONLY
+ * 4. Labels must be explicit and unambiguous:
+ *    - "Pending" → "Awaiting Review" or "Awaiting Evidence"
+ *    - "Completed" → "Completed & Verified" or "Completed (Awaiting Verification)"
+ *    - "Valid" → Always include expiry date when available
  */
 
 // Compliance/Document statuses
@@ -13,11 +18,15 @@ export const COMPLIANCE_STATUS = {
   EXPIRING: 'expiring',
   EXPIRING_SOON: 'expiring_soon',
   MISSING: 'missing',
-  PENDING: 'pending',
+  PENDING: 'pending',  // Backend value - frontend should display as "Awaiting Review"
+  PENDING_REVIEW: 'pending_review',
+  AWAITING_EVIDENCE: 'awaiting_evidence',
   NEEDS_RENEWAL: 'needs_renewal',
   NOT_STARTED: 'not_started',
   IN_PROGRESS: 'in_progress',
   COMPLETED: 'completed',
+  COMPLETED_VERIFIED: 'completed_verified',
+  COMPLETED_UNVERIFIED: 'completed_unverified',
   VERIFIED: 'verified',
 };
 

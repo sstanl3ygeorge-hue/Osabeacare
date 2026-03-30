@@ -14,6 +14,11 @@ import {
 /**
  * StatusBadge - Single source of truth for status styling across the app
  * 
+ * UI INTEGRITY: Always show truthful, unambiguous status with context.
+ * - Never show green for items with expiry issues
+ * - Always indicate verification state when relevant
+ * - Include expiry date context when available
+ * 
  * @param {string} status - One of: valid, expired, pending, supervised, ready, 
  *                          needs_renewal, verified, missing, blocked, current,
  *                          completed, in_progress, not_started, expiring_soon
@@ -22,6 +27,8 @@ import {
  * @param {boolean} showIcon - Whether to show status icon (default: false)
  * @param {string} className - Additional classes
  * @param {string} variant - 'badge' | 'pill' | 'dot' (default: 'badge')
+ * @param {string} expiryDate - Optional expiry date to display with status
+ * @param {boolean} isVerified - Optional verification state to indicate
  */
 export const StatusBadge = ({ 
   status, 
@@ -29,36 +36,43 @@ export const StatusBadge = ({
   size = 'sm', 
   showIcon = false,
   className,
-  variant = 'badge'
+  variant = 'badge',
+  expiryDate,
+  isVerified
 }) => {
   // Normalize status to lowercase
   const normalizedStatus = (status || '').toLowerCase().replace(/[\s_-]+/g, '_');
   
   // Status configuration - SINGLE SOURCE OF TRUTH
+  // UI INTEGRITY: Labels must be explicit about what they mean
   const statusConfig = {
-    // GREEN statuses - positive/complete
+    // GREEN statuses - positive/complete (ONLY when truly complete with no caveats)
     valid: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Valid' },
     verified: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: Shield, label: 'Verified' },
     ready: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Ready' },
     work_ready: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Ready to Work' },
     fully_compliant: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Fully Compliant' },
     completed: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Completed' },
+    completed_verified: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: Shield, label: 'Completed & Verified' },
+    completed_unverified: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Completed (Awaiting Verification)' },
     current: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Current' },
     approved: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Approved' },
     checked_approved: { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200', icon: CheckCircle, label: 'Checked & Approved' },
     
     // AMBER statuses - warning/attention needed
-    pending: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Pending' },
+    pending: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting Review' },
+    pending_review: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting Review' },
+    awaiting_evidence: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting Evidence' },
     supervised: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Eye, label: 'Supervised' },
     supervised_start: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Eye, label: 'Supervised Start' },
     needs_renewal: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Needs Renewal' },
-    expiring: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Expiring' },
+    expiring: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Expiring Soon' },
     expiring_soon: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Expiring Soon' },
     review_due_soon: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Review Due Soon' },
     in_progress: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'In Progress' },
     ready_for_review: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200', icon: Eye, label: 'Ready for Review' },
     under_review: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200', icon: Eye, label: 'Under Review' },
-    certificate_only: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Certificate Only' },
+    certificate_only: { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200', icon: AlertTriangle, label: 'Certificate Only (Needs Verification)' },
     
     // RED statuses - critical/blocked
     expired: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200', icon: XCircle, label: 'Expired' },
@@ -72,7 +86,7 @@ export const StatusBadge = ({
     // GRAY statuses - neutral/not started
     not_started: { bg: 'bg-gray-100', text: 'text-gray-700', border: 'border-gray-200', icon: HelpCircle, label: 'Not Started' },
     unknown: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: HelpCircle, label: 'Unknown' },
-    no_expiry: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: CheckCircle, label: 'No Expiry' },
+    no_expiry: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: CheckCircle, label: 'No Expiry Set' },
   };
   
   // Get config or fallback
@@ -168,8 +182,12 @@ export const ExpiryBadge = ({
 
 /**
  * WorkReadinessBadge - Specific badge for work readiness status
+ * UI INTEGRITY: "Not Ready" must explain WHY (missing DBS, expired docs, etc.)
+ * @param {string} status - work_ready, supervised_start, not_ready, blocked
+ * @param {string} reason - Optional reason for not_ready status (e.g., "Missing DBS")
+ * @param {string} className - Additional classes
  */
-export const WorkReadinessBadge = ({ status, className }) => {
+export const WorkReadinessBadge = ({ status, reason, className }) => {
   const statusMap = {
     'work_ready': 'ready',
     'fully_compliant': 'ready',
@@ -182,8 +200,8 @@ export const WorkReadinessBadge = ({ status, className }) => {
     'work_ready': 'Ready to Work',
     'fully_compliant': 'Ready to Work',
     'supervised_start': 'Supervised Start',
-    'not_ready': 'Not Ready',
-    'blocked': 'Blocked'
+    'not_ready': reason ? `Not Ready: ${reason}` : 'Not Ready',
+    'blocked': reason ? `Blocked: ${reason}` : 'Blocked'
   };
   
   return (

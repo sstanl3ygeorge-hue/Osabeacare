@@ -190,9 +190,9 @@ export default function DBSRegisterPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="current">Current</SelectItem>
-                <SelectItem value="certificate_only">Certificate Only</SelectItem>
-                <SelectItem value="pending_verification">Pending Verification</SelectItem>
+                <SelectItem value="current">Current & Verified</SelectItem>
+                <SelectItem value="certificate_only">Certificate Only (Needs Verification)</SelectItem>
+                <SelectItem value="pending_verification">Awaiting Verification</SelectItem>
                 <SelectItem value="review_due_soon">Review Due Soon</SelectItem>
                 <SelectItem value="review_overdue">Review Overdue</SelectItem>
                 <SelectItem value="missing">Missing</SelectItem>

@@ -3,6 +3,102 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+
+## UI Miscommunication Audit (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Comprehensive audit and fix of all pages to eliminate UI elements that could mislead human users or inspectors. This is a safety-critical system - UI must never overstate compliance, hide risk, or use ambiguous wording.
+
+### Fixes Applied by Page
+
+#### Dashboard
+- ✅ Changed "Progress to Full Compliance" → "Average Employee Compliance" (clearer, accurate)
+- ✅ Changed "Progress" label → "Compliance" (consistent terminology)
+- ✅ Added "Not Ready" reason display (shows WHY employee isn't ready)
+
+#### Employees List
+- ✅ Added "Not Ready" reason below status badge (e.g., "Missing: DBS, Right to Work")
+- ✅ Added tooltips with full reason context
+
+#### Employee Profile
+- ✅ "Checked & Approved" now shows expiry context if applicable:
+  - "Verified (Expired)" - red if expired
+  - "Verified (Expiring Soon)" - amber if expiring
+  - "Checked & Approved" - green only when truly current
+- ✅ Updated Care Status panel with explanatory sub-text:
+  - "Checked, approved & current"
+  - "Evidence uploaded, needs verification"
+  - "No evidence uploaded"
+- ✅ File expiry badges now show dates: "Valid until [date]" instead of just "Valid"
+- ✅ Multi-file requirement badges show expiry context
+
+#### Training Page
+- ✅ Status column now shows verification state:
+  - "Completed & Verified" - green (both done)
+  - "Completed (Awaiting Verification)" - blue (done, not verified)
+  - "In Progress" - amber
+  - "Not Started" - gray
+
+#### DBS Register
+- ✅ Filter labels updated:
+  - "Current" → "Current & Verified"
+  - "Certificate Only" → "Certificate Only (Needs Verification)"
+  - "Pending Verification" → "Awaiting Verification"
+
+#### Compliance Centre
+- ✅ "Pending Compliance" → "Not Yet Compliant"
+- ✅ "Pending" → "Awaiting Completion" (training)
+- ✅ "pending items" → "outstanding items"
+
+#### Documents Page
+- ✅ "Pending Review" → "Awaiting Review"
+- ✅ "Approved" → "Verified" (consistent terminology)
+- ✅ Filter items updated to match
+
+#### Audit View
+- ✅ "Progress to Full Compliance" → "Average Employee Compliance"
+- ✅ "DBS Pending" → "DBS Awaiting Verification"
+- ✅ "RTW Documents" → "RTW Missing"
+
+#### Templates Page
+- ✅ "Pending Review" → "Awaiting Review"
+
+### Backend Updates
+- ✅ `calculate_work_readiness_quick()` now returns `reason` field explaining why someone is Not Ready
+- ✅ DBS status labels updated: "Pending Verification" → "Awaiting Verification", "Certificate Only" → "Certificate Only (Needs Update Service)"
+- ✅ RTW status labels updated: "Pending Verification" → "Awaiting Verification"
+
+### Status Badge Component Updates
+- ✅ Added new statuses: `completed_verified`, `completed_unverified`, `pending_review`, `awaiting_evidence`
+- ✅ Added JSDoc documentation with UI Integrity notes
+- ✅ `WorkReadinessBadge` now accepts optional `reason` prop
+
+### Standardized Vocabulary
+| Old Term | New Term | Usage |
+|----------|----------|-------|
+| Pending | Awaiting Review / Awaiting Evidence | Context-appropriate |
+| Approved | Verified | Consistent across app |
+| Completed | Completed & Verified / Completed (Awaiting Verification) | Shows verification state |
+| Valid | Valid until [DATE] | Always includes date |
+| Progress | Compliance | More accurate |
+
+### Visual Safety Rules Enforced
+- ✅ Expired = ALWAYS red, never green
+- ✅ Expiring Soon = ALWAYS amber + visible
+- ✅ Green status = ONLY when truly complete with no caveats
+- ✅ "Not Ready" = ALWAYS shows WHY
+
+### Verification Screenshots
+- Dashboard: "Average Employee Compliance" visible ✅
+- Employees: Status badges with reason text visible ✅
+- Employee Profile: "Verified & Complete" / "Awaiting Review" in Care Status ✅
+- Training: "Completed & Verified" / "Completed (Awaiting Verification)" visible ✅
+- DBS Register: Clear status labels with tooltips ✅
+
+---
+
+
 ## Completion Percentage Consistency Fix (2026-03-30)
 **Status**: FIXED ✅
 

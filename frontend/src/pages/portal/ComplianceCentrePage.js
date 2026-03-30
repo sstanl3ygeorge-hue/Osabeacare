@@ -1504,7 +1504,7 @@ export default function ComplianceCentrePage() {
                         <span className="font-bold text-success">{dashboard.staff?.work_ready || 0}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-sm text-text-muted">Pending Compliance</span>
+                        <span className="text-sm text-text-muted">Not Yet Compliant</span>
                         <span className={`font-bold ${
                           (dashboard.staff?.pending_compliance || 0) > 0 ? 'text-warning' : 'text-success'
                         }`}>
@@ -2066,7 +2066,7 @@ export default function ComplianceCentrePage() {
                         {trainingReport.report?.reduce((sum, s) => sum + s.completed_count, 0) || 0} Completed
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">
-                        {trainingReport.report?.reduce((sum, s) => sum + s.pending_count, 0) || 0} Pending
+                        {trainingReport.report?.reduce((sum, s) => sum + s.pending_count, 0) || 0} Awaiting Completion
                       </span>
                     </div>
                   )}
@@ -2147,7 +2147,7 @@ export default function ComplianceCentrePage() {
                       </div>
                       <div className="text-left">
                         <p className="font-medium">Send Reminders</p>
-                        <p className="text-xs text-text-muted">Notify staff about pending items</p>
+                        <p className="text-xs text-text-muted">Notify staff about outstanding items</p>
                       </div>
                     </div>
                   </Button>
@@ -2226,7 +2226,7 @@ export default function ComplianceCentrePage() {
                         <div className="text-right">
                           <span className="text-sm font-medium text-success">{staff.completed_count} completed</span>
                           {staff.pending_count > 0 && (
-                            <span className="text-sm text-warning ml-2">{staff.pending_count} pending</span>
+                            <span className="text-sm text-warning ml-2">{staff.pending_count} outstanding</span>
                           )}
                           {staff.expiring_soon?.length > 0 && (
                             <p className="text-xs text-error mt-1">{staff.expiring_soon.length} expiring</p>

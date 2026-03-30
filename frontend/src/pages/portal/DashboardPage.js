@@ -284,7 +284,7 @@ export default function DashboardPage() {
               </div>
               <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
                 <div className="flex justify-between items-center mb-2">
-                  <span className="text-text-muted">Progress to Full Compliance</span>
+                  <span className="text-text-muted">Average Employee Compliance</span>
                   <span className="font-semibold text-text-primary">{avgCompletion}%</span>
                 </div>
                 <Progress value={avgCompletion} className="h-3" />
@@ -354,6 +354,7 @@ export default function DashboardPage() {
                 {employees.slice(0, 5).map((emp) => {
                   const isReady = emp.work_readiness?.status === 'work_ready' || emp.work_readiness?.status === 'fully_compliant';
                   const isSupervisedStart = emp.work_readiness?.status === 'almost_ready' || emp.work_readiness?.status === 'supervised_start';
+                  const notReadyReason = emp.work_readiness?.reason;
                   
                   return (
                     <Link
@@ -379,15 +380,26 @@ export default function DashboardPage() {
                       <div className="flex items-center gap-3">
                         <div className="text-right hidden sm:block">
                           <p className="text-sm font-medium text-text-primary">{emp.completion_percentage}%</p>
-                          <p className="text-xs text-text-muted">Progress</p>
+                          <p className="text-xs text-text-muted">Compliance</p>
                         </div>
-                        <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
-                          isReady ? 'bg-green-100 text-green-700' :
-                          isSupervisedStart ? 'bg-amber-100 text-amber-700' :
-                          'bg-red-100 text-red-700'
-                        }`}>
-                          {isReady ? 'Ready to Work' : isSupervisedStart ? 'Supervised Start' : 'Not Ready'}
-                        </span>
+                        <div className="text-right">
+                          <span 
+                            className={`px-2 py-1 rounded-lg text-xs font-medium ${
+                              isReady ? 'bg-green-100 text-green-700' :
+                              isSupervisedStart ? 'bg-amber-100 text-amber-700' :
+                              'bg-red-100 text-red-700'
+                            }`}
+                            title={notReadyReason || (isReady ? 'All mandatory requirements verified' : 'Some requirements missing')}
+                          >
+                            {isReady ? 'Ready to Work' : isSupervisedStart ? 'Supervised Start' : 'Not Ready'}
+                          </span>
+                          {/* UI INTEGRITY: Show WHY someone is Not Ready */}
+                          {!isReady && !isSupervisedStart && notReadyReason && (
+                            <p className="text-[10px] text-red-600 mt-0.5 max-w-[120px] truncate" title={notReadyReason}>
+                              {notReadyReason}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </Link>
                   );

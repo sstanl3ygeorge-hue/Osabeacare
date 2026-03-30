@@ -1746,7 +1746,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     elif summary["update_service_active"]:
         # Has update service but not verified - WARNING only
         summary["dbs_status"] = "pending_verification"
-        summary["dbs_status_label"] = "Pending Verification"
+        summary["dbs_status_label"] = "Awaiting Verification"
         summary["dbs_status_color"] = "blue"
         summary["status_band"] = "urgent"
         summary["is_blocking"] = False  # Not blocking, just needs verification
@@ -1757,7 +1757,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     elif summary["certificate_on_file"] and summary["certificate_verified"]:
         # Has certificate only (no update service) - WARNING, recommend update service
         summary["dbs_status"] = "certificate_only"
-        summary["dbs_status_label"] = "Certificate Only"
+        summary["dbs_status_label"] = "Certificate Only (Needs Update Service)"
         summary["dbs_status_color"] = "amber"
         summary["status_band"] = "due_soon"
         summary["is_blocking"] = False
@@ -1772,7 +1772,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     elif summary["certificate_on_file"]:
         # Has certificate but not verified - WARNING only
         summary["dbs_status"] = "pending_verification"
-        summary["dbs_status_label"] = "Pending Verification"
+        summary["dbs_status_label"] = "Awaiting Verification"
         summary["dbs_status_color"] = "blue"
         summary["status_band"] = "urgent"
         summary["is_blocking"] = False
@@ -2032,7 +2032,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
         else:
             # Not verified - BLOCKING (legal requirement)
             summary["rtw_status"] = "pending_verification"
-            summary["rtw_status_label"] = "Pending Verification"
+            summary["rtw_status_label"] = "Awaiting Verification"
             summary["rtw_status_color"] = "blue"
             summary["status_band"] = "urgent"
             summary["is_blocking"] = True
@@ -4414,14 +4414,39 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     mandatory_complete = len(verified_ids.intersection(work_ready_ids))
     total_mandatory = len(work_ready_ids)
     
+    # Calculate missing items for Not Ready reason
+    missing_items = work_ready_ids - verified_ids
+    
+    # Build human-readable reason for missing items
+    def get_missing_reason():
+        if not missing_items:
+            return None
+        # Map IDs to readable names
+        id_to_name = {
+            "dbs_certificate": "DBS",
+            "dbs_check": "DBS",
+            "right_to_work_documents": "Right to Work",
+            "right_to_work_check": "Right to Work",
+            "safeguarding": "Safeguarding",
+            "manual_handling": "Manual Handling",
+            "infection_control": "Infection Control",
+            "references": "References",
+            "proof_of_identity": "ID",
+            "proof_of_address": "Address"
+        }
+        names = [id_to_name.get(item, item.replace('_', ' ').title()) for item in list(missing_items)[:2]]
+        if len(missing_items) > 2:
+            return f"Missing: {', '.join(names)} +{len(missing_items)-2}"
+        return f"Missing: {', '.join(names)}"
+    
     if mandatory_complete == total_mandatory:
         return {"status": "work_ready", "label": "Ready to Work", "color": "success"}
     elif mandatory_complete >= total_mandatory - 2:
-        return {"status": "supervised_start", "label": "Supervised Start Only", "color": "warning"}
+        return {"status": "supervised_start", "label": "Supervised Start Only", "color": "warning", "reason": get_missing_reason()}
     elif mandatory_complete > 0:
-        return {"status": "in_progress", "label": "Not Ready", "color": "error"}
+        return {"status": "in_progress", "label": "Not Ready", "color": "error", "reason": get_missing_reason()}
     else:
-        return {"status": "not_started", "label": "Not Ready", "color": "error"}
+        return {"status": "not_started", "label": "Not Ready", "color": "error", "reason": get_missing_reason()}
 
 @api_router.post("/employees", response_model=EmployeeResponse)
 async def create_employee(employee: EmployeeCreate, user: dict = Depends(require_manager_or_admin)):

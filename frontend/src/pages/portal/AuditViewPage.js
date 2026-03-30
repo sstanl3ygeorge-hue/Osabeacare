@@ -270,10 +270,10 @@ export default function AuditViewPage() {
             </div>
           </div>
           
-          {/* Progress to Full Compliance */}
+          {/* Average Employee Compliance */}
           <div className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-text-muted">Progress to Full Compliance</span>
+              <span className="text-text-muted">Average Employee Compliance</span>
               <span className="font-semibold text-text-primary">{avgCompletion}%</span>
             </div>
             <Progress value={avgCompletion} className="h-3" />
@@ -369,12 +369,12 @@ export default function AuditViewPage() {
             <div 
               onClick={() => (stats?.dbs_pending || 0) > 0 && navigate('/portal/employees?requirement=dbs')}
               className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${(stats?.dbs_pending || 0) > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
-              title={(stats?.dbs_pending || 0) > 0 ? 'View staff with pending DBS' : ''}
+              title={(stats?.dbs_pending || 0) > 0 ? 'View staff with DBS awaiting verification' : ''}
               data-testid="audit-card-dbs"
             >
               <p className="text-3xl font-heading font-bold text-text-primary">{stats?.dbs_pending || 0}</p>
               <div className="flex items-center justify-between">
-                <p className="text-sm text-text-muted">DBS Pending</p>
+                <p className="text-sm text-text-muted">DBS Awaiting Verification</p>
                 {(stats?.dbs_pending || 0) > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
               </div>
             </div>
@@ -383,12 +383,12 @@ export default function AuditViewPage() {
             <div 
               onClick={() => (stats?.rtw_missing || 0) > 0 && navigate('/portal/employees?requirement=rtw')}
               className={`p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB] transition-all ${(stats?.rtw_missing || 0) > 0 ? 'cursor-pointer hover:bg-gray-100 hover:shadow-sm' : ''}`}
-              title={(stats?.rtw_missing || 0) > 0 ? 'View staff with missing RTW' : ''}
+              title={(stats?.rtw_missing || 0) > 0 ? 'View staff with missing Right to Work' : ''}
               data-testid="audit-card-rtw"
             >
               <p className="text-3xl font-heading font-bold text-text-primary">{stats?.rtw_missing || 0}</p>
               <div className="flex items-center justify-between">
-                <p className="text-sm text-text-muted">RTW Documents</p>
+                <p className="text-sm text-text-muted">RTW Missing</p>
                 {(stats?.rtw_missing || 0) > 0 && <ArrowRight className="h-3 w-3 text-gray-400" />}
               </div>
             </div>

@@ -493,7 +493,10 @@ export default function EmployeesPage() {
                   {filteredEmployees.map((emp) => {
                     // Use work_readiness from API (single source of truth)
                     const workReadiness = emp.work_readiness || {};
-                    const workStatusLabel = workReadiness.label || 'Unknown';
+                    // UI INTEGRITY: Show reason when Not Ready (never hide risk)
+                    const workStatusLabel = workReadiness.reason 
+                      ? `${workReadiness.label}: ${workReadiness.reason.replace('Missing: ', '')}`
+                      : workReadiness.label || 'Unknown';
                     const workStatusColor = workReadiness.color === 'success' ? 'bg-success/10 text-success' :
                                            workReadiness.color === 'warning' ? 'bg-warning/10 text-warning' :
                                            'bg-error/10 text-error';
@@ -522,19 +525,33 @@ export default function EmployeesPage() {
                       </td>
                       <td className="p-4">
                         {/* Work Status Badge - Uses API work_readiness (single source of truth) */}
-                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}>
+                        {/* UI INTEGRITY: Shows WHY someone is Not Ready */}
+                        <div 
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}
+                          title={workReadiness.reason || workReadiness.label}
+                        >
                           {workReadiness.status === 'work_ready' || workReadiness.status === 'fully_compliant' ? (
                             <Shield className="h-3.5 w-3.5" />
                           ) : (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           )}
-                          {workStatusLabel}
+                          {/* Show condensed label in table, full reason in tooltip */}
+                          {workReadiness.label || 'Unknown'}
                         </div>
+                        {/* Show reason on separate line if Not Ready */}
+                        {workReadiness.reason && workReadiness.color === 'error' && (
+                          <p className="text-[10px] text-red-600 mt-0.5 max-w-[150px] truncate" title={workReadiness.reason}>
+                            {workReadiness.reason}
+                          </p>
+                        )}
                       </td>
                       <td className="p-4 hidden lg:table-cell">
-                        {/* Recruitment File Status - Uses API work_readiness (same source) */}
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}>
-                          {workStatusLabel}
+                        {/* Recruitment File Status - Same info in condensed form */}
+                        <span 
+                          className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${workStatusColor}`}
+                          title={workReadiness.reason || workReadiness.label}
+                        >
+                          {workReadiness.label || 'Unknown'}
                         </span>
                       </td>
                       <td className="p-4">

@@ -216,7 +216,7 @@ export default function TemplatesPage() {
               </div>
               <div>
                 <p className="text-2xl font-bold text-text-primary">{pendingForms.length}</p>
-                <p className="text-xs text-text-muted">Pending Review</p>
+                <p className="text-xs text-text-muted">Awaiting Review</p>
               </div>
             </div>
           </CardContent>

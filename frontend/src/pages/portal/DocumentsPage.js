@@ -104,7 +104,7 @@ export default function DocumentsPage() {
             </div>
             <div>
               <p className="text-2xl font-heading font-bold text-text-primary">{pendingReview}</p>
-              <p className="text-sm text-text-muted">Pending Review</p>
+              <p className="text-sm text-text-muted">Awaiting Review</p>
             </div>
           </CardContent>
         </Card>
@@ -115,7 +115,7 @@ export default function DocumentsPage() {
             </div>
             <div>
               <p className="text-2xl font-heading font-bold text-text-primary">{approved}</p>
-              <p className="text-sm text-text-muted">Approved</p>
+              <p className="text-sm text-text-muted">Verified</p>
             </div>
           </CardContent>
         </Card>
@@ -155,9 +155,9 @@ export default function DocumentsPage() {
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="not_started">Not Started</SelectItem>
                 <SelectItem value="requested">Requested</SelectItem>
-                <SelectItem value="uploaded">Uploaded</SelectItem>
+                <SelectItem value="uploaded">Awaiting Review</SelectItem>
                 <SelectItem value="under_review">Under Review</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="approved">Verified</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
               </SelectContent>
             </Select>

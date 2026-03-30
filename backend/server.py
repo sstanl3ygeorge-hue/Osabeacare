@@ -15251,6 +15251,269 @@ async def upload_insurance_doc(
     return updated
 
 
+
+
+# ==================== DOCUMENT REPLACEMENT & REMOVAL ENDPOINTS ====================
+
+@api_router.post("/compliance/insurance/{insurance_id}/replace")
+async def replace_insurance_doc(
+    insurance_id: str,
+    file: UploadFile = File(...),
+    reason: str = Query(..., description="Reason for replacement"),
+    expiry_date: Optional[str] = Query(None),
+    policy_number: Optional[str] = None,
+    provider: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """
+    Replace an insurance document with full audit trail.
+    Stores the previous file info in history before uploading new file.
+    """
+    insurance = await db.insurance_docs.find_one({"id": insurance_id})
+    if not insurance:
+        raise HTTPException(status_code=404, detail="Insurance record not found")
+    
+    # Check if expiry date is required for this certificate type
+    requires_expiry = insurance.get("requires_expiry_date", True)
+    if requires_expiry and not expiry_date:
+        raise HTTPException(status_code=400, detail="Expiry date is required for this certificate type")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (for history tracking)
+    previous_state = {
+        "file_url": insurance.get("file_url"),
+        "original_filename": insurance.get("original_filename"),
+        "expiry_date": insurance.get("expiry_date"),
+        "policy_number": insurance.get("policy_number"),
+        "provider": insurance.get("provider"),
+        "status": insurance.get("status"),
+        "replaced_at": now,
+        "replaced_by": user['user_id'],
+        "replacement_reason": reason,
+        "action": "replaced"
+    }
+    
+    # Upload new file
+    content = await file.read()
+    path = f"{APP_NAME}/insurance/{insurance_id}/{str(uuid.uuid4())}_{file.filename}"
+    content_type = file.content_type or "application/octet-stream"
+    result = put_object(path, content, content_type)
+    
+    update_data = {
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "status": "valid",
+        "updated_at": now
+    }
+    
+    if expiry_date:
+        update_data["expiry_date"] = expiry_date
+    if policy_number:
+        update_data["policy_number"] = policy_number
+    if provider:
+        update_data["provider"] = provider
+    
+    # Push previous state to history and update with new file
+    await db.insurance_docs.update_one(
+        {"id": insurance_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_data
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "replace_insurance", "insurance", insurance_id, {
+        "reason": reason,
+        "old_filename": previous_state.get("original_filename"),
+        "new_filename": file.filename
+    })
+    
+    updated = await db.insurance_docs.find_one({"id": insurance_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/compliance/insurance/{insurance_id}/file")
+async def remove_insurance_file(
+    insurance_id: str,
+    reason: str = Query(..., description="Reason for removal"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Remove an insurance document file (marks as missing, keeps history).
+    Use this to correct an accidental upload.
+    """
+    insurance = await db.insurance_docs.find_one({"id": insurance_id})
+    if not insurance:
+        raise HTTPException(status_code=404, detail="Insurance record not found")
+    
+    if not insurance.get("file_url"):
+        raise HTTPException(status_code=400, detail="No file to remove")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (for history tracking)
+    previous_state = {
+        "file_url": insurance.get("file_url"),
+        "original_filename": insurance.get("original_filename"),
+        "expiry_date": insurance.get("expiry_date"),
+        "status": insurance.get("status"),
+        "removed_at": now,
+        "removed_by": user['user_id'],
+        "removal_reason": reason,
+        "action": "removed"
+    }
+    
+    # Clear file and mark as missing
+    update_data = {
+        "file_url": None,
+        "original_filename": None,
+        "status": "missing",
+        "updated_at": now
+    }
+    
+    await db.insurance_docs.update_one(
+        {"id": insurance_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_data
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "remove_insurance_file", "insurance", insurance_id, {
+        "reason": reason,
+        "removed_filename": previous_state.get("original_filename")
+    })
+    
+    return {"message": "File removed successfully", "status": "missing"}
+
+
+@api_router.post("/compliance/policies/{policy_id}/replace")
+async def replace_org_policy_doc(
+    policy_id: str,
+    file: UploadFile = File(...),
+    reason: str = Query(..., description="Reason for replacement"),
+    version: Optional[str] = None,
+    review_date: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """
+    Replace an organisation policy document with full audit trail.
+    Stores the previous file info in history before uploading new file.
+    """
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (for history tracking)
+    previous_state = {
+        "file_url": policy.get("file_url"),
+        "original_filename": policy.get("original_filename"),
+        "version": policy.get("version"),
+        "review_date": policy.get("review_date"),
+        "status": policy.get("status"),
+        "replaced_at": now,
+        "replaced_by": user['user_id'],
+        "replacement_reason": reason,
+        "action": "replaced"
+    }
+    
+    # Upload new file
+    content = await file.read()
+    path = f"{APP_NAME}/policies/{policy_id}/{str(uuid.uuid4())}_{file.filename}"
+    content_type = file.content_type or "application/octet-stream"
+    result = put_object(path, content, content_type)
+    
+    update_data = {
+        "file_url": result["path"],
+        "original_filename": file.filename,
+        "status": "active",
+        "last_reviewed_at": now,
+        "reviewed_by": user['user_id'],
+        "updated_at": now
+    }
+    
+    if version:
+        update_data["version"] = version
+    if review_date:
+        update_data["review_date"] = review_date
+    
+    # Push previous state to history and update with new file
+    await db.org_policies.update_one(
+        {"id": policy_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_data
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "replace_policy", "org_policy", policy_id, {
+        "reason": reason,
+        "old_filename": previous_state.get("original_filename"),
+        "new_filename": file.filename
+    })
+    
+    updated = await db.org_policies.find_one({"id": policy_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/compliance/policies/{policy_id}/file")
+async def remove_org_policy_file(
+    policy_id: str,
+    reason: str = Query(..., description="Reason for removal"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Remove an organisation policy document file (marks as missing, keeps history).
+    Use this to correct an accidental upload.
+    """
+    policy = await db.org_policies.find_one({"id": policy_id})
+    if not policy:
+        raise HTTPException(status_code=404, detail="Policy not found")
+    
+    if not policy.get("file_url"):
+        raise HTTPException(status_code=400, detail="No file to remove")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture the previous state (for history tracking)
+    previous_state = {
+        "file_url": policy.get("file_url"),
+        "original_filename": policy.get("original_filename"),
+        "version": policy.get("version"),
+        "status": policy.get("status"),
+        "removed_at": now,
+        "removed_by": user['user_id'],
+        "removal_reason": reason,
+        "action": "removed"
+    }
+    
+    # Clear file and mark as missing
+    update_data = {
+        "file_url": None,
+        "original_filename": None,
+        "status": "missing",
+        "updated_at": now
+    }
+    
+    await db.org_policies.update_one(
+        {"id": policy_id},
+        {
+            "$push": {"history": previous_state},
+            "$set": update_data
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "remove_policy_file", "org_policy", policy_id, {
+        "reason": reason,
+        "removed_filename": previous_state.get("original_filename")
+    })
+    
+    return {"message": "File removed successfully", "status": "missing"}
+
+
 # ==================== AMENDMENT ENDPOINTS (with history tracking) ====================
 
 @api_router.put("/compliance/insurance/{insurance_id}/amend")

@@ -17,7 +17,8 @@ import {
   Shield, FileText, AlertTriangle, CheckCircle, Clock, Upload,
   Loader2, Building, Users, ClipboardList, AlertCircle, Calendar,
   RefreshCw, Download, Plus, Search, Filter, Eye, XCircle, UserPlus,
-  Edit, History, Save, BookOpen, ArrowRight, TrendingUp, Bell, Mail, Send
+  Edit, History, Save, BookOpen, ArrowRight, TrendingUp, Bell, Mail, Send,
+  Trash2
 } from 'lucide-react';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
 
@@ -108,6 +109,8 @@ export default function ComplianceCentrePage() {
   const [uploadPolicyNumber, setUploadPolicyNumber] = useState('');
   const [uploadProvider, setUploadProvider] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [isReplaceMode, setIsReplaceMode] = useState(false);
+  const [replaceReason, setReplaceReason] = useState('');
   
   // Incident form
   const [incidentDialogOpen, setIncidentDialogOpen] = useState(false);
@@ -402,6 +405,90 @@ export default function ComplianceCentrePage() {
     setUploadExpiryDate('');
     setUploadPolicyNumber('');
     setUploadProvider('');
+    setIsReplaceMode(false);
+    setReplaceReason('');
+  };
+
+  // ==================== DOCUMENT REMOVE/REPLACE HANDLERS ====================
+  
+  const handleRemoveDocument = async (type, id, name) => {
+    const reason = window.prompt(`Why are you removing the document from "${name}"?\n\nThis will mark the document as missing.`);
+    if (!reason) return; // User cancelled
+    
+    try {
+      const endpoint = type === 'policy' 
+        ? `${API}/compliance/policies/${id}/file`
+        : `${API}/compliance/insurance/${id}/file`;
+      
+      await axios.delete(`${endpoint}?reason=${encodeURIComponent(reason)}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      toast.success('Document removed successfully');
+      fetchData();
+    } catch (error) {
+      console.error('Failed to remove document:', error);
+      toast.error(error.response?.data?.detail || 'Failed to remove document');
+    }
+  };
+
+  const handleReplaceDocument = async (e) => {
+    e.preventDefault();
+    if (!uploadFile) return;
+    if (!replaceReason.trim()) {
+      toast.error('Please provide a reason for replacing the document');
+      return;
+    }
+    
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', uploadFile);
+      
+      let url, params;
+      
+      if (selectedPolicy) {
+        url = `${API}/compliance/policies/${selectedPolicy.id}/replace`;
+        params = new URLSearchParams();
+        params.append('reason', replaceReason);
+        if (uploadVersion) params.append('version', uploadVersion);
+        if (uploadReviewDate) params.append('review_date', uploadReviewDate);
+      } else if (selectedInsurance) {
+        // Check if expiry is required
+        const requiresExpiry = selectedInsurance.requires_expiry_date !== false;
+        if (requiresExpiry && !uploadExpiryDate) {
+          toast.error('Expiry date is required for this certificate type');
+          setIsUploading(false);
+          return;
+        }
+        
+        url = `${API}/compliance/insurance/${selectedInsurance.id}/replace`;
+        params = new URLSearchParams();
+        params.append('reason', replaceReason);
+        if (uploadExpiryDate) params.append('expiry_date', uploadExpiryDate);
+        if (uploadPolicyNumber) params.append('policy_number', uploadPolicyNumber);
+        if (uploadProvider) params.append('provider', uploadProvider);
+      }
+      
+      url += `?${params.toString()}`;
+      
+      await axios.post(url, formData, {
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      toast.success('Document replaced successfully');
+      setUploadDialogOpen(false);
+      resetUploadForm();
+      fetchData();
+    } catch (error) {
+      console.error('Failed to replace document:', error);
+      toast.error(error.response?.data?.detail || 'Failed to replace document');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // ==================== AMENDMENT HANDLERS ====================
@@ -984,15 +1071,27 @@ export default function ComplianceCentrePage() {
                                         <Button 
                                           size="sm"
                                           variant="outline"
-                                          className="rounded-lg"
+                                          className="rounded-lg text-primary border-primary/30 hover:bg-primary/5"
                                           onClick={() => {
                                             setSelectedPolicy(policy);
                                             setSelectedInsurance(null);
+                                            setIsReplaceMode(true);
                                             setUploadDialogOpen(true);
                                           }}
+                                          data-testid={`replace-policy-${policy.id}`}
                                         >
                                           <RefreshCw className="h-4 w-4 mr-1" />
                                           Replace
+                                        </Button>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm"
+                                          className="rounded-lg text-error hover:bg-error/10"
+                                          onClick={() => handleRemoveDocument('policy', policy.id, policy.name)}
+                                          title="Remove file"
+                                          data-testid={`remove-policy-${policy.id}`}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
                                         </Button>
                                         {/* Assign to Employees Button */}
                                         <Button 
@@ -1217,11 +1316,36 @@ export default function ComplianceCentrePage() {
                                         <Button 
                                           variant="outline" 
                                           size="sm"
+                                          className="rounded-lg text-primary border-primary/30 hover:bg-primary/5"
+                                          onClick={() => {
+                                            setSelectedPolicy(null);
+                                            setSelectedInsurance(cert);
+                                            setIsReplaceMode(true);
+                                            setUploadDialogOpen(true);
+                                          }}
+                                          data-testid={`replace-certificate-${cert.id}`}
+                                        >
+                                          <RefreshCw className="h-4 w-4 mr-1" />
+                                          Replace
+                                        </Button>
+                                        <Button 
+                                          variant="outline" 
+                                          size="sm"
                                           className="rounded-lg"
                                           onClick={() => openAmendDialog('insurance', cert)}
                                         >
                                           <Edit className="h-4 w-4 mr-1" />
                                           Amend
+                                        </Button>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm"
+                                          className="rounded-lg text-error hover:bg-error/10"
+                                          onClick={() => handleRemoveDocument('insurance', cert.id, cert.name)}
+                                          title="Remove file"
+                                          data-testid={`remove-certificate-${cert.id}`}
+                                        >
+                                          <Trash2 className="h-4 w-4" />
                                         </Button>
                                         <Button 
                                           variant="ghost" 
@@ -2349,11 +2473,44 @@ export default function ComplianceCentrePage() {
         <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading text-lg pr-6">
-              {selectedPolicy ? `Upload ${selectedPolicy.name}` : selectedInsurance ? `Upload ${selectedInsurance.name}` : 'Upload Document'}
+              {isReplaceMode 
+                ? `Replace Document: ${selectedPolicy?.name || selectedInsurance?.name}` 
+                : selectedPolicy 
+                  ? `Upload ${selectedPolicy.name}` 
+                  : selectedInsurance 
+                    ? `Upload ${selectedInsurance.name}` 
+                    : 'Upload Document'}
             </DialogTitle>
           </DialogHeader>
           
-          <form onSubmit={selectedPolicy ? handleUploadPolicy : handleUploadInsurance} className="space-y-4 mt-4">
+          <form onSubmit={isReplaceMode ? handleReplaceDocument : (selectedPolicy ? handleUploadPolicy : handleUploadInsurance)} className="space-y-4 mt-4">
+            {/* Replace mode warning */}
+            {isReplaceMode && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-amber-800">
+                    <p className="font-medium">Replacing existing document</p>
+                    <p className="text-xs mt-1">The current document will be moved to history and replaced with the new file.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* Replacement reason (required for replace mode) */}
+            {isReplaceMode && (
+              <div className="space-y-2">
+                <Label>Reason for Replacement *</Label>
+                <Input
+                  value={replaceReason}
+                  onChange={(e) => setReplaceReason(e.target.value)}
+                  placeholder="e.g., Wrong document uploaded, newer version available"
+                  required
+                  className="rounded-xl"
+                />
+              </div>
+            )}
+            
             <div className="space-y-2">
               <Label>Document File *</Label>
               <FileUploaderInline

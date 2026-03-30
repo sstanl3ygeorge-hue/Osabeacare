@@ -4,6 +4,58 @@
 **Osabea Healthcare Solutions**
 
 
+## UI + Logic Alignment Pass (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Changes Summary
+
+#### 1. Tabs Renamed / Repurposed
+| Before | After | Purpose |
+|--------|-------|---------|
+| "What's Needed" | **"Compliance File"** | Primary tab for evidence management, verification, form requests |
+| "Documents" | **"All Files"** | Read-only library view (no verification actions) |
+
+#### 2. Navigation Structure
+- **Recruitment Pipeline**: Applicant-stage only (new, screening, interview, compliance_review)
+- **Staff**: Employee-stage only (onboarding, active, inactive)
+
+#### 3. Applicant vs Staff Labels
+- **Applicant** badge (blue): Shows on recruitment pipeline and applicant profiles
+- **Staff** badge (green): Shows on staff list and employee profiles
+- Explanatory text added to both pages
+
+#### 4. Approval Wording
+- **Before**: "Approve" (vague)
+- **After**: "Approve Recruitment" with helper text explaining the action
+- Dialog shows detailed consequences: assigns employee code, moves to Staff stage
+
+#### 5. Status Language Updated
+| Before | After |
+|--------|-------|
+| "Still Needed" | **"Required"** |
+| "Ready for Review" | **"Awaiting Review"** |
+| "Checked & Approved" | **"Verified"** |
+| "Pending" | **"Awaiting Review"** |
+| "compliance_review" | **"Awaiting Approval"** |
+
+#### 6. 3-Layer Status Model
+| Layer | Statuses | Meaning |
+|-------|----------|---------|
+| **Work Status** | NOT_READY, READY_WITH_CONDITIONS, READY_TO_WORK | Operational decision |
+| **Recruitment Status** | Awaiting Review, In Progress, Awaiting Approval, Approved | Recruitment stage |
+| **File Status** | Required, Awaiting Review, Verified | Evidence completion |
+
+#### 7. Reasons Surfaced Everywhere
+All NOT_READY and READY_WITH_CONDITIONS statuses now show reason tags:
+- Hard blocks (red): "Recruitment not approved", "Right to Work Documents missing"
+- Conditional (amber): "Supervision overdue", "Competency assessment overdue"
+
+### Test Results
+- Frontend: 100% (10/10 features verified)
+- Test report: `/app/test_reports/iteration_68.json`
+
+---
+
 ## 3-Tier Work Readiness Enforcement & Send Forms via Email (2026-03-30)
 **Status**: COMPLETE ✅
 

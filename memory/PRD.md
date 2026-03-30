@@ -3134,3 +3134,96 @@ Build a comprehensive compliance management portal for a UK care recruitment age
   - Hidden "locked" status from user view
   - Simplified evidence file display (max 2 shown, "+N more" indicator)
   - Removed unnecessary status badges
+
+
+## Critical Recruitment Compliance Features (2026-03-30)
+**Status**: COMPLETE ✅
+
+### Objective
+Implement 3 real-agency compliance rules that ensure employees are "safe, traceable, and legally vetted" per CQC requirements:
+1. **Reference Integrity Rule** - References must match CV OR have documented justification
+2. **Proof of Address Verification** - 2 separate verified documents required (NHS standard)
+3. **CV Gap Analysis** - Employment gaps >30 days require documented explanation
+
+---
+
+### Feature 1: Reference Integrity Rule ✅
+**Backend Implementation**:
+- Extended employee schema with `reference_N_from_cv` (boolean) and `reference_N_override_reason` (string)
+- New endpoint: `POST /api/employees/{id}/verify-reference`
+- Validates: If `from_cv=false`, requires `override_reason` (min 10 chars)
+- Blocks recruitment completion if references unverified
+
+**Frontend Implementation**:
+- Recruitment tab displays both references with status (Verified / Awaiting Verification)
+- "Verify Reference" dialog with radio options:
+  - "Yes, matches CV" → Direct verification
+  - "No, different from CV" → Requires justification text
+- Shows justification reason if reference doesn't match CV
+
+### Feature 2: Proof of Address (NHS Standard) ✅
+**Backend Implementation**:
+- Added `proof_of_address` to `MANDATORY_ITEMS` with `required_count: 2`
+- `recruitment-status` endpoint checks verified document count
+- Blocks recruitment completion if <2 verified PoA documents
+
+**Frontend Implementation**:
+- Recruitment tab shows: "0/2 Documents Verified"
+- Guidance text: "2 separate documents required: utility bill, bank statement, council tax, or tenancy agreement"
+- Links to "What's Needed" tab for document upload
+
+### Feature 3: CV Gap Analysis ✅
+**Backend Implementation**:
+- Extended employee schema with `employment_history` array containing `gap_after` objects
+- Gap detection: Flags gaps >30 days between employment periods
+- Each gap has: `gap_id`, `gap_start`, `gap_end`, `gap_duration_days`, `explanation`, `verified`
+- New endpoint: `POST /api/employees/{id}/explain-cv-gap`
+- Blocks recruitment completion if unexplained gaps exist
+
+**Frontend Implementation**:
+- Recruitment tab shows: "Employment History & Gap Analysis"
+- Gap counter: "1/2 gaps explained"
+- Each gap shows:
+  - Duration (e.g., "76 days")
+  - Previous job → Next job with dates
+  - "Explain" button opens dialog
+- Explain Gap dialog with:
+  - Gap details (duration, from/to jobs)
+  - Textarea for explanation (min 10 chars)
+  - Save Explanation button
+
+---
+
+### New API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/employees/{id}/recruitment-status` | GET | Returns reference integrity, CV gaps, PoA status |
+| `/api/employees/{id}/verify-reference` | POST | Verify reference with CV match status |
+| `/api/employees/{id}/explain-cv-gap` | POST | Add explanation for employment gap |
+
+### Database Schema Extensions
+| Collection | Field | Type | Description |
+|------------|-------|------|-------------|
+| employees | `reference_N_from_cv` | boolean | CV match status |
+| employees | `reference_N_override_reason` | string | Justification if not from CV |
+| employees | `employment_history[].gap_after` | object | Gap details with explanation |
+| MANDATORY_ITEMS | `proof_of_address.required_count` | number | 2 (NHS standard) |
+
+### Frontend Components Added
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Recruitment Tab | EmployeeProfilePage.js | Displays all 3 compliance features |
+| Verify Reference Dialog | EmployeeProfilePage.js | CV match verification with justification |
+| Explain Gap Dialog | EmployeeProfilePage.js | Gap explanation submission |
+
+### Verification
+- ✅ Recruitment tab renders correctly with all 3 sections
+- ✅ Reference Integrity shows verified/awaiting status with justification display
+- ✅ CV Gap Analysis shows unexplained gaps with Explain button
+- ✅ Proof of Address shows document count with guidance
+- ✅ Verify Reference dialog functions correctly (radio options, validation)
+- ✅ Explain Gap dialog functions correctly (min length validation, submission)
+- ✅ Backend endpoints return correct data structure
+
+---
+

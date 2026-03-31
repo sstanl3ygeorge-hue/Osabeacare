@@ -20,3 +20,7 @@ export { default as TrainingSummaryCard } from './TrainingSummaryCard';
 // Phase D2 - File interaction components
 export { default as RequirementFilesDrawer } from './RequirementFilesDrawer';
 export { default as DocumentActionMenu } from './DocumentActionMenu';
+
+// Phase D3 - Request lifecycle & history components
+export { default as RequirementHistoryDrawer } from './RequirementHistoryDrawer';
+export { default as RequestStatusBadge, RequestStatusInline } from './RequestStatusBadge';

@@ -11,6 +11,7 @@ import EvidenceRow from './EvidenceRow';
 import CheckRow from './CheckRow';
 import AgreementRow from './AgreementRow';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
+import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -61,11 +62,27 @@ export default function DualRowComplianceSection({
     requirementTitle: ''
   });
   
+  // Phase D3: History drawer state
+  const [historyDrawer, setHistoryDrawer] = useState({
+    open: false,
+    requirementKey: null,
+    requirementTitle: ''
+  });
+  
   const { token } = useAuth();
   
   // Open files drawer for a requirement
   const handleViewFiles = (requirementKey, requirementTitle) => {
     setFilesDrawer({
+      open: true,
+      requirementKey,
+      requirementTitle
+    });
+  };
+  
+  // Open history drawer for a requirement
+  const handleViewHistory = (requirementKey, requirementTitle) => {
+    setHistoryDrawer({
       open: true,
       requirementKey,
       requirementTitle
@@ -161,6 +178,7 @@ export default function DualRowComplianceSection({
                     onPreviewFile={onPreviewFile}
                     onExtractReview={onExtractReview}
                     onViewFiles={handleViewFiles}
+                    onViewHistory={handleViewHistory}
                     isAuditor={isAuditor}
                   />
                 );
@@ -174,7 +192,7 @@ export default function DualRowComplianceSection({
                     employeeId={employeeId}
                     onRefresh={handleRefresh}
                     onRecordCheck={onRecordCheck}
-                    onViewHistory={onViewHistory}
+                    onViewHistory={handleViewHistory}
                     isAuditor={isAuditor}
                   />
                 );
@@ -191,7 +209,7 @@ export default function DualRowComplianceSection({
                     onSendForm={onSendAgreement}
                     onFillInternally={onFillAgreement}
                     onCompleteByPhone={onCompleteByPhone}
-                    onViewHistory={onViewHistory}
+                    onViewHistory={handleViewHistory}
                     isAuditor={isAuditor}
                   />
                 );
@@ -317,6 +335,15 @@ export default function DualRowComplianceSection({
         onPreviewFile={onPreviewFile}
         onExtractReview={onExtractReview}
         isAuditor={isAuditor}
+      />
+      
+      {/* Phase D3: History Drawer */}
+      <RequirementHistoryDrawer
+        open={historyDrawer.open}
+        onClose={() => setHistoryDrawer({ open: false, requirementKey: null, requirementTitle: '' })}
+        employeeId={employeeId}
+        requirementKey={historyDrawer.requirementKey}
+        requirementTitle={historyDrawer.requirementTitle}
       />
     </div>
   );

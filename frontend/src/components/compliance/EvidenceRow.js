@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { RequestStatusInline } from './RequestStatusBadge';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -41,7 +42,8 @@ export default function EvidenceRow({
   onRequest,
   onPreviewFile,
   onExtractReview,
-  onViewFiles,  // New: Opens RequirementFilesDrawer
+  onViewFiles,  // Opens RequirementFilesDrawer
+  onViewHistory, // Opens RequirementHistoryDrawer
   isAuditor = false
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -121,7 +123,11 @@ export default function EvidenceRow({
                 Evidence
               </Badge>
             </div>
-            <p className="text-sm text-text-muted truncate">{status_summary}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm text-text-muted truncate">{status_summary}</p>
+              {/* Request Status Inline - Phase D3 */}
+              <RequestStatusInline employeeId={employeeId} requirementKey={key} />
+            </div>
           </div>
           
           {/* File Count Badge - Always neutral */}
@@ -196,6 +202,18 @@ export default function EvidenceRow({
               )}
             </>
           )}
+          
+          {/* History Button - Phase D3 */}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={(e) => { e.stopPropagation(); if (onViewHistory) onViewHistory(key, title); }}
+            className="h-8 w-8 p-0 text-text-muted hover:text-text-primary"
+            data-testid={`history-${key}`}
+            title="View History"
+          >
+            <History className="h-4 w-4" />
+          </Button>
           
           {/* Expand/Collapse */}
           <Button

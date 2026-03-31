@@ -4,6 +4,48 @@
 **Osabea Healthcare Solutions**
 
 
+## Step 11D: File Interaction + Request Lifecycle - Phase D1 (2026-03-31)
+**Status**: D1 COMPLETE ✅ | D2-D4 PENDING
+
+### Phase D1: Backend Endpoints ✅ (2026-03-31)
+Implemented the backend infrastructure that turns the Compliance File from a status page into an operations page.
+
+**New Endpoints:**
+1. `GET /api/employees/{id}/requirements/{key}/files` - Full file lifecycle data
+   - active_files: Files with status, verification, extraction, request linkage
+   - historical_files: Superseded, rejected, uploaded_in_error, moved files
+   - multi_file_config: {multi_file, max_active_files, required_count}
+   
+2. `GET /api/employees/{id}/requirements/{key}/unified-history` - Unified timeline
+   - Audit logs, request events, evidence edits
+   - Check recorded events (RTW, DBS, Identity, Address)
+   - Agreement completion events
+   
+3. `GET /api/employees/{id}/requirements/{key}/requests` - Request lifecycle
+   - overall_status: not_requested, sent, viewed, submitted, completed
+   - current_request, request_history
+   - sent_at, viewed_at, submitted_at, source (manual/scheduled)
+
+4. `POST /api/employees/{id}/requirements/{key}/resend-request` - Resend request
+   - Supersedes previous pending request
+   - Appends to history
+
+5. `POST /api/employees/{id}/requirements/{key}/request-replacement` - Request replacement
+   - Linked to specific file_id if provided
+   - Includes reason for replacement
+
+**Existing Endpoints Enhanced (already existed):**
+- `POST /api/documents/{id}/supersede` - Mark as superseded with status_history
+- `POST /api/documents/{id}/move-category` - Change requirement linkage
+- `POST /api/documents/{id}/mark-uploaded-in-error` - Safe remove from active set
+
+**Multi-File Configuration:**
+- proof_of_address: required_count=2, max_active_files=5
+- right_to_work_documents: required_count=1, max_active_files=10
+- identity_documents: required_count=1, max_active_files=10
+
+---
+
 ## Step 11: Dual-Row Evidence/Check Model - COMPLETE (2026-03-31)
 **Status**: ALL PHASES COMPLETE ✅
 

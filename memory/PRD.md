@@ -4,6 +4,42 @@
 **Osabea Healthcare Solutions**
 
 
+## Document Extraction "Document Not Found" Bugfix (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Root Cause
+The extraction modal was receiving `file_id` from `evidence_files` array but the backend expected `document_id` from `employee_documents` collection. Additionally, the `EvidenceFileResponse` Pydantic model was missing the `document_id` field, causing it to be stripped from API responses.
+
+### Fixes Applied
+1. **EvidenceFileResponse Model**: Added `document_id: Optional[str] = None` field
+2. **Evidence Endpoint**: Now adds `document_id` to each evidence file (line 10611-10613)
+3. **GET /api/documents/{id}/extraction**: Now resolves `file_id` to `document_id` via lookup
+4. **POST /api/documents/{id}/extract**: Now handles both `file_id` and `document_id`
+5. **Frontend openDocExtraction**: Now validates document ID and passes full context
+6. **DocumentExtractionReview**: Shows file context (name, type, requirement, date) and better error handling
+
+### Behavior Changes
+- **Before**: Extraction failed with "Document not found" when using file_id
+- **After**: Both file_id and document_id work for extraction; proper error messages shown
+
+### Files Changed
+- `/app/backend/server.py` - EvidenceFileResponse model, extraction endpoints, evidence endpoint
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` - openDocExtraction function
+- `/app/frontend/src/components/documents/DocumentExtractionReview.js` - Error handling and context display
+
+### Test Results
+- Backend: 100% (14/14 tests passed)
+- Frontend: 100% (Extraction modal opens correctly with proper document context)
+- Test report: `/app/test_reports/iteration_81.json`
+
+### Verification
+- Evidence endpoint now returns `document_id` in evidence_files array
+- GET /api/documents/{file_id}/extraction resolves file_id → document_id
+- POST /api/documents/{file_id}/extract works with evidence file IDs
+
+---
+
+
 ## Cross-Document Intelligence - Phase 4: Name Mismatch Detection (2026-03-31)
 **Status**: COMPLETE ✅
 

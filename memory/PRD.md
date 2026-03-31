@@ -4,6 +4,59 @@
 **Osabea Healthcare Solutions**
 
 
+## Step 10: Training Intake Wizard - Phases 4-6 Frontend (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented the frontend components for the Training Intake Wizard: action buttons in Training tab, multi-step wizard dialog, email request dialog, and public secure upload page.
+
+### Phases Completed
+1. **Training Tab Action Buttons** (EmployeeProfilePage.js)
+   - "Upload & Scan" button opens TrainingIntakeWizard
+   - "Request Certs" button opens TrainingRequestDialog
+   - "Pending Review" badge shows when proposed items exist
+
+2. **TrainingIntakeWizard Component** (TrainingIntakeWizard.js)
+   - 3-step flow: Upload → Extract → Review
+   - File upload with drag-and-drop
+   - Spinner during AI extraction
+   - Review split items with approve/reject/edit per item
+   - Name mismatch warnings
+   - Confidence badges
+
+3. **TrainingRequestDialog Component** (TrainingRequestDialog.js)
+   - 10 training type checkboxes with Select All/Clear
+   - Include renewals checkbox
+   - Due date input (default 14 days)
+   - Custom message textarea
+
+4. **TrainingUploadPage** (public/TrainingUploadPage.js)
+   - Token-based public access (no login required)
+   - Multi-file upload with progress
+   - Error handling for expired/invalid tokens
+   - Success confirmation
+
+5. **TrainingPage Enhancements**
+   - Enhanced status column: "Awaiting Extraction Review", "Evidence Requested"
+   - Clickable "Awaiting Review" stat card
+
+### New Files Created
+- `/app/frontend/src/components/training/TrainingIntakeWizard.js`
+- `/app/frontend/src/components/training/TrainingRequestDialog.js`
+- `/app/frontend/src/pages/public/TrainingUploadPage.js`
+
+### Files Modified
+- `/app/frontend/src/App.js` - Added `/training/upload/:token` route
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` - Training tab actions
+- `/app/frontend/src/pages/portal/TrainingPage.js` - Enhanced status displays
+
+### Test Results
+- Frontend: 100% (7/7 features passed)
+- Test report: `/app/test_reports/iteration_83.json`
+
+---
+
+
 ## Step 10: Training Intake Wizard - Phases 1-3 Backend (2026-03-31)
 **Status**: COMPLETE ✅
 

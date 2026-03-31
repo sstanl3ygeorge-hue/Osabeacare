@@ -1,0 +1,90 @@
+{
+  "summary": "Document Extraction Bugfix testing completed. All 14 backend tests passed. Frontend extraction modal working correctly - opens with proper document context showing extracted fields with confidence scores.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/dashboard/stats", "issue": "Returns 500 error (unrelated to extraction bugfix)", "priority": "LOW"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "DocumentExtractionReview modal", "issues": ["Minor HTML nesting warning: <p> cannot contain nested <p> or <div> - cosmetic issue only, does not affect functionality"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_document_extraction_bugfix.py",
+    "/app/test_reports/pytest/document_extraction_bugfix_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: Added document_id field to EvidenceFileResponse Pydantic model (line 10200) - was missing causing document_id to be stripped from API response"
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_document_extraction_bugfix.py"
+  ],
+  "success_rate": {
+    "backend": "100% (14/14 tests passed)",
+    "frontend": "100% (Document extraction modal opens correctly with proper document context)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Used existing employee (d88335f6-1b18-435a-8086-28af4a583f77 - Olakunle Alonge) with Right to Work documents",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Document extraction bugfix fully tested. Key fixes verified: (1) EvidenceFileResponse model now includes document_id field, (2) GET /api/documents/{file_id}/extraction resolves file_id to document_id, (3) POST /api/documents/{file_id}/extract works with file_id from evidence_files, (4) Evidence endpoint returns document_id in evidence_files array, (5) Frontend openDocExtraction validates document ID before opening modal, (6) DocumentExtractionReview shows file context (name, type, requirement, date), (7) Extraction modal shows extracted fields with confidence scores. Test employee 'Olakunle Alonge' has BRP document with extraction showing Name: ALONGE OLAKUNLE MOSES, Document Type: Residence Permit, Expiry: 2024-12-31.",
+  "features_tested": {
+    "evidence_endpoint_document_id": {
+      "status": "PASS",
+      "details": "GET /api/employees/{id}/requirements/{req_id}/evidence now returns document_id in evidence_files"
+    },
+    "get_extraction_file_id_resolution": {
+      "status": "PASS",
+      "details": "GET /api/documents/{file_id}/extraction resolves file_id to document_id and returns extraction"
+    },
+    "post_extract_with_file_id": {
+      "status": "PASS",
+      "details": "POST /api/documents/{file_id}/extract works with file_id from evidence_files"
+    },
+    "post_extract_with_document_id": {
+      "status": "PASS",
+      "details": "POST /api/documents/{document_id}/extract works with direct document_id"
+    },
+    "frontend_extraction_modal": {
+      "status": "PASS",
+      "details": "Document Extraction Review modal opens with correct file context (BRP, Right to Work Documents, uploaded date)"
+    },
+    "extraction_data_display": {
+      "status": "PASS",
+      "details": "Modal shows extracted fields with confidence scores (Name, Document Type, Expiry Date, etc.)"
+    },
+    "error_handling": {
+      "status": "PASS",
+      "details": "Invalid document IDs return proper 404 with helpful error message"
+    }
+  },
+  "verification_summary": {
+    "total_backend_tests": 14,
+    "backend_tests_passed": 14,
+    "api_endpoints_tested": [
+      "GET /api/employees/{id}/requirements/{req_id}/evidence",
+      "GET /api/documents/{id}/extraction",
+      "POST /api/documents/{id}/extract"
+    ],
+    "frontend_features_tested": [
+      "Three-dot menu with Extract Document Data option",
+      "Document Extraction Review modal",
+      "Extracted fields display with confidence scores",
+      "Approve/Reject extraction buttons"
+    ]
+  },
+  "bugfix_verification": {
+    "original_issue": "Document Extraction 'Document not found' error - extraction modal was opening with requirement IDs or file_ids instead of actual document IDs",
+    "root_cause": "EvidenceFileResponse Pydantic model was missing document_id field, causing it to be stripped from API response",
+    "fix_applied": "Added document_id: Optional[str] = None to EvidenceFileResponse model at line 10200",
+    "verification_method": "Backend tests verify document_id is returned in evidence_files, frontend test confirms modal opens with correct document context"
+  }
+}

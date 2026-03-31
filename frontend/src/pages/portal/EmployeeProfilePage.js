@@ -257,6 +257,7 @@ export default function EmployeeProfilePage() {
   const [docExtractionReviewOpen, setDocExtractionReviewOpen] = useState(false);
   const [docExtractionDocumentId, setDocExtractionDocumentId] = useState(null);
   const [docExtractionDocumentName, setDocExtractionDocumentName] = useState('');
+  const [docExtractionContext, setDocExtractionContext] = useState(null); // Full context for modal header
   
   const { token, isAuditor, isAdmin, user } = useAuth();
   
@@ -1242,9 +1243,29 @@ export default function EmployeeProfilePage() {
   };
   
   // Open document extraction review
-  const openDocExtraction = (documentId, documentName) => {
+  // BUGFIX: Must receive actual document_id, not file_id from evidence_files
+  const openDocExtraction = (document, requirementName = '') => {
+    // Validate we have a proper document ID
+    const documentId = document?.id || document?.document_id;
+    
+    if (!documentId) {
+      toast.error('No document selected for extraction. Please select a specific file.');
+      console.error('openDocExtraction called without valid document ID:', document);
+      return;
+    }
+    
+    // Build context for modal header
+    const context = {
+      documentId,
+      fileName: document.file_label || document.original_filename || document.file_name || 'Document',
+      requirementName: requirementName,
+      documentType: document.document_type || document.requirement_id || '',
+      uploadedAt: document.uploaded_at
+    };
+    
     setDocExtractionDocumentId(documentId);
-    setDocExtractionDocumentName(documentName);
+    setDocExtractionDocumentName(context.fileName);
+    setDocExtractionContext(context);
     setDocExtractionReviewOpen(true);
   };
   
@@ -1253,6 +1274,7 @@ export default function EmployeeProfilePage() {
     setDocExtractionReviewOpen(false);
     setDocExtractionDocumentId(null);
     setDocExtractionDocumentName('');
+    setDocExtractionContext(null);
     fetchData();
     fetchCompliance();
     toast.success('Document extraction reviewed successfully');
@@ -5159,7 +5181,15 @@ export default function EmployeeProfilePage() {
                                                   <>
                                                     <DropdownMenuSeparator />
                                                     <DropdownMenuItem 
-                                                      onClick={() => openDocExtraction(activeFile.file_id, activeFile.file_label || activeFile.original_filename || req.name)}
+                                                      onClick={() => openDocExtraction({
+                                                        id: activeFile.document_id || activeFile.file_id,
+                                                        document_id: activeFile.document_id || activeFile.file_id,
+                                                        file_label: activeFile.file_label,
+                                                        original_filename: activeFile.original_filename,
+                                                        file_name: activeFile.file_label || activeFile.original_filename,
+                                                        requirement_id: req.id,
+                                                        uploaded_at: activeFile.uploaded_at
+                                                      }, req.name)}
                                                       data-testid={`extract-compliance-${req.id}`}
                                                     >
                                                       <FileSearch className="h-4 w-4 mr-2 text-primary" />
@@ -5659,7 +5689,15 @@ export default function EmployeeProfilePage() {
                                             <>
                                               <DropdownMenuSeparator />
                                               <DropdownMenuItem 
-                                                onClick={() => openDocExtraction(doc.file_id, doc.file_label || doc.original_filename || req.name)}
+                                                onClick={() => openDocExtraction({
+                                                  id: doc.document_id || doc.file_id,
+                                                  document_id: doc.document_id || doc.file_id,
+                                                  file_label: doc.file_label,
+                                                  original_filename: doc.original_filename,
+                                                  file_name: doc.file_label || doc.original_filename,
+                                                  requirement_id: req.id,
+                                                  uploaded_at: doc.uploaded_at
+                                                }, req.name)}
                                                 data-testid={`extract-doc-${doc.file_id}`}
                                               >
                                                 <FileSearch className="h-4 w-4 mr-2 text-primary" />
@@ -7582,9 +7620,11 @@ export default function EmployeeProfilePage() {
           onClose={() => {
             setDocExtractionReviewOpen(false);
             setDocExtractionDocumentId(null);
+            setDocExtractionContext(null);
           }}
           onApproved={handleDocExtractionComplete}
           documentName={docExtractionDocumentName}
+          documentContext={docExtractionContext}
         />
       )}
 

@@ -21,12 +21,15 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * - Extraction is ASSISTIVE only - never auto-verifies
  * - All extracted values require admin review
  * - Canonical structured records remain source of truth
+ * 
+ * BUGFIX: Now accepts full document context for proper ID resolution
  */
 export default function DocumentExtractionReview({ 
   documentId, 
   onClose, 
   onApproved,
-  documentName = "Document"
+  documentName = "Document",
+  documentContext = null // Optional: { fileName, requirementName, documentType, uploadedAt }
 }) {
   const [extraction, setExtraction] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -34,18 +37,34 @@ export default function DocumentExtractionReview({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editedValues, setEditedValues] = useState({});
+  const [error, setError] = useState(null);
   
   const { token } = useAuth();
 
+  // Validate documentId before any operation
+  const validateDocumentId = () => {
+    if (!documentId || documentId === 'undefined' || documentId === 'null') {
+      return false;
+    }
+    return true;
+  };
+
   // Fetch existing extraction or trigger new one
   const fetchExtraction = async () => {
+    if (!validateDocumentId()) {
+      setError('No document selected for extraction. Please select a specific file.');
+      setLoading(false);
+      return;
+    }
+    
     setLoading(true);
+    setError(null);
     try {
       const response = await axios.get(`${API}/documents/${documentId}/extraction`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      if (response.data.status === 'not_extracted') {
+      if (response.data.status === 'not_extracted' || !response.data.has_extraction) {
         // No extraction exists - offer to trigger one
         setExtraction(null);
       } else {
@@ -54,6 +73,8 @@ export default function DocumentExtractionReview({
       }
     } catch (error) {
       console.error('Failed to fetch extraction:', error);
+      const errorDetail = error.response?.data?.detail || 'Failed to load extraction data.';
+      setError(errorDetail);
     } finally {
       setLoading(false);
     }
@@ -61,7 +82,13 @@ export default function DocumentExtractionReview({
 
   // Trigger new extraction
   const handleTriggerExtraction = async () => {
+    if (!validateDocumentId()) {
+      toast.error('No document selected for extraction.');
+      return;
+    }
+    
     setIsExtracting(true);
+    setError(null);
     try {
       const response = await axios.post(`${API}/documents/${documentId}/extract?force=true`, {}, {
         headers: { Authorization: `Bearer ${token}` }
@@ -77,7 +104,19 @@ export default function DocumentExtractionReview({
         toast.error('Extraction failed');
       }
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Extraction failed');
+      const errorDetail = error.response?.data?.detail || 'Extraction failed';
+      
+      // Provide user-friendly error messages
+      if (error.response?.status === 404) {
+        setError('The selected document could not be found. It may have been moved, removed, or the page may be out of date. Please refresh and try again.');
+        toast.error('Document not found. Please refresh the page.');
+      } else if (error.response?.status === 409) {
+        setError('This document cannot be extracted in its current state.');
+        toast.error('Document not extractable');
+      } else {
+        setError(errorDetail);
+        toast.error(errorDetail);
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -195,11 +234,61 @@ export default function DocumentExtractionReview({
             Document Extraction Review
           </DialogTitle>
           <DialogDescription>
-            {documentName}
+            {documentContext ? (
+              <div className="space-y-1 text-left">
+                <p><strong>File:</strong> {documentContext.fileName || documentName}</p>
+                {documentContext.requirementName && (
+                  <p><strong>Requirement:</strong> {documentContext.requirementName}</p>
+                )}
+                {documentContext.documentType && (
+                  <p><strong>Type:</strong> {documentContext.documentType}</p>
+                )}
+                {documentContext.uploadedAt && (
+                  <p><strong>Uploaded:</strong> {new Date(documentContext.uploadedAt).toLocaleDateString()}</p>
+                )}
+              </div>
+            ) : (
+              documentName
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="py-4">
+          {/* Error State */}
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-medium text-red-800">Extraction Error</p>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                  <div className="mt-3 flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setError(null);
+                        fetchExtraction();
+                      }}
+                      className="rounded-lg border-red-300 text-red-700 hover:bg-red-100"
+                    >
+                      <RefreshCw className="h-4 w-4 mr-1" />
+                      Retry
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={onClose}
+                      className="rounded-lg"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />

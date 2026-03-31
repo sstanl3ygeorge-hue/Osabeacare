@@ -10197,6 +10197,8 @@ class EvidenceFileResponse(BaseModel):
     file_label: Optional[str] = None
     source_type: str  # "manual_upload", "form_submission", "imported", "replacement"
     content_type: Optional[str] = None
+    # BUGFIX: Include document_id for extraction
+    document_id: Optional[str] = None  # Parent document ID for extraction
     # Status for soft-delete/replace
     status: Optional[str] = "active"  # active, superseded, removed
     # Metadata
@@ -10594,9 +10596,12 @@ async def get_requirement_evidence(
         
         for doc in docs:
             doc_files = doc.get('evidence_files', [])
+            parent_doc_id = doc.get('id')  # Parent document ID for extraction
+            
             if not doc_files and doc.get('file_url'):
                 doc_files = [{
                     "file_id": doc['id'],
+                    "document_id": doc['id'],  # BUGFIX: Include parent document ID for extraction
                     "file_url": doc['file_url'],
                     "original_filename": doc.get('original_filename', 'document'),
                     "uploaded_at": doc.get('uploaded_at', doc.get('created_at')),
@@ -10604,6 +10609,11 @@ async def get_requirement_evidence(
                     "file_label": doc.get('document_label'),
                     "source_type": doc.get('source_type', 'manual_upload')
                 }]
+            else:
+                # BUGFIX: Add document_id to each evidence file for extraction
+                for ef in doc_files:
+                    ef['document_id'] = parent_doc_id
+            
             evidence_files.extend(doc_files)
             
             if doc.get('verified'):
@@ -20932,7 +20942,7 @@ class DocumentExtractionService:
         Main entry point for document extraction.
         
         Args:
-            document_id: ID of the uploaded document
+            document_id: ID of the uploaded document OR a file_id from evidence_files
             force_rerun: If True, re-runs extraction even if one exists
             
         Returns:
@@ -20947,10 +20957,59 @@ class DocumentExtractionService:
             if existing.get("extraction_status") in ["completed", "needs_review"]:
                 return existing
         
-        # Get document
+        # Get document - first try direct ID match
         document = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
+        
+        # BUGFIX: If not found, try looking up by file_id in evidence_files array
         if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
+            document = await db.employee_documents.find_one(
+                {"evidence_files.file_id": document_id},
+                {"_id": 0}
+            )
+            # If found, update document_id to the actual document ID
+            if document:
+                # Find the specific evidence file to get its file_url
+                evidence_file = next(
+                    (ef for ef in document.get("evidence_files", []) if ef.get("file_id") == document_id),
+                    None
+                )
+                # Store the file_id for reference but use document.id as authoritative
+                document_id = document.get("id")
+                if evidence_file:
+                    # Use the specific evidence file's URL if available
+                    document["_evidence_file"] = evidence_file
+        
+        # Also check training_records for training certificates
+        if not document:
+            training_record = await db.training_records.find_one(
+                {"$or": [
+                    {"id": document_id},
+                    {"evidence_files.file_id": document_id}
+                ]},
+                {"_id": 0}
+            )
+            if training_record:
+                # Convert training record to document-like structure
+                evidence_file = next(
+                    (ef for ef in training_record.get("evidence_files", []) if ef.get("file_id") == document_id),
+                    training_record.get("evidence_files", [{}])[0] if training_record.get("evidence_files") else None
+                )
+                if evidence_file:
+                    document = {
+                        "id": document_id,
+                        "employee_id": training_record.get("employee_id"),
+                        "file_url": evidence_file.get("file_url") or training_record.get("certificate_url"),
+                        "requirement_id": training_record.get("requirement_id"),
+                        "document_type_name": training_record.get("training_name"),
+                        "_is_training": True,
+                        "_training_record_id": training_record.get("id")
+                    }
+        
+        if not document:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Document not found for id {document_id}. The document may have been removed or the ID is invalid."
+            )
         
         # Get employee for name matching
         employee = await db.employees.find_one(
@@ -20982,8 +21041,21 @@ class DocumentExtractionService:
         }
         
         try:
-            # Download document
-            file_url = document.get("file_url")
+            # Download document - prefer specific evidence file URL if available
+            evidence_file = document.get("_evidence_file")
+            if evidence_file:
+                file_url = evidence_file.get("file_url")
+            else:
+                file_url = document.get("file_url")
+                # If no direct URL, check evidence_files
+                if not file_url and document.get("evidence_files"):
+                    active_file = next(
+                        (ef for ef in document.get("evidence_files", []) if ef.get("status") in [None, "active"]),
+                        document.get("evidence_files", [{}])[0] if document.get("evidence_files") else None
+                    )
+                    if active_file:
+                        file_url = active_file.get("file_url")
+            
             if not file_url:
                 extraction["extraction_status"] = ExtractionStatus.FAILED.value
                 extraction["issues"].append({
@@ -21944,15 +22016,40 @@ async def get_document_extraction(
 ):
     """
     Get extraction record for a document.
+    
+    Accepts either the document record ID or the file_id from evidence_files.
     """
+    # First try direct document_id match
     extraction = await db.document_extractions.find_one(
         {"document_id": document_id},
         {"_id": 0}
     )
-    if not extraction:
-        return {"status": "not_extracted", "document_id": document_id}
     
-    return extraction
+    # BUGFIX: If not found by direct ID, resolve file_id to document_id first
+    if not extraction:
+        # Check if this is a file_id within employee_documents
+        doc = await db.employee_documents.find_one(
+            {"evidence_files.file_id": document_id},
+            {"_id": 0, "id": 1}
+        )
+        if doc:
+            extraction = await db.document_extractions.find_one(
+                {"document_id": doc["id"]},
+                {"_id": 0}
+            )
+    
+    if not extraction:
+        return {
+            "status": "not_extracted", 
+            "document_id": document_id,
+            "has_extraction": False,
+            "extraction": None
+        }
+    
+    return {
+        **extraction,
+        "has_extraction": True
+    }
 
 
 @api_router.post("/documents/{document_id}/extraction/review")

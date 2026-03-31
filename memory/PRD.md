@@ -4,6 +4,88 @@
 **Osabea Healthcare Solutions**
 
 
+## Step 10: Training Intake Wizard - Phases 1-3 Backend (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented the backend for the Training Intake Wizard with multi-training certificate extraction, proposed items review, and canonical training_records creation. One uploaded document can create MANY training records.
+
+### Phase 1: Training Request & Secure Upload
+- `POST /api/employees/{id}/training/request` - Admin sends training certificate request email
+- `GET /api/training/respond/{token}` - Employee views secure upload page (public, no auth)
+- `POST /api/training/respond/{token}/upload` - Employee uploads certificates (auto-extraction)
+- Reuses existing EmailRequestService lifecycle
+
+### Phase 2: Multi-Training Extraction
+- GPT-5.2 Vision extracts ALL courses from a certificate
+- Detects single vs multi-training certificates
+- Training mapping layer: raw titles → internal codes (e.g., "CSTF - Fire Safety" → `fire_safety`)
+- Name verification: `match` | `partial_match` | `mismatch` | `review_required`
+- Creates `proposed_training_items` for admin review
+
+### Phase 3: Review & Commit
+- `GET /api/employees/{id}/training/proposed-items` - Get items awaiting review
+- `POST /api/employees/{id}/training/proposed-items/review` - Approve/reject items
+- Approved items create canonical `training_records`
+- One document can link to MANY training_records (via `source_document_id`)
+- Training Matrix shows same records
+
+### Key Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/employees/{id}/training/proposed-items` | GET | Get pending items |
+| `/employees/{id}/training/requests` | GET | Request history |
+| `/employees/{id}/training/request` | POST | Send certificate request |
+| `/employees/{id}/training/intake` | POST | Trigger extraction |
+| `/employees/{id}/training/proposed-items/review` | POST | Approve/reject |
+| `/employees/{id}/training/manual` | POST | Manual record entry |
+| `/training/respond/{token}` | GET | Public upload page |
+| `/training/respond/{token}/upload` | POST | Public file upload |
+
+### Training Code Mapping
+```
+fire_safety, infection_control, manual_handling, safeguarding,
+basic_life_support, food_hygiene, equality_diversity, health_and_safety,
+information_governance, prevent, first_aid, medication_administration,
+mental_capacity_act, dols, dementia_awareness, autism_awareness,
+learning_disabilities, end_of_life_care
+```
+
+### Proposed Training Item Structure
+```json
+{
+  "id": "uuid",
+  "source_document_id": "uuid",
+  "raw_course_title": "CSTF - Fire Safety Online Training Module",
+  "mapped_training_code": "fire_safety",
+  "mapped_training_title": "Fire Safety",
+  "completed_at": "2025-12-08",
+  "expires_at": "2027-12-08",
+  "expiry_source": "explicit | inferred_policy | manual",
+  "holder_name": "John Smith",
+  "holder_name_match": "match | partial_match | mismatch",
+  "status": "proposed | approved | rejected"
+}
+```
+
+### Test Results
+- Backend: 100% (25/25 tests passed)
+- Test report: `/app/test_reports/iteration_82.json`
+
+### Critical Fix Applied
+Routes defined after `app.include_router()` were not being registered. Fixed by moving `app.include_router()` to after all route definitions.
+
+### Non-Negotiables Verified
+- ✅ One uploaded document can create many proposed training items
+- ✅ Nothing becomes verified automatically (approved items have `verified: false`)
+- ✅ Approved items write to same `training_records` used by Training Matrix
+- ✅ Employee secure upload reuses existing EmailRequestService
+- ✅ Name mismatch is visible and reviewable
+- ✅ Raw certificate title preserved alongside mapped internal training code
+
+---
+
+
 ## Document Extraction "Document Not Found" Bugfix (2026-03-31)
 **Status**: COMPLETE ✅
 

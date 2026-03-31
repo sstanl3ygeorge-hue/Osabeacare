@@ -4,8 +4,8 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11D: File Interaction + Request Lifecycle - Phase D1-D4 (2026-03-31)
-**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3 COMPLETE ✅ | D4 COMPLETE ✅
+## Step 11D: File Interaction + Request Lifecycle - Phase D1-D4.1 (2026-03-31)
+**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3 COMPLETE ✅ | D4 COMPLETE ✅ | D4.1 COMPLETE ✅
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)
 Implemented the backend infrastructure that turns the Compliance File from a status page into an operations page.
@@ -113,6 +113,32 @@ Implemented inline request lifecycle visibility on Evidence rows without needing
 - Request Replacement button when files are already verified
 
 **Testing:** All 14 tests passed (iteration_93.json). 100% success rate.
+
+### Phase D4.1: Fix View Buttons ✅ (2026-03-31)
+Fixed View button functionality for complete file viewing experience.
+
+**Backend Enhancements:**
+- Added `mime_type`, `content_type`, `file_available` fields to files endpoint
+- Added `file_url`, `content_type`, `file_available` to compliance-file documents_preview
+- File availability status for stale/missing file detection
+
+**Frontend Enhancements:**
+- `handleViewFile()` helper in RequirementFilesDrawer:
+  - Checks file availability before attempting view
+  - Shows toast error for missing/stale files
+  - Falls back to download with toast when preview not supported
+  - Previewable types: PDF, images, text files
+- `handleDownloadFile()` with proper error handling
+- Updated parent handler to accept both old and new file object formats
+
+**Acceptance Criteria Met:**
+- ✅ Click View on requirement row → opens RequirementFilesDrawer
+- ✅ Click View on file inside drawer → opens preview/download
+- ✅ Multi-file requirements show all files
+- ✅ Preview unsupported → download fallback with informative toast
+- ✅ No View button silently does nothing
+
+**Testing:** All 8 tests passed (iteration_94.json). 100% success rate.
 
 ---
 

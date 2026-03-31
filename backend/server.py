@@ -12254,15 +12254,100 @@ async def get_requirement_unified_history(
     
     timeline = []
     
-    # 1. Get audit logs for this requirement
-    audit_logs = await db.audit_logs.find({
+    # Map _evidence suffix keys to base document keys and vice versa
+    evidence_key_mapping = {
+        'right_to_work_evidence': 'right_to_work_documents',
+        'right_to_work_documents': 'right_to_work_documents',
+        'dbs_evidence': 'dbs_certificate',
+        'dbs_certificate': 'dbs_certificate',
+        'identity_evidence': 'identity_documents',
+        'identity_documents': 'identity_documents',
+        'proof_of_address_evidence': 'proof_of_address',
+        'proof_of_address': 'proof_of_address',
+    }
+    
+    # Get the canonical requirement_id for document lookups
+    doc_requirement_key = evidence_key_mapping.get(requirement_key, requirement_key)
+    
+    # Build list of all possible keys to search for
+    search_keys = list(set([requirement_key, doc_requirement_key]))
+    
+    # 0. Get document upload events directly from employee_documents
+    documents = await db.employee_documents.find({
         "employee_id": employee_id,
+        "requirement_id": {"$in": search_keys}
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    for doc in documents:
+        # Document uploaded event
+        timeline.append({
+            "event_type": "document_uploaded",
+            "timestamp": doc.get('uploaded_at') or doc.get('created_at'),
+            "user_id": doc.get('uploaded_by'),
+            "user_name": doc.get('uploaded_by_name'),
+            "details": {
+                "file_id": doc.get('id'),
+                "filename": doc.get('original_filename') or doc.get('document_label'),
+                "source_type": doc.get('source_type', 'manual_upload'),
+                "status": doc.get('status')
+            },
+            "source": "document"
+        })
+        
+        # Document verified event (if verified)
+        if doc.get('verified'):
+            timeline.append({
+                "event_type": "document_verified",
+                "timestamp": doc.get('verified_at') or doc.get('updated_at'),
+                "user_id": doc.get('verified_by'),
+                "user_name": doc.get('verified_by_name'),
+                "details": {
+                    "file_id": doc.get('id'),
+                    "filename": doc.get('original_filename') or doc.get('document_label')
+                },
+                "source": "document"
+            })
+        
+        # Document superseded or error status
+        if doc.get('status') == 'superseded':
+            timeline.append({
+                "event_type": "document_superseded",
+                "timestamp": doc.get('superseded_at') or doc.get('updated_at'),
+                "user_id": doc.get('superseded_by'),
+                "user_name": doc.get('superseded_by_name'),
+                "details": {
+                    "file_id": doc.get('id'),
+                    "filename": doc.get('original_filename') or doc.get('document_label'),
+                    "reason": doc.get('superseded_reason')
+                },
+                "source": "document"
+            })
+        elif doc.get('status') == 'uploaded_in_error':
+            timeline.append({
+                "event_type": "document_marked_uploaded_in_error",
+                "timestamp": doc.get('marked_error_at') or doc.get('updated_at'),
+                "user_id": doc.get('marked_error_by'),
+                "user_name": doc.get('marked_error_by_name'),
+                "details": {
+                    "file_id": doc.get('id'),
+                    "filename": doc.get('original_filename') or doc.get('document_label'),
+                    "reason": doc.get('error_reason')
+                },
+                "source": "document"
+            })
+    
+    # 1. Get audit logs for this requirement (search multiple paths)
+    audit_logs = await db.audit_logs.find({
         "$or": [
-            {"requirement_id": requirement_key},
-            {"entity_id": requirement_key},
-            {"details.requirement_id": requirement_key}
+            # Standard log_audit_action format (metadata.requirement_id, entity_id is doc_id)
+            {"metadata.requirement_id": {"$in": search_keys}, "metadata.employee_id": employee_id},
+            {"metadata.requirement_id": {"$in": search_keys}, "entity_id": employee_id},
+            # Some logs may have requirement_id at top level
+            {"requirement_id": {"$in": search_keys}, "employee_id": employee_id},
+            # Entity type lookups
+            {"entity_type": "requirement", "entity_id": {"$in": search_keys}, "metadata.employee_id": employee_id}
         ]
-    }, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    }, {"_id": 0}).sort("created_at", -1).to_list(200)
     
     for log in audit_logs:
         timeline.append({
@@ -12277,7 +12362,7 @@ async def get_requirement_unified_history(
     # 2. Get request history (sent, viewed, submitted, etc.)
     requests = await db.email_requests.find({
         "person_id": employee_id,
-        "requirement_id": requirement_key
+        "requirement_id": {"$in": search_keys}
     }, {"_id": 0}).sort("created_at", -1).to_list(100)
     
     for req in requests:
@@ -12314,7 +12399,7 @@ async def get_requirement_unified_history(
     # 3. Get evidence edit logs
     edit_logs = await db.evidence_edit_logs.find({
         "employee_id": employee_id,
-        "requirement_id": requirement_key
+        "requirement_id": {"$in": search_keys}
     }, {"_id": 0}).sort("changed_at", -1).to_list(100)
     
     for log in edit_logs:
@@ -12336,19 +12421,29 @@ async def get_requirement_unified_history(
     # Map both evidence keys and check keys to collections
     check_collections = {
         'right_to_work_check': 'rtw_checks',
-        'right_to_work_documents': 'rtw_checks',  # Evidence key also shows checks
+        'right_to_work_documents': 'rtw_checks',
+        'right_to_work_evidence': 'rtw_checks',
         'rtw_check': 'rtw_checks',
         'dbs_status_check': 'dbs_checks',
-        'dbs_certificate': 'dbs_checks',  # Evidence key also shows checks
+        'dbs_certificate': 'dbs_checks',
+        'dbs_evidence': 'dbs_checks',
         'dbs_check': 'dbs_checks',
         'identity_verification': 'identity_verifications',
         'identity_documents': 'identity_verifications',
+        'identity_evidence': 'identity_verifications',
         'address_verification': 'address_verifications',
-        'proof_of_address': 'address_verifications'  # Evidence key also shows checks
+        'proof_of_address': 'address_verifications',
+        'proof_of_address_evidence': 'address_verifications'
     }
     
-    if requirement_key in check_collections:
-        collection_name = check_collections[requirement_key]
+    # Check if any of our search keys map to a check collection
+    collection_name = None
+    for key in search_keys:
+        if key in check_collections:
+            collection_name = check_collections[key]
+            break
+    
+    if collection_name:
         checks = await db[collection_name].find({
             "employee_id": employee_id
         }, {"_id": 0}).sort("created_at", -1).to_list(50)

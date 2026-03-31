@@ -232,6 +232,14 @@ export default function EmployeeProfilePage() {
   const [fieldsToApply, setFieldsToApply] = useState({});
   const [isApplyingExtraction, setIsApplyingExtraction] = useState(false);
   
+  // Employment History Mismatch State (CV vs Structured)
+  const [employmentMismatch, setEmploymentMismatch] = useState(null);
+  const [loadingMismatch, setLoadingMismatch] = useState(false);
+  const [mismatchDialogOpen, setMismatchDialogOpen] = useState(false);
+  const [mismatchReviewNote, setMismatchReviewNote] = useState('');
+  const [isSubmittingMismatchNote, setIsSubmittingMismatchNote] = useState(false);
+  const [isReextractingFromCv, setIsReextractingFromCv] = useState(false);
+  
   const { token, isAuditor, isAdmin, user } = useAuth();
   
   // Document preview modal state
@@ -252,6 +260,92 @@ export default function EmployeeProfilePage() {
       console.error('Failed to fetch recruitment status:', err);
     } finally {
       setLoadingRecruitment(false);
+    }
+  };
+  
+  // Fetch Employment History Mismatch Status (CV vs Structured)
+  const fetchEmploymentMismatch = async () => {
+    if (!employeeId) return;
+    setLoadingMismatch(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/employment-mismatch`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setEmploymentMismatch(response.data);
+    } catch (err) {
+      console.error('Failed to fetch employment mismatch:', err);
+    } finally {
+      setLoadingMismatch(false);
+    }
+  };
+  
+  // Re-extract employment history from CV (Admin action)
+  const handleReextractFromCv = async () => {
+    // Find CV document
+    const cvDoc = (compliance?.evidence || []).find(e => 
+      e.document_type_name?.toLowerCase().includes('cv') || 
+      e.document_type_name?.toLowerCase().includes('resume')
+    );
+    
+    if (!cvDoc?.file_id && !cvDoc?.id) {
+      toast.error('No CV document found. Please upload a CV first.');
+      return;
+    }
+    
+    setIsReextractingFromCv(true);
+    try {
+      // Step 1: Extract from CV
+      const extractResponse = await axios.post(
+        `${API}/cv/extract-employment-history?file_id=${cvDoc.file_id || cvDoc.id}&employee_id=${employeeId}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (extractResponse.data.status !== 'success' || !extractResponse.data.extracted_roles?.length) {
+        toast.warning('No employment history could be extracted from CV');
+        return;
+      }
+      
+      // Step 2: Compare with structured history
+      const compareResponse = await axios.post(
+        `${API}/employees/${employeeId}/compare-employment-history`,
+        extractResponse.data.extracted_roles,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(`CV re-extracted. ${extractResponse.data.extracted_roles.length} roles found.`);
+      fetchEmploymentMismatch();
+      fetchRecruitmentStatus();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to re-extract from CV');
+    } finally {
+      setIsReextractingFromCv(false);
+    }
+  };
+  
+  // Add mismatch review note
+  const handleAddMismatchNote = async () => {
+    if (mismatchReviewNote.length < 5) {
+      toast.error('Note must be at least 5 characters');
+      return;
+    }
+    
+    setIsSubmittingMismatchNote(true);
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/employment-mismatch/add-note`,
+        { note: mismatchReviewNote },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('Review note added');
+      setMismatchDialogOpen(false);
+      setMismatchReviewNote('');
+      fetchEmploymentMismatch();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to add note');
+    } finally {
+      setIsSubmittingMismatchNote(false);
     }
   };
   
@@ -538,6 +632,7 @@ export default function EmployeeProfilePage() {
     fetchCompliance();
     fetchRecruitmentStatus();
     fetchReferenceStatus();
+    fetchEmploymentMismatch();
   }, [employeeId, token]);
 
   // Fetch profile photo when employee has one
@@ -6028,6 +6123,77 @@ export default function EmployeeProfilePage() {
                         </p>
                       </div>
                     )}
+                    
+                    {/* Employment History vs CV Mismatch Warning (Amber - Soft Block) */}
+                    {employmentMismatch?.has_mismatch && (
+                      <div className="mt-4 p-4 bg-amber-50 rounded-xl border border-amber-200" data-testid="employment-mismatch-warning">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-3">
+                            <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <div>
+                              <p className="font-medium text-amber-800">
+                                Employment history differs from CV
+                              </p>
+                              <p className="text-sm text-amber-700 mt-1">
+                                {employmentMismatch.mismatch_count} inconsistencies detected between structured employment history and CV.
+                              </p>
+                              <p className="text-xs text-amber-600 mt-1">
+                                Source of truth: Structured Employment History (used for compliance)
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg border-amber-300 text-amber-700 hover:bg-amber-100"
+                              onClick={() => setMismatchDialogOpen(true)}
+                              data-testid="view-mismatch-details-btn"
+                            >
+                              View Details
+                            </Button>
+                            {!isAuditor() && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg border-blue-300 text-blue-700 hover:bg-blue-100"
+                                onClick={handleReextractFromCv}
+                                disabled={isReextractingFromCv}
+                                data-testid="reextract-cv-btn"
+                              >
+                                {isReextractingFromCv ? (
+                                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                ) : (
+                                  <FileText className="h-4 w-4 mr-1" />
+                                )}
+                                Re-extract from CV
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Re-extract from CV button when no mismatch data exists */}
+                    {!employmentMismatch?.has_mismatch && !loadingMismatch && !isAuditor() && (
+                      <div className="mt-4">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-lg text-gray-600"
+                          onClick={handleReextractFromCv}
+                          disabled={isReextractingFromCv}
+                          data-testid="extract-cv-initial-btn"
+                        >
+                          {isReextractingFromCv ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          ) : (
+                            <FileText className="h-4 w-4 mr-1" />
+                          )}
+                          Compare with CV
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Proof of Address Section */}
@@ -8279,6 +8445,153 @@ export default function EmployeeProfilePage() {
               )}
               Mark as Reviewed
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Employment History Mismatch Details Dialog */}
+      <Dialog open={mismatchDialogOpen} onOpenChange={setMismatchDialogOpen}>
+        <DialogContent className="sm:max-w-3xl bg-white max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Employment History vs CV Comparison
+            </DialogTitle>
+            <DialogDescription>
+              Review inconsistencies between structured employment history and CV. Structured history is the source of truth for compliance.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {employmentMismatch && (
+            <div className="space-y-6 mt-4">
+              {/* Summary */}
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-100">
+                <p className="text-sm text-amber-800">
+                  <strong>{employmentMismatch.mismatch_count}</strong> inconsistencies detected | 
+                  <span className="ml-2">Structured roles: {employmentMismatch.structured_history?.length || 0}</span> | 
+                  <span className="ml-2">CV roles: {employmentMismatch.cv_extracted_roles?.length || 0}</span>
+                </p>
+                {employmentMismatch.compared_at && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Last compared: {new Date(employmentMismatch.compared_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              
+              {/* Mismatch List */}
+              <div className="space-y-3">
+                <h4 className="font-medium text-gray-900">Detected Mismatches</h4>
+                {employmentMismatch.mismatch_summary?.map((mismatch, idx) => (
+                  <div key={idx} className={`p-3 rounded-lg border ${
+                    mismatch.severity === 'critical' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+                  }`}>
+                    <p className={`text-sm font-medium ${
+                      mismatch.severity === 'critical' ? 'text-red-800' : 'text-amber-800'
+                    }`}>
+                      {mismatch.type === 'missing_in_structured' && '⚠️ Role in CV not in structured history'}
+                      {mismatch.type === 'missing_in_cv' && '⚠️ Role in structured history not in CV'}
+                      {mismatch.type === 'date_inconsistency' && '⚠️ Date mismatch'}
+                      {mismatch.type === 'overlap_inconsistency' && '⚠️ Overlap inconsistency'}
+                    </p>
+                    <p className="text-sm text-gray-700 mt-1">{mismatch.description}</p>
+                    
+                    {/* Show data comparison */}
+                    <div className="grid grid-cols-2 gap-4 mt-2 text-xs">
+                      {mismatch.structured_data && (
+                        <div className="p-2 bg-white rounded border">
+                          <p className="font-medium text-gray-600">Structured:</p>
+                          <p>{mismatch.structured_data.employer_name || mismatch.structured_data.company}</p>
+                          <p className="text-gray-500">{mismatch.structured_data.start_date} - {mismatch.structured_data.end_date || 'Present'}</p>
+                        </div>
+                      )}
+                      {mismatch.cv_data && (
+                        <div className="p-2 bg-white rounded border">
+                          <p className="font-medium text-gray-600">CV:</p>
+                          <p>{mismatch.cv_data.employer}</p>
+                          <p className="text-gray-500">{mismatch.cv_data.start_date} - {mismatch.cv_data.end_date || 'Present'}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Side-by-side View */}
+              <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Structured Employment History (Source of Truth)</h4>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {employmentMismatch.structured_history?.length > 0 ? (
+                      employmentMismatch.structured_history.map((job, idx) => (
+                        <div key={idx} className="p-2 bg-green-50 rounded border border-green-200 text-sm">
+                          <p className="font-medium">{job.employer_name || job.company}</p>
+                          <p className="text-gray-600">{job.job_title || job.role}</p>
+                          <p className="text-xs text-gray-500">{job.start_date} - {job.end_date || 'Present'}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">No structured history recorded</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">CV Extracted Roles</h4>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {employmentMismatch.cv_extracted_roles?.length > 0 ? (
+                      employmentMismatch.cv_extracted_roles.map((role, idx) => (
+                        <div key={idx} className="p-2 bg-blue-50 rounded border border-blue-200 text-sm">
+                          <p className="font-medium">{role.employer}</p>
+                          <p className="text-gray-600">{role.job_title}</p>
+                          <p className="text-xs text-gray-500">{role.start_date} - {role.end_date || 'Present'}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">No roles extracted from CV</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Add Review Note */}
+              {!isAuditor() && (
+                <div className="pt-4 border-t space-y-3">
+                  <h4 className="font-medium text-gray-900">Add Review Note</h4>
+                  <p className="text-xs text-gray-500">Document your review of this mismatch to proceed with recruitment approval.</p>
+                  <Textarea
+                    value={mismatchReviewNote}
+                    onChange={(e) => setMismatchReviewNote(e.target.value)}
+                    placeholder="Explain why this mismatch is acceptable or document actions taken..."
+                    rows={3}
+                    className="bg-white border-[#E4E8EB]"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          
+          <DialogFooter className="flex gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setMismatchDialogOpen(false)}
+              className="border-[#E4E8EB]"
+            >
+              Close
+            </Button>
+            {!isAuditor() && (
+              <Button 
+                onClick={handleAddMismatchNote}
+                disabled={isSubmittingMismatchNote || mismatchReviewNote.length < 5}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="add-mismatch-note-btn"
+              >
+                {isSubmittingMismatchNote ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                )}
+                Add Review Note
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response, Form
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response, Form, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -12,6 +12,7 @@ import secrets
 import io
 import zipfile
 import base64
+import json
 from enum import Enum
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
@@ -19323,7 +19324,458 @@ async def upload_application_cv(file: UploadFile = File(...)):
     }
 
 
-@api_router.get("/applications/{reference}")
+# ==================== CV EMPLOYMENT HISTORY EXTRACTION ====================
+# Phase 2: CV Extraction (Assist Only) - GPT-based extraction
+
+class CVExtractedRole(BaseModel):
+    """Structured role extracted from CV"""
+    job_title: str
+    employer: str
+    start_date: Optional[str] = None  # YYYY-MM format
+    end_date: Optional[str] = None  # YYYY-MM format or None if current
+    is_current: bool = False
+    description: Optional[str] = None
+    confidence: float = 0.0  # 0.0 to 1.0
+
+class CVExtractionResponse(BaseModel):
+    """Response from CV extraction endpoint"""
+    status: str
+    extracted_roles: List[CVExtractedRole]
+    overall_confidence: float
+    extraction_notes: Optional[str] = None
+    source: str = "cv_extraction"
+
+
+@api_router.post("/cv/extract-employment-history", response_model=CVExtractionResponse)
+async def extract_employment_history_from_cv(
+    file_id: str = Query(..., description="CV file ID from cv-upload endpoint"),
+    employee_id: Optional[str] = Query(None, description="Employee ID (optional, for admin re-extraction)")
+):
+    """
+    Extract employment history from uploaded CV using GPT-5.2.
+    
+    This is an ASSIST-ONLY endpoint:
+    - Returns SUGGESTED roles extracted from CV
+    - Does NOT auto-save to employment_history
+    - Requires user confirmation before applying
+    - Source of truth remains structured employment_history
+    
+    Use cases:
+    1. Apply Page: Prefill employment history for applicant to review/edit
+    2. Admin Portal: Re-extract when CV updated or for comparison
+    """
+    # Find the CV document
+    cv_doc = await db.employee_documents.find_one({"id": file_id}, {"_id": 0})
+    if not cv_doc:
+        raise HTTPException(status_code=404, detail="CV document not found")
+    
+    file_url = cv_doc.get("file_url")
+    if not file_url:
+        raise HTTPException(status_code=400, detail="CV file URL not found")
+    
+    # Get API key
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    if not api_key:
+        raise HTTPException(status_code=500, detail="LLM API key not configured")
+    
+    try:
+        # Download and convert CV to images for vision processing
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.get(file_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail="Failed to download CV file")
+            cv_content = response.content
+        
+        # Convert PDF to images for GPT Vision
+        images_to_process = []
+        file_ext = cv_doc.get("file_type", ".pdf").lower()
+        
+        if file_ext == ".pdf":
+            import fitz  # PyMuPDF
+            pdf_doc = fitz.open(stream=cv_content, filetype="pdf")
+            for page_num in range(min(pdf_doc.page_count, 5)):  # Max 5 pages
+                page = pdf_doc[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_bytes = pix.tobytes("png")
+                img_base64 = base64.b64encode(img_bytes).decode()
+                images_to_process.append(img_base64)
+            pdf_doc.close()
+        else:
+            # For Word docs, try to extract text directly
+            # Convert to base64 for processing
+            img_base64 = base64.b64encode(cv_content).decode()
+            images_to_process.append(img_base64)
+        
+        if not images_to_process:
+            raise HTTPException(status_code=400, detail="Could not process CV file")
+        
+        # Use GPT-5.2 Vision to extract employment history
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"cv-extraction-{uuid.uuid4()}",
+            system_message="""You are an employment history extraction specialist. Extract ALL employment roles from the provided CV/Resume.
+
+For EACH role found, extract:
+- job_title: The job title/position held
+- employer: Company/organization name
+- start_date: Start date in YYYY-MM format (e.g., "2020-03")
+- end_date: End date in YYYY-MM format, or null if current position
+- is_current: true if this is current employment, false otherwise
+- description: Brief duties/responsibilities (max 200 chars)
+- confidence: Your confidence in this extraction (0.0 to 1.0)
+
+IMPORTANT:
+- Extract ALL roles, including part-time, volunteer, and internships
+- If dates are only years (e.g., "2019-2021"), use YYYY-01 for start and YYYY-12 for end
+- If "Present" or "Current", set end_date to null and is_current to true
+- Order by most recent first
+- Return ONLY valid JSON array, no other text"""
+        ).with_model("openai", "gpt-5.2")
+        
+        # Process images
+        all_extraction_results = []
+        for i, image_base64 in enumerate(images_to_process[:3]):  # Max 3 pages for employment
+            image_content = ImageContent(image_base64=image_base64)
+            user_message = UserMessage(
+                text=f"Extract all employment/work history roles from this CV page {i+1}. Return a JSON array of role objects. If no employment found on this page, return empty array [].",
+                file_contents=[image_content]
+            )
+            
+            page_result = await chat.send_message(user_message)
+            if page_result:
+                all_extraction_results.append(page_result)
+        
+        # Parse combined results
+        extracted_roles = []
+        seen_roles = set()  # Dedupe by employer+title
+        
+        for result_text in all_extraction_results:
+            try:
+                # Clean up response - extract JSON
+                json_match = re.search(r'\[[\s\S]*\]', result_text)
+                if json_match:
+                    roles_data = json.loads(json_match.group())
+                    for role in roles_data:
+                        # Dedupe key
+                        role_key = f"{role.get('employer', '').lower()}_{role.get('job_title', '').lower()}"
+                        if role_key not in seen_roles and role.get('employer'):
+                            seen_roles.add(role_key)
+                            extracted_roles.append(CVExtractedRole(
+                                job_title=role.get('job_title', 'Unknown'),
+                                employer=role.get('employer', 'Unknown'),
+                                start_date=role.get('start_date'),
+                                end_date=role.get('end_date'),
+                                is_current=role.get('is_current', False),
+                                description=role.get('description', '')[:200] if role.get('description') else None,
+                                confidence=float(role.get('confidence', 0.7))
+                            ))
+            except json.JSONDecodeError:
+                continue
+        
+        # Calculate overall confidence
+        overall_confidence = sum(r.confidence for r in extracted_roles) / len(extracted_roles) if extracted_roles else 0.0
+        
+        return CVExtractionResponse(
+            status="success",
+            extracted_roles=extracted_roles,
+            overall_confidence=round(overall_confidence, 2),
+            extraction_notes=f"Extracted {len(extracted_roles)} roles from CV" if extracted_roles else "No employment history found in CV",
+            source="cv_extraction"
+        )
+        
+    except Exception as e:
+        logger.error(f"CV extraction failed: {e}")
+        raise HTTPException(status_code=500, detail=f"CV extraction failed: {str(e)}")
+
+
+# ==================== EMPLOYMENT HISTORY MISMATCH DETECTION ====================
+# Phase 3: Mismatch Detection between structured employment_history and CV extraction
+
+class EmploymentMismatchEntry(BaseModel):
+    """A single mismatch entry"""
+    type: str  # "missing_in_structured", "missing_in_cv", "date_inconsistency", "overlap_inconsistency"
+    severity: str  # "warning", "critical"
+    description: str
+    structured_data: Optional[dict] = None
+    cv_data: Optional[dict] = None
+
+class EmploymentMismatchResult(BaseModel):
+    """Result of mismatch comparison"""
+    has_mismatch: bool
+    mismatch_count: int
+    mismatch_summary: List[EmploymentMismatchEntry]
+    structured_role_count: int
+    cv_role_count: int
+    compared_at: str
+
+
+def compare_employment_histories(
+    structured_history: List[dict], 
+    cv_extracted_roles: List[dict],
+    tolerance_months: int = 1
+) -> EmploymentMismatchResult:
+    """
+    Compare structured employment history with CV-extracted roles.
+    
+    Detects:
+    - Missing roles (in CV but not in structured)
+    - Extra roles (in structured but not in CV)
+    - Date inconsistencies (±tolerance_months)
+    - Overlapping inconsistencies
+    
+    IMPORTANT: This is for admin awareness ONLY.
+    Structured history remains the source of truth for compliance.
+    """
+    mismatches = []
+    
+    def normalize_date(date_str):
+        """Normalize date string to YYYY-MM format"""
+        if not date_str:
+            return None
+        # Handle various formats
+        if isinstance(date_str, str):
+            # Already YYYY-MM
+            if re.match(r'^\d{4}-\d{2}$', date_str):
+                return date_str
+            # YYYY-MM-DD format
+            if re.match(r'^\d{4}-\d{2}-\d{2}', date_str):
+                return date_str[:7]
+        return None
+    
+    def dates_match(date1, date2, tolerance_months=1):
+        """Check if two dates match within tolerance"""
+        d1 = normalize_date(date1)
+        d2 = normalize_date(date2)
+        
+        if not d1 or not d2:
+            return False
+        
+        try:
+            # Parse as YYYY-MM
+            y1, m1 = int(d1[:4]), int(d1[5:7])
+            y2, m2 = int(d2[:4]), int(d2[5:7])
+            
+            # Calculate month difference
+            month_diff = abs((y1 * 12 + m1) - (y2 * 12 + m2))
+            return month_diff <= tolerance_months
+        except:
+            return False
+    
+    def normalize_employer(name):
+        """Normalize employer name for comparison"""
+        if not name:
+            return ""
+        # Remove common suffixes and normalize
+        name = name.lower().strip()
+        for suffix in [' ltd', ' limited', ' plc', ' inc', ' corp', ' llc', ' gmbh']:
+            name = name.replace(suffix, '')
+        return name.strip()
+    
+    # Create lookup for structured history
+    structured_lookup = {}
+    for job in structured_history:
+        employer = job.get('employer_name') or job.get('company') or job.get('employer')
+        key = normalize_employer(employer)
+        if key:
+            structured_lookup[key] = job
+    
+    # Create lookup for CV extracted
+    cv_lookup = {}
+    for role in cv_extracted_roles:
+        employer = role.get('employer')
+        key = normalize_employer(employer)
+        if key:
+            cv_lookup[key] = role
+    
+    # Check for roles in CV but not in structured (missing in structured)
+    for cv_key, cv_role in cv_lookup.items():
+        if cv_key not in structured_lookup:
+            mismatches.append(EmploymentMismatchEntry(
+                type="missing_in_structured",
+                severity="warning",
+                description=f"CV contains role at '{cv_role.get('employer')}' not found in structured history",
+                cv_data=cv_role
+            ))
+        else:
+            # Role exists, check dates
+            struct_job = structured_lookup[cv_key]
+            struct_start = struct_job.get('start_date')
+            struct_end = struct_job.get('end_date')
+            cv_start = cv_role.get('start_date')
+            cv_end = cv_role.get('end_date')
+            
+            if struct_start and cv_start and not dates_match(struct_start, cv_start, tolerance_months):
+                mismatches.append(EmploymentMismatchEntry(
+                    type="date_inconsistency",
+                    severity="warning",
+                    description=f"Start date mismatch for '{cv_role.get('employer')}': Structured={struct_start}, CV={cv_start}",
+                    structured_data=struct_job,
+                    cv_data=cv_role
+                ))
+            
+            if struct_end and cv_end and not dates_match(struct_end, cv_end, tolerance_months):
+                mismatches.append(EmploymentMismatchEntry(
+                    type="date_inconsistency",
+                    severity="warning",
+                    description=f"End date mismatch for '{cv_role.get('employer')}': Structured={struct_end}, CV={cv_end}",
+                    structured_data=struct_job,
+                    cv_data=cv_role
+                ))
+    
+    # Check for roles in structured but not in CV (extra in structured)
+    for struct_key, struct_job in structured_lookup.items():
+        if struct_key not in cv_lookup:
+            employer = struct_job.get('employer_name') or struct_job.get('company') or struct_job.get('employer')
+            mismatches.append(EmploymentMismatchEntry(
+                type="missing_in_cv",
+                severity="warning",
+                description=f"Structured history contains role at '{employer}' not found in CV",
+                structured_data=struct_job
+            ))
+    
+    return EmploymentMismatchResult(
+        has_mismatch=len(mismatches) > 0,
+        mismatch_count=len(mismatches),
+        mismatch_summary=mismatches,
+        structured_role_count=len(structured_lookup),
+        cv_role_count=len(cv_lookup),
+        compared_at=datetime.now(timezone.utc).isoformat()
+    )
+
+
+@api_router.post("/employees/{employee_id}/compare-employment-history")
+async def compare_employment_with_cv(
+    employee_id: str,
+    cv_extracted_roles: List[dict] = Body(..., description="Roles extracted from CV"),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Compare structured employment history with CV-extracted roles.
+    Stores mismatch result for admin review.
+    
+    This does NOT affect compliance calculations.
+    Gap calculation uses ONLY structured employment_history.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    structured_history = employee.get("employment_history", [])
+    
+    # Run comparison
+    result = compare_employment_histories(structured_history, cv_extracted_roles)
+    
+    # Store mismatch flag on employee
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "employment_history_mismatch": result.has_mismatch,
+        "employment_history_mismatch_summary": [m.model_dump() for m in result.mismatch_summary],
+        "employment_history_mismatch_count": result.mismatch_count,
+        "employment_history_compared_at": now,
+        "cv_extracted_roles": cv_extracted_roles,
+        "updated_at": now
+    }
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_data}
+    )
+    
+    # Log audit trail
+    await log_audit_action(
+        user['user_id'], 
+        "compare_employment_history", 
+        "employee", 
+        employee_id,
+        {"mismatch_detected": result.has_mismatch, "mismatch_count": result.mismatch_count}
+    )
+    
+    return {
+        "status": "success",
+        "comparison_result": result.model_dump(),
+        "message": "Employment history compared. Mismatch detected." if result.has_mismatch else "No significant mismatches found."
+    }
+
+
+@api_router.get("/employees/{employee_id}/employment-mismatch")
+async def get_employment_mismatch(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get stored employment history mismatch status for admin review.
+    """
+    employee = await db.employees.find_one(
+        {"id": employee_id},
+        {
+            "_id": 0,
+            "employment_history": 1,
+            "employment_history_mismatch": 1,
+            "employment_history_mismatch_summary": 1,
+            "employment_history_mismatch_count": 1,
+            "employment_history_compared_at": 1,
+            "cv_extracted_roles": 1
+        }
+    )
+    
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    return {
+        "has_mismatch": employee.get("employment_history_mismatch", False),
+        "mismatch_count": employee.get("employment_history_mismatch_count", 0),
+        "mismatch_summary": employee.get("employment_history_mismatch_summary", []),
+        "compared_at": employee.get("employment_history_compared_at"),
+        "structured_history": employee.get("employment_history", []),
+        "cv_extracted_roles": employee.get("cv_extracted_roles", []),
+        "source_of_truth": "structured_employment_history"
+    }
+
+
+@api_router.post("/employees/{employee_id}/employment-mismatch/add-note")
+async def add_employment_mismatch_note(
+    employee_id: str,
+    note: str = Body(..., embed=True, min_length=5),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Add admin review note for employment history mismatch.
+    Used when admin acknowledges mismatch but proceeds anyway.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    note_entry = {
+        "note": note,
+        "added_by": user['email'],
+        "added_at": now
+    }
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$push": {"employment_mismatch_review_notes": note_entry},
+            "$set": {
+                "employment_mismatch_reviewed": True,
+                "employment_mismatch_reviewed_by": user['email'],
+                "employment_mismatch_reviewed_at": now,
+                "updated_at": now
+            }
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "add_employment_mismatch_note", "employee", employee_id, {"note": note[:100]})
+    
+    return {
+        "status": "success",
+        "message": "Review note added successfully"
+    }
+
+
+
 async def get_application_status(reference: str):
     """
     Public endpoint to check application status by reference.

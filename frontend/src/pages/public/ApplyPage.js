@@ -69,6 +69,11 @@ export default function ApplyPage() {
   const [cvFileId, setCvFileId] = useState(null);
   const [isUploadingCv, setIsUploadingCv] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
+  
+  // CV Extraction Prefill State
+  const [isExtractingFromCv, setIsExtractingFromCv] = useState(false);
+  const [cvPrefillApplied, setCvPrefillApplied] = useState(false);
+  const [cvExtractionConfidence, setCvExtractionConfidence] = useState(null);
 
   // Form data state
   const [formData, setFormData] = useState({
@@ -288,11 +293,74 @@ export default function ApplyPage() {
       
       setCvFileId(response.data.file_id);
       toast.success('CV uploaded successfully');
+      
+      // Trigger employment history extraction from CV
+      await extractEmploymentFromCv(response.data.file_id);
+      
     } catch (error) {
       toast.error('Failed to upload CV. Please try again.');
       setCvFile(null);
     } finally {
       setIsUploadingCv(false);
+    }
+  };
+  
+  // CV Employment History Extraction (Phase 2: Assist Only)
+  const extractEmploymentFromCv = async (fileId) => {
+    setIsExtractingFromCv(true);
+    try {
+      const response = await axios.post(`${API}/cv/extract-employment-history?file_id=${fileId}`);
+      
+      if (response.data.status === 'success' && response.data.extracted_roles?.length > 0) {
+        // Convert extracted roles to form format (DO NOT auto-save)
+        const extractedHistory = response.data.extracted_roles.map(role => ({
+          employer_name: role.employer || '',
+          job_title: role.job_title || '',
+          start_date: role.start_date || '',
+          end_date: role.end_date || '',
+          is_current: role.is_current || false,
+          duties: role.description || '',
+          reason_for_leaving: '',
+          employer_address: '',
+          employer_phone: '',
+          can_contact: true
+        }));
+        
+        // Prefill ONLY if current employment history is empty/default
+        const hasUserEnteredData = formData.employment_history.some(emp => 
+          emp.employer_name.trim() || emp.job_title.trim()
+        );
+        
+        if (!hasUserEnteredData && extractedHistory.length > 0) {
+          setFormData(prev => ({
+            ...prev,
+            employment_history: extractedHistory
+          }));
+          setCvPrefillApplied(true);
+          setCvExtractionConfidence(response.data.overall_confidence);
+          toast.info(`Employment history pre-filled from CV (${extractedHistory.length} roles found). Please review and correct any inaccuracies.`);
+        } else if (extractedHistory.length > 0) {
+          // User already entered data, don't overwrite but notify
+          toast.info(`CV contains ${extractedHistory.length} roles. Your manually entered data has been preserved.`);
+        }
+      } else {
+        toast.info('No employment history could be extracted from CV. Please enter manually.');
+      }
+    } catch (error) {
+      console.error('CV extraction error:', error);
+      // Non-critical - just log and continue, user can enter manually
+      toast.info('CV processing completed. Please enter your employment history below.');
+    } finally {
+      setIsExtractingFromCv(false);
+    }
+  };
+  
+  // Reset CV prefill status when user modifies employment history
+  const handleEmploymentChange = (index, field, value) => {
+    handleArrayChange('employment_history', index, field, value);
+    // Mark as user-modified if prefill was applied
+    if (cvPrefillApplied) {
+      setCvPrefillApplied(false);
     }
   };
 
@@ -646,9 +714,43 @@ export default function ApplyPage() {
     <div className="space-y-6">
       <div>
         <h2 className="font-heading text-xl font-semibold text-text-primary mb-2">Employment History</h2>
-        <p className="text-sm text-text-muted mb-6">
+        <p className="text-sm text-text-muted mb-4">
           Please provide your complete employment history. This will be verified and checked for any unexplained gaps.
         </p>
+        
+        {/* CV Extraction Loading State */}
+        {isExtractingFromCv && (
+          <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+              <p className="text-sm text-blue-700 font-medium">
+                Extracting employment history from your CV...
+              </p>
+            </div>
+          </div>
+        )}
+        
+        {/* CV Prefill Notice - CRITICAL for user awareness */}
+        {cvPrefillApplied && (
+          <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 mb-4" data-testid="cv-prefill-notice">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-800">
+                  Employment history has been pre-filled from your CV
+                </p>
+                <p className="text-xs text-amber-700 mt-1">
+                  Please review and correct any inaccuracies before submitting. 
+                  {cvExtractionConfidence !== null && (
+                    <span className="ml-1">
+                      (Extraction confidence: {Math.round(cvExtractionConfidence * 100)}%)
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       
       {formData.employment_history.map((emp, idx) => (
@@ -669,16 +771,18 @@ export default function ApplyPage() {
                 <Label>Employer Name *</Label>
                 <Input 
                   value={emp.employer_name}
-                  onChange={(e) => handleArrayChange('employment_history', idx, 'employer_name', e.target.value)}
+                  onChange={(e) => handleEmploymentChange(idx, 'employer_name', e.target.value)}
                   className={validationErrors[`emp_${idx}_name`] ? 'border-red-500' : ''}
+                  data-testid={`employment-${idx}-employer`}
                 />
               </div>
               <div className="space-y-2">
                 <Label>Job Title *</Label>
                 <Input 
                   value={emp.job_title}
-                  onChange={(e) => handleArrayChange('employment_history', idx, 'job_title', e.target.value)}
+                  onChange={(e) => handleEmploymentChange(idx, 'job_title', e.target.value)}
                   className={validationErrors[`emp_${idx}_title`] ? 'border-red-500' : ''}
+                  data-testid={`employment-${idx}-title`}
                 />
               </div>
             </div>
@@ -689,8 +793,9 @@ export default function ApplyPage() {
                 <Input 
                   type="month" 
                   value={emp.start_date}
-                  onChange={(e) => handleArrayChange('employment_history', idx, 'start_date', e.target.value)}
+                  onChange={(e) => handleEmploymentChange(idx, 'start_date', e.target.value)}
                   className={validationErrors[`emp_${idx}_start`] ? 'border-red-500' : ''}
+                  data-testid={`employment-${idx}-start`}
                 />
               </div>
               <div className="space-y-2">
@@ -698,16 +803,17 @@ export default function ApplyPage() {
                 <Input 
                   type="month" 
                   value={emp.end_date}
-                  onChange={(e) => handleArrayChange('employment_history', idx, 'end_date', e.target.value)}
+                  onChange={(e) => handleEmploymentChange(idx, 'end_date', e.target.value)}
                   disabled={emp.is_current}
                   className={validationErrors[`emp_${idx}_end`] && !emp.is_current ? 'border-red-500' : ''}
+                  data-testid={`employment-${idx}-end`}
                 />
               </div>
               <div className="space-y-2 flex items-end pb-2">
                 <div className="flex items-center gap-2">
                   <Checkbox 
                     checked={emp.is_current}
-                    onCheckedChange={(c) => handleArrayChange('employment_history', idx, 'is_current', c)}
+                    onCheckedChange={(c) => handleEmploymentChange(idx, 'is_current', c)}
                   />
                   <Label className="cursor-pointer">Current employer</Label>
                 </div>
@@ -718,7 +824,7 @@ export default function ApplyPage() {
               <Label>Main Duties & Responsibilities</Label>
               <Textarea 
                 value={emp.duties}
-                onChange={(e) => handleArrayChange('employment_history', idx, 'duties', e.target.value)}
+                onChange={(e) => handleEmploymentChange(idx, 'duties', e.target.value)}
                 rows={3}
                 placeholder="Describe your main responsibilities in this role..."
               />
@@ -729,7 +835,7 @@ export default function ApplyPage() {
                 <Label>Reason for Leaving</Label>
                 <Input 
                   value={emp.reason_for_leaving}
-                  onChange={(e) => handleArrayChange('employment_history', idx, 'reason_for_leaving', e.target.value)}
+                  onChange={(e) => handleEmploymentChange(idx, 'reason_for_leaving', e.target.value)}
                 />
               </div>
             )}

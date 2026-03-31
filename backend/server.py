@@ -12221,6 +12221,30 @@ async def get_requirement_files(
     active_files.sort(key=lambda x: x.get('uploaded_at') or '', reverse=True)
     historical_files.sort(key=lambda x: x.get('uploaded_at') or '', reverse=True)
     
+    # Fetch request history for this requirement
+    requests = await db.email_requests.find({
+        "person_id": employee_id,
+        "requirement_id": {"$in": req_ids_to_search}
+    }, {"_id": 0}).sort("created_at", -1).to_list(50)
+    
+    request_history = []
+    for req in requests:
+        events = req.get('events', [])
+        clicked_at = next((e.get('timestamp') for e in events if e.get('event_type') == 'clicked'), None)
+        submitted_at = next((e.get('timestamp') for e in events if e.get('event_type') == 'submitted'), None)
+        
+        request_history.append({
+            "request_id": req.get('request_id') or req.get('id'),
+            "status": req.get('status'),
+            "source": req.get('source', 'manual'),
+            "created_at": req.get('created_at'),
+            "sent_at": req.get('sent_at'),
+            "viewed_at": clicked_at,
+            "submitted_at": submitted_at,
+            "is_replacement": req.get('is_replacement_request', False),
+            "reminder_count": req.get('reminder_count', 0)
+        })
+    
     return {
         "requirement_key": requirement_key,
         "requirement_name": requirement.get('name') if requirement else requirement_key,
@@ -12231,7 +12255,9 @@ async def get_requirement_files(
         "historical_file_count": len(historical_files),
         "pending_review_count": sum(1 for f in active_files if (f.get('extraction_status') or {}).get('status') == 'awaiting_review'),
         "verified_count": sum(1 for f in active_files if f.get('verified')),
-        "multi_file_config": multi_file_config
+        "multi_file_config": multi_file_config,
+        "requests": request_history,
+        "request_count": len(request_history)
     }
 
 
@@ -26772,6 +26798,66 @@ async def get_compliance_file(
         docs_by_requirement[req_id].append(doc)
     
     # =========================================================================
+    # HELPER: Build Evidence Status Summary
+    # =========================================================================
+    def build_evidence_status_summary(
+        active_count: int,
+        verified_count: int,
+        awaiting_verification: int,
+        request_lifecycle: dict,
+        is_multi_file: bool = False,
+        required_count: int = 1
+    ) -> str:
+        """Build a clear one-line status summary for evidence rows."""
+        parts = []
+        required_count = required_count or 1  # Default to 1 if None
+        
+        # File count
+        if active_count == 0:
+            if request_lifecycle and request_lifecycle.get('status') in ['sent', 'viewed', 'submitted']:
+                rl_status = request_lifecycle.get('status')
+                if rl_status == 'submitted':
+                    parts.append("Submitted • awaiting review")
+                elif rl_status == 'viewed':
+                    parts.append("Request viewed • awaiting upload")
+                else:
+                    parts.append("Requested • awaiting upload")
+            else:
+                parts.append("No files uploaded")
+        elif is_multi_file and required_count > 1:
+            # Multi-file requirement (e.g., PoA needs 2)
+            if verified_count >= required_count:
+                parts.append(f"{verified_count}/{required_count} verified")
+            elif verified_count > 0:
+                parts.append(f"{verified_count}/{required_count} verified")
+                if awaiting_verification > 0:
+                    parts.append(f"{awaiting_verification} awaiting review")
+            else:
+                parts.append(f"{active_count} file{'s' if active_count != 1 else ''}")
+                if awaiting_verification > 0:
+                    parts.append(f"{awaiting_verification} awaiting review")
+        else:
+            # Single-file requirement or simple count
+            if verified_count > 0:
+                parts.append(f"{verified_count} verified")
+                if active_count > verified_count:
+                    extra = active_count - verified_count
+                    if awaiting_verification > 0:
+                        parts.append(f"{awaiting_verification} awaiting review")
+            else:
+                parts.append(f"{active_count} file{'s' if active_count != 1 else ''}")
+                if awaiting_verification > 0:
+                    parts.append(f"{awaiting_verification} awaiting review")
+        
+        # Add request status for pending requests (when no files submitted yet)
+        if active_count == 0 and request_lifecycle:
+            rl = request_lifecycle
+            if rl.get('is_stale'):
+                parts.append(f"stale ({rl.get('stale_days')}d)")
+        
+        return " • ".join(parts) if parts else "No files"
+    
+    # =========================================================================
     # HELPER: Build Evidence Row
     # =========================================================================
     def build_evidence_row(
@@ -26963,9 +27049,12 @@ async def get_compliance_file(
             # File limit warnings
             "file_warnings": file_warnings,
             
-            # Status summary
+            # Status summary - Enhanced to reflect real state
             "status": "has_files" if active_count > 0 else "empty",
-            "status_summary": f"{active_count} active file{'s' if active_count != 1 else ''}" if active_count > 0 else "No files uploaded",
+            "status_summary": build_evidence_status_summary(
+                active_count, verified_count, awaiting_verification, 
+                request_lifecycle, config.get("multi_file"), config.get("required_count")
+            ),
             
             # Allowed actions
             "allowed_actions": allowed_actions,

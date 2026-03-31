@@ -89,6 +89,36 @@ Clear distinction between supporting evidence and authoritative checks.
 
 **Testing:** 9/9 UI tests passed (iteration_96.json). 100% success rate.
 
+## Compliance File Audit Pass (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Backend Improvements
+- Files endpoint now returns `requests` array with full request history
+- Each request includes: status, source, sent_at, viewed_at, submitted_at, reminder_count
+- Added `build_evidence_status_summary()` helper for accurate row summaries
+- Row summaries now reflect actual backend truth:
+  - "1 verified" (single verified file)
+  - "1 verified • 1 awaiting review" (multiple files, mixed status)
+  - "Requested • awaiting upload" (request sent, no files)
+  - "2/2 verified" (multi-file requirement fully met)
+
+### Frontend Improvements
+- RequirementFilesDrawer now renders 3 sections:
+  1. **Active Files** - Current files with full metadata
+  2. **Request History** - Expandable list of all requests with timestamps
+  3. **Historical Files** - Superseded/archived files
+- Per-file actions verified: View, Download, Supersede, Move Category, Mark Uploaded in Error
+- File URLs verified present for all active files (preview/download works)
+
+### Audit Results
+✅ Row summaries match backend counts
+✅ Files drawer fetches from real `/files` endpoint
+✅ Request history shown with sent/viewed/submitted timestamps
+✅ File-level actions work (View opens file, Download works)
+✅ No placeholder interactions
+✅ No silent empty states
+✅ No client-side guessed logic
+
 ---
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)

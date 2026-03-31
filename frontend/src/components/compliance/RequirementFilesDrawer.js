@@ -65,6 +65,7 @@ export default function RequirementFilesDrawer({
   const [loading, setLoading] = useState(false);
   const [filesData, setFilesData] = useState(null);
   const [historicalExpanded, setHistoricalExpanded] = useState(false);
+  const [requestHistoryExpanded, setRequestHistoryExpanded] = useState(false);
   const [actionDialog, setActionDialog] = useState({ open: false, type: null, file: null });
   const [actionReason, setActionReason] = useState('');
   const [newRequirementId, setNewRequirementId] = useState('');
@@ -596,6 +597,83 @@ export default function RequirementFilesDrawer({
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Request History - Collapsed */}
+              {filesData.requests && filesData.requests.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => setRequestHistoryExpanded(!requestHistoryExpanded)}
+                    className="w-full flex items-center justify-between p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors text-sm"
+                    data-testid="toggle-request-history"
+                  >
+                    <span className="font-medium text-blue-700 flex items-center gap-2">
+                      <Send className="h-4 w-4" />
+                      Request History ({filesData.request_count})
+                    </span>
+                    {requestHistoryExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-blue-600" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-blue-600" />
+                    )}
+                  </button>
+
+                  {requestHistoryExpanded && (
+                    <div className="mt-3 space-y-2">
+                      {filesData.requests.map((req, idx) => (
+                        <div 
+                          key={req.request_id || idx}
+                          className={`p-3 border rounded-lg ${
+                            req.status === 'completed' ? 'bg-green-50 border-green-200' :
+                            req.status === 'expired' ? 'bg-gray-50 border-gray-200' :
+                            'bg-blue-50 border-blue-200'
+                          }`}
+                          data-testid={`request-${req.request_id || idx}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <Badge className={`text-[10px] px-1.5 py-0 ${
+                                  req.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                  req.status === 'sent' ? 'bg-blue-100 text-blue-700' :
+                                  req.status === 'clicked' ? 'bg-purple-100 text-purple-700' :
+                                  req.status === 'expired' ? 'bg-gray-100 text-gray-500' :
+                                  'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {req.status === 'clicked' ? 'Viewed' : req.status}
+                                </Badge>
+                                {req.source === 'scheduled' && (
+                                  <Badge className="text-[10px] px-1 py-0 bg-gray-100 text-gray-500">
+                                    Auto
+                                  </Badge>
+                                )}
+                                {req.is_replacement && (
+                                  <Badge className="text-[10px] px-1 py-0 bg-amber-100 text-amber-700">
+                                    Replacement
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="text-xs text-text-muted mt-1 space-y-0.5">
+                                {req.sent_at && (
+                                  <p>Sent: {formatBackendDate(req.sent_at, { format: 'medium' })}</p>
+                                )}
+                                {req.viewed_at && (
+                                  <p>Viewed: {formatBackendDate(req.viewed_at, { format: 'medium' })}</p>
+                                )}
+                                {req.submitted_at && (
+                                  <p>Submitted: {formatBackendDate(req.submitted_at, { format: 'medium' })}</p>
+                                )}
+                                {req.reminder_count > 0 && (
+                                  <p className="text-amber-600">{req.reminder_count} reminder(s) sent</p>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       ))}

@@ -4,6 +4,82 @@
 **Osabea Healthcare Solutions**
 
 
+
+## NHS-Level Strict Reference Workflow (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented a 3-step strict reference verification workflow aligned with NHS-level safer recruitment practices. The workflow ensures all references are externally verified with full mismatch documentation and 2-step admin verification.
+
+### Workflow Steps
+
+#### Step 1: Request Reference (External Outreach)
+- Admin sends reference request directly to referee via email
+- Generates secure token-based link (expires in 30 days)
+- Referee completes form without needing to log in
+- Endpoint: `POST /api/employees/{id}/send-reference-request?reference_num=1|2`
+
+#### Step 2: Referee Submits Response
+- Public page at `/referee/complete/:token`
+- Captures referee details, employment assessment, suitability for care work, declarations
+- Automatic mismatch detection (compares declared vs returned name/company)
+- Endpoint: `POST /api/referee/complete/{token}`
+
+#### Step 3: Review Reference (Manager/Admin)
+- Compare declared details (from application) with returned details (from referee)
+- If mismatch detected, document explanation (required)
+- Endpoint: `POST /api/employees/{id}/review-reference?reference_num=1|2&mismatch_notes=...`
+
+#### Step 4: Verify Reference (Admin Only)
+- Final verification by admin (2-step Maker-Checker)
+- Requires response received + review completed
+- Endpoint: `POST /api/employees/{id}/verify-reference-strict?reference_num=1|2`
+
+### Frontend UI Changes
+
+#### Compliance File Tab - Reference Rows
+- Reference 1/2 rows show dynamic status badges:
+  - "Request Sent" → "Awaiting Referee" → "Response Received" → "Awaiting Admin Verification" → "Verified"
+- **Request Reference** button opens dialog with:
+  - Referee details from application (name, email, company)
+  - Optional custom message field
+- **Review Response** button opens comparison modal:
+  - Side-by-side declared vs returned details
+  - Mismatch highlighting
+  - Mandatory mismatch notes when discrepancy detected
+- **Verify (Admin)** button for final verification
+
+#### Public Referee Form Page (`/referee/complete/:token`)
+- No login required
+- Shows applicant context
+- Displays declared referee details for reference
+- Form sections: Referee Details, Relationship, Suitability Assessment, Care Work Suitability, Declaration
+- Error states for expired/already-submitted tokens
+
+### Database Fields Added
+```
+reference_{n}_request_status: requested | awaiting_response | submitted | awaiting_review | verified
+reference_{n}_request_sent_at: ISO timestamp
+reference_{n}_request_token: secure token (cleared after submission)
+reference_{n}_response_received_at: ISO timestamp
+reference_{n}_response_data: {} referee form submission
+reference_{n}_mismatch_detected: boolean
+reference_{n}_mismatch_notes: string
+reference_{n}_reviewed: boolean
+reference_{n}_reviewed_by: user_id
+reference_{n}_reviewed_at: ISO timestamp
+reference_{n}_verified: boolean
+reference_{n}_verified_by: user_id
+reference_{n}_verified_at: ISO timestamp
+```
+
+### Test Results
+- Backend: 100% (13/13 tests passed)
+- Frontend: 100% (All reference workflow UI verified)
+- Test report: `/app/test_reports/iteration_70.json`
+
+---
+
 ## Integrity Hardening Pass (2026-03-30)
 **Status**: COMPLETE ✅
 

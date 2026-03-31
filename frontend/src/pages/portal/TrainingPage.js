@@ -14,8 +14,9 @@ import { toast } from 'sonner';
 import { 
   GraduationCap, Plus, CheckCircle, Clock, AlertTriangle, Loader2, 
   MoreVertical, Edit, History, Filter, CalendarClock, ShieldCheck,
-  Download, FileSpreadsheet, FileText
+  Download, FileSpreadsheet, FileText, FileSearch, Eye, ExternalLink
 } from 'lucide-react';
+import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -114,6 +115,15 @@ export default function TrainingPage() {
   
   // Export state
   const [exporting, setExporting] = useState(false);
+  
+  // Summary data from backend (single source of truth)
+  const [matrixSummary, setMatrixSummary] = useState(null);
+  const [pendingExtractions, setPendingExtractions] = useState([]);
+  const [showExtractionPanel, setShowExtractionPanel] = useState(false);
+  
+  // Extraction review modal
+  const [extractionReviewOpen, setExtractionReviewOpen] = useState(false);
+  const [reviewingDocumentId, setReviewingDocumentId] = useState(null);
 
   const [newRecord, setNewRecord] = useState({
     employee_id: '',
@@ -125,12 +135,27 @@ export default function TrainingPage() {
 
   const fetchData = async () => {
     try {
-      const [trainingRes, employeesRes] = await Promise.all([
+      const [trainingRes, employeesRes, summaryRes, extractionsRes] = await Promise.all([
         axios.get(`${API}/training-records`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } })
+        axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get(`${API}/training/matrix/summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null),
+        axios.get(`${API}/document-extractions/pending-review?limit=50`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
       ]);
       setTraining(trainingRes.data);
       setEmployees(employeesRes.data);
+      
+      // Set summary from backend (canonical source)
+      if (summaryRes?.data) {
+        setMatrixSummary(summaryRes.data);
+      }
+      
+      // Filter extractions to training certificates only
+      if (extractionsRes?.data?.extractions) {
+        const trainingExtractions = extractionsRes.data.extractions.filter(
+          ext => ext.document_type === 'training_certificate'
+        );
+        setPendingExtractions(trainingExtractions);
+      }
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -285,11 +310,24 @@ export default function TrainingPage() {
     return renewalStatus === filter || (filter === 'expiring_soon' && renewalStatus === 'needs_renewal');
   });
 
-  // Calculate stats using backend-computed status
-  const completed = training.filter(t => t.status === 'completed' || t.computed_status === 'completed').length;
-  const expired = training.filter(t => t.renewal_status === 'expired' || t.computed_status === 'expired').length;
-  const expiringSoon = training.filter(t => t.renewal_status === 'expiring_soon' || t.computed_status === 'needs_renewal').length;
-  const verified = training.filter(t => t.verified).length;
+  // Use backend summary as source of truth, fallback to local calculation
+  const completed = matrixSummary?.completed ?? training.filter(t => t.status === 'completed' || t.computed_status === 'completed').length;
+  const expired = matrixSummary?.expired ?? training.filter(t => t.renewal_status === 'expired' || t.computed_status === 'expired').length;
+  const expiringSoon = matrixSummary?.needs_renewal ?? training.filter(t => t.renewal_status === 'expiring_soon' || t.computed_status === 'needs_renewal').length;
+  const verified = matrixSummary?.verified ?? training.filter(t => t.verified).length;
+  const awaitingExtractionReview = matrixSummary?.awaiting_extraction_review ?? pendingExtractions.length;
+
+  // Handle extraction review
+  const handleOpenExtractionReview = (documentId) => {
+    setReviewingDocumentId(documentId);
+    setExtractionReviewOpen(true);
+  };
+
+  const handleExtractionReviewComplete = () => {
+    setExtractionReviewOpen(false);
+    setReviewingDocumentId(null);
+    fetchData(); // Refresh to update counts
+  };
 
   return (
     <div className="space-y-6" data-testid="training-page">
@@ -422,7 +460,7 @@ export default function TrainingPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="border-[#E4E8EB] shadow-sm">
           <CardContent className="p-4 flex items-center gap-4">
             <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
@@ -467,7 +505,97 @@ export default function TrainingPage() {
             </div>
           </CardContent>
         </Card>
+        {/* Awaiting Extraction Review - NEW in Step 8 */}
+        <Card 
+          className={`border-[#E4E8EB] shadow-sm cursor-pointer transition-all hover:shadow-md ${awaitingExtractionReview > 0 ? 'border-blue-200 bg-blue-50' : ''}`}
+          onClick={() => awaitingExtractionReview > 0 && setShowExtractionPanel(!showExtractionPanel)}
+          data-testid="awaiting-extraction-card"
+        >
+          <CardContent className="p-4 flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+              <FileSearch className="h-6 w-6 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-heading font-bold text-blue-700">{awaitingExtractionReview}</p>
+              <p className="text-sm text-blue-600">Awaiting Review</p>
+              {awaitingExtractionReview > 0 && (
+                <p className="text-xs text-blue-500">Click to review</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Pending Extraction Review Panel - Shown when card is clicked */}
+      {showExtractionPanel && pendingExtractions.length > 0 && (
+        <Card className="border-blue-200 bg-blue-50/50 shadow-sm" data-testid="extraction-review-panel">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="font-heading text-lg flex items-center gap-2">
+                <FileSearch className="h-5 w-5 text-blue-600" />
+                Training Certificates Awaiting Extraction Review
+              </CardTitle>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowExtractionPanel(false)}
+                className="text-blue-600 hover:text-blue-800"
+              >
+                Hide
+              </Button>
+            </div>
+            <p className="text-sm text-text-muted">
+              AI-extracted data must be reviewed before it updates canonical training records
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {pendingExtractions.map((ext) => (
+                <div 
+                  key={ext.id}
+                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-blue-200 hover:border-blue-400 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-blue-600" />
+                    <div>
+                      <p className="font-medium text-text-primary">{ext.document_file_name || 'Training Certificate'}</p>
+                      <p className="text-sm text-text-muted">
+                        {ext.employee_name || 'Unknown Employee'} • Extracted: {ext.extracted_at ? new Date(ext.extracted_at).toLocaleDateString() : 'N/A'}
+                      </p>
+                      {ext.extracted_fields?.training_title && (
+                        <p className="text-xs text-blue-600 mt-1">
+                          Training: {ext.extracted_fields.training_title}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {ext.confidence_score && (
+                      <span className={`text-xs px-2 py-1 rounded ${
+                        ext.confidence_score >= 0.8 ? 'bg-green-100 text-green-700' :
+                        ext.confidence_score >= 0.5 ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {Math.round(ext.confidence_score * 100)}% confidence
+                      </span>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-xl border-blue-300 text-blue-700 hover:bg-blue-100"
+                      onClick={() => handleOpenExtractionReview(ext.document_id)}
+                      data-testid={`review-extraction-${ext.document_id}`}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      Review
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Filters */}
       <Card className="border-[#E4E8EB] shadow-sm">
@@ -807,6 +935,16 @@ export default function TrainingPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Extraction Review Modal - Step 8 */}
+      {extractionReviewOpen && reviewingDocumentId && (
+        <DocumentExtractionReview
+          documentId={reviewingDocumentId}
+          onClose={() => setExtractionReviewOpen(false)}
+          onApproved={handleExtractionReviewComplete}
+          documentName="Training Certificate"
+        />
+      )}
     </div>
   );
 }

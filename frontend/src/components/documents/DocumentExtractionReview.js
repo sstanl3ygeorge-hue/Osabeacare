@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
@@ -115,7 +115,7 @@ export default function DocumentExtractionReview({
   };
 
   // Effect to load extraction on mount
-  useState(() => {
+  useEffect(() => {
     fetchExtraction();
   }, []);
 

@@ -244,6 +244,14 @@ export default function EmployeeProfilePage() {
   const [isSubmittingMismatchNote, setIsSubmittingMismatchNote] = useState(false);
   const [isReextractingFromCv, setIsReextractingFromCv] = useState(false);
   
+  // Document Correction State (Step 8)
+  const [docCorrectionDialogOpen, setDocCorrectionDialogOpen] = useState(false);
+  const [docCorrectionType, setDocCorrectionType] = useState(null); // 'uploaded_in_error' | 'supersede' | 'move_category' | 'reopen_review'
+  const [docCorrectionTarget, setDocCorrectionTarget] = useState(null);
+  const [docCorrectionReason, setDocCorrectionReason] = useState('');
+  const [docCorrectionNewCategory, setDocCorrectionNewCategory] = useState('');
+  const [isSubmittingDocCorrection, setIsSubmittingDocCorrection] = useState(false);
+  
   const { token, isAuditor, isAdmin, user } = useAuth();
   
   // Document preview modal state
@@ -1046,6 +1054,146 @@ export default function EmployeeProfilePage() {
     setSelectedRequirementForAction(requirementId);
     setRequirementHistoryOpen(true);
     fetchRequirementHistory(requirementId);
+  };
+
+  // ========================================
+  // DOCUMENT CORRECTION ACTIONS (Step 8)
+  // ========================================
+  
+  // Mark document as uploaded in error
+  const handleMarkUploadedInError = async (documentId, reason) => {
+    if (!reason || reason.trim().length < 10) {
+      toast.error('Please provide a reason (minimum 10 characters)');
+      return false;
+    }
+    
+    try {
+      await axios.post(
+        `${API}/documents/${documentId}/mark-uploaded-in-error`,
+        { reason: reason.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Document marked as uploaded in error');
+      await fetchData();
+      await fetchCompliance();
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to mark document');
+      return false;
+    }
+  };
+
+  // Supersede document with newer version
+  const handleSupersedeDocument = async (documentId, replacementId, reason) => {
+    try {
+      await axios.post(
+        `${API}/documents/${documentId}/supersede`,
+        { 
+          replacement_document_id: replacementId || null,
+          reason: reason || 'Replaced by newer document'
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Document marked as superseded');
+      await fetchData();
+      await fetchCompliance();
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to supersede document');
+      return false;
+    }
+  };
+
+  // Move document to different requirement category
+  const handleMoveDocumentCategory = async (documentId, newRequirementId, reason) => {
+    if (!reason || reason.trim().length < 5) {
+      toast.error('Please provide a reason (minimum 5 characters)');
+      return false;
+    }
+    
+    try {
+      await axios.post(
+        `${API}/documents/${documentId}/move-category`,
+        { 
+          new_requirement_id: newRequirementId,
+          reason: reason.trim()
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Document moved to new category');
+      await fetchData();
+      await fetchCompliance();
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to move document');
+      return false;
+    }
+  };
+
+  // Reopen document for review (undo verification/rejection)
+  const handleReopenDocumentReview = async (documentId, reason) => {
+    if (!reason || reason.trim().length < 10) {
+      toast.error('Please provide a reason (minimum 10 characters)');
+      return false;
+    }
+    
+    try {
+      await axios.post(
+        `${API}/documents/${documentId}/reopen-review`,
+        { reason: reason.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Document reopened for review');
+      await fetchData();
+      await fetchCompliance();
+      return true;
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to reopen document');
+      return false;
+    }
+  };
+
+  // Open document correction dialog
+  const openDocCorrectionDialog = (type, document) => {
+    setDocCorrectionType(type);
+    setDocCorrectionTarget(document);
+    setDocCorrectionReason('');
+    setDocCorrectionNewCategory('');
+    setDocCorrectionDialogOpen(true);
+  };
+
+  // Submit document correction
+  const handleSubmitDocCorrection = async () => {
+    setIsSubmittingDocCorrection(true);
+    try {
+      let success = false;
+      switch (docCorrectionType) {
+        case 'uploaded_in_error':
+          success = await handleMarkUploadedInError(docCorrectionTarget.file_id || docCorrectionTarget.id, docCorrectionReason);
+          break;
+        case 'supersede':
+          success = await handleSupersedeDocument(docCorrectionTarget.file_id || docCorrectionTarget.id, null, docCorrectionReason);
+          break;
+        case 'move_category':
+          success = await handleMoveDocumentCategory(docCorrectionTarget.file_id || docCorrectionTarget.id, docCorrectionNewCategory, docCorrectionReason);
+          break;
+        case 'reopen_review':
+          success = await handleReopenDocumentReview(docCorrectionTarget.file_id || docCorrectionTarget.id, docCorrectionReason);
+          break;
+        default:
+          toast.error('Unknown correction type');
+      }
+      
+      if (success) {
+        setDocCorrectionDialogOpen(false);
+        setDocCorrectionTarget(null);
+        setDocCorrectionType(null);
+        setDocCorrectionReason('');
+        setDocCorrectionNewCategory('');
+      }
+    } finally {
+      setIsSubmittingDocCorrection(false);
+    }
   };
 
   const handleBulkUpload = async () => {
@@ -5378,6 +5526,77 @@ export default function EmployeeProfilePage() {
                                         <Shield className="h-4 w-4" />
                                       </Button>
                                     )}
+                                    
+                                    {/* More Actions - Document Corrections (Step 8) */}
+                                    {!isAuditor() && (
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button 
+                                            size="sm" 
+                                            variant="ghost"
+                                            className="h-8 w-8 p-0 rounded-lg"
+                                            title="More actions"
+                                            data-testid={`more-actions-file-${doc.file_id}`}
+                                          >
+                                            <MoreVertical className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-56">
+                                          {/* Mark as Uploaded in Error */}
+                                          <DropdownMenuItem 
+                                            onClick={() => {
+                                              setSelectedRequirementForAction(req.id);
+                                              openDocCorrectionDialog('uploaded_in_error', doc);
+                                            }}
+                                            data-testid={`mark-error-${doc.file_id}`}
+                                          >
+                                            <FileWarning className="h-4 w-4 mr-2 text-amber-500" />
+                                            Mark Uploaded in Error
+                                          </DropdownMenuItem>
+                                          
+                                          {/* Mark as Superseded */}
+                                          <DropdownMenuItem 
+                                            onClick={() => {
+                                              setSelectedRequirementForAction(req.id);
+                                              openDocCorrectionDialog('supersede', doc);
+                                            }}
+                                            data-testid={`supersede-${doc.file_id}`}
+                                          >
+                                            <FileArchive className="h-4 w-4 mr-2 text-blue-500" />
+                                            Mark as Superseded
+                                          </DropdownMenuItem>
+                                          
+                                          {/* Move to Different Category */}
+                                          <DropdownMenuItem 
+                                            onClick={() => {
+                                              setSelectedRequirementForAction(req.id);
+                                              openDocCorrectionDialog('move_category', doc);
+                                            }}
+                                            data-testid={`move-category-${doc.file_id}`}
+                                          >
+                                            <FormInput className="h-4 w-4 mr-2 text-purple-500" />
+                                            Move to Different Category
+                                          </DropdownMenuItem>
+                                          
+                                          {/* Reopen for Review - only for verified documents */}
+                                          {doc.verified && (
+                                            <>
+                                              <DropdownMenuSeparator />
+                                              <DropdownMenuItem 
+                                                onClick={() => {
+                                                  setSelectedRequirementForAction(req.id);
+                                                  openDocCorrectionDialog('reopen_review', doc);
+                                                }}
+                                                data-testid={`reopen-review-${doc.file_id}`}
+                                              >
+                                                <RotateCcw className="h-4 w-4 mr-2 text-green-500" />
+                                                Reopen for Review
+                                              </DropdownMenuItem>
+                                            </>
+                                          )}
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    )}
                                   </div>
                                 </div>
                                 );
@@ -7024,6 +7243,122 @@ export default function EmployeeProfilePage() {
             >
               {isReplacing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
               Replace File
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Document Correction Dialog - Step 8 */}
+      <Dialog open={docCorrectionDialogOpen} onOpenChange={setDocCorrectionDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {docCorrectionType === 'uploaded_in_error' && <FileWarning className="h-5 w-5 text-amber-500" />}
+              {docCorrectionType === 'supersede' && <FileArchive className="h-5 w-5 text-blue-500" />}
+              {docCorrectionType === 'move_category' && <FormInput className="h-5 w-5 text-purple-500" />}
+              {docCorrectionType === 'reopen_review' && <RotateCcw className="h-5 w-5 text-green-500" />}
+              {docCorrectionType === 'uploaded_in_error' && 'Mark as Uploaded in Error'}
+              {docCorrectionType === 'supersede' && 'Mark as Superseded'}
+              {docCorrectionType === 'move_category' && 'Move to Different Category'}
+              {docCorrectionType === 'reopen_review' && 'Reopen for Review'}
+            </DialogTitle>
+            <DialogDescription>
+              {docCorrectionType === 'uploaded_in_error' && 'This document will be marked as uploaded in error. It will not count toward requirements but is preserved for audit.'}
+              {docCorrectionType === 'supersede' && 'Mark this document as superseded by a newer version. The original is preserved for audit trail.'}
+              {docCorrectionType === 'move_category' && 'Move this document to a different requirement category if it was filed incorrectly.'}
+              {docCorrectionType === 'reopen_review' && 'Reopen this document for review, undoing any previous verification or rejection.'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {docCorrectionTarget && (
+            <div className="space-y-4 py-4">
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="font-medium text-sm">{docCorrectionTarget.file_label || docCorrectionTarget.original_filename || 'Document'}</p>
+                {docCorrectionTarget.uploaded_at && (
+                  <p className="text-xs text-muted-foreground">
+                    Uploaded: {formatBackendDate(docCorrectionTarget.uploaded_at, { format: 'medium' })}
+                  </p>
+                )}
+              </div>
+
+              {docCorrectionType === 'move_category' && (
+                <div className="space-y-2">
+                  <Label>New Category *</Label>
+                  <Select 
+                    value={docCorrectionNewCategory} 
+                    onValueChange={setDocCorrectionNewCategory}
+                  >
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="Select new category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {complianceRequirements?.requirements
+                        .filter(r => r.type === 'document' && r.id !== selectedRequirementForAction)
+                        .map(r => (
+                          <SelectItem key={r.id} value={r.id}>
+                            {r.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>
+                  Reason for Change *
+                  <span className="text-xs text-muted-foreground ml-2">
+                    ({docCorrectionType === 'move_category' ? 'min 5' : 'min 10'} characters)
+                  </span>
+                </Label>
+                <Textarea
+                  placeholder="Explain why this correction is being made..."
+                  value={docCorrectionReason}
+                  onChange={(e) => setDocCorrectionReason(e.target.value)}
+                  className="min-h-[80px] rounded-xl"
+                  data-testid="doc-correction-reason"
+                />
+                <p className="text-xs text-muted-foreground">
+                  This reason will be permanently recorded in the audit trail.
+                </p>
+              </div>
+
+              {docCorrectionTarget.verified && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <p className="text-sm text-amber-700 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    This document is currently verified. This action will be flagged in the audit log.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setDocCorrectionDialogOpen(false)}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitDocCorrection}
+              disabled={
+                isSubmittingDocCorrection || 
+                !docCorrectionReason.trim() ||
+                docCorrectionReason.trim().length < (docCorrectionType === 'move_category' ? 5 : 10) ||
+                (docCorrectionType === 'move_category' && !docCorrectionNewCategory)
+              }
+              className={`rounded-xl ${
+                docCorrectionType === 'uploaded_in_error' ? 'bg-amber-600 hover:bg-amber-700' :
+                docCorrectionType === 'reopen_review' ? 'bg-green-600 hover:bg-green-700' :
+                'bg-primary hover:bg-primary-hover'
+              }`}
+              data-testid="submit-doc-correction"
+            >
+              {isSubmittingDocCorrection && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              Confirm
             </Button>
           </DialogFooter>
         </DialogContent>

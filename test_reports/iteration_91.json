@@ -1,0 +1,83 @@
+{
+  "summary": "Phase D2 Frontend Testing - RequirementFilesDrawer + DocumentActionMenu. All features working correctly after fixing backend key mapping bug.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/frontend/src/components/compliance/RequirementFilesDrawer.js",
+    "/app/frontend/src/components/compliance/DocumentActionMenu.js",
+    "/app/frontend/src/components/compliance/EvidenceRow.js"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/server.py"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Used existing test employee d88335f6-1b18-435a-8086-28af4a583f77",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase D2 frontend complete. RequirementFilesDrawer and DocumentActionMenu working. Fixed backend key mapping to include dbs_check in dbs_certificate_evidence mapping. Also fixed AttributeError for extraction_status being None.",
+  "features_tested": {
+    "view_files_button": {
+      "status": "PASS",
+      "details": "View Files button appears on evidence rows with files (RTW Evidence, DBS Certificate Evidence)"
+    },
+    "requirement_files_drawer": {
+      "status": "PASS",
+      "details": "Drawer opens with stats (Active, Verified, Pending counts), multi-file config indicator, active files list with metadata"
+    },
+    "document_action_menu": {
+      "status": "PASS",
+      "details": "Three-dot menu shows View, Download, Supersede/Replace, Move Category, Mark Uploaded in Error. Verify/Reject hidden for already verified files."
+    },
+    "mark_uploaded_in_error_dialog": {
+      "status": "PASS",
+      "details": "Dialog opens with correct title, reason textarea, and warning about audit purposes"
+    },
+    "supersede_dialog": {
+      "status": "PASS",
+      "details": "Dialog opens with correct title, reason textarea, and warning about replacement"
+    },
+    "move_category_dialog": {
+      "status": "PASS",
+      "details": "Dialog opens with category selector and reason textarea"
+    },
+    "multi_file_config_indicator": {
+      "status": "PASS",
+      "details": "Shows '1/1 required documents verified' for RTW Evidence"
+    },
+    "dbs_certificate_evidence_drawer": {
+      "status": "PASS",
+      "details": "Shows 2 active files after backend fix"
+    },
+    "historical_files_section": {
+      "status": "N/A",
+      "details": "No historical files in test data to verify collapsed state"
+    }
+  },
+  "bugs_fixed": [
+    {
+      "location": "/app/backend/server.py line 12107-12117",
+      "issue": "dbs_certificate_evidence key not mapped to dbs_certificate and dbs_check document requirement IDs",
+      "fix": "Added dbs_certificate_evidence to legacy_mapping with ['dbs', 'dbs_certificate', 'dbs_check']"
+    },
+    {
+      "location": "/app/backend/server.py line 12229",
+      "issue": "AttributeError when extraction_status is None - f.get('extraction_status', {}).get('status') fails",
+      "fix": "Changed to (f.get('extraction_status') or {}).get('status')"
+    }
+  ]
+}

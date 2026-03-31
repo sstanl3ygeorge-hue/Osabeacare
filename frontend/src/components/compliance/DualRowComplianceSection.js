@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import EvidenceRow from './EvidenceRow';
 import CheckRow from './CheckRow';
 import AgreementRow from './AgreementRow';
+import RequirementFilesDrawer from './RequirementFilesDrawer';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -53,7 +54,23 @@ export default function DualRowComplianceSection({
     agreements: true
   });
   
+  // Phase D2: Files drawer state
+  const [filesDrawer, setFilesDrawer] = useState({
+    open: false,
+    requirementKey: null,
+    requirementTitle: ''
+  });
+  
   const { token } = useAuth();
+  
+  // Open files drawer for a requirement
+  const handleViewFiles = (requirementKey, requirementTitle) => {
+    setFilesDrawer({
+      open: true,
+      requirementKey,
+      requirementTitle
+    });
+  };
 
   // Fetch compliance file data
   const fetchComplianceFile = async () => {
@@ -143,6 +160,7 @@ export default function DualRowComplianceSection({
                     onRequest={onRequest}
                     onPreviewFile={onPreviewFile}
                     onExtractReview={onExtractReview}
+                    onViewFiles={handleViewFiles}
                     isAuditor={isAuditor}
                   />
                 );
@@ -285,6 +303,21 @@ export default function DualRowComplianceSection({
       <div className="text-xs text-text-muted text-right">
         Serializer: {complianceFile.serializer_version}
       </div>
+      
+      {/* Phase D2: Files Drawer */}
+      <RequirementFilesDrawer
+        open={filesDrawer.open}
+        onClose={() => setFilesDrawer({ open: false, requirementKey: null, requirementTitle: '' })}
+        employeeId={employeeId}
+        requirementKey={filesDrawer.requirementKey}
+        requirementTitle={filesDrawer.requirementTitle}
+        onRefresh={handleRefresh}
+        onUpload={onUpload}
+        onRequest={onRequest}
+        onPreviewFile={onPreviewFile}
+        onExtractReview={onExtractReview}
+        isAuditor={isAuditor}
+      />
     </div>
   );
 }

@@ -16,3 +16,7 @@ export { default as SendAgreementDialog } from './SendAgreementDialog';
 export { default as ComplianceActionBar } from './ComplianceActionBar';
 export { default as WhatsNeededPanel } from './WhatsNeededPanel';
 export { default as TrainingSummaryCard } from './TrainingSummaryCard';
+
+// Phase D2 - File interaction components
+export { default as RequirementFilesDrawer } from './RequirementFilesDrawer';
+export { default as DocumentActionMenu } from './DocumentActionMenu';

@@ -41,6 +41,7 @@ export default function EvidenceRow({
   onRequest,
   onPreviewFile,
   onExtractReview,
+  onViewFiles,  // New: Opens RequirementFilesDrawer
   isAuditor = false
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -138,6 +139,20 @@ export default function EvidenceRow({
         
         {/* Actions */}
         <div className="flex items-center gap-2 ml-4">
+          {/* View Files - Always show when there are files */}
+          {counts.active_files > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={(e) => { e.stopPropagation(); if (onViewFiles) onViewFiles(key, title); }}
+              className="h-8 text-xs rounded-lg"
+              data-testid={`view-files-${key}`}
+            >
+              <Eye className="h-3.5 w-3.5 mr-1" />
+              View Files
+            </Button>
+          )}
+          
           {!isAuditor && (
             <>
               {/* Primary Action: Upload or Add File */}

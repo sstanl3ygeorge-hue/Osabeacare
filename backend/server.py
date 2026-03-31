@@ -12103,11 +12103,17 @@ async def get_requirement_files(
     requirement = next((item for item in all_items if item['id'] == requirement_key), None)
     
     # Legacy mapping for requirement keys
+    # Maps serializer keys (e.g., "right_to_work_evidence") to document requirement IDs
     legacy_mapping = {
-        "dbs_certificate": ["dbs", "dbs_certificate"],
+        "dbs_certificate": ["dbs", "dbs_certificate", "dbs_check"],
+        "dbs_evidence": ["dbs", "dbs_certificate", "dbs_check"],
+        "dbs_certificate_evidence": ["dbs", "dbs_certificate", "dbs_check"],  # Phase D2: Added for dual-row model
         "identity_documents": ["identity_rtw", "identity_documents"],
+        "identity_evidence": ["identity_rtw", "identity_documents"],
         "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+        "right_to_work_evidence": ["identity_rtw", "right_to_work_documents"],
         "proof_of_address": ["proof_of_address", "address_proof"],
+        "proof_of_address_evidence": ["proof_of_address", "address_proof"],
     }
     req_ids_to_search = legacy_mapping.get(requirement_key, [requirement_key])
     
@@ -12119,13 +12125,13 @@ async def get_requirement_files(
     }
     
     # Special cases for multi-file requirements
-    if requirement_key == 'proof_of_address':
+    if requirement_key in ['proof_of_address', 'proof_of_address_evidence']:
         multi_file_config = {
             "multi_file": True,
             "max_active_files": 5,
             "required_count": 2,
         }
-    elif requirement_key in ['right_to_work_documents', 'identity_documents']:
+    elif requirement_key in ['right_to_work_documents', 'right_to_work_evidence', 'identity_documents', 'identity_evidence']:
         multi_file_config = {
             "multi_file": True,
             "max_active_files": 10,
@@ -12220,7 +12226,7 @@ async def get_requirement_files(
         "active_file_count": len(active_files),
         "historical_files": historical_files,
         "historical_file_count": len(historical_files),
-        "pending_review_count": sum(1 for f in active_files if f.get('extraction_status', {}).get('status') == 'awaiting_review'),
+        "pending_review_count": sum(1 for f in active_files if (f.get('extraction_status') or {}).get('status') == 'awaiting_review'),
         "verified_count": sum(1 for f in active_files if f.get('verified')),
         "multi_file_config": multi_file_config
     }

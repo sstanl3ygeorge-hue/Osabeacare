@@ -4,6 +4,52 @@
 **Osabea Healthcare Solutions**
 
 
+## Compliance File Consolidation + Training Matrix Repair - Step 8 (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Consolidated operational workflows to prevent duplicate UI actions. Training Matrix now uses backend canonical truth with "Awaiting Extraction Review" summary. Document correction actions added for audit-safe handling of misfiled/superseded documents.
+
+### Training Matrix Enhancements
+1. **5 Summary Cards** - Completed, Verified, Needs Renewal, Expired, **Awaiting Extraction Review** (new)
+2. **Backend Canonical Source** - All stats fetched from `/api/training/matrix/summary`
+3. **Pending Extraction Panel** - Clickable card reveals list of training certificates awaiting extraction review
+4. **Inline Review** - Opens DocumentExtractionReview modal directly from Training Matrix
+
+### Document Correction Actions
+Four new correction types with full audit trail:
+1. **Mark as Uploaded in Error** - Document removed from compliance counts (preserved for audit)
+2. **Mark as Superseded** - Old version archived when newer exists
+3. **Move to Different Category** - Fix misfiled documents between requirements
+4. **Reopen for Review** - Admin can undo verification/rejection with documented reason
+
+### UI Consolidation
+- **All Files Tab** renamed with "Library View" badge - view-only evidence library
+- **Compliance File Tab** remains single operational workspace for uploads, verification, requests
+- Document dropdown menu now shows correction actions via MoreVertical icon
+
+### New Endpoints
+- `GET /api/training/matrix/summary` - 5 stat card counts (canonical truth)
+- `POST /api/documents/{id}/mark-uploaded-in-error` - Requires 10+ char reason
+- `POST /api/documents/{id}/supersede` - Optional replacement_document_id
+- `POST /api/documents/{id}/move-category` - Requires new_requirement_id, 5+ char reason
+- `POST /api/documents/{id}/reopen-review` - Admin only, requires 10+ char reason
+- `GET /api/documents/{id}/history` - Full document lifecycle history
+
+### Test Results
+- Backend: 100% (18/18 tests passed)
+- Frontend: 100% (All Step 8 features verified)
+- Test report: `/app/test_reports/iteration_78.json`
+
+### Key Fixes Applied
+- ✅ Training Matrix uses backend-computed stats (no local date calculations)
+- ✅ Awaiting Extraction Review count visible in Training Matrix
+- ✅ Document corrections preserved in audit trail (never deleted)
+- ✅ All Files tab is now read-only library view
+
+---
+
+
 ## Reference Integrity Hardening + Compliance Page Restructure - Step 7 (2026-03-31)
 **Status**: COMPLETE ✅
 

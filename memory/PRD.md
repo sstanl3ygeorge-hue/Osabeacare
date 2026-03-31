@@ -5,6 +5,105 @@
 
 
 
+## Employment History + CV Alignment (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented a dual-source model for employment history where structured employment history is the **source of truth** for compliance, and CV is used as **supporting evidence + mismatch detection**. This strengthens audit defensibility while allowing CV to assist with data entry.
+
+### Core Principles
+1. **Structured Employment History** = Source of truth (used for gap calculation, compliance decisions, approval logic)
+2. **CV Extraction** = Assist only (never override, never used for compliance engine)
+3. **Mismatch Detection** = Admin awareness tool (soft block, amber warning)
+
+### Phase 1: Core Alignment (No Breaking Changes)
+- Preserved existing employment history form
+- Marked source of truth in all responses
+- Gap calculation uses ONLY structured employment_history
+
+### Phase 2: CV Extraction (Assist Only)
+**New Endpoint**: `POST /api/cv/extract-employment-history?file_id={cv_file_id}`
+
+Response:
+```json
+{
+  "status": "success",
+  "extracted_roles": [
+    {"job_title": "...", "employer": "...", "start_date": "YYYY-MM", "end_date": "YYYY-MM|null", "is_current": false, "description": "...", "confidence": 0.85}
+  ],
+  "overall_confidence": 0.82,
+  "source": "cv_extraction"
+}
+```
+
+**Apply Page Integration**:
+- CV upload triggers extraction automatically
+- Prefills employment history section (NOT auto-saved)
+- Shows amber warning: "Employment history has been pre-filled from your CV. Please review and correct any inaccuracies before submitting."
+- User MUST review/edit before submission
+
+**Admin Portal Integration**:
+- "Re-extract from CV" button in Recruitment tab
+- Used when CV updated or admin wants to re-evaluate
+- Does NOT auto-run silently
+
+### Phase 3: Mismatch Detection (CRITICAL)
+
+**Compare Endpoint**: `POST /api/employees/{id}/compare-employment-history`
+- Input: CV extracted roles
+- Compares with structured employment_history
+- Detects: missing roles, extra roles, date inconsistencies (±1 month tolerance)
+
+**Mismatch Storage**:
+```
+employment_history_mismatch: true/false
+employment_history_mismatch_summary: [{type, severity, description, structured_data, cv_data}]
+employment_history_mismatch_count: int
+employment_history_compared_at: ISO timestamp
+cv_extracted_roles: [] (stored for comparison view)
+```
+
+**Mismatch Status Endpoint**: `GET /api/employees/{id}/employment-mismatch`
+- Returns mismatch status with `source_of_truth: "structured_employment_history"`
+
+**Admin UI (Recruitment Tab)**:
+- Amber warning: "Employment history differs from CV" with mismatch count
+- "View Details" button opens comparison modal:
+  - Detected mismatches list
+  - Side-by-side: Structured History (green) vs CV Extracted (blue)
+  - Add Review Note section
+- "Re-extract from CV" button
+- Does NOT hard-block approval (soft block only)
+
+### Data Model Additions
+```
+employment_history_mismatch: boolean
+employment_history_mismatch_summary: [MismatchEntry]
+employment_history_mismatch_count: int
+employment_history_compared_at: ISO timestamp
+cv_extracted_roles: [ExtractedRole]
+employment_mismatch_reviewed: boolean
+employment_mismatch_reviewed_by: string
+employment_mismatch_reviewed_at: ISO timestamp
+employment_mismatch_review_notes: [NoteEntry]
+```
+
+### Constraints Enforced
+- ❌ Did NOT remove employment history section
+- ❌ Did NOT overwrite user-entered data with CV extraction
+- ❌ Did NOT rely on CV parsing for compliance decisions
+- ❌ Did NOT duplicate storage unnecessarily
+- ✅ Reused form_submissions, employee_documents
+- ✅ Gap calculation remains deterministic and auditable
+
+### Test Results
+- Backend: 100% (13/13 tests passed)
+- Frontend: 100% (All CV alignment UI verified)
+- Test report: `/app/test_reports/iteration_71.json`
+
+---
+
+
 ## NHS-Level Strict Reference Workflow (2026-03-31)
 **Status**: COMPLETE ✅
 

@@ -4,6 +4,85 @@
 **Osabea Healthcare Solutions**
 
 
+## Universal Document Extraction Pipeline - Step 6 (2026-03-31)
+**Status**: COMPLETE ✅ (Phase 1: Training Certificates)
+
+### Overview
+Implemented single shared extraction framework using GPT-5.2 Vision for all document types. Extraction is ASSISTIVE only - all extracted values require admin review before entering authoritative structured fields. Verification remains separate.
+
+### Core Principles Implemented
+- ✅ Extraction = assistive draft only
+- ✅ Verified structured record = source of truth
+- ✅ Extraction never directly marks document verified
+- ✅ Extraction never directly marks employee ready
+- ✅ All extracted values require admin review
+
+### Document Types Supported
+1. **Training Certificates** (Phase 1 - Complete)
+   - Extracts: holder_name, training_title, provider_name, completion_date, expiry_date, duration_text, reference_number
+   - Infers expiry from internal TRAINING_RENEWAL_POLICIES when explicit expiry not found
+   - Policy codes: moving_and_handling (12mo), medication (12mo), safeguarding_adults (36mo), etc.
+
+2. **DBS Certificates** (Phase 2)
+   - Extracts: holder_name, certificate_number, issue_date, disclosure_type
+   - Notes: DBS certificates typically don't have expiry - flags policy-based renewal
+
+3. **Right to Work** (Phase 2)
+   - Extracts: holder_name, document_type, document_number, issue_date, expiry_date, permission_end_date
+   - Supports: Passports, Visas, BRP cards, Share Code letters
+
+4. **ID Documents** (Phase 2)
+   - Extracts: holder_name, document_type, document_number, date_of_birth, issue_date, expiry_date
+
+5. **Proof of Address** (Phase 3)
+   - Extracts: holder_name, address_text, document_type, document_date, issuer
+   - Computes: days_old, meets_recency_requirement (90 days)
+
+### Endpoints
+- `POST /api/documents/{id}/extract` - Trigger extraction
+- `GET /api/documents/{id}/extraction` - Get extraction record
+- `POST /api/documents/{id}/extraction/review` - Review with actions: approve, edit_and_approve, reject
+- `POST /api/documents/{id}/extraction/retry` - Retry failed extraction
+- `GET /api/document-extractions/pending-review` - List document extractions awaiting review
+
+### Review Outcomes
+- **Approve**: Extracted values populate canonical records (training_records, employee_documents)
+- **Edit & Approve**: Admin-corrected values populate canonical records
+- **Reject**: Extraction kept for audit but no canonical update
+
+### Extraction Record Structure
+```javascript
+{
+  extraction_status: 'pending' | 'completed' | 'failed' | 'needs_review',
+  review_status: 'awaiting_review' | 'approved' | 'edited' | 'rejected',
+  extracted_fields: { holder_name, completion_date, expiry_date, ... },
+  field_metadata: {
+    [field]: { source_type: 'explicit'|'inferred_policy'|'derived_text'|'not_found', confidence: 0.0-1.0 }
+  },
+  issues: [{ code, detail, severity: 'info'|'warning'|'blocker' }]
+}
+```
+
+### Provenance Tracking
+- Every approved date entering canonical records preserves:
+  - `source_type`: explicit, inferred_policy, manual_entry
+  - `source_document_id`: Document that provided the evidence
+  - `confidence`: Extraction confidence score
+  - `approved_by`, `approved_at`: Admin who reviewed
+
+### Frontend Component
+- `DocumentExtractionReview.js` - Dialog for reviewing AI-extracted document data
+- Shows: extraction status, document type, extracted fields with source badges, confidence indicators, issues
+- Actions: Trigger Extraction, Edit Values, Approve, Reject, Retry
+
+### Test Results
+- Backend: 100% (28/28 tests passed)
+- Test report: `/app/test_reports/iteration_76.json`
+- Bug fixed: Route conflict where `/extractions/pending-review` was being caught by `/extractions/{extraction_id}`
+
+---
+
+
 ## Scheduled Bulk Requests (2026-03-31)
 **Status**: COMPLETE ✅
 

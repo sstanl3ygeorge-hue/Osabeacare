@@ -8,6 +8,7 @@ import re
 import logging
 import uuid
 import asyncio
+import secrets
 import io
 import zipfile
 import base64
@@ -20641,8 +20642,8 @@ async def review_reference(
     }
 
 
-@api_router.post("/employees/{employee_id}/verify-reference")
-async def verify_reference(
+@api_router.post("/employees/{employee_id}/verify-reference-strict")
+async def verify_reference_strict(
     employee_id: str,
     reference_num: int = Query(..., description="Reference number: 1 or 2"),
     user: dict = Depends(require_admin)  # ADMIN ONLY for final verification

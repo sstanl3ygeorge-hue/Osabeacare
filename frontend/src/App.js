@@ -10,6 +10,7 @@ import CompliancePage from "./pages/public/CompliancePage";
 import ContactPage from "./pages/public/ContactPage";
 import ApplyPage from "./pages/public/ApplyPage";
 import FormCompletionPage from "./pages/public/FormCompletionPage";
+import RefereeCompletionPage from "./pages/public/RefereeCompletionPage";
 
 // Auth Pages
 import LoginPage from "./pages/auth/LoginPage";
@@ -61,6 +62,9 @@ function AppRouter() {
       
       {/* Public Form Completion Route (No Auth Required) */}
       <Route path="/forms/complete/:token" element={<FormCompletionPage />} />
+      
+      {/* Public Referee Reference Completion Route (No Auth Required) */}
+      <Route path="/referee/complete/:token" element={<RefereeCompletionPage />} />
       
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />

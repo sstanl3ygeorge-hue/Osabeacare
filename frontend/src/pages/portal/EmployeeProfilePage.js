@@ -211,6 +211,19 @@ export default function EmployeeProfilePage() {
   const [sendFormMessage, setSendFormMessage] = useState('');
   const [isSendingForm, setIsSendingForm] = useState(false);
   
+  // Reference Request state (NHS-Level Workflow)
+  const [referenceStatus, setReferenceStatus] = useState(null);
+  const [loadingReferenceStatus, setLoadingReferenceStatus] = useState(false);
+  const [requestReferenceDialogOpen, setRequestReferenceDialogOpen] = useState(false);
+  const [selectedRefForRequest, setSelectedRefForRequest] = useState(null);
+  const [referenceRequestMessage, setReferenceRequestMessage] = useState('');
+  const [isRequestingReference, setIsRequestingReference] = useState(false);
+  const [reviewReferenceDialogOpen, setReviewReferenceDialogOpen] = useState(false);
+  const [selectedRefForReview, setSelectedRefForReview] = useState(null);
+  const [reviewMismatchNotes, setReviewMismatchNotes] = useState('');
+  const [isReviewingReference, setIsReviewingReference] = useState(false);
+  const [isVerifyingReferenceStrict, setIsVerifyingReferenceStrict] = useState(false);
+  
   // Profile extraction from application form state
   const [extractionDialogOpen, setExtractionDialogOpen] = useState(false);
   const [extractionResult, setExtractionResult] = useState(null);
@@ -297,6 +310,108 @@ export default function EmployeeProfilePage() {
       toast.error(err.response?.data?.detail || 'Failed to record explanation');
     } finally {
       setIsExplainingGap(false);
+    }
+  };
+  
+  // Fetch reference status (NHS-Level strict workflow)
+  const fetchReferenceStatus = async () => {
+    if (!employeeId) return;
+    setLoadingReferenceStatus(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/reference-status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setReferenceStatus(response.data.references || []);
+    } catch (err) {
+      console.error('Failed to fetch reference status:', err);
+    } finally {
+      setLoadingReferenceStatus(false);
+    }
+  };
+  
+  // Send reference request to referee (NHS-Level Step 1: Request)
+  const handleSendReferenceRequest = async () => {
+    if (!selectedRefForRequest) return;
+    
+    setIsRequestingReference(true);
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/send-reference-request?reference_num=${selectedRefForRequest.reference_num}${referenceRequestMessage ? `&message=${encodeURIComponent(referenceRequestMessage)}` : ''}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.data.status === 'duplicate') {
+        toast.info('Reference request already sent and awaiting response');
+      } else if (response.data.status === 'success') {
+        toast.success(`Reference request sent to ${response.data.referee_email}`);
+      } else if (response.data.status === 'email_failed') {
+        toast.warning('Request created but email failed to send');
+      }
+      
+      setRequestReferenceDialogOpen(false);
+      setReferenceRequestMessage('');
+      setSelectedRefForRequest(null);
+      fetchReferenceStatus();
+      fetchEmployee();
+      fetchCompliance();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to send reference request');
+    } finally {
+      setIsRequestingReference(false);
+    }
+  };
+  
+  // Review reference (NHS-Level Step 2: Review with mismatch documentation)
+  const handleReviewReference = async () => {
+    if (!selectedRefForReview) return;
+    
+    // If mismatch detected, require notes
+    if (selectedRefForReview.mismatch_detected && reviewMismatchNotes.length < 10) {
+      toast.error('Mismatch detected - please provide at least 10 characters explaining the mismatch');
+      return;
+    }
+    
+    setIsReviewingReference(true);
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/review-reference?reference_num=${selectedRefForReview.reference_num}${reviewMismatchNotes ? `&mismatch_notes=${encodeURIComponent(reviewMismatchNotes)}` : ''}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(`Reference ${selectedRefForReview.reference_num} reviewed. Ready for final verification.`);
+      setReviewReferenceDialogOpen(false);
+      setReviewMismatchNotes('');
+      setSelectedRefForReview(null);
+      fetchReferenceStatus();
+      fetchEmployee();
+      fetchCompliance();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to review reference');
+    } finally {
+      setIsReviewingReference(false);
+    }
+  };
+  
+  // Verify reference (NHS-Level Step 3: Final Verification - Admin Only)
+  const handleVerifyReferenceStrict = async (refNum) => {
+    setIsVerifyingReferenceStrict(true);
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/verify-reference-strict?reference_num=${refNum}`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(`Reference ${refNum} verified (2-step verification complete)`);
+      fetchReferenceStatus();
+      fetchEmployee();
+      fetchCompliance();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to verify reference');
+    } finally {
+      setIsVerifyingReferenceStrict(false);
     }
   };
   
@@ -422,6 +537,7 @@ export default function EmployeeProfilePage() {
     fetchData();
     fetchCompliance();
     fetchRecruitmentStatus();
+    fetchReferenceStatus();
   }, [employeeId, token]);
 
   // Fetch profile photo when employee has one
@@ -4122,6 +4238,137 @@ export default function EmployeeProfilePage() {
                                         Acknowledged
                                       </span>
                                     )}
+                                    
+                                    {/* REFERENCE TYPE - NHS-Level Strict Workflow */}
+                                    {(req.id === 'reference_1' || req.id === 'reference_2') && (() => {
+                                      const refNum = req.id === 'reference_1' ? 1 : 2;
+                                      const refData = referenceStatus?.find(r => r.reference_num === refNum);
+                                      const requestStatus = refData?.request_status;
+                                      
+                                      return (
+                                        <>
+                                          {/* Reference Status Badge */}
+                                          {requestStatus && requestStatus !== 'verified' && (
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                              requestStatus === 'verified' ? 'bg-green-100 text-green-700' :
+                                              requestStatus === 'awaiting_review' ? 'bg-blue-100 text-blue-700' :
+                                              requestStatus === 'submitted' ? 'bg-purple-100 text-purple-700' :
+                                              requestStatus === 'awaiting_response' ? 'bg-amber-100 text-amber-700' :
+                                              requestStatus === 'requested' ? 'bg-gray-100 text-gray-700' :
+                                              'bg-gray-100 text-gray-600'
+                                            }`}>
+                                              {requestStatus === 'awaiting_review' ? 'Awaiting Admin Verification' :
+                                               requestStatus === 'submitted' ? 'Response Received' :
+                                               requestStatus === 'awaiting_response' ? 'Awaiting Referee' :
+                                               requestStatus === 'requested' ? 'Request Sent' :
+                                               requestStatus}
+                                            </span>
+                                          )}
+                                          
+                                          {/* Mismatch Warning */}
+                                          {refData?.mismatch_detected && !refData?.verified && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1">
+                                              <AlertTriangle className="h-2.5 w-2.5" />
+                                              Mismatch
+                                            </span>
+                                          )}
+                                          
+                                          {/* Step 1: Request Reference (No request yet or need to resend) */}
+                                          {(!requestStatus || requestStatus === 'not_started') && employee?.[`reference_${refNum}_email`] && (
+                                            <Button 
+                                              size="sm" 
+                                              variant="default"
+                                              onClick={() => {
+                                                setSelectedRefForRequest(refData || { 
+                                                  reference_num: refNum,
+                                                  declared: {
+                                                    name: employee?.[`reference_${refNum}_name`],
+                                                    email: employee?.[`reference_${refNum}_email`],
+                                                    company: employee?.[`reference_${refNum}_company`],
+                                                  }
+                                                });
+                                                setRequestReferenceDialogOpen(true);
+                                              }}
+                                              className="text-xs h-7 bg-primary hover:bg-primary-hover text-white rounded-lg"
+                                              data-testid={`request-reference-${req.id}`}
+                                            >
+                                              <Mail className="h-3 w-3 mr-1" />
+                                              Request Reference
+                                            </Button>
+                                          )}
+                                          
+                                          {/* No email on file - prompt to add it */}
+                                          {(!requestStatus || requestStatus === 'not_started') && !employee?.[`reference_${refNum}_email`] && (
+                                            <span className="text-xs text-amber-600 flex items-center gap-1">
+                                              <AlertTriangle className="h-3 w-3" />
+                                              Add referee email in profile
+                                            </span>
+                                          )}
+                                          
+                                          {/* Resend option when awaiting response */}
+                                          {requestStatus === 'awaiting_response' && (
+                                            <Button 
+                                              size="sm" 
+                                              variant="outline"
+                                              onClick={() => {
+                                                setSelectedRefForRequest(refData);
+                                                setRequestReferenceDialogOpen(true);
+                                              }}
+                                              className="text-xs h-7 text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg"
+                                              data-testid={`resend-reference-${req.id}`}
+                                            >
+                                              <Mail className="h-3 w-3 mr-1" />
+                                              Resend
+                                            </Button>
+                                          )}
+                                          
+                                          {/* Step 2: Review Reference (Response received, needs review) */}
+                                          {requestStatus === 'submitted' && !refData?.reviewed && (
+                                            <Button 
+                                              size="sm" 
+                                              variant="default"
+                                              onClick={() => {
+                                                setSelectedRefForReview(refData);
+                                                setReviewMismatchNotes('');
+                                                setReviewReferenceDialogOpen(true);
+                                              }}
+                                              className="text-xs h-7 bg-amber-600 hover:bg-amber-700 text-white rounded-lg"
+                                              data-testid={`review-reference-${req.id}`}
+                                            >
+                                              <ClipboardCheck className="h-3 w-3 mr-1" />
+                                              Review Response
+                                            </Button>
+                                          )}
+                                          
+                                          {/* Step 3: Verify Reference (Reviewed, needs admin verification) */}
+                                          {(requestStatus === 'awaiting_review' || (requestStatus === 'submitted' && refData?.reviewed)) && isAdmin() && (
+                                            <Button 
+                                              size="sm" 
+                                              variant="default"
+                                              onClick={() => handleVerifyReferenceStrict(refNum)}
+                                              disabled={isVerifyingReferenceStrict}
+                                              className="text-xs h-7 bg-green-600 hover:bg-green-700 text-white rounded-lg"
+                                              data-testid={`verify-reference-strict-${req.id}`}
+                                            >
+                                              {isVerifyingReferenceStrict ? (
+                                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                              ) : (
+                                                <Shield className="h-3 w-3 mr-1" />
+                                              )}
+                                              Verify (Admin)
+                                            </Button>
+                                          )}
+                                          
+                                          {/* Admin badge when awaiting verification but user is not admin */}
+                                          {(requestStatus === 'awaiting_review' || (requestStatus === 'submitted' && refData?.reviewed)) && !isAdmin() && (
+                                            <span className="text-xs text-blue-600 flex items-center gap-1">
+                                              <Shield className="h-3 w-3" />
+                                              Awaiting Admin
+                                            </span>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
                                     
                                     {/* Generate PDF for forms without evidence */}
                                     {req.type !== 'acknowledgement' && req.type === 'form-generated' && req.form && req.form.status && 
@@ -7842,6 +8089,195 @@ export default function EmployeeProfilePage() {
                 <Send className="h-4 w-4 mr-2" />
               )}
               Send Form
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reference Request Dialog (NHS-Level Workflow Step 1) */}
+      <Dialog open={requestReferenceDialogOpen} onOpenChange={setRequestReferenceDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <Mail className="h-5 w-5 text-primary" />
+              Request Reference from Referee
+            </DialogTitle>
+            <DialogDescription>
+              Send a reference request email directly to the referee. They can complete a secure form without logging in.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            {selectedRefForRequest && (
+              <>
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  <p className="text-sm text-blue-800 mb-2">
+                    <strong>Referee Details (from application):</strong>
+                  </p>
+                  <div className="text-sm text-blue-700 space-y-1">
+                    <p><strong>Name:</strong> {selectedRefForRequest.declared?.name || 'Not provided'}</p>
+                    <p><strong>Email:</strong> {selectedRefForRequest.declared?.email || 'Not provided'}</p>
+                    <p><strong>Company:</strong> {selectedRefForRequest.declared?.company || 'Not provided'}</p>
+                  </div>
+                </div>
+                {!selectedRefForRequest.declared?.email && (
+                  <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-sm text-red-800 flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4" />
+                      Referee email is required. Please update the employee profile first.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="space-y-2">
+              <Label className="text-gray-700 font-medium">Additional Message (Optional)</Label>
+              <Textarea
+                value={referenceRequestMessage}
+                onChange={(e) => setReferenceRequestMessage(e.target.value)}
+                placeholder="Add any specific instructions or context for the referee..."
+                rows={3}
+                className="bg-white border-[#E4E8EB]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setRequestReferenceDialogOpen(false)}
+              className="border-[#E4E8EB]"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSendReferenceRequest}
+              disabled={isRequestingReference || !selectedRefForRequest?.declared?.email}
+              className="bg-primary hover:bg-primary-hover text-white"
+              data-testid="send-reference-request-btn"
+            >
+              {isRequestingReference ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4 mr-2" />
+              )}
+              Send Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Review Reference Dialog (NHS-Level Workflow Step 2) */}
+      <Dialog open={reviewReferenceDialogOpen} onOpenChange={setReviewReferenceDialogOpen}>
+        <DialogContent className="sm:max-w-2xl bg-white max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
+              <ClipboardCheck className="h-5 w-5 text-primary" />
+              Review Reference {selectedRefForReview?.reference_num}
+            </DialogTitle>
+            <DialogDescription>
+              Compare declared details with returned response. Document any mismatches before verification.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedRefForReview && (
+            <div className="space-y-4 mt-4">
+              {/* Mismatch Warning */}
+              {selectedRefForReview.mismatch_detected && (
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                  <p className="text-sm text-amber-800 flex items-center gap-2 font-medium">
+                    <AlertTriangle className="h-4 w-4" />
+                    Mismatch Detected - Details in returned response differ from application
+                  </p>
+                </div>
+              )}
+              
+              {/* Side-by-side comparison */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Declared (From Application) */}
+                <div className="space-y-2">
+                  <h4 className="font-medium text-gray-900 text-sm border-b pb-1">Declared (Application)</h4>
+                  <div className="text-sm space-y-1.5">
+                    <p><span className="text-gray-500">Name:</span> {selectedRefForReview.declared?.name || '-'}</p>
+                    <p><span className="text-gray-500">Company:</span> {selectedRefForReview.declared?.company || '-'}</p>
+                    <p><span className="text-gray-500">Email:</span> {selectedRefForReview.declared?.email || '-'}</p>
+                    <p><span className="text-gray-500">Phone:</span> {selectedRefForReview.declared?.phone || '-'}</p>
+                    <p><span className="text-gray-500">Job Title:</span> {selectedRefForReview.declared?.job_title || '-'}</p>
+                    <p><span className="text-gray-500">Relationship:</span> {selectedRefForReview.declared?.relationship || '-'}</p>
+                  </div>
+                </div>
+                
+                {/* Returned (From Referee) */}
+                <div className="space-y-2">
+                  <h4 className="font-medium text-gray-900 text-sm border-b pb-1">Returned (Referee Response)</h4>
+                  <div className="text-sm space-y-1.5">
+                    <p className={selectedRefForReview.mismatch_detected && selectedRefForReview.declared?.name?.toLowerCase() !== selectedRefForReview.returned?.name?.toLowerCase() ? 'text-amber-600 font-medium' : ''}>
+                      <span className="text-gray-500">Name:</span> {selectedRefForReview.returned?.name || '-'}
+                    </p>
+                    <p className={selectedRefForReview.mismatch_detected && selectedRefForReview.declared?.company?.toLowerCase() !== selectedRefForReview.returned?.company?.toLowerCase() ? 'text-amber-600 font-medium' : ''}>
+                      <span className="text-gray-500">Company:</span> {selectedRefForReview.returned?.company || '-'}
+                    </p>
+                    <p><span className="text-gray-500">Email:</span> {selectedRefForReview.returned?.email || '-'}</p>
+                    <p><span className="text-gray-500">Phone:</span> {selectedRefForReview.returned?.phone || '-'}</p>
+                    <p><span className="text-gray-500">Job Title:</span> {selectedRefForReview.returned?.job_title || '-'}</p>
+                    <p><span className="text-gray-500">Relationship:</span> {selectedRefForReview.returned?.relationship || '-'}</p>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Full Response Summary */}
+              {selectedRefForReview.response_data && (
+                <div className="space-y-2 mt-4 pt-4 border-t">
+                  <h4 className="font-medium text-gray-900 text-sm">Reference Assessment Summary</h4>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <p><span className="text-gray-500">Performance:</span> {selectedRefForReview.response_data.performance_rating || '-'}</p>
+                    <p><span className="text-gray-500">Reliability:</span> {selectedRefForReview.response_data.reliability || '-'}</p>
+                    <p><span className="text-gray-500">Professionalism:</span> {selectedRefForReview.response_data.professionalism || '-'}</p>
+                    <p><span className="text-gray-500">Care Suitable:</span> {selectedRefForReview.response_data.care_vulnerable_suitable || '-'}</p>
+                    <p><span className="text-gray-500">Would Re-employ:</span> {selectedRefForReview.response_data.would_re_employ || '-'}</p>
+                    <p><span className="text-gray-500">Safeguarding:</span> {selectedRefForReview.response_data.safeguarding_concerns || '-'}</p>
+                  </div>
+                </div>
+              )}
+              
+              {/* Mismatch Notes (Required if mismatch detected) */}
+              {selectedRefForReview.mismatch_detected && (
+                <div className="space-y-2 mt-4 pt-4 border-t">
+                  <Label className="text-gray-700 font-medium flex items-center gap-1">
+                    Mismatch Explanation <span className="text-red-500">*</span>
+                  </Label>
+                  <p className="text-xs text-gray-500">
+                    Document the discrepancy and explain why it is acceptable for verification.
+                  </p>
+                  <Textarea
+                    value={reviewMismatchNotes}
+                    onChange={(e) => setReviewMismatchNotes(e.target.value)}
+                    placeholder="Explain the mismatch (e.g., 'Name variation is maiden name vs married name, confirmed via phone call with referee on [date]')"
+                    rows={3}
+                    className="bg-white border-[#E4E8EB]"
+                    required
+                  />
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="flex gap-2 mt-4">
+            <Button 
+              variant="outline" 
+              onClick={() => setReviewReferenceDialogOpen(false)}
+              className="border-[#E4E8EB]"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleReviewReference}
+              disabled={isReviewingReference || (selectedRefForReview?.mismatch_detected && reviewMismatchNotes.length < 10)}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              data-testid="review-reference-btn"
+            >
+              {isReviewingReference ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              )}
+              Mark as Reviewed
             </Button>
           </DialogFooter>
         </DialogContent>

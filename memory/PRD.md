@@ -5,6 +5,92 @@
 
 
 
+## NHS-Level Compliance Hardening (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented 8 Change Sets for NHS-Level Compliance Hardening to ensure strict applicant/employee separation, single source of truth for readiness calculation, and UI/backend truth alignment.
+
+### Change Set 1: Global Applicant/Employee Separation
+**Repository Layer** (`EmployeesRepository`):
+- `list_employees()` - Returns only onboarding/active/inactive
+- `list_applicants()` - Returns only new/screening/interview/compliance_review
+- `get_employee_by_id()` - Returns 404 for applicants
+- `get_applicant_by_id()` - Returns 404 for employees
+- `count_employees()`, `count_applicants()` - Scoped counts
+
+**Scope Helpers**:
+- `is_applicant_status(status)` / `is_employee_status(status)`
+- `applicant_scope_filter()` / `employee_scope_filter()`
+
+**New Endpoints**:
+- `GET /staff/employees/{id}` - Employee-only profile (404 for applicants)
+- `GET /recruitment/applicants/{id}` - Applicant-only profile (404 for employees)
+
+### Change Set 2: Single Readiness Calculation
+**Authoritative Endpoint**: `GET /employees/{id}/readiness`
+
+Returns:
+```json
+{
+  "ready": boolean,
+  "status": "NOT_READY" | "READY_WITH_CONDITIONS" | "READY_TO_WORK",
+  "label": "Not Ready to Work" | ...,
+  "blockedReasons": [{ "code": "recruitment_not_approved", "message": "..." }],
+  "checks": {
+    "recruitmentApproved": boolean,
+    "referencesVerified": { "required": 2, "verified": n, "passed": boolean },
+    "proofOfAddress": { "required": 2, "verified": n, "passed": boolean },
+    "rightToWork": { "passed": boolean, "missing": boolean, "expired": boolean },
+    "dbs": { "passed": boolean, "missing": boolean, "expired": boolean },
+    "id": { "passed": boolean, "missing": boolean, "expired": boolean },
+    "healthForm": { "passed": boolean, "submitted": boolean, "verified": boolean },
+    "interviewForm": { "passed": boolean, "submitted": boolean, "verified": boolean }
+  },
+  "calculatedAt": ISO timestamp,
+  "source_of_truth": "authoritative_readiness_calculation"
+}
+```
+
+**Stable Reason Codes**:
+- `recruitment_not_approved`
+- `references_below_minimum`
+- `proof_of_address_below_minimum`
+- `right_to_work_missing` / `right_to_work_expired`
+- `dbs_missing` / `dbs_expired`
+- `id_missing` / `id_expired`
+- `health_form_missing` / `health_form_unverified`
+- `interview_form_missing` / `interview_form_unverified`
+
+### Change Sets 3-8: Previously Implemented
+- **Change Set 3**: Structured Employment History as Authoritative ✅
+- **Change Set 4**: NHS-Level Reference Workflow ✅
+- **Change Set 5**: Form Sending System ✅
+- **Change Set 6**: Recurring Compliance Visibility ✅
+- **Change Set 7**: Document Request UI ✅
+- **Change Set 8**: Recruitment → Employee Transition ✅
+
+### UI Behavior Changes
+- Dashboard: Uses `/staff/employees` (excludes applicants)
+- Workforce Readiness: Uses 3-tier calculation
+- Staff Directory: Employee-only
+- Recruitment Pipeline: Applicant-only
+- Profile route: Validates scope, 404 for wrong scope
+
+### Verification Metrics
+- Total Employees: 2
+- Total Applicants: 9
+- Scoped endpoints: 100% correct separation
+- Readiness calculation: Single authoritative source
+
+### Test Results
+- Backend: 100% (16/16 tests passed)
+- Frontend: 100% (All scoped UI elements verified)
+- Test report: `/app/test_reports/iteration_72.json`
+
+---
+
+
 ## Employment History + CV Alignment (2026-03-31)
 **Status**: COMPLETE ✅
 

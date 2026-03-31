@@ -132,11 +132,31 @@ Created reusable shell components for all requirement sections.
 - Added `references` to expandedSections
 - Single `toggleSection()` handler for all sections
 
-### Remaining Passes
-- Pass 2: Upload workflow unification (use shared components)
-- Pass 3: Agreements rebuild (template/send/complete/verify)
-- Pass 4: References alignment (consistent shell/action bar)
-- Pass 5: Remove fake states (audit all badges/counts)
+### Pass 1C (Ticket B): Upload Workflow Unification ✅ (2026-03-31)
+Replaced legacy EvidenceRow + CheckRow with unified UploadRequirementCard for all 4 upload-type requirements.
+
+**Changes Made:**
+- Updated `DualRowComplianceSection.js`:
+  - Added `transformToUploadSurface()` function to convert backend rows to normalized surface
+  - Added `renderUploadSection()` function using UploadRequirementCard
+  - RTW, DBS, Identity, PoA now use `renderUploadSection()` instead of `renderSection()`
+  - Agreements and References continue using legacy `renderSection()` (AgreementRow, ReferenceRow)
+
+**Unified Card Features:**
+- Evidence Files section with file previews, counters, extraction status
+- Verification Check section with check status, Record Check/Update buttons
+- Request lifecycle status (requested, viewed, submitted)
+- Action bar: Upload, Request/Resend, View Files
+- Footer with counters (active, pending, historical) and View History button
+- Toggle expand/collapse with chevron
+
+**Testing:** 13/13 tests passed (iteration_97.json). 100% success rate.
+
+### Remaining Passes (Tickets C-F)
+- **Ticket C**: Upload Requirement Drawer - Standardize drawer for Active Files, Request History, Historical Files
+- **Ticket D**: Agreements Rebuild - Template-driven send/view/verify workflow
+- **Ticket E**: References Alignment - Same shell/action bar as uploads, reference-specific drawer
+- **Ticket F**: Remove Fake States - Audit all badges/counts, hide anything not wired to backend truth
 
 ---
 

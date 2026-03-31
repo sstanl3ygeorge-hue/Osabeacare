@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import EvidenceRow from './EvidenceRow';
 import CheckRow from './CheckRow';
 import AgreementRow from './AgreementRow';
+import ReferenceRow from './ReferenceRow';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 
@@ -215,6 +216,54 @@ export default function DualRowComplianceSection({
                 );
               }
               
+              if (row.row_type === 'reference') {
+                return (
+                  <ReferenceRow
+                    key={row.key || idx}
+                    row={row}
+                    employeeId={employeeId}
+                    onRefresh={handleRefresh}
+                    onViewHistory={handleViewHistory}
+                    onViewResponse={(refNum) => {
+                      // TODO: Open reference response modal/drawer
+                      toast.info(`View response for Reference ${refNum}`);
+                    }}
+                    onVerify={async (refNum) => {
+                      try {
+                        // Simple verification - assumes from_cv=true
+                        // A more complete implementation would open a dialog asking about CV match
+                        await axios.post(
+                          `${API}/employees/${employeeId}/verify-reference`,
+                          { 
+                            reference_num: refNum,
+                            from_cv: true
+                          },
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        toast.success(`Reference ${refNum} verified`);
+                        handleRefresh();
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Failed to verify reference');
+                      }
+                    }}
+                    onReject={async (refNum) => {
+                      try {
+                        await axios.post(
+                          `${API}/references/${employeeId}/${refNum}/reject`,
+                          { reason: 'Rejected by admin' },
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        toast.success(`Reference ${refNum} rejected`);
+                        handleRefresh();
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Failed to reject reference');
+                      }
+                    }}
+                    isAuditor={isAuditor}
+                  />
+                );
+              }
+              
               return null;
             })}
           </div>
@@ -314,6 +363,9 @@ export default function DualRowComplianceSection({
           
           {/* Agreements */}
           {sections.agreements && renderSection('agreements', sections.agreements)}
+          
+          {/* References */}
+          {sections.references && sections.references.rows && renderSection('references', sections.references)}
         </>
       )}
       

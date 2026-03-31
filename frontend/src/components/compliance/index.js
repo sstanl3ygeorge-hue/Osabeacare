@@ -3,10 +3,12 @@
 // Evidence row = uploaded/supporting files
 // Check row = employer/admin verification outcome (authoritative)
 // Agreement row = form acknowledgements
+// Reference row = referee request/response/verification workflow
 
 export { default as EvidenceRow } from './EvidenceRow';
 export { default as CheckRow } from './CheckRow';
 export { default as AgreementRow } from './AgreementRow';
+export { default as ReferenceRow } from './ReferenceRow';
 export { default as DualRowComplianceSection } from './DualRowComplianceSection';
 export { default as RecordCheckDialog } from './RecordCheckDialog';
 export { default as CompleteAgreementDialog } from './CompleteAgreementDialog';

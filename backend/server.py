@@ -27269,6 +27269,207 @@ async def get_compliance_file(
         }
     
     # =========================================================================
+    # HELPER: Build Reference Row
+    # =========================================================================
+    def build_reference_row(ref_num: int) -> dict:
+        """Build a reference requirement row with full lifecycle data."""
+        prefix = f"reference_{ref_num}_"
+        
+        # Declared referee details
+        declared_referee = {
+            "name": employee.get(f"{prefix}name"),
+            "company": employee.get(f"{prefix}company"),
+            "email": employee.get(f"{prefix}email"),
+            "phone": employee.get(f"{prefix}phone"),
+            "job_title": employee.get(f"{prefix}job_title"),
+            "relationship": employee.get(f"{prefix}relationship"),
+            "start_date": employee.get(f"{prefix}start_date"),
+            "end_date": employee.get(f"{prefix}end_date"),
+            "from_cv": employee.get(f"{prefix}from_cv"),
+            "override_reason": employee.get(f"{prefix}override_reason")
+        }
+        has_declared = bool(declared_referee.get("name") or declared_referee.get("email"))
+        
+        # Request status
+        request_status = employee.get(f"{prefix}request_status")  # None, "requested", "awaiting_response", "submitted", etc.
+        request_sent_at = employee.get(f"{prefix}request_sent_at")
+        request_token = employee.get(f"{prefix}request_token")
+        
+        # Response data
+        response_received_at = employee.get(f"{prefix}response_received_at")
+        response_data = employee.get(f"{prefix}response_data") or {}
+        has_response = bool(response_data) and bool(response_received_at)
+        
+        # Response referee details (from form submission)
+        returned_referee = {
+            "name": response_data.get("referee_full_name"),
+            "company": response_data.get("referee_organisation"),
+            "email": response_data.get("referee_work_email"),
+            "phone": response_data.get("referee_phone"),
+            "job_title": response_data.get("referee_job_title"),
+            "relationship": response_data.get("relationship_type")
+        } if has_response else None
+        
+        # Mismatch detection
+        mismatch_detected = employee.get(f"{prefix}mismatch_detected", False)
+        mismatch_notes = employee.get(f"{prefix}mismatch_notes")
+        
+        # Review status
+        reviewed = employee.get(f"{prefix}reviewed", False)
+        reviewed_by = employee.get(f"{prefix}reviewed_by")
+        reviewed_at = employee.get(f"{prefix}reviewed_at")
+        
+        # Verification status
+        verified = employee.get(f"{prefix}verified", False)
+        verified_by = employee.get(f"{prefix}verified_by")
+        verified_at = employee.get(f"{prefix}verified_at")
+        
+        # Determine overall lifecycle status
+        if verified:
+            lifecycle_status = "verified"
+        elif reviewed:
+            lifecycle_status = "reviewed"
+        elif has_response:
+            if mismatch_detected:
+                lifecycle_status = "mismatch_detected"
+            else:
+                lifecycle_status = "awaiting_review"
+        elif request_status == "awaiting_response":
+            lifecycle_status = "awaiting_response"
+        elif request_status == "requested":
+            lifecycle_status = "requested"
+        elif has_declared:
+            lifecycle_status = "not_requested"
+        else:
+            lifecycle_status = "not_declared"
+        
+        # Build status summary
+        if lifecycle_status == "verified":
+            status_summary = f"Verified • {declared_referee.get('company', 'Referee')}"
+            if verified_at:
+                status_summary += f" • {verified_at[:10]}"
+        elif lifecycle_status == "reviewed":
+            status_summary = f"Reviewed • awaiting verification"
+        elif lifecycle_status == "mismatch_detected":
+            status_summary = f"Response received • identity mismatch • awaiting review"
+        elif lifecycle_status == "awaiting_review":
+            status_summary = f"Response received • awaiting review"
+        elif lifecycle_status == "awaiting_response":
+            days_since = None
+            if request_sent_at:
+                try:
+                    sent_date = datetime.fromisoformat(request_sent_at.replace("Z", "+00:00"))
+                    days_since = (datetime.now(timezone.utc) - sent_date).days
+                except:
+                    pass
+            status_summary = f"Requested{' ' + str(days_since) + ' days ago' if days_since else ''} • awaiting response"
+        elif lifecycle_status == "requested":
+            status_summary = "Request pending"
+        elif lifecycle_status == "not_requested":
+            status_summary = f"Referee declared • not yet requested"
+        else:
+            status_summary = "Referee not declared"
+        
+        # Blocker text
+        blocker_text = None
+        if not verified:
+            blocker_text = f"Reference {ref_num} not verified"
+        
+        # Allowed actions
+        allowed_actions = []
+        if has_declared and declared_referee.get("email"):
+            if lifecycle_status in ["not_requested", "not_declared"]:
+                allowed_actions.append("send_request")
+            elif lifecycle_status in ["requested", "awaiting_response"]:
+                allowed_actions.append("resend_request")
+            elif lifecycle_status in ["awaiting_review", "mismatch_detected", "reviewed"]:
+                allowed_actions.extend(["view_response", "review", "verify", "reject"])
+            elif lifecycle_status == "verified":
+                allowed_actions.extend(["view_response", "request_replacement"])
+        if has_response:
+            allowed_actions.append("view_response")
+        allowed_actions.append("view_history")
+        
+        # Request lifecycle data (similar to evidence rows)
+        request_lifecycle = {
+            "status": lifecycle_status,
+            "current_request": {
+                "sent_at": request_sent_at,
+                "token": request_token[:8] + "..." if request_token else None  # Partial for security
+            } if request_status else None,
+            "last_requested_at": request_sent_at,
+            "last_response_at": response_received_at,
+            "source": "manual",  # Reference requests are always manual
+            "is_stale": False,
+            "stale_days": 0
+        }
+        
+        # Check if request is stale (> 14 days without response)
+        if request_sent_at and lifecycle_status in ["requested", "awaiting_response"]:
+            try:
+                sent_date = datetime.fromisoformat(request_sent_at.replace("Z", "+00:00"))
+                days_since = (datetime.now(timezone.utc) - sent_date).days
+                if days_since >= 14:
+                    request_lifecycle["is_stale"] = True
+                    request_lifecycle["stale_days"] = days_since
+            except:
+                pass
+        
+        return {
+            "key": f"reference_{ref_num}",
+            "title": f"Reference {ref_num}",
+            "row_type": "reference",
+            "reference_num": ref_num,
+            
+            "affects_readiness": True,
+            "is_supporting_evidence": False,
+            "blocker_text": blocker_text,
+            
+            # Declared referee
+            "has_declared": has_declared,
+            "declared_referee": declared_referee if has_declared else None,
+            
+            # Request status
+            "request_status": request_status,
+            "request_sent_at": request_sent_at,
+            "request_lifecycle": request_lifecycle,
+            
+            # Response
+            "has_response": has_response,
+            "response_received_at": response_received_at,
+            "returned_referee": returned_referee,
+            "response_data_preview": {
+                "relationship_type": response_data.get("relationship_type"),
+                "employment_dates": f"{response_data.get('employment_start_date', '')} - {response_data.get('employment_end_date', '')}",
+                "would_rehire": response_data.get("would_rehire"),
+                "overall_assessment": response_data.get("overall_assessment")
+            } if has_response else None,
+            
+            # Mismatch
+            "mismatch_detected": mismatch_detected,
+            "mismatch_notes": mismatch_notes,
+            
+            # Review/Verification
+            "reviewed": reviewed,
+            "reviewed_by": reviewed_by,
+            "reviewed_at": reviewed_at,
+            "verified": verified,
+            "verified_by": verified_by,
+            "verified_at": verified_at,
+            
+            # Lifecycle
+            "lifecycle_status": lifecycle_status,
+            "status": "verified" if verified else ("partial" if has_response else "not_completed"),
+            "status_summary": status_summary,
+            
+            # Actions
+            "allowed_actions": allowed_actions,
+            
+            # Counts toward readiness
+            "counts_toward_readiness": verified
+        }
+    
+    # =========================================================================
     # BUILD DUAL-ROW SECTIONS
     # =========================================================================
     
@@ -27370,31 +27571,18 @@ async def get_compliance_file(
             ]
         },
         
-        # References - Keep existing structure (already has integrity layer)
+        # References - Dual-row structure with full lifecycle
         "references": {
             "title": "References",
-            "reference_1": {
-                "declared": ref1.get("declared_referee") if ref1 else None,
-                "response_source": ref1.get("response", {}).get("source") if ref1 else None,
-                "identity_confidence": ref1.get("comparison", {}).get("identity_confidence") if ref1 else None,
-                "verification_status": ref1.get("verification", {}).get("status") if ref1 else "not_started",
-                "counts_toward_readiness": ref1.get("counts_toward_readiness", False) if ref1 else False,
-                "blocked": ref1.get("blocked_by_integrity", False) if ref1 else False,
-                "lifecycle": ref1.get("lifecycle_status") if ref1 else None
-            },
-            "reference_2": {
-                "declared": ref2.get("declared_referee") if ref2 else None,
-                "response_source": ref2.get("response", {}).get("source") if ref2 else None,
-                "identity_confidence": ref2.get("comparison", {}).get("identity_confidence") if ref2 else None,
-                "verification_status": ref2.get("verification", {}).get("status") if ref2 else "not_started",
-                "counts_toward_readiness": ref2.get("counts_toward_readiness", False) if ref2 else False,
-                "blocked": ref2.get("blocked_by_integrity", False) if ref2 else False,
-                "lifecycle": ref2.get("lifecycle_status") if ref2 else None
-            },
+            "rows": [
+                build_reference_row(1),
+                build_reference_row(2)
+            ],
             "valid_count": sum([
-                1 if ref1 and ref1.get("counts_toward_readiness") else 0,
-                1 if ref2 and ref2.get("counts_toward_readiness") else 0
-            ])
+                1 if employee.get("reference_1_verified") else 0,
+                1 if employee.get("reference_2_verified") else 0
+            ]),
+            "required_count": 2
         },
         
         # Training - Keep existing structure

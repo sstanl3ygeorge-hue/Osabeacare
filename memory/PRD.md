@@ -153,10 +153,36 @@ Replaced legacy EvidenceRow + CheckRow with unified UploadRequirementCard for al
 **Testing:** 13/13 tests passed (iteration_97.json). 100% success rate.
 
 ### Remaining Passes (Tickets C-F)
-- **Ticket C**: Upload Requirement Drawer - Standardize drawer for Active Files, Request History, Historical Files
+- **Ticket C**: Upload Requirement Drawer ✅ COMPLETE (2026-03-31)
 - **Ticket D**: Agreements Rebuild - Template-driven send/view/verify workflow
 - **Ticket E**: References Alignment - Same shell/action bar as uploads, reference-specific drawer
 - **Ticket F**: Remove Fake States - Audit all badges/counts, hide anything not wired to backend truth
+
+### Ticket C: Upload Requirement Drawer ✅ (2026-03-31)
+Implemented shared `UploadRequirementDrawer` for all upload requirements.
+
+**New Component Created:**
+- `UploadRequirementDrawer.js` - Unified working drawer for RTW, DBS, Identity, PoA
+  - Header with title, counters (active, verified, pending), Upload/Request buttons
+  - Active Files section with file list, badges, per-file action menus
+  - Request History section (collapsible) with request status timeline
+  - Historical Files section (collapsible) for superseded/archived files
+  - PoA-specific 2-document requirement banner
+
+**Integration:**
+- Added `uploadDrawer` state in DualRowComplianceSection.js
+- `openUploadDrawer()` and `closeUploadDrawer()` functions
+- Wired via `onOpenDrawer` prop in UploadRequirementCard
+- "Manage" button always visible (shows "View Files" when files exist)
+
+**Per-File Actions (via DocumentActionMenu):**
+- View, Download
+- Verify, Reject (for admins, if awaiting review)
+- Review Extraction (if extraction pending)
+- Supersede/Replace, Move Category, Mark Uploaded in Error
+- View File History
+
+**Testing:** 10/10 tests passed (iteration_98.json). 100% frontend success rate.
 
 ---
 

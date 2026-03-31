@@ -4,8 +4,8 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11: Dual-Row Evidence/Check Model - Phase 1, 2, 3 Backend (2026-03-31)
-**Status**: Phase 1-3 COMPLETE ✅ | Phase 4 (Frontend) PENDING
+## Step 11: Dual-Row Evidence/Check Model - COMPLETE (2026-03-31)
+**Status**: ALL PHASES COMPLETE ✅
 
 ### Phase 1: Backend Data Model & Services ✅
 Implemented the backend data model, services, and endpoints for the dual-row evidence/check model.
@@ -27,6 +27,28 @@ Updated `GET /api/employees/{id}/compliance-file` to return dual-row structure:
 - Counts: active_files, verified, awaiting_verification, pending_requests, history
 - Check/Agreement data with method, outcome, version, verification_status
 - `migration_info` for transparency
+
+### Phase 4: Frontend UI ✅ (2026-03-31)
+Implemented the complete frontend UI for the Dual-Row Evidence/Check Model:
+
+**Components Created:**
+- `DualRowComplianceSection.js` - Main container that fetches and renders the compliance file
+- `EvidenceRow.js` - Renders evidence (uploaded files) with Upload, Add, Request actions
+- `CheckRow.js` - Renders check/verification outcomes with Record Check, Update actions
+- `AgreementRow.js` - Renders agreement acknowledgements with Send, Fill, Phone actions
+- `RecordCheckDialog.js` - Dialog for recording employer verification checks (RTW, DBS, Identity)
+- `CompleteAgreementDialog.js` - Dialog for completing agreements (admin-assisted, phone-assisted)
+- `SendAgreementDialog.js` - Dialog for sending agreement forms to employees via secure link
+
+**UI Features:**
+- Section-based layout (Right to Work, DBS, Identity, Proof of Address, Agreements)
+- Collapsible sections with blocking item badges
+- Evidence rows: Blue file icon, file counts, extraction review badges
+- Check rows: Green/Amber/Red status indicators, verification method and date
+- Agreement rows: Purple icon, version acknowledged, completion mode
+- Blocking requirements banner with clear messaging
+- "Serializer: dual_row_v1" footer for debugging
+- Legacy Checklist View preserved as collapsible backup
 
 ### Key Principle
 - **Evidence row** = uploaded/supporting files (passport, certificate, etc.)

@@ -1,0 +1,87 @@
+{
+  "summary": "Training Intake Wizard Phases 1-3 Backend Testing completed. All 25 tests passed after fixing critical route registration bug. Routes defined after app.include_router() were not being registered.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_training_intake_wizard.py",
+    "/app/test_reports/pytest/training_intake_wizard_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "FIXED: Routes defined after app.include_router(api_router) at line 30323 were NOT being registered. Moved app.include_router() to after all routes are defined (line 31371).",
+    "FIXED: Duplicate route definition for /training/intake - removed duplicate at line 31193, kept early definition at line 7223 which now calls TrainingIntakeService",
+    "FIXED: Early /training/intake endpoint was returning placeholder message instead of calling TrainingIntakeService - now properly validates document and calls extraction service"
+  ],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_training_intake_wizard.py"
+  ],
+  "success_rate": {
+    "backend": "100% (25/25 tests passed)",
+    "frontend": "N/A (backend-only testing requested)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Used existing employee d88335f6-1b18-435a-8086-28af4a583f77 (Olakunle Alonge). Created manual training records for fire_safety, infection_control, safeguarding during testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Training Intake Wizard Phases 1-3 fully tested. Key endpoints verified: (1) GET /api/employees/{id}/training/proposed-items - returns proposed items array with total and pending_review counts, (2) GET /api/employees/{id}/training/requests - returns training request history, (3) POST /api/employees/{id}/training/request - creates email request via EmailRequestService, (4) POST /api/employees/{id}/training/intake - triggers multi-training extraction with document validation, (5) POST /api/employees/{id}/training/proposed-items/review - approves/rejects items and creates training_records, (6) POST /api/employees/{id}/training/manual - creates training record without certificate. TRAINING_CODE_MAPPING maps raw titles like 'CSTF - Fire Safety' to internal codes. Name comparison returns match/partial_match/mismatch/review_required. Approved items create canonical training_records that appear in Training Matrix.",
+  "features_tested": {
+    "get_proposed_items": {
+      "status": "PASS",
+      "endpoint": "GET /api/employees/{id}/training/proposed-items",
+      "details": "Returns items array, total count, pending_review count. Supports status filter."
+    },
+    "get_training_requests": {
+      "status": "PASS",
+      "endpoint": "GET /api/employees/{id}/training/requests",
+      "details": "Returns training request history from email_requests collection"
+    },
+    "post_training_request": {
+      "status": "PASS",
+      "endpoint": "POST /api/employees/{id}/training/request",
+      "details": "Creates email request via EmailRequestService. Returns duplicate_blocked if request already exists."
+    },
+    "post_training_intake": {
+      "status": "PASS",
+      "endpoint": "POST /api/employees/{id}/training/intake",
+      "details": "Validates document exists, calls TrainingIntakeService.extract_multi_training. Returns 404 for invalid document."
+    },
+    "post_proposed_items_review": {
+      "status": "PASS",
+      "endpoint": "POST /api/employees/{id}/training/proposed-items/review",
+      "details": "Approves/rejects items, creates training_records for approved items. Returns approved/rejected counts and errors."
+    },
+    "post_manual_training": {
+      "status": "PASS",
+      "endpoint": "POST /api/employees/{id}/training/manual",
+      "details": "Creates training record without certificate. Updates existing record if same training_code exists."
+    },
+    "training_mapping_layer": {
+      "status": "PASS",
+      "details": "TRAINING_CODE_MAPPING maps raw titles to internal codes (fire_safety, infection_control, etc.)"
+    },
+    "name_comparison": {
+      "status": "PASS",
+      "details": "TrainingIntakeService.compare_names returns match/partial_match/mismatch/review_required"
+    },
+    "authentication": {
+      "status": "PASS",
+      "details": "All endpoints require authentication, return 401 without token"
+    }
+  },
+  "bugfix_verification": {
+    "original_issue": "Routes defined after app.include_router() were not being registered - /training/proposed-items/review returned 404, /training/manual returned 405",
+    "root_cause": "app.include_router(api_router) was called at line 30323, but training intake routes were defined at lines 31269-31364 (after the include)",
+    "fix_applied": "Moved app.include_router(api_router) to line 31371 (after all routes are defined). Removed duplicate /training/intake route. Updated early /training/intake to call TrainingIntakeService.",
+    "verification_method": "All 25 backend tests pass. Manual curl tests confirm endpoints return expected responses."
+  }
+}

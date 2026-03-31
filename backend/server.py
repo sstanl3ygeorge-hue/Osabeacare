@@ -7115,6 +7115,164 @@ async def get_employee_training(
     return training_status
 
 
+# ============ TRAINING INTAKE ENDPOINTS (MUST BE BEFORE PARAMETERIZED ROUTES) ============
+# These routes use fixed paths like /training/proposed-items and must be defined
+# BEFORE routes like /training/{requirement_id} to avoid being shadowed
+
+@api_router.get("/employees/{employee_id}/training/proposed-items")
+async def get_proposed_training_items_inline(
+    employee_id: str,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get proposed training items awaiting review for an employee.
+    Must be defined BEFORE parameterized training routes.
+    """
+    # Query directly since TrainingIntakeService is defined later in the file
+    query = {"employee_id": employee_id}
+    if status:
+        query["status"] = status
+    
+    items = await db.proposed_training_items.find(
+        query, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    
+    # Enrich with source document info
+    for item in items:
+        doc_id = item.get("source_document_id")
+        if doc_id:
+            doc = await db.employee_documents.find_one(
+                {"id": doc_id},
+                {"_id": 0, "original_filename": 1, "file_url": 1}
+            )
+            if doc:
+                item["source_document_filename"] = doc.get("original_filename")
+                item["source_document_url"] = doc.get("file_url")
+    
+    return {
+        "items": items,
+        "total": len(items),
+        "pending_review": len([i for i in items if i.get("status") == "proposed"])
+    }
+
+
+@api_router.get("/employees/{employee_id}/training/requests")
+async def get_employee_training_requests_inline(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get training certificate request history for an employee.
+    Must be defined BEFORE parameterized training routes.
+    """
+    requests = await db.email_requests.find({
+        "person_id": employee_id,
+        "request_type": "upload_training"
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    return {
+        "requests": requests,
+        "total": len(requests)
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/request")
+async def request_training_certificates_inline(
+    employee_id: str,
+    training_types: Optional[List[str]] = Body(None),
+    include_renewals: bool = Body(False),
+    custom_message: Optional[str] = Body(None),
+    due_days: int = Body(14),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send email request for training certificates to employee.
+    Must be defined BEFORE parameterized training routes.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Build context for email
+    context = {
+        "training_types": training_types,
+        "include_renewals": include_renewals,
+        "custom_message": custom_message,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}"
+    }
+    
+    # Create request through existing service
+    result = await EmailRequestService.create_request(
+        person_id=employee_id,
+        person_type="employee",
+        request_type=RequestType.UPLOAD_TRAINING,
+        requirement_id="training_certificates",
+        template_variant="training_intake",
+        due_days=due_days,
+        context=context,
+        admin_id=user.get("user_id")
+    )
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("reason"))
+    
+    return result
+
+
+@api_router.post("/employees/{employee_id}/training/intake")
+async def trigger_training_intake_inline(
+    employee_id: str,
+    document_id: str = Body(..., embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Trigger multi-training extraction for a specific document.
+    Must be defined BEFORE parameterized training routes.
+    
+    This endpoint calls TrainingIntakeService.extract_multi_training which:
+    - Detects single/multi training certificates
+    - Maps raw titles to internal training codes
+    - Compares certificate holder name with employee name
+    - Creates proposed_training_items for review
+    """
+    # TrainingIntakeService is defined later in the file (line ~30530)
+    # We need to call it after it's defined, which happens when the module loads
+    # Since Python executes top-to-bottom, we use a lazy import pattern
+    
+    # First validate the document exists
+    document = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
+    if not document:
+        # Try file_id fallback
+        document = await db.employee_documents.find_one(
+            {"evidence_files.file_id": document_id}, {"_id": 0}
+        )
+    
+    if not document:
+        # Check training_records
+        training_doc = await db.training_records.find_one(
+            {"$or": [{"id": document_id}, {"evidence_files.file_id": document_id}]},
+            {"_id": 0}
+        )
+        if not training_doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Call TrainingIntakeService - it's defined later but available at runtime
+    # because Python has already loaded the entire module by the time this runs
+    try:
+        result = await TrainingIntakeService.extract_multi_training(document_id, employee_id)
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=result.get("message"))
+        
+        return result
+    except NameError:
+        # TrainingIntakeService not yet defined (shouldn't happen at runtime)
+        raise HTTPException(status_code=500, detail="TrainingIntakeService not available")
+
+# ============ END TRAINING INTAKE ENDPOINTS (EARLY DEFINITION) ============
+
+
 @api_router.post("/employees/{employee_id}/training/assign")
 async def assign_training(
     employee_id: str,
@@ -30197,10 +30355,7 @@ File available in system: {cert.get('file_url', 'Not uploaded')}
     )
 
 
-# Include router
-app.include_router(api_router)
-
-# CORS middleware
+# CORS middleware (router included after all routes are defined)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -30208,6 +30363,1025 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ==================== TRAINING INTAKE WIZARD (Step 10 - Phases 1-3) ====================
+#
+# This module implements the Training Intake Wizard with:
+# - Phase 1: Training certificate request & secure upload
+# - Phase 2: Multi-training extraction with proposed items
+# - Phase 3: Review & commit to canonical training_records
+#
+# Key principles:
+# - One uploaded document CAN link to MANY training records
+# - Nothing becomes verified automatically
+# - Approved items write to the SAME training_records used by Training Matrix
+# - Employee secure upload REUSES the existing EmailRequestService
+# - Name mismatch is visible and reviewable
+# - Raw certificate title is preserved alongside mapped internal training code
+
+# ================= TRAINING MAPPING LAYER =================
+
+TRAINING_CODE_MAPPING = {
+    # CSTF (Care Skills Training Framework) Mappings
+    "cstf - fire safety": "fire_safety",
+    "fire safety": "fire_safety",
+    "cstf - infection prevention and control": "infection_control",
+    "infection prevention and control": "infection_control",
+    "infection control": "infection_control",
+    "cstf - manual handling": "manual_handling",
+    "manual handling": "manual_handling",
+    "moving and handling": "manual_handling",
+    "cstf - safeguarding adults": "safeguarding",
+    "safeguarding adults": "safeguarding",
+    "safeguarding": "safeguarding",
+    "cstf - adult basic life support": "basic_life_support",
+    "basic life support": "basic_life_support",
+    "bls": "basic_life_support",
+    "cstf - food hygiene": "food_hygiene",
+    "food hygiene": "food_hygiene",
+    "food safety": "food_hygiene",
+    "cstf - equality diversity and human rights": "equality_diversity",
+    "equality diversity": "equality_diversity",
+    "cstf - health safety and welfare": "health_and_safety",
+    "health and safety": "health_and_safety",
+    "cstf - information governance": "information_governance",
+    "information governance": "information_governance",
+    "data protection": "information_governance",
+    "gdpr": "information_governance",
+    "cstf - preventing radicalisation": "prevent",
+    "prevent": "prevent",
+    "preventing radicalisation": "prevent",
+    "first aid": "first_aid",
+    "first aid awareness": "first_aid",
+    "medication administration": "medication_administration",
+    "medication management": "medication_administration",
+    "mental capacity act": "mental_capacity_act",
+    "mca": "mental_capacity_act",
+    "deprivation of liberty": "dols",
+    "dols": "dols",
+    "dementia awareness": "dementia_awareness",
+    "dementia": "dementia_awareness",
+    "autism awareness": "autism_awareness",
+    "learning disabilities": "learning_disabilities",
+    "end of life care": "end_of_life_care",
+    "palliative care": "end_of_life_care",
+}
+
+TRAINING_TITLES = {
+    "fire_safety": "Fire Safety",
+    "infection_control": "Infection Prevention and Control",
+    "manual_handling": "Manual Handling & Moving",
+    "safeguarding": "Safeguarding",
+    "basic_life_support": "Basic Life Support",
+    "food_hygiene": "Food Hygiene & Safety",
+    "equality_diversity": "Equality, Diversity & Human Rights",
+    "health_and_safety": "Health, Safety & Welfare",
+    "information_governance": "Information Governance & GDPR",
+    "prevent": "Prevent (Anti-Radicalisation)",
+    "first_aid": "First Aid Awareness",
+    "medication_administration": "Medication Administration",
+    "mental_capacity_act": "Mental Capacity Act",
+    "dols": "Deprivation of Liberty Safeguards",
+    "dementia_awareness": "Dementia Awareness",
+    "autism_awareness": "Autism Awareness",
+    "learning_disabilities": "Learning Disabilities Awareness",
+    "end_of_life_care": "End of Life Care",
+}
+
+
+def map_training_title(raw_title: str) -> tuple:
+    """
+    Map a raw certificate title to an internal training code.
+    
+    Returns:
+        (mapped_code, mapped_title) or (None, None) if no match
+    """
+    if not raw_title:
+        return (None, None)
+    
+    normalized = raw_title.lower().strip()
+    
+    # Remove common prefixes/suffixes
+    for prefix in ["cstf -", "cstf-", "e-learning:", "online:"]:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):].strip()
+    
+    for suffix in ["- online", "online module", "e-learning", "level 1", "level 2", "level 1&2", "level 1 & 2"]:
+        if normalized.endswith(suffix):
+            normalized = normalized[:-len(suffix)].strip()
+    
+    # Direct lookup
+    if normalized in TRAINING_CODE_MAPPING:
+        code = TRAINING_CODE_MAPPING[normalized]
+        return (code, TRAINING_TITLES.get(code, raw_title))
+    
+    # Fuzzy matching - check if any mapping key is contained in the title
+    for key, code in TRAINING_CODE_MAPPING.items():
+        if key in normalized or normalized in key:
+            return (code, TRAINING_TITLES.get(code, raw_title))
+    
+    return (None, None)
+
+
+class ProposedTrainingItemStatus(str, Enum):
+    """Status of a proposed training item from extraction."""
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    MERGED = "merged"
+
+
+class NameMatchResult(str, Enum):
+    """Result of name comparison between certificate and employee."""
+    MATCH = "match"
+    PARTIAL_MATCH = "partial_match"
+    MISMATCH = "mismatch"
+    REVIEW_REQUIRED = "review_required"
+
+
+class ExpirySource(str, Enum):
+    """Source of expiry date determination."""
+    EXPLICIT = "explicit"          # Stated on certificate
+    INFERRED_POLICY = "inferred_policy"  # From training validity policy
+    MANUAL = "manual"              # Admin-entered
+
+
+# ================= PROPOSED TRAINING ITEMS MODELS =================
+
+class ProposedTrainingItem(BaseModel):
+    """A proposed training item extracted from a certificate."""
+    id: str
+    source_document_id: str
+    employee_id: str
+    page_range: Optional[str] = None
+    raw_course_title: str
+    mapped_training_code: Optional[str] = None
+    mapped_training_title: Optional[str] = None
+    completed_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    expiry_source: Optional[str] = None
+    certificate_number: Optional[str] = None
+    provider_name: Optional[str] = None
+    holder_name: Optional[str] = None
+    holder_name_match: Optional[str] = None
+    confidence: Optional[float] = None
+    status: str = ProposedTrainingItemStatus.PROPOSED.value
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    created_training_record_id: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class TrainingIntakeRequest(BaseModel):
+    """Request to start training certificate intake."""
+    training_types: Optional[List[str]] = None  # Specific types, or None for all missing
+    include_renewals: bool = False
+    custom_message: Optional[str] = None
+    due_days: int = 14
+
+
+class TrainingIntakeReviewItem(BaseModel):
+    """Single item in a review request."""
+    item_id: str
+    approve: bool
+    mapped_training_code: Optional[str] = None
+    mapped_training_title: Optional[str] = None
+    completed_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TrainingIntakeReviewRequest(BaseModel):
+    """Request to review proposed training items."""
+    items: List[TrainingIntakeReviewItem]
+
+
+# ================= TRAINING INTAKE SERVICE =================
+
+class TrainingIntakeService:
+    """
+    Service for managing the training certificate intake workflow.
+    
+    Handles:
+    - Multi-training certificate extraction
+    - Proposed items creation and review
+    - Name verification
+    - Canonical training_records creation
+    """
+    
+    @staticmethod
+    def compare_names(certificate_name: str, employee_name: str) -> str:
+        """
+        Compare certificate holder name with employee name.
+        
+        Returns:
+            NameMatchResult value: match, partial_match, mismatch, review_required
+        """
+        if not certificate_name or not employee_name:
+            return NameMatchResult.REVIEW_REQUIRED.value
+        
+        # Normalize names
+        cert_parts = set(certificate_name.lower().strip().split())
+        emp_parts = set(employee_name.lower().strip().split())
+        
+        # Remove titles
+        titles = {"mr", "mrs", "ms", "miss", "dr", "prof"}
+        cert_parts = cert_parts - titles
+        emp_parts = emp_parts - titles
+        
+        if not cert_parts or not emp_parts:
+            return NameMatchResult.REVIEW_REQUIRED.value
+        
+        # Calculate overlap
+        common = cert_parts.intersection(emp_parts)
+        total = cert_parts.union(emp_parts)
+        
+        if cert_parts == emp_parts:
+            return NameMatchResult.MATCH.value
+        elif len(common) >= min(len(cert_parts), len(emp_parts)):
+            return NameMatchResult.PARTIAL_MATCH.value
+        elif len(common) >= 1:
+            return NameMatchResult.PARTIAL_MATCH.value
+        else:
+            return NameMatchResult.MISMATCH.value
+    
+    @staticmethod
+    async def extract_multi_training(document_id: str, employee_id: str) -> dict:
+        """
+        Extract training information from a certificate, detecting multi-training.
+        
+        Returns:
+            {
+                "status": "success" | "error",
+                "is_multi_training": bool,
+                "proposed_items": [...],
+                "raw_extraction": {...}
+            }
+        """
+        # Get document
+        document = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
+        if not document:
+            # Try file_id fallback
+            document = await db.employee_documents.find_one(
+                {"evidence_files.file_id": document_id}, {"_id": 0}
+            )
+            if document:
+                document_id = document.get("id")
+        
+        if not document:
+            # Check training_records
+            training_doc = await db.training_records.find_one(
+                {"$or": [{"id": document_id}, {"evidence_files.file_id": document_id}]},
+                {"_id": 0}
+            )
+            if training_doc:
+                evidence_file = next(
+                    (ef for ef in training_doc.get("evidence_files", []) if ef.get("file_id") == document_id),
+                    training_doc.get("evidence_files", [{}])[0] if training_doc.get("evidence_files") else None
+                )
+                if evidence_file:
+                    document = {
+                        "id": document_id,
+                        "employee_id": training_doc.get("employee_id"),
+                        "file_url": evidence_file.get("file_url") or training_doc.get("certificate_url")
+                    }
+        
+        if not document:
+            return {"status": "error", "message": "Document not found"}
+        
+        # Get file URL
+        file_url = document.get("file_url")
+        if not file_url and document.get("evidence_files"):
+            ef = document.get("evidence_files", [{}])[0]
+            file_url = ef.get("file_url")
+        
+        if not file_url:
+            return {"status": "error", "message": "No file URL found"}
+        
+        # Get employee for name comparison
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}" if employee else ""
+        
+        # Use GPT-5.2 Vision to extract multi-training data
+        try:
+            from emergentintegrations.llm.chat import Chat
+            
+            prompt = """Analyze this training certificate image and extract ALL training courses/modules present.
+
+This certificate may contain MULTIPLE training items (e.g., a mandatory training bundle with several courses).
+
+For EACH training course found, extract:
+1. course_title: The exact title as shown on the certificate
+2. completion_date: Date completed (YYYY-MM-DD format if possible)
+3. expiry_date: Expiry date if shown (YYYY-MM-DD format if possible)
+4. certificate_number: Certificate/reference number if shown
+5. provider_name: Training provider name
+6. holder_name: Name of the person who completed the training
+
+Return JSON format:
+{
+  "is_multi_training": true/false,
+  "total_courses": number,
+  "holder_name": "Name from certificate",
+  "provider_name": "Training provider",
+  "courses": [
+    {
+      "course_title": "Full title as shown",
+      "completion_date": "YYYY-MM-DD or null",
+      "expiry_date": "YYYY-MM-DD or null",
+      "certificate_number": "number or null",
+      "page_reference": "page 1" or null
+    }
+  ]
+}
+
+Important:
+- Extract ALL courses, even if there are many on a summary page
+- Look for course tables, lists, or sections with multiple modules
+- If only one course, set is_multi_training to false
+- Preserve exact course titles for audit purposes"""
+
+            chat = Chat(
+                api_key=EMERGENT_KEY
+            ).with_model("openai", "gpt-5.2")
+            
+            response = await asyncio.to_thread(
+                chat.send_image,
+                prompt,
+                file_url
+            )
+            
+            # Parse JSON from response
+            import json
+            import re
+            
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if not json_match:
+                return {
+                    "status": "error",
+                    "message": "Could not parse extraction response",
+                    "raw_response": response
+                }
+            
+            extraction_data = json.loads(json_match.group())
+            
+        except Exception as e:
+            logger.error(f"Multi-training extraction failed: {e}")
+            return {"status": "error", "message": str(e)}
+        
+        # Create proposed items from extraction
+        now = datetime.now(timezone.utc).isoformat()
+        proposed_items = []
+        
+        courses = extraction_data.get("courses", [])
+        holder_name = extraction_data.get("holder_name")
+        provider_name = extraction_data.get("provider_name")
+        
+        for course in courses:
+            raw_title = course.get("course_title", "")
+            if not raw_title:
+                continue
+            
+            # Map to internal code
+            mapped_code, mapped_title = map_training_title(raw_title)
+            
+            # Determine expiry
+            completion_date = course.get("completion_date")
+            explicit_expiry = course.get("expiry_date")
+            
+            if explicit_expiry:
+                expires_at = explicit_expiry
+                expiry_source = ExpirySource.EXPLICIT.value
+            elif completion_date and mapped_code:
+                # Infer from policy
+                validity_days = get_training_validity_days(mapped_code)
+                try:
+                    completion_dt = datetime.fromisoformat(completion_date.replace('Z', '+00:00'))
+                    expiry_dt = completion_dt + timedelta(days=validity_days)
+                    expires_at = expiry_dt.strftime('%Y-%m-%d')
+                    expiry_source = ExpirySource.INFERRED_POLICY.value
+                except:
+                    expires_at = None
+                    expiry_source = None
+            else:
+                expires_at = None
+                expiry_source = None
+            
+            # Name comparison
+            name_match = TrainingIntakeService.compare_names(holder_name, employee_name)
+            
+            proposed_item = {
+                "id": str(uuid.uuid4()),
+                "source_document_id": document_id,
+                "employee_id": employee_id,
+                "page_range": course.get("page_reference"),
+                "raw_course_title": raw_title,
+                "mapped_training_code": mapped_code,
+                "mapped_training_title": mapped_title,
+                "completed_at": completion_date,
+                "expires_at": expires_at,
+                "expiry_source": expiry_source,
+                "certificate_number": course.get("certificate_number"),
+                "provider_name": provider_name,
+                "holder_name": holder_name,
+                "holder_name_match": name_match,
+                "confidence": 0.85 if mapped_code else 0.5,
+                "status": ProposedTrainingItemStatus.PROPOSED.value,
+                "created_at": now
+            }
+            
+            proposed_items.append(proposed_item)
+        
+        # Store proposed items
+        if proposed_items:
+            await db.proposed_training_items.insert_many(proposed_items)
+        
+        return {
+            "status": "success",
+            "is_multi_training": extraction_data.get("is_multi_training", len(courses) > 1),
+            "total_courses": len(courses),
+            "proposed_items": proposed_items,
+            "raw_extraction": extraction_data
+        }
+    
+    @staticmethod
+    async def get_proposed_items(employee_id: str, status: Optional[str] = None) -> list:
+        """Get proposed training items for an employee."""
+        query = {"employee_id": employee_id}
+        if status:
+            query["status"] = status
+        
+        items = await db.proposed_training_items.find(
+            query, {"_id": 0}
+        ).sort("created_at", -1).to_list(200)
+        
+        return items
+    
+    @staticmethod
+    async def review_proposed_items(
+        employee_id: str,
+        items: List[TrainingIntakeReviewItem],
+        reviewer_id: str,
+        reviewer_name: str
+    ) -> dict:
+        """
+        Review and approve/reject proposed training items.
+        
+        Approved items create canonical training_records.
+        One document can create MANY training records.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        results = {
+            "approved": 0,
+            "rejected": 0,
+            "created_records": [],
+            "errors": []
+        }
+        
+        for item in items:
+            # Get the proposed item
+            proposed = await db.proposed_training_items.find_one(
+                {"id": item.item_id, "employee_id": employee_id},
+                {"_id": 0}
+            )
+            
+            if not proposed:
+                results["errors"].append({
+                    "item_id": item.item_id,
+                    "error": "Item not found"
+                })
+                continue
+            
+            if item.approve:
+                # Create canonical training record
+                training_code = item.mapped_training_code or proposed.get("mapped_training_code")
+                training_title = item.mapped_training_title or proposed.get("mapped_training_title") or proposed.get("raw_course_title")
+                completed_at = item.completed_at or proposed.get("completed_at")
+                expires_at = item.expires_at or proposed.get("expires_at")
+                
+                # Get source document for file linking
+                source_doc = await db.employee_documents.find_one(
+                    {"id": proposed.get("source_document_id")},
+                    {"_id": 0, "file_url": 1, "original_filename": 1, "evidence_files": 1}
+                )
+                
+                file_url = None
+                original_filename = None
+                if source_doc:
+                    file_url = source_doc.get("file_url")
+                    original_filename = source_doc.get("original_filename")
+                    if not file_url and source_doc.get("evidence_files"):
+                        ef = source_doc.get("evidence_files", [{}])[0]
+                        file_url = ef.get("file_url")
+                        original_filename = ef.get("original_filename", original_filename)
+                
+                # Check for existing training record to update
+                existing_record = await db.training_records.find_one({
+                    "employee_id": employee_id,
+                    "requirement_id": training_code,
+                    "record_status": "active"
+                }, {"_id": 0})
+                
+                if existing_record:
+                    # Update existing record
+                    record_id = existing_record.get("id")
+                    update_data = {
+                        "completion_date": completed_at,
+                        "expiry_date": expires_at,
+                        "status": "completed",
+                        "certificate_url": file_url,
+                        "original_filename": original_filename,
+                        "uploaded_at": now,
+                        "updated_at": now,
+                        "completion_method": "certificate",
+                        "raw_certificate_title": proposed.get("raw_course_title"),
+                        "certificate_number": proposed.get("certificate_number"),
+                        "provider_name": proposed.get("provider_name"),
+                        "source_document_id": proposed.get("source_document_id"),
+                        "intake_item_id": item.item_id
+                    }
+                    
+                    # Add evidence file link
+                    evidence_file = {
+                        "file_id": str(uuid.uuid4()),
+                        "document_id": proposed.get("source_document_id"),
+                        "file_url": file_url,
+                        "original_filename": original_filename,
+                        "uploaded_at": now,
+                        "page_range": proposed.get("page_range")
+                    }
+                    
+                    await db.training_records.update_one(
+                        {"id": record_id},
+                        {
+                            "$set": update_data,
+                            "$push": {"evidence_files": evidence_file}
+                        }
+                    )
+                else:
+                    # Create new training record
+                    record_id = str(uuid.uuid4())
+                    new_record = {
+                        "id": record_id,
+                        "employee_id": employee_id,
+                        "training_name": training_title,
+                        "requirement_id": training_code,
+                        "mandatory": True,
+                        "completion_date": completed_at,
+                        "expiry_date": expires_at,
+                        "status": "completed",
+                        "certificate_url": file_url,
+                        "original_filename": original_filename,
+                        "uploaded_at": now,
+                        "verified": False,
+                        "completion_method": "certificate",
+                        "record_status": "active",
+                        "raw_certificate_title": proposed.get("raw_course_title"),
+                        "certificate_number": proposed.get("certificate_number"),
+                        "provider_name": proposed.get("provider_name"),
+                        "source_document_id": proposed.get("source_document_id"),
+                        "intake_item_id": item.item_id,
+                        "evidence_files": [{
+                            "file_id": str(uuid.uuid4()),
+                            "document_id": proposed.get("source_document_id"),
+                            "file_url": file_url,
+                            "original_filename": original_filename,
+                            "uploaded_at": now,
+                            "page_range": proposed.get("page_range")
+                        }],
+                        "created_at": now,
+                        "updated_at": now
+                    }
+                    
+                    await db.training_records.insert_one(new_record)
+                
+                # Update proposed item status
+                await db.proposed_training_items.update_one(
+                    {"id": item.item_id},
+                    {
+                        "$set": {
+                            "status": ProposedTrainingItemStatus.APPROVED.value,
+                            "reviewed_by": reviewer_id,
+                            "reviewed_at": now,
+                            "created_training_record_id": record_id,
+                            "mapped_training_code": training_code,
+                            "mapped_training_title": training_title,
+                            "completed_at": completed_at,
+                            "expires_at": expires_at,
+                            "updated_at": now
+                        }
+                    }
+                )
+                
+                results["approved"] += 1
+                results["created_records"].append({
+                    "item_id": item.item_id,
+                    "record_id": record_id,
+                    "training_title": training_title
+                })
+            else:
+                # Reject item
+                await db.proposed_training_items.update_one(
+                    {"id": item.item_id},
+                    {
+                        "$set": {
+                            "status": ProposedTrainingItemStatus.REJECTED.value,
+                            "reviewed_by": reviewer_id,
+                            "reviewed_at": now,
+                            "review_notes": item.notes,
+                            "updated_at": now
+                        }
+                    }
+                )
+                results["rejected"] += 1
+        
+        return results
+    
+    @staticmethod
+    async def get_training_requests(employee_id: str) -> list:
+        """Get training certificate requests for an employee."""
+        requests = await db.email_requests.find({
+            "person_id": employee_id,
+            "request_type": RequestType.UPLOAD_TRAINING.value
+        }, {"_id": 0}).sort("created_at", -1).to_list(100)
+        
+        return requests
+
+
+# ================= TRAINING INTAKE ENDPOINTS =================
+
+@api_router.post("/employees/{employee_id}/training/request")
+async def request_training_certificates(
+    employee_id: str,
+    request: TrainingIntakeRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send email request for training certificates to employee.
+    
+    Uses existing EmailRequestService lifecycle.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Build context for email
+    context = {
+        "training_types": request.training_types,
+        "include_renewals": request.include_renewals,
+        "custom_message": request.custom_message,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}"
+    }
+    
+    # Create request through existing service
+    result = await EmailRequestService.create_request(
+        person_id=employee_id,
+        person_type="employee",
+        request_type=RequestType.UPLOAD_TRAINING,
+        requirement_id="training_certificates",
+        template_variant="training_intake",
+        due_days=request.due_days,
+        context=context,
+        admin_id=user.get("user_id")
+    )
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("reason"))
+    
+    return result
+
+
+@api_router.get("/training/respond/{token}")
+async def get_training_upload_page(token: str):
+    """
+    Get training certificate upload page data.
+    
+    Public endpoint - no auth required, uses secure token.
+    """
+    result = await EmailRequestService.validate_and_use_token(token)
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("reason"))
+    
+    if result.get("status") == "expired":
+        raise HTTPException(status_code=410, detail="This link has expired")
+    
+    payload = result.get("payload", {})
+    employee_id = payload.get("person_id")
+    
+    # Get employee info for display
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get request context
+    request_data = await db.email_requests.find_one(
+        {"token_id": payload.get("jti")},
+        {"_id": 0}
+    )
+    
+    return {
+        "status": "valid",
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+        "employee_id": employee_id,
+        "training_types": request_data.get("context", {}).get("training_types") if request_data else None,
+        "custom_message": request_data.get("context", {}).get("custom_message") if request_data else None,
+        "due_date": request_data.get("due_at") if request_data else None,
+        "request_id": request_data.get("id") if request_data else None
+    }
+
+
+@api_router.post("/training/respond/{token}/upload")
+async def upload_training_certificate_public(
+    token: str,
+    files: List[UploadFile] = File(...),
+    notes: Optional[str] = Form(None)
+):
+    """
+    Public endpoint for employee to upload training certificates.
+    
+    After upload:
+    - Files are attached to employee record
+    - Extraction runs automatically
+    - Proposed items enter review queue
+    """
+    result = await EmailRequestService.validate_and_use_token(token)
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("reason"))
+    
+    if result.get("status") == "expired":
+        raise HTTPException(status_code=410, detail="This link has expired")
+    
+    payload = result.get("payload", {})
+    employee_id = payload.get("person_id")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    uploaded_documents = []
+    proposed_items_total = []
+    
+    for file in files:
+        # Upload file
+        try:
+            file_content = await file.read()
+            file_ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'pdf'
+            file_key = f"training/{employee_id}/{uuid.uuid4()}.{file_ext}"
+            
+            from emergentintegrations.storage import upload_file_to_storage
+            file_url = upload_file_to_storage(file_key, file_content)
+        except Exception as e:
+            logger.error(f"File upload failed: {e}")
+            continue
+        
+        # Create document record
+        doc_id = str(uuid.uuid4())
+        document = {
+            "id": doc_id,
+            "employee_id": employee_id,
+            "requirement_id": "training_certificate",
+            "document_type": "training_certificate",
+            "file_url": file_url,
+            "original_filename": file.filename,
+            "uploaded_at": now,
+            "uploaded_by_type": "employee",
+            "source": "employee_secure_upload",
+            "notes": notes,
+            "status": "awaiting_extraction",
+            "evidence_files": [{
+                "file_id": str(uuid.uuid4()),
+                "document_id": doc_id,
+                "file_url": file_url,
+                "original_filename": file.filename,
+                "uploaded_at": now,
+                "status": "active"
+            }],
+            "created_at": now
+        }
+        
+        await db.employee_documents.insert_one(document)
+        uploaded_documents.append(doc_id)
+        
+        # Run multi-training extraction
+        extraction_result = await TrainingIntakeService.extract_multi_training(
+            doc_id, employee_id
+        )
+        
+        if extraction_result.get("status") == "success":
+            proposed_items_total.extend(extraction_result.get("proposed_items", []))
+    
+    # Link submission to request
+    request_data = await db.email_requests.find_one(
+        {"token_id": payload.get("jti")},
+        {"_id": 0, "id": 1}
+    )
+    
+    if request_data:
+        await EmailRequestService.link_submission(
+            request_id=request_data.get("id"),
+            submission_id=uploaded_documents[0] if uploaded_documents else None,
+            submission_type="training_certificate",
+            actor_id=employee_id,
+            actor_type="employee"
+        )
+        
+        # Update request status
+        await db.email_requests.update_one(
+            {"id": request_data.get("id")},
+            {
+                "$set": {
+                    "status": "submitted",
+                    "submitted_at": now,
+                    "submission_count": len(uploaded_documents)
+                }
+            }
+        )
+    
+    return {
+        "status": "success",
+        "message": "Training certificates uploaded successfully",
+        "documents_uploaded": len(uploaded_documents),
+        "proposed_items_created": len(proposed_items_total),
+        "next_step": "Admin will review your certificates"
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/intake/from-upload")
+async def upload_and_intake_training(
+    employee_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Upload a training certificate and immediately run multi-training extraction.
+    
+    Combined action: Upload & Scan Certificate
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Upload file
+    try:
+        file_content = await file.read()
+        file_ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'pdf'
+        file_key = f"training/{employee_id}/{uuid.uuid4()}.{file_ext}"
+        
+        from emergentintegrations.storage import upload_file_to_storage
+        file_url = upload_file_to_storage(file_key, file_content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
+    
+    # Create document record
+    doc_id = str(uuid.uuid4())
+    document = {
+        "id": doc_id,
+        "employee_id": employee_id,
+        "requirement_id": "training_certificate",
+        "document_type": "training_certificate",
+        "file_url": file_url,
+        "original_filename": file.filename,
+        "uploaded_at": now,
+        "uploaded_by": user.get("user_id"),
+        "uploaded_by_name": f"{user.get('first_name', '')} {user.get('last_name', '')}",
+        "source": "admin_upload",
+        "status": "awaiting_extraction",
+        "evidence_files": [{
+            "file_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "file_url": file_url,
+            "original_filename": file.filename,
+            "uploaded_at": now,
+            "status": "active"
+        }],
+        "created_at": now
+    }
+    
+    await db.employee_documents.insert_one(document)
+    
+    # Run extraction
+    extraction_result = await TrainingIntakeService.extract_multi_training(
+        doc_id, employee_id
+    )
+    
+    return {
+        "document_id": doc_id,
+        "file_url": file_url,
+        "extraction": extraction_result
+    }
+
+
+# Note: /employees/{employee_id}/training/proposed-items and /training/requests
+# are defined earlier (line ~7123) to avoid route shadowing by parameterized routes
+
+
+@api_router.post("/employees/{employee_id}/training/proposed-items/review")
+async def review_proposed_training_items(
+    employee_id: str,
+    request: TrainingIntakeReviewRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Review proposed training items - approve or reject.
+    
+    Approved items create canonical training_records that appear
+    in both the employee Training tab and Training Matrix.
+    """
+    result = await TrainingIntakeService.review_proposed_items(
+        employee_id=employee_id,
+        items=request.items,
+        reviewer_id=user.get("user_id"),
+        reviewer_name=f"{user.get('first_name', '')} {user.get('last_name', '')}"
+    )
+    
+    return result
+
+
+@api_router.post("/employees/{employee_id}/training/manual")
+async def add_manual_training_record(
+    employee_id: str,
+    training_code: str = Body(...),
+    training_title: str = Body(...),
+    completion_date: str = Body(...),
+    expiry_date: Optional[str] = Body(None),
+    notes: Optional[str] = Body(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Manually add a training record without certificate.
+    
+    Uses the same canonical training_records path as intake wizard.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Check for existing active record
+    existing = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "requirement_id": training_code,
+        "record_status": "active"
+    }, {"_id": 0})
+    
+    record_id = str(uuid.uuid4())
+    
+    if existing:
+        # Update existing
+        record_id = existing.get("id")
+        await db.training_records.update_one(
+            {"id": record_id},
+            {
+                "$set": {
+                    "completion_date": completion_date,
+                    "expiry_date": expiry_date,
+                    "status": "completed",
+                    "completion_method": "manual",
+                    "updated_at": now,
+                    "updated_by": user.get("user_id"),
+                    "manual_entry_notes": notes
+                }
+            }
+        )
+    else:
+        # Create new record
+        new_record = {
+            "id": record_id,
+            "employee_id": employee_id,
+            "training_name": training_title,
+            "requirement_id": training_code,
+            "mandatory": True,
+            "completion_date": completion_date,
+            "expiry_date": expiry_date,
+            "status": "completed",
+            "verified": False,
+            "completion_method": "manual",
+            "record_status": "active",
+            "created_at": now,
+            "updated_at": now,
+            "created_by": user.get("user_id"),
+            "manual_entry_notes": notes
+        }
+        
+        await db.training_records.insert_one(new_record)
+    
+    return {
+        "status": "success",
+        "record_id": record_id,
+        "message": f"Training record {'updated' if existing else 'created'} successfully"
+    }
+
+
+# ================= END TRAINING INTAKE WIZARD ====================
+
+
+# Include router AFTER all routes are defined
+app.include_router(api_router)
+
 
 @app.on_event("startup")
 async def startup():

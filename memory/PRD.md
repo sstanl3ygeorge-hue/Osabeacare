@@ -4,6 +4,75 @@
 **Osabea Healthcare Solutions**
 
 
+## Scheduled Bulk Requests (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented durable scheduled runner for automatic renewal reminders using APScheduler with catch-up logic, locking, and full audit trail. Reuses existing EmailRequestService (no parallel system).
+
+### Key Features
+1. **Database-backed Schedule Definitions**
+   - Name, description, target_type (documents/training)
+   - Trigger type (days_before_expiry)
+   - Target rules (employee statuses, document types, training codes)
+   - Request payload (due_days, custom_message)
+
+2. **Durable APScheduler Integration**
+   - Runs every hour at :15 (CronTrigger)
+   - `misfire_grace_time=3600` for catch-up within 1 hour
+   - Run locking prevents duplicate concurrent execution
+   - Idempotent runs with full catch-up logic
+
+3. **Run History & Attribution**
+   - Every run recorded with: `matched_employees`, `created_requests`, `skipped_duplicates`, `skipped_ineligible`, `errors`
+   - Every auto-created request marked with: `created_source='scheduled'`, `schedule_id`, `schedule_name`, `trigger_reason`
+   - Example trigger reason: "DBS expires on 2026-06-12; auto-request sent 60 days before expiry"
+
+4. **Deduplication**
+   - Checks for active open requests within 90 days
+   - Prevents spam reminders within same expiry cycle
+
+5. **Scope Safety**
+   - NEVER includes applicants
+   - Default scope: `["onboarding", "active"]`
+   - Filters by role if specified
+
+### Endpoints
+- `POST /api/bulk/schedules` - Create schedule
+- `GET /api/bulk/schedules` - List schedules
+- `GET /api/bulk/schedules/{id}` - Get schedule
+- `PUT /api/bulk/schedules/{id}` - Update schedule
+- `POST /api/bulk/schedules/{id}/enable` - Enable schedule
+- `POST /api/bulk/schedules/{id}/disable` - Disable (does NOT delete history)
+- `POST /api/bulk/schedules/{id}/run-now` - Manual trigger
+- `GET /api/bulk/schedules/{id}/history` - Run history
+- `POST /api/bulk/schedules/run-all-due` - Run all due schedules (catch-up)
+- `GET /api/bulk/requests/attributed` - View requests by source (manual/scheduled)
+
+### Frontend UI
+- **Scheduled Requests page** (`/portal/scheduled-requests`)
+- Navigation link in sidebar
+- Schedule cards showing: name, status badge, days before expiry, last run info, action buttons
+- Create/Edit Schedule dialog with all fields
+- Run History dialog showing all metrics
+- Run Now, Enable/Disable, Edit actions per schedule
+
+### Non-Negotiable Constraints Met
+- ✅ No parallel reminder engine - uses existing EmailRequestService
+- ✅ No applicants in schedule scope
+- ✅ Every auto-created request appears in normal request history
+- ✅ Every scheduled run is explainable (trigger_reason)
+- ✅ Duplicate open requests skipped, not recreated
+- ✅ Disabling a schedule stops future runs only, never deletes history
+
+### Test Results
+- Backend: 100% (19/19 tests passed)
+- Frontend: 100% (All UI elements verified)
+- Test report: `/app/test_reports/iteration_75.json`
+
+---
+
+
 ## Training Audit Export Coverage - Phase 4 (2026-03-31)
 **Status**: COMPLETE ✅
 

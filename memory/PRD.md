@@ -4,8 +4,38 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11D: File Interaction + Request Lifecycle - Phase D1-D4.1 (2026-03-31)
-**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3 COMPLETE ✅ | D4 COMPLETE ✅ | D4.1 COMPLETE ✅
+## Compliance File Stabilisation - STEP A (2026-03-31)
+**Status**: References Restoration COMPLETE ✅ | Request Flow VERIFIED ✅ | Files Drawer VERIFIED ✅
+
+### STEP A.1: References Restoration ✅ (2026-03-31)
+Restored references as proper requirement cards in the Compliance File.
+
+**Backend Changes:**
+- Added `build_reference_row()` helper function (lines 27269-27469)
+- Returns full lifecycle data: declared_referee, request_status, response data, mismatch detection, verification
+- Updated references section to use `rows` array structure
+- Lifecycle states: not_declared, not_requested, requested, awaiting_response, awaiting_review, mismatch_detected, reviewed, verified
+
+**Frontend Changes:**
+- Created `ReferenceRow.js` component with:
+  - Expandable card showing declared referee details (name, company, email, phone)
+  - Status badges: Verified, Mismatch, Stale
+  - Action buttons: Request, Resend, View Response, Verify, Reject, History
+  - Request lifecycle summary (stale detection for 14+ day old requests)
+  - Verification status box with verifier and date
+- Updated `DualRowComplianceSection.js` to render reference rows
+- Added verify/reject handlers using existing backend endpoints
+
+**Acceptance Criteria Met:**
+- ✅ References visible as requirement cards
+- ✅ Request flow visible (Send/Resend buttons)
+- ✅ Response/evidence viewable (View Response button)
+- ✅ Mismatches visible (Mismatch badge)
+- ✅ Readiness only counts verified references
+
+**Testing:** 13/13 tests passed (iteration_95.json). 100% success rate.
+
+---
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)
 Implemented the backend infrastructure that turns the Compliance File from a status page into an operations page.

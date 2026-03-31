@@ -60,6 +60,31 @@ Implemented operational workflow improvements:
 **Tab Navigation:**
 Now shows 7 tabs: Overview, Compliance File, Policies, Training, Audit Log, Recruitment, Recurring
 
+### Phase 4B: Visual Cleanup ✅ (2026-03-31)
+Implemented clear visual distinction between Evidence and Check rows:
+
+**Evidence Rows → Neutral/Grey:**
+- Grey icon background (`bg-gray-100`)
+- Grey "Evidence" badge (`bg-gray-100 text-gray-600 border-gray-300`)
+- Neutral file count badges (grey)
+- Removed "Verified" text from file list
+- Grey row background (`bg-gray-50/30`)
+- Stats show: active, pending review, superseded, in history (no "verified" count)
+
+**Check Rows → Color-Driven:**
+- ✅ Green = Verified (`bg-green-100`, `border-green-200`, green icon with checkmark)
+- 🟡 Amber = Partial/Awaiting Review (`bg-amber-100`, `border-amber-200`, clock icon)
+- 🔴 Red = Not Recorded (`bg-red-100`, `border-red-200`, alert triangle icon)
+- "Blocks Readiness" badge only on Check rows (never on Evidence)
+
+**Agreement Rows → Color-Driven:**
+- Same pattern as Check rows (green/amber/red based on completion)
+
+**Key Visual Principle:**
+- Evidence rows NEVER show green/red - they are neutral supporting documents
+- Only Check/Agreement rows use color to indicate verification status
+- No duplicate badges between Evidence and Check
+
 **UI Features:**
 - Section-based layout (Right to Work, DBS, Identity, Proof of Address, Agreements)
 - Collapsible sections with blocking item badges

@@ -4,8 +4,8 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11D: File Interaction + Request Lifecycle - Phase D1 & D2 (2026-03-31)
-**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3-D4 PENDING
+## Step 11D: File Interaction + Request Lifecycle - Phase D1-D3 (2026-03-31)
+**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3 COMPLETE ✅ | D4 PENDING
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)
 Implemented the backend infrastructure that turns the Compliance File from a status page into an operations page.
@@ -60,6 +60,32 @@ Implemented frontend per-file interaction components.
 - Mark Uploaded in Error moves file to historical, preserves audit
 - Supersede marks old file historical, allows new upload
 - Move Category changes requirement_id, preserves history
+
+### Phase D3: RequirementHistoryDrawer ✅ (2026-03-31)
+Implemented unified timeline history view for compliance requirements.
+
+**New Component:**
+- `RequirementHistoryDrawer.js` - Slide-out drawer showing complete audit trail
+  - Chronological timeline with visual line and event icons
+  - Event types: document_uploaded, document_verified, check_recorded, request_sent, etc.
+  - Color-coded badges: green (verified/check), blue (requests), amber (superseded), red (error)
+  - User attribution and timestamps for all events
+  - Event details: method, outcome, valid_until, reason, etc.
+  - Total events counter in footer
+
+- `RequestStatusBadge.js` - Inline component showing request lifecycle status
+  - States: sent, viewed, submitted, completed
+  - Source indicator (manual/scheduled)
+
+**Backend Enhancements:**
+- Enhanced `GET /api/employees/{id}/requirements/{key}/unified-history` endpoint:
+  - Added document lifecycle events from `employee_documents` collection
+  - Fixed audit_logs query to use `metadata.requirement_id` path
+  - Added evidence key mapping (`right_to_work_evidence` → `right_to_work_documents`)
+  - Added `_evidence` suffix key support for all requirement types
+  - Returns document_uploaded, document_verified, document_superseded, check_recorded events
+
+**Testing:** All 15 tests passed (iteration_92.json). 100% success rate.
 
 ---
 

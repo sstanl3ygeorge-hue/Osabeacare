@@ -4,8 +4,8 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11: Dual-Row Evidence/Check Model - Phase 1 & 2 Backend (2026-03-31)
-**Status**: COMPLETE ✅
+## Step 11: Dual-Row Evidence/Check Model - Phase 1, 2, 3 Backend (2026-03-31)
+**Status**: Phase 1-3 COMPLETE ✅ | Phase 4 (Frontend) PENDING
 
 ### Phase 1: Backend Data Model & Services ✅
 Implemented the backend data model, services, and endpoints for the dual-row evidence/check model.
@@ -17,6 +17,16 @@ Updated `calculate_work_readiness_3tier` to use CHECK RECORDS as the authoritati
 - Identity readiness → `identity_verifications`
 - Address readiness → `address_verifications` (need 2/2 verified)
 - Agreements readiness → `agreement_acknowledgements` (contract + handbook)
+
+### Phase 3: Compliance File Serializer ✅
+Updated `GET /api/employees/{id}/compliance-file` to return dual-row structure:
+- `serializer_version: "dual_row_v1"`
+- Explicit `row_type`: "evidence" | "check" | "form_acknowledgement"
+- Explicit `allowed_actions` array per row
+- `affects_readiness`, `is_supporting_evidence`, `blocker_text` flags
+- Counts: active_files, verified, awaiting_verification, pending_requests, history
+- Check/Agreement data with method, outcome, version, verification_status
+- `migration_info` for transparency
 
 ### Key Principle
 - **Evidence row** = uploaded/supporting files (passport, certificate, etc.)

@@ -4,8 +4,8 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11D: File Interaction + Request Lifecycle - Phase D1-D3 (2026-03-31)
-**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3 COMPLETE ✅ | D4 PENDING
+## Step 11D: File Interaction + Request Lifecycle - Phase D1-D4 (2026-03-31)
+**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3 COMPLETE ✅ | D4 COMPLETE ✅
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)
 Implemented the backend infrastructure that turns the Compliance File from a status page into an operations page.
@@ -86,6 +86,33 @@ Implemented unified timeline history view for compliance requirements.
   - Returns document_uploaded, document_verified, document_superseded, check_recorded events
 
 **Testing:** All 15 tests passed (iteration_92.json). 100% success rate.
+
+### Phase D4: Request Lifecycle Inline Display ✅ (2026-03-31)
+Implemented inline request lifecycle visibility on Evidence rows without needing to open drawers.
+
+**New Component:**
+- `RequestLifecycleInline.js` - Inline request status display
+  - Status badges: Not Requested, Requested, Viewed, Submitted, Awaiting Review, Verified, Rejected, Replacement Requested
+  - Timestamps: last_requested_at, last_viewed_at, last_submitted_at
+  - Source indicator: manual or scheduled (Auto badge)
+  - Stale request warning: Shows "Stale (Xd)" badge for requests older than 7 days without submission
+  - Multi-file awareness: Shows "X submitted • Y still needed" for multi-file requirements
+  - Quick action buttons: Request, Resend, Request Replacement
+
+**Backend Enhancements:**
+- Added `request_lifecycle` object to compliance-file serializer for all evidence rows
+- Fields: status, current_request, timestamps, source, is_stale, stale_days, files_submitted, files_needed, can_resend, can_request_replacement, is_replacement_request
+- Stale detection: Flags requests as stale if sent 7+ days ago without submission
+- Multi-file tracking: Calculates files_needed based on requirement config
+
+**UI Integration:**
+- Collapsed evidence row shows request summary (e.g., "Requested 30/03/26")
+- Expanded row shows full REQUEST STATUS section with badges and quick actions
+- Quick Request button for not_requested status
+- Resend button for sent/viewed/stale status
+- Request Replacement button when files are already verified
+
+**Testing:** All 14 tests passed (iteration_93.json). 100% success rate.
 
 ---
 

@@ -22408,6 +22408,472 @@ class ReferenceIntegrityService:
         return {"status": "success", "message": f"Reference {ref_num} rejected"}
 
 
+# ==================== CROSS-DOCUMENT INTELLIGENCE (Phase 4) ====================
+
+class NameMismatchSeverity(str, Enum):
+    """Severity levels for name mismatches across documents."""
+    NONE = "none"
+    LOW = "low"          # Minor variations (middle name, title)
+    MEDIUM = "medium"    # Significant but potentially valid (maiden name, typo)
+    HIGH = "high"        # Major discrepancy requiring investigation
+    CRITICAL = "critical" # Completely different names
+
+class CrossDocumentIntelligenceService:
+    """
+    Service for detecting and analyzing discrepancies across multiple documents.
+    
+    Phase 4 Focus: Name mismatch detection
+    - Collects holder_name from all extracted documents
+    - Compares names using fuzzy matching
+    - Flags discrepancies with severity levels
+    - Provides admin review workflow
+    """
+    
+    @staticmethod
+    def normalize_name(name: str) -> str:
+        """Normalize a name for comparison."""
+        if not name:
+            return ""
+        
+        # Remove common titles
+        titles = ["mr", "mrs", "ms", "miss", "dr", "sir", "prof", "professor"]
+        parts = name.lower().strip().split()
+        parts = [p for p in parts if p not in titles and len(p) > 1]
+        
+        # Remove punctuation
+        import re
+        parts = [re.sub(r'[^a-z]', '', p) for p in parts]
+        parts = [p for p in parts if p]
+        
+        return " ".join(sorted(parts))  # Sort for order-independent comparison
+    
+    @staticmethod
+    def compare_names(name1: str, name2: str) -> dict:
+        """
+        Compare two names and return similarity metrics.
+        
+        Returns:
+            - similarity: 0.0-1.0 score
+            - match_type: exact, partial, fuzzy, mismatch
+            - common_parts: shared name components
+            - different_parts: name components that differ
+        """
+        norm1 = CrossDocumentIntelligenceService.normalize_name(name1)
+        norm2 = CrossDocumentIntelligenceService.normalize_name(name2)
+        
+        if not norm1 or not norm2:
+            return {
+                "similarity": 0.0,
+                "match_type": "incomplete",
+                "common_parts": [],
+                "different_parts": [],
+                "note": "One or both names missing"
+            }
+        
+        parts1 = set(norm1.split())
+        parts2 = set(norm2.split())
+        
+        common = parts1.intersection(parts2)
+        different1 = parts1 - parts2
+        different2 = parts2 - parts1
+        
+        # Calculate similarity
+        total_unique = len(parts1.union(parts2))
+        similarity = len(common) / total_unique if total_unique > 0 else 0.0
+        
+        # Determine match type
+        if parts1 == parts2:
+            match_type = "exact"
+        elif len(common) >= min(len(parts1), len(parts2)):
+            match_type = "partial"  # One is subset of other
+        elif len(common) >= 1 and similarity >= 0.5:
+            match_type = "fuzzy"
+        else:
+            match_type = "mismatch"
+        
+        return {
+            "similarity": round(similarity, 2),
+            "match_type": match_type,
+            "common_parts": list(common),
+            "different_parts": list(different1.union(different2))
+        }
+    
+    @staticmethod
+    def determine_severity(comparisons: list) -> str:
+        """Determine overall severity from multiple comparisons."""
+        if not comparisons:
+            return NameMismatchSeverity.NONE.value
+        
+        # Get worst match type
+        match_types = [c.get("match_type", "mismatch") for c in comparisons]
+        
+        if all(t == "exact" for t in match_types):
+            return NameMismatchSeverity.NONE.value
+        elif all(t in ["exact", "partial"] for t in match_types):
+            return NameMismatchSeverity.LOW.value
+        elif any(t == "mismatch" for t in match_types):
+            # Check similarity scores
+            min_similarity = min(c.get("similarity", 0) for c in comparisons)
+            if min_similarity < 0.3:
+                return NameMismatchSeverity.CRITICAL.value
+            elif min_similarity < 0.5:
+                return NameMismatchSeverity.HIGH.value
+            else:
+                return NameMismatchSeverity.MEDIUM.value
+        elif any(t == "fuzzy" for t in match_types):
+            return NameMismatchSeverity.MEDIUM.value
+        
+        return NameMismatchSeverity.LOW.value
+    
+    @staticmethod
+    async def get_employee_document_names(employee_id: str) -> list:
+        """
+        Get all holder_name values from extracted documents for an employee.
+        
+        Returns list of:
+        {
+            document_id: str,
+            document_type: str,
+            holder_name: str,
+            extraction_date: str,
+            confidence: float
+        }
+        """
+        # Get all documents for this employee
+        documents = await db.employee_documents.find(
+            {"employee_id": employee_id},
+            {"_id": 0, "id": 1, "requirement_id": 1, "original_filename": 1}
+        ).to_list(100)
+        
+        if not documents:
+            return []
+        
+        doc_ids = [d["id"] for d in documents]
+        doc_lookup = {d["id"]: d for d in documents}
+        
+        # Get extractions with holder_name
+        extractions = await db.document_extractions.find(
+            {
+                "document_id": {"$in": doc_ids},
+                "extracted_fields.holder_name": {"$exists": True}
+            },
+            {"_id": 0}
+        ).to_list(100)
+        
+        names = []
+        for ext in extractions:
+            holder_name_field = ext.get("extracted_fields", {}).get("holder_name", {})
+            holder_name = holder_name_field.get("value") if isinstance(holder_name_field, dict) else holder_name_field
+            
+            if holder_name:
+                doc = doc_lookup.get(ext.get("document_id"), {})
+                names.append({
+                    "document_id": ext.get("document_id"),
+                    "document_type": ext.get("document_type"),
+                    "requirement_id": doc.get("requirement_id"),
+                    "file_name": doc.get("original_filename"),
+                    "holder_name": holder_name,
+                    "extraction_date": ext.get("extracted_at"),
+                    "confidence": holder_name_field.get("confidence", 1.0) if isinstance(holder_name_field, dict) else 1.0,
+                    "review_status": ext.get("review_status")
+                })
+        
+        return names
+    
+    @staticmethod
+    async def analyze_name_mismatches(employee_id: str) -> dict:
+        """
+        Analyze all documents for name mismatches.
+        
+        Returns comprehensive mismatch analysis with:
+        - Overall severity
+        - Primary name (most common/confident)
+        - All name variants found
+        - Pairwise comparisons
+        - Recommendations
+        """
+        names = await CrossDocumentIntelligenceService.get_employee_document_names(employee_id)
+        
+        if len(names) < 2:
+            return {
+                "has_mismatches": False,
+                "severity": NameMismatchSeverity.NONE.value,
+                "message": "Insufficient documents for comparison",
+                "documents_analyzed": len(names),
+                "name_variants": [n["holder_name"] for n in names],
+                "comparisons": [],
+                "recommendations": []
+            }
+        
+        # Get employee's registered name for reference
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        registered_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}" if employee else ""
+        
+        # Collect unique name variants
+        name_variants = {}
+        for n in names:
+            holder = n["holder_name"]
+            if holder not in name_variants:
+                name_variants[holder] = {
+                    "name": holder,
+                    "documents": [],
+                    "avg_confidence": 0,
+                    "count": 0
+                }
+            name_variants[holder]["documents"].append({
+                "document_id": n["document_id"],
+                "document_type": n["document_type"],
+                "file_name": n["file_name"],
+                "confidence": n["confidence"]
+            })
+            name_variants[holder]["count"] += 1
+            name_variants[holder]["avg_confidence"] = (
+                (name_variants[holder]["avg_confidence"] * (name_variants[holder]["count"] - 1) + n["confidence"]) 
+                / name_variants[holder]["count"]
+            )
+        
+        # Pairwise comparisons
+        variant_list = list(name_variants.keys())
+        comparisons = []
+        
+        for i in range(len(variant_list)):
+            for j in range(i + 1, len(variant_list)):
+                name1 = variant_list[i]
+                name2 = variant_list[j]
+                comparison = CrossDocumentIntelligenceService.compare_names(name1, name2)
+                comparisons.append({
+                    "name1": name1,
+                    "name2": name2,
+                    "name1_docs": [d["document_type"] for d in name_variants[name1]["documents"]],
+                    "name2_docs": [d["document_type"] for d in name_variants[name2]["documents"]],
+                    **comparison
+                })
+        
+        # Determine overall severity
+        severity = CrossDocumentIntelligenceService.determine_severity(comparisons)
+        has_mismatches = severity != NameMismatchSeverity.NONE.value
+        
+        # Determine primary name (most frequent, then highest confidence)
+        sorted_variants = sorted(
+            name_variants.values(),
+            key=lambda x: (x["count"], x["avg_confidence"]),
+            reverse=True
+        )
+        primary_name = sorted_variants[0]["name"] if sorted_variants else ""
+        
+        # Compare with registered name
+        registered_comparison = None
+        if registered_name.strip():
+            for variant in variant_list:
+                comp = CrossDocumentIntelligenceService.compare_names(registered_name, variant)
+                if not registered_comparison or comp["similarity"] < registered_comparison.get("similarity", 1.0):
+                    registered_comparison = {
+                        "registered_name": registered_name,
+                        "document_name": variant,
+                        **comp
+                    }
+        
+        # Generate recommendations
+        recommendations = []
+        if severity == NameMismatchSeverity.CRITICAL.value:
+            recommendations.append({
+                "priority": "critical",
+                "action": "immediate_investigation",
+                "message": "Names on documents appear to be for different individuals. Verify document authenticity immediately."
+            })
+        elif severity == NameMismatchSeverity.HIGH.value:
+            recommendations.append({
+                "priority": "high",
+                "action": "verify_identity",
+                "message": "Significant name discrepancies detected. Request supporting documentation (deed poll, marriage certificate)."
+            })
+        elif severity == NameMismatchSeverity.MEDIUM.value:
+            recommendations.append({
+                "priority": "medium",
+                "action": "document_reason",
+                "message": "Name variations detected. Document the reason for discrepancy if acceptable (e.g., maiden name, abbreviation)."
+            })
+        elif severity == NameMismatchSeverity.LOW.value:
+            recommendations.append({
+                "priority": "low",
+                "action": "review_optional",
+                "message": "Minor name variations (title, middle name). Usually acceptable but review recommended."
+            })
+        
+        return {
+            "has_mismatches": has_mismatches,
+            "severity": severity,
+            "documents_analyzed": len(names),
+            "unique_name_count": len(name_variants),
+            "primary_name": primary_name,
+            "registered_name": registered_name,
+            "registered_comparison": registered_comparison,
+            "name_variants": [
+                {
+                    "name": v["name"],
+                    "count": v["count"],
+                    "documents": v["documents"],
+                    "avg_confidence": round(v["avg_confidence"], 2)
+                }
+                for v in sorted_variants
+            ],
+            "comparisons": comparisons,
+            "recommendations": recommendations
+        }
+    
+    @staticmethod
+    async def get_all_employees_with_mismatches() -> list:
+        """Get summary of all employees with name mismatches."""
+        # Get all employees
+        employees = await EmployeesRepository.list_employees()
+        
+        mismatches = []
+        for emp in employees:
+            emp_id = emp.get("id")
+            analysis = await CrossDocumentIntelligenceService.analyze_name_mismatches(emp_id)
+            
+            if analysis.get("has_mismatches"):
+                mismatches.append({
+                    "employee_id": emp_id,
+                    "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                    "severity": analysis.get("severity"),
+                    "unique_name_count": analysis.get("unique_name_count"),
+                    "documents_analyzed": analysis.get("documents_analyzed"),
+                    "primary_recommendation": analysis.get("recommendations", [{}])[0] if analysis.get("recommendations") else None
+                })
+        
+        # Sort by severity
+        severity_order = {
+            NameMismatchSeverity.CRITICAL.value: 0,
+            NameMismatchSeverity.HIGH.value: 1,
+            NameMismatchSeverity.MEDIUM.value: 2,
+            NameMismatchSeverity.LOW.value: 3
+        }
+        mismatches.sort(key=lambda x: severity_order.get(x.get("severity"), 4))
+        
+        return mismatches
+
+
+# ==================== CROSS-DOCUMENT INTELLIGENCE ENDPOINTS ====================
+
+@api_router.get("/employees/{employee_id}/name-mismatches")
+async def get_employee_name_mismatches(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get detailed name mismatch analysis for an employee.
+    
+    Returns:
+    - Severity level (none, low, medium, high, critical)
+    - All name variants found across documents
+    - Pairwise comparisons with similarity scores
+    - Comparison with registered name
+    - Recommendations for action
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    analysis = await CrossDocumentIntelligenceService.analyze_name_mismatches(employee_id)
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
+        **analysis
+    }
+
+
+@api_router.get("/compliance/name-mismatches")
+async def get_all_name_mismatches(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all employees with detected name mismatches.
+    
+    Returns list sorted by severity (critical first).
+    """
+    mismatches = await CrossDocumentIntelligenceService.get_all_employees_with_mismatches()
+    
+    return {
+        "total": len(mismatches),
+        "employees": mismatches,
+        "severity_counts": {
+            "critical": len([m for m in mismatches if m.get("severity") == NameMismatchSeverity.CRITICAL.value]),
+            "high": len([m for m in mismatches if m.get("severity") == NameMismatchSeverity.HIGH.value]),
+            "medium": len([m for m in mismatches if m.get("severity") == NameMismatchSeverity.MEDIUM.value]),
+            "low": len([m for m in mismatches if m.get("severity") == NameMismatchSeverity.LOW.value])
+        }
+    }
+
+
+class NameMismatchReviewRequest(BaseModel):
+    """Request to review/dismiss a name mismatch."""
+    action: str  # 'dismiss', 'flag_for_investigation', 'resolved'
+    reason: str
+    notes: Optional[str] = None
+
+
+@api_router.post("/employees/{employee_id}/name-mismatches/review")
+async def review_name_mismatch(
+    employee_id: str,
+    request: NameMismatchReviewRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Review and take action on name mismatches.
+    
+    Actions:
+    - dismiss: Mark as acceptable variation (e.g., maiden name, title difference)
+    - flag_for_investigation: Escalate for further review
+    - resolved: Mark as resolved after investigation
+    """
+    if request.action not in ["dismiss", "flag_for_investigation", "resolved"]:
+        raise HTTPException(status_code=400, detail="Invalid action. Use 'dismiss', 'flag_for_investigation', or 'resolved'")
+    
+    if len(request.reason) < 10:
+        raise HTTPException(status_code=400, detail="Reason must be at least 10 characters")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Store review in employee record
+    mismatch_review = {
+        "action": request.action,
+        "reason": request.reason,
+        "notes": request.notes,
+        "reviewed_by": user.get("id"),
+        "reviewed_by_name": f"{user.get('first_name', '')} {user.get('last_name', '')}",
+        "reviewed_at": now
+    }
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                "name_mismatch_review": mismatch_review,
+                "name_mismatch_status": request.action
+            }
+        }
+    )
+    
+    # Log audit action
+    await log_audit_action(user.get("id"), f"name_mismatch_{request.action}", "employee", employee_id, {
+        "action": request.action,
+        "reason": request.reason,
+        "notes": request.notes
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Name mismatch {request.action} recorded",
+        "review": mismatch_review
+    }
+
+
 # ==================== REFERENCE INTEGRITY ENDPOINTS ====================
 
 @api_router.get("/references/{employee_id}/{ref_num}/integrity")

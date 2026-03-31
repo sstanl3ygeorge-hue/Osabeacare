@@ -265,6 +265,11 @@ export default function EmployeeProfilePage() {
   const [previewFile, setPreviewFile] = useState(null);
   const [previewFiles, setPreviewFiles] = useState([]); // For multi-file navigation
   
+  // Name Mismatch State (Phase 4 - Cross-Document Intelligence)
+  const [nameMismatch, setNameMismatch] = useState(null);
+  const [loadingNameMismatch, setLoadingNameMismatch] = useState(false);
+  const [nameMismatchExpanded, setNameMismatchExpanded] = useState(false);
+  
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
   const fetchRecruitmentStatus = async () => {
     if (!employeeId) return;
@@ -294,6 +299,22 @@ export default function EmployeeProfilePage() {
       console.error('Failed to fetch employment mismatch:', err);
     } finally {
       setLoadingMismatch(false);
+    }
+  };
+  
+  // Fetch Name Mismatch Status (Phase 4 - Cross-Document Intelligence)
+  const fetchNameMismatch = async () => {
+    if (!employeeId) return;
+    setLoadingNameMismatch(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/name-mismatches`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setNameMismatch(response.data);
+    } catch (err) {
+      console.error('Failed to fetch name mismatch:', err);
+    } finally {
+      setLoadingNameMismatch(false);
     }
   };
   
@@ -667,6 +688,7 @@ export default function EmployeeProfilePage() {
     fetchRecruitmentStatus();
     fetchReferenceStatus();
     fetchEmploymentMismatch();
+    fetchNameMismatch();
     fetchTrainingEvaluation();
   }, [employeeId, token]);
 
@@ -6520,6 +6542,127 @@ export default function EmployeeProfilePage() {
                             )}
                           </div>
                         </div>
+                      </div>
+                    )}
+                    
+                    {/* Name Mismatch Warning (Phase 4 - Cross-Document Intelligence) */}
+                    {nameMismatch?.has_mismatches && (
+                      <div className={`mt-4 p-4 rounded-xl border ${
+                        nameMismatch.severity === 'critical' ? 'bg-red-50 border-red-200' :
+                        nameMismatch.severity === 'high' ? 'bg-red-50 border-red-200' :
+                        nameMismatch.severity === 'medium' ? 'bg-amber-50 border-amber-200' :
+                        'bg-blue-50 border-blue-200'
+                      }`} data-testid="name-mismatch-warning">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-start gap-3">
+                            <AlertTriangle className={`h-5 w-5 flex-shrink-0 mt-0.5 ${
+                              nameMismatch.severity === 'critical' || nameMismatch.severity === 'high' 
+                                ? 'text-red-600' 
+                                : nameMismatch.severity === 'medium' ? 'text-amber-600' : 'text-blue-600'
+                            }`} />
+                            <div>
+                              <p className={`font-medium ${
+                                nameMismatch.severity === 'critical' || nameMismatch.severity === 'high' 
+                                  ? 'text-red-800' 
+                                  : nameMismatch.severity === 'medium' ? 'text-amber-800' : 'text-blue-800'
+                              }`}>
+                                {nameMismatch.severity === 'critical' && 'CRITICAL: Names on documents may be for different individuals'}
+                                {nameMismatch.severity === 'high' && 'Name discrepancies detected across documents'}
+                                {nameMismatch.severity === 'medium' && 'Name variations found across documents'}
+                                {nameMismatch.severity === 'low' && 'Minor name variations detected'}
+                              </p>
+                              <p className={`text-sm mt-1 ${
+                                nameMismatch.severity === 'critical' || nameMismatch.severity === 'high' 
+                                  ? 'text-red-700' 
+                                  : nameMismatch.severity === 'medium' ? 'text-amber-700' : 'text-blue-700'
+                              }`}>
+                                {nameMismatch.unique_name_count} different names found across {nameMismatch.documents_analyzed} documents.
+                              </p>
+                              {nameMismatch.recommendations?.[0] && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                  {nameMismatch.recommendations[0].message}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={`rounded-lg ${
+                              nameMismatch.severity === 'critical' || nameMismatch.severity === 'high' 
+                                ? 'border-red-300 text-red-700 hover:bg-red-100' 
+                                : nameMismatch.severity === 'medium' ? 'border-amber-300 text-amber-700 hover:bg-amber-100' 
+                                : 'border-blue-300 text-blue-700 hover:bg-blue-100'
+                            }`}
+                            onClick={() => setNameMismatchExpanded(!nameMismatchExpanded)}
+                            data-testid="view-name-mismatch-btn"
+                          >
+                            {nameMismatchExpanded ? 'Hide Details' : 'View Details'}
+                          </Button>
+                        </div>
+                        
+                        {/* Expanded Name Mismatch Details */}
+                        {nameMismatchExpanded && (
+                          <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <p className="text-xs font-medium text-gray-500 uppercase">Registered Name</p>
+                                <p className="font-medium">{nameMismatch.registered_name}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs font-medium text-gray-500 uppercase">Primary Document Name</p>
+                                <p className="font-medium">{nameMismatch.primary_name}</p>
+                              </div>
+                            </div>
+                            
+                            <div>
+                              <p className="text-xs font-medium text-gray-500 uppercase mb-2">Name Variants Found</p>
+                              <div className="space-y-2">
+                                {nameMismatch.name_variants?.map((variant, idx) => (
+                                  <div key={idx} className="flex items-center justify-between p-2 bg-white rounded-lg border">
+                                    <div>
+                                      <p className="font-medium text-sm">{variant.name}</p>
+                                      <p className="text-xs text-gray-500">
+                                        Found on: {variant.documents?.map(d => d.document_type).join(', ')}
+                                      </p>
+                                    </div>
+                                    <span className="text-xs px-2 py-1 bg-gray-100 rounded">
+                                      {variant.count} doc{variant.count > 1 ? 's' : ''}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            
+                            {nameMismatch.comparisons?.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium text-gray-500 uppercase mb-2">Comparisons</p>
+                                <div className="space-y-2">
+                                  {nameMismatch.comparisons.map((comp, idx) => (
+                                    <div key={idx} className="p-2 bg-white rounded-lg border text-sm">
+                                      <div className="flex items-center justify-between">
+                                        <span>{comp.name1_docs?.join(', ')} vs {comp.name2_docs?.join(', ')}</span>
+                                        <span className={`px-2 py-0.5 rounded text-xs ${
+                                          comp.match_type === 'exact' ? 'bg-green-100 text-green-700' :
+                                          comp.match_type === 'partial' ? 'bg-blue-100 text-blue-700' :
+                                          comp.match_type === 'fuzzy' ? 'bg-amber-100 text-amber-700' :
+                                          'bg-red-100 text-red-700'
+                                        }`}>
+                                          {Math.round(comp.similarity * 100)}% match
+                                        </span>
+                                      </div>
+                                      {comp.different_parts?.length > 0 && (
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          Differences: {comp.different_parts.join(', ')}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                     

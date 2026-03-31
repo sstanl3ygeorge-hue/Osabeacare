@@ -11,10 +11,15 @@ import EvidenceRow from './EvidenceRow';
 import CheckRow from './CheckRow';
 import AgreementRow from './AgreementRow';
 import ReferenceRow from './ReferenceRow';
+import UploadRequirementCard from './UploadRequirementCard';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
+import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Upload-based requirement keys that should use UploadRequirementCard
+const UPLOAD_REQUIREMENT_KEYS = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
 
 /**
  * DualRowComplianceSection - Displays the dual-row compliance file structure
@@ -136,7 +141,104 @@ export default function DualRowComplianceSection({
     }));
   };
 
-  // Render a section with paired rows
+  /**
+   * Transform backend evidence/check rows into a normalized surface for UploadRequirementCard
+   */
+  const transformToUploadSurface = (sectionKey, section) => {
+    if (!section || !section.rows) return null;
+    
+    const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
+    const checkRow = section.rows.find(r => r.row_type === 'check');
+    
+    if (!evidenceRow) return null;
+    
+    // Transform documents_preview to files array format
+    const files = (evidenceRow.documents_preview || []).map(doc => ({
+      file_id: doc.id,
+      id: doc.id,
+      file_name: doc.file_name,
+      original_filename: doc.file_name,
+      file_url: doc.file_url,
+      uploaded_at: doc.uploaded_at,
+      uploaded_by: doc.uploaded_by,
+      verified: doc.verified || false,
+      status: doc.status || 'active',
+      extraction_status: doc.extraction_status ? { status: doc.extraction_status } : null
+    }));
+    
+    // Add remaining files if has_more_documents indicates there are more
+    // The counts tell us how many total active files
+    const totalActive = evidenceRow.counts?.active_files || files.length;
+    const totalHistorical = (evidenceRow.counts?.superseded || 0) + (evidenceRow.counts?.history || 0) - totalActive;
+    
+    // Transform request_lifecycle to requests array
+    const requests = [];
+    if (evidenceRow.request_lifecycle?.current_request) {
+      const req = evidenceRow.request_lifecycle.current_request;
+      requests.push({
+        request_id: req.id,
+        status: req.status,
+        sent_at: req.sent_at,
+        viewed_at: req.viewed_at,
+        submitted_at: req.submitted_at,
+        reminder_count: req.reminder_count || 0,
+        is_replacement: req.is_replacement || false
+      });
+    }
+    
+    // Transform check row to checks array
+    const checks = [];
+    if (checkRow && checkRow.check_record) {
+      const check = checkRow.check_record;
+      checks.push({
+        id: check.check_id || check.id,
+        status: check.outcome || check.status || (checkRow.is_verified ? 'verified' : 'pending'),
+        method: check.method || check.check_method,
+        checked_at: check.checked_at || check.verified_at || check.updated_at,
+        checked_by: check.checked_by || check.verified_by,
+        follow_up_date: check.follow_up_date,
+        updated_at: check.updated_at
+      });
+    }
+    
+    // Use the normalizer with transformed data
+    return normalizeUploadRequirementSurface({
+      requirementKey: sectionKey,
+      files,
+      requests,
+      checks
+    });
+  };
+
+  /**
+   * Render upload-type requirement using UploadRequirementCard
+   */
+  const renderUploadSection = (sectionKey, section) => {
+    const surface = transformToUploadSurface(sectionKey, section);
+    if (!surface) return null;
+    
+    const isExpanded = expandedSections[sectionKey] !== false;
+    
+    return (
+      <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
+        <UploadRequirementCard
+          surface={surface}
+          isOpen={isExpanded}
+          onToggle={() => toggleSection(sectionKey)}
+          onOpenDrawer={() => handleViewFiles(`${sectionKey}_evidence`, section.title)}
+          onUpload={() => onUpload && onUpload(`${sectionKey}_evidence`)}
+          onRequest={() => onRequest && onRequest(`${sectionKey}_evidence`, section.title)}
+          onResend={() => onRequest && onRequest(`${sectionKey}_evidence`, section.title)}
+          onRecordCheck={() => onRecordCheck && onRecordCheck(sectionKey)}
+          onUpdateCheck={() => onRecordCheck && onRecordCheck(sectionKey)}
+          onViewHistory={() => handleViewHistory(sectionKey, section.title)}
+          isAuditor={isAuditor}
+        />
+      </div>
+    );
+  };
+
+  // Render a legacy section with paired rows (for agreements and references)
   const renderSection = (sectionKey, section) => {
     if (!section || !section.rows) return null;
     
@@ -352,22 +454,22 @@ export default function DualRowComplianceSection({
       {/* Compliance Sections */}
       {sections && (
         <>
-          {/* Right to Work */}
-          {sections.right_to_work && renderSection('right_to_work', sections.right_to_work)}
+          {/* Right to Work - Uses unified UploadRequirementCard */}
+          {sections.right_to_work && renderUploadSection('right_to_work', sections.right_to_work)}
           
-          {/* DBS */}
-          {sections.dbs && renderSection('dbs', sections.dbs)}
+          {/* DBS - Uses unified UploadRequirementCard */}
+          {sections.dbs && renderUploadSection('dbs', sections.dbs)}
           
-          {/* Identity */}
-          {sections.identity && renderSection('identity', sections.identity)}
+          {/* Identity - Uses unified UploadRequirementCard */}
+          {sections.identity && renderUploadSection('identity', sections.identity)}
           
-          {/* Proof of Address */}
-          {sections.proof_of_address && renderSection('proof_of_address', sections.proof_of_address)}
+          {/* Proof of Address - Uses unified UploadRequirementCard */}
+          {sections.proof_of_address && renderUploadSection('proof_of_address', sections.proof_of_address)}
           
-          {/* Agreements */}
+          {/* Agreements - Uses legacy section for now */}
           {sections.agreements && renderSection('agreements', sections.agreements)}
           
-          {/* References */}
+          {/* References - Uses legacy section for now */}
           {sections.references && sections.references.rows && renderSection('references', sections.references)}
         </>
       )}

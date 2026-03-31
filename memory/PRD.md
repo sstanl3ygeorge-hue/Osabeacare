@@ -4,6 +4,79 @@
 **Osabea Healthcare Solutions**
 
 
+## Reference Integrity Hardening + Compliance Page Restructure - Step 7 (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented 3-layer reference truth model for NHS-level compliance. References only count toward readiness when independently verified. Candidate upload alone ≠ verified reference. Compliance page restructured into 7 inspection-ready sections.
+
+### 3-Layer Reference Truth Model
+1. **Declared Referee** - What applicant entered (name, email, phone, organisation, relationship)
+2. **Response** - What came back independently (source, responder_name, responder_email, submitted_at)
+3. **Comparison** - System-determined match state (name_match, email_match, identity_confidence, mismatch_flags)
+
+### Evidence Source Types
+- `candidate_upload` - Uploaded by applicant (NOT independently verified)
+- `referee_response` - Received through secure form (INDEPENDENT)
+- `admin_uploaded_on_behalf` - Admin uploaded after phone verification
+- `legacy_import` - Pre-existing data
+
+### Identity Confidence Levels
+- `match` - Full name match
+- `partial_match` - Some fields match
+- `mismatch` - Critical field mismatch (blocks verification)
+- `review_required` - Manual review needed
+
+### Mismatch Flags
+- `referee_name_mismatch` - Responder name differs from declared
+- `referee_email_mismatch` - Email differs
+- `organisation_mismatch` - Organisation differs
+- `candidate_upload_only` - No independent response received
+- `unlinked_reference_document` - Document without response context
+
+### Verification Rules (Hardened)
+A reference counts toward readiness ONLY when:
+1. ✅ `verification.status === 'verified'`
+2. ✅ `response.submitted_at != null` (independent response exists)
+3. ✅ `source` in ('referee_response', 'admin_uploaded_on_behalf')
+4. ✅ Not blocked by integrity OR override exists with documented reason
+
+### Proof of Address Requirement
+- **Minimum**: 2 verified proof-of-address documents
+- **Blocking**: `proof_of_address_below_minimum` if < 2
+- **UI**: Shows "0/2 Verified" or "1/2 Verified" etc.
+
+### Compliance Page Restructure (7 Sections)
+1. **Work Readiness Summary** - Status, blockers, awaiting review items
+2. **Identity & Legal** - ID, Right to Work, DBS
+3. **Address Verification** - Proof of Address 1 & 2, verified count
+4. **Recruitment Integrity** - References (declared vs response, match status, lifecycle), CV gaps
+5. **Health & Required Forms** - Health declaration, interview, HMRC, personal details
+6. **Training** - Required training, status, expiry, verification
+7. **Request & Evidence Trail** - Pending requests, viewed, submitted
+
+### New Endpoints
+- `GET /api/references/{employee_id}/{ref_num}/integrity` - Full 3-layer truth model
+- `POST /api/references/{employee_id}/{ref_num}/override-mismatch` - Override with 20+ char reason
+- `POST /api/references/{employee_id}/{ref_num}/reject` - Reject reference
+- `GET /api/employees/{employee_id}/references-integrity` - Both references + valid count
+- `GET /api/employees/{employee_id}/compliance-structured` - 7-section compliance data
+- `POST /api/employees/{employee_id}/request-missing-items` - Request all missing items
+
+### Test Results
+- Backend: 100% (29/29 tests passed)
+- Test report: `/app/test_reports/iteration_77.json`
+
+### Key Fixes Applied
+- ✅ Reference appearing verified from application-side data FIXED
+- ✅ Unclear separation between declared/response/evidence FIXED
+- ✅ Compliance page mixing missing/received/verified items FIXED
+- ✅ Candidate upload alone cannot produce verified reference
+- ✅ Mismatches block verification unless explicitly overridden
+
+---
+
+
 ## Universal Document Extraction Pipeline - Step 6 (2026-03-31)
 **Status**: COMPLETE ✅ (Phase 1: Training Certificates)
 

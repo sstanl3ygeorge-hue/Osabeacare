@@ -21,17 +21,19 @@ export default function DashboardPage() {
   const [employees, setEmployees] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState(null);
   const [recurringCompliance, setRecurringCompliance] = useState(null);
+  const [trainingSummary, setTrainingSummary] = useState(null);
   const { token } = useAuth();
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, employeesRes, expiryRes, recurringRes] = await Promise.all([
+        const [statsRes, employeesRes, expiryRes, recurringRes, trainingRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
           // Use staff/employees endpoint for employee-only data (excludes applicants)
           axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
-          axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
+          axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
+          axios.get(`${API}/dashboard/training-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
         ]);
         setStats(statsRes.data);
         // Ensure we only have employee-status records (staff, not applicants)
@@ -40,6 +42,7 @@ export default function DashboardPage() {
         setEmployees(staffOnly);
         setExpiryAlerts(expiryRes.data);
         setRecurringCompliance(recurringRes.data);
+        setTrainingSummary(trainingRes.data);
       } catch (error) {
         console.error('Failed to fetch dashboard data:', error);
       } finally {
@@ -379,6 +382,77 @@ export default function DashboardPage() {
                       <span className="text-xs text-amber-600">({item.employee_name})</span>
                     </div>
                     <span className="text-xs text-amber-600">Due in {item.days_value || 0}d</span>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Training Summary */}
+      {trainingSummary && (trainingSummary.training_overdue_count > 0 || trainingSummary.training_due_soon_count > 0 || trainingSummary.employees_blocked_by_training > 0) && (
+        <Card className="border-[#E4E8EB] shadow-sm">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              <GraduationCap className="h-5 w-5 text-primary" />
+              Training Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              {/* Blocked by Training */}
+              <div className={`p-4 rounded-xl border ${trainingSummary.employees_blocked_by_training > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-[#E4E8EB]'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${trainingSummary.employees_blocked_by_training > 0 ? 'text-red-700' : 'text-gray-500'}`}>Blocked</span>
+                  <AlertTriangle className={`h-4 w-4 ${trainingSummary.employees_blocked_by_training > 0 ? 'text-red-600' : 'text-gray-400'}`} />
+                </div>
+                <p className={`text-2xl font-heading font-bold mt-1 ${trainingSummary.employees_blocked_by_training > 0 ? 'text-red-700' : 'text-gray-400'}`}>
+                  {trainingSummary.employees_blocked_by_training || 0}
+                </p>
+              </div>
+              
+              {/* Overdue */}
+              <div className={`p-4 rounded-xl border ${trainingSummary.training_overdue_count > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-[#E4E8EB]'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${trainingSummary.training_overdue_count > 0 ? 'text-amber-700' : 'text-gray-500'}`}>Overdue</span>
+                  <Clock className={`h-4 w-4 ${trainingSummary.training_overdue_count > 0 ? 'text-amber-600' : 'text-gray-400'}`} />
+                </div>
+                <p className={`text-2xl font-heading font-bold mt-1 ${trainingSummary.training_overdue_count > 0 ? 'text-amber-700' : 'text-gray-400'}`}>
+                  {trainingSummary.training_overdue_count || 0}
+                </p>
+              </div>
+              
+              {/* Due Soon */}
+              <div className={`p-4 rounded-xl border ${trainingSummary.training_due_soon_count > 0 ? 'bg-blue-50 border-blue-200' : 'bg-white border-[#E4E8EB]'}`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${trainingSummary.training_due_soon_count > 0 ? 'text-blue-700' : 'text-gray-500'}`}>Due Soon</span>
+                  <CalendarClock className={`h-4 w-4 ${trainingSummary.training_due_soon_count > 0 ? 'text-blue-600' : 'text-gray-400'}`} />
+                </div>
+                <p className={`text-2xl font-heading font-bold mt-1 ${trainingSummary.training_due_soon_count > 0 ? 'text-blue-700' : 'text-gray-400'}`}>
+                  {trainingSummary.training_due_soon_count || 0}
+                </p>
+              </div>
+            </div>
+
+            {/* Blocked Employees List */}
+            {trainingSummary.blocked_employees?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-text-muted">Staff Blocked by Training:</p>
+                {trainingSummary.blocked_employees.slice(0, 3).map((emp, idx) => (
+                  <Link 
+                    key={`blocked-${idx}`}
+                    to={`/portal/employees/${emp.id}?tab=training`}
+                    className="flex items-center justify-between p-2 rounded-lg bg-red-50 hover:bg-red-100 transition-colors"
+                    data-testid={`training-blocked-${idx}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <GraduationCap className="h-4 w-4 text-red-600" />
+                      <span className="text-sm text-red-800">{emp.name}</span>
+                    </div>
+                    <span className="text-xs text-red-600">
+                      {emp.blockers?.length || 0} training item(s) required
+                    </span>
                   </Link>
                 ))}
               </div>

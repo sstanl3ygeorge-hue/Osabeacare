@@ -4937,6 +4937,236 @@ def enrich_training_record_with_computed_status(record: dict) -> dict:
     return enriched
 
 
+# ============================================================================
+# SUPPLEMENTARY TRAINING: BLOCKER CONFIGURATION
+# ============================================================================
+# Training items that can block work readiness when missing/expired/unverified.
+# Only items with blocker_for_work=True can prevent an employee from working.
+# ============================================================================
+
+TRAINING_BLOCKER_CONFIG = {
+    # Core training that blocks work readiness
+    "safeguarding": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "safeguarding_training_missing",
+        "reason_message": "Safeguarding training required"
+    },
+    "manual_handling": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "manual_handling_training_missing",
+        "reason_message": "Manual Handling training required"
+    },
+    "moving_and_handling": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "moving_handling_training_missing",
+        "reason_message": "Moving and Handling training required"
+    },
+    "medication_administration": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "medication_training_missing",
+        "reason_message": "Medication training required"
+    },
+    "infection_control": {
+        "blocker_for_work": False,  # Warning only, not blocking
+        "evidence_required": True,
+        "reason_code": "infection_control_training_missing",
+        "reason_message": "Infection Control training recommended"
+    },
+    "bls": {
+        "blocker_for_work": False,  # Warning only
+        "evidence_required": True,
+        "reason_code": "bls_training_missing",
+        "reason_message": "Basic Life Support training recommended"
+    },
+    "fire_safety": {
+        "blocker_for_work": False,  # Warning only
+        "evidence_required": True,
+        "reason_code": "fire_safety_training_missing",
+        "reason_message": "Fire Safety training recommended"
+    },
+    "health_safety": {
+        "blocker_for_work": False,  # Warning only
+        "evidence_required": True,
+        "reason_code": "health_safety_training_missing",
+        "reason_message": "Health & Safety training recommended"
+    },
+}
+
+def get_training_blocker_config(requirement_id: str) -> dict:
+    """Get blocker configuration for a training requirement."""
+    req_lower = requirement_id.lower().replace(' ', '_').replace('-', '_')
+    return TRAINING_BLOCKER_CONFIG.get(req_lower, {
+        "blocker_for_work": False,
+        "evidence_required": True,
+        "reason_code": f"{req_lower}_training_missing",
+        "reason_message": f"{requirement_id} training required"
+    })
+
+
+# ============================================================================
+# CANONICAL TRAINING EVALUATOR (Single Source of Truth)
+# ============================================================================
+# This function evaluates ALL training status for an employee.
+# It must be used by:
+# - GET /employees/{id}/training
+# - GET /employees/{id}/readiness (for training blockers)
+# - GET /dashboard (for training due/overdue counts)
+# - Audit exports
+# ============================================================================
+
+async def evaluate_employee_training_status(employee_id: str, role: str = '') -> dict:
+    """
+    CANONICAL TRAINING EVALUATOR - Single Source of Truth.
+    
+    Evaluates all required training for an employee and returns:
+    - overall: 'current' | 'due_soon' | 'overdue' | 'missing'
+    - blockerCount: Number of work-blocking training items that are not passed
+    - warningCount: Number of non-blocking training items that need attention
+    - items: Array of detailed training item status
+    
+    This function is THE ONLY way to evaluate training status.
+    All endpoints MUST call this function.
+    """
+    # Get required training for this employee
+    required_training = await get_required_training_for_employee(employee_id, role)
+    
+    # Get all training records for this employee
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0}).to_list(100)
+    
+    # Build lookup by requirement_id
+    records_by_req = {}
+    for record in training_records:
+        req_id = record.get('requirement_id') or record.get('training_name', '').lower().replace(' ', '_')
+        if req_id not in records_by_req:
+            records_by_req[req_id] = record
+    
+    items = []
+    blocker_count = 0
+    warning_count = 0
+    has_missing = False
+    has_expired = False
+    has_due_soon = False
+    
+    for req in required_training:
+        req_id = req.get('id') or req.get('training_name', '').lower().replace(' ', '_')
+        training_name = req.get('training_name') or req.get('name', req_id)
+        
+        # Get blocker config
+        blocker_config = get_training_blocker_config(req_id)
+        is_blocker = blocker_config.get('blocker_for_work', False)
+        evidence_required = blocker_config.get('evidence_required', True)
+        
+        # Find matching record
+        record = records_by_req.get(req_id)
+        
+        # Also check by training_name variations
+        if not record:
+            for alt_id in [training_name.lower().replace(' ', '_'), req_id.replace('_', '-')]:
+                if alt_id in records_by_req:
+                    record = records_by_req[alt_id]
+                    break
+        
+        if not record:
+            # MISSING
+            items.append({
+                "code": req_id,
+                "title": training_name,
+                "status": "missing",
+                "blocker": is_blocker,
+                "detail": f"{training_name} training not recorded",
+                "expires_at": None,
+                "verified": False,
+                "evidence_required": evidence_required
+            })
+            has_missing = True
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
+            continue
+        
+        # Compute status
+        computed = compute_training_record_status(record)
+        computed_status = computed.get('computed_status')
+        verified = record.get('verified', False)
+        expiry_date = record.get('expiry_date')
+        
+        # Determine final status
+        if computed_status == 'not_started':
+            status = 'missing'
+            has_missing = True
+            detail = f"{training_name} training not completed"
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
+        elif computed_status == 'expired':
+            status = 'expired'
+            has_expired = True
+            detail = f"{training_name} expired on {expiry_date}"
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
+        elif computed_status == 'needs_renewal':
+            status = 'due_soon'
+            has_due_soon = True
+            days_left = computed.get('days_until_expiry', 0)
+            detail = f"{training_name} expires in {days_left} days"
+            # Due soon is a warning, not a blocker
+            warning_count += 1
+        elif not verified and evidence_required:
+            status = 'awaiting_review'
+            detail = f"{training_name} submitted but awaiting verification"
+            # Unverified training does NOT pass if evidence is required
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
+        else:
+            status = 'verified' if verified else 'completed'
+            detail = f"{training_name} valid" + (f" until {expiry_date}" if expiry_date else "")
+        
+        items.append({
+            "code": req_id,
+            "title": training_name,
+            "status": status,
+            "blocker": is_blocker,
+            "detail": detail,
+            "expires_at": expiry_date,
+            "verified": verified,
+            "evidence_required": evidence_required,
+            "completion_date": record.get('completion_date'),
+            "days_until_expiry": computed.get('days_until_expiry'),
+            "certificate_url": record.get('certificate_url')
+        })
+    
+    # Determine overall status
+    if has_expired:
+        overall = 'overdue'
+    elif has_missing:
+        overall = 'missing'
+    elif has_due_soon:
+        overall = 'due_soon'
+    else:
+        overall = 'current'
+    
+    return {
+        "overall": overall,
+        "blockerCount": blocker_count,
+        "warningCount": warning_count,
+        "items": items,
+        "evaluatedAt": datetime.now(timezone.utc).isoformat()
+    }
+
+
 async def get_or_create_training_record(
     employee_id: str, 
     requirement_id: str, 
@@ -6637,12 +6867,32 @@ async def get_employee_readiness(employee_id: str, user: dict = Depends(get_curr
     interview_submitted = interview.get('has_evidence', False)
     interview_verified = interview.get('verified', False)
     
+    # Training check (canonical evaluator)
+    training_status = await evaluate_employee_training_status(employee_id, role)
+    training_blocker_count = training_status.get('blockerCount', 0)
+    
+    # Add training blockers to readiness reasons if any
+    blocked_reasons = list(readiness.get('reasons', []))
+    if training_blocker_count > 0:
+        for item in training_status.get('items', []):
+            if item.get('blocker') and item.get('status') in ['missing', 'expired', 'awaiting_review']:
+                blocker_config = get_training_blocker_config(item.get('code', ''))
+                blocked_reasons.append({
+                    "code": blocker_config.get('reason_code', f"training_{item['code']}_missing"),
+                    "message": item.get('detail', blocker_config.get('reason_message'))
+                })
+    
+    # Recalculate final status if training blockers exist
+    final_status = readiness.get('status')
+    if training_blocker_count > 0 and final_status != 'NOT_READY':
+        final_status = 'NOT_READY'
+    
     return {
-        "ready": readiness.get('status') == 'READY_TO_WORK',
-        "status": readiness.get('status'),
-        "label": readiness.get('label'),
-        "color": readiness.get('color'),
-        "blockedReasons": readiness.get('reasons', []),
+        "ready": final_status == 'READY_TO_WORK',
+        "status": final_status,
+        "label": readiness.get('label') if final_status == readiness.get('status') else "Not Ready to Work",
+        "color": readiness.get('color') if final_status == readiness.get('status') else "red",
+        "blockedReasons": blocked_reasons,
         "checks": {
             "recruitmentApproved": employee.get('recruitment_approved', False),
             "referencesVerified": {
@@ -6679,6 +6929,13 @@ async def get_employee_readiness(employee_id: str, user: dict = Depends(get_curr
                 "passed": interview_submitted and interview_verified,
                 "submitted": interview_submitted,
                 "verified": interview_verified
+            },
+            "training": {
+                "passed": training_blocker_count == 0,
+                "blockerCount": training_blocker_count,
+                "warningCount": training_status.get('warningCount', 0),
+                "overall": training_status.get('overall'),
+                "items": training_status.get('items', [])
             }
         },
         "calculatedAt": datetime.now(timezone.utc).isoformat(),
@@ -6728,6 +6985,331 @@ async def get_employees_readiness_summary(
                 if code not in summary['by_blocking_reason']:
                     summary['by_blocking_reason'][code] = 0
                 summary['by_blocking_reason'][code] += 1
+    
+    return summary
+
+
+# ============================================================================
+# SUPPLEMENTARY TRAINING ENDPOINTS
+# All endpoints use evaluate_employee_training_status as canonical evaluator
+# ============================================================================
+
+@api_router.get("/employees/{employee_id}/training")
+async def get_employee_training(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get training status for an employee using canonical evaluator.
+    
+    Returns:
+    - overall: 'current' | 'due_soon' | 'overdue' | 'missing'
+    - blockerCount: Work-blocking training items that are not passed
+    - warningCount: Non-blocking training items needing attention
+    - items: Array of training item status
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    role = employee.get('role', '')
+    training_status = await evaluate_employee_training_status(employee_id, role)
+    
+    return training_status
+
+
+@api_router.post("/employees/{employee_id}/training/assign")
+async def assign_training(
+    employee_id: str,
+    training_code: str = Body(..., embed=True),
+    required: bool = Body(True, embed=True),
+    blocker_for_work: bool = Body(False, embed=True),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Assign additional training requirement to an employee.
+    Use this to add supplementary training beyond role defaults.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Check if training exists in catalogue
+    catalogue_item = await db.training_catalogue.find_one({"id": training_code}, {"_id": 0})
+    if not catalogue_item:
+        raise HTTPException(status_code=404, detail=f"Training '{training_code}' not found in catalogue")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    assignment = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "training_code": training_code,
+        "training_name": catalogue_item.get('training_name', training_code),
+        "is_required": required,
+        "blocker_for_work": blocker_for_work,
+        "assigned_by": user['email'],
+        "assigned_at": now,
+        "created_at": now
+    }
+    
+    # Upsert - don't duplicate
+    await db.employee_training_assignments.update_one(
+        {"employee_id": employee_id, "training_code": training_code},
+        {"$set": assignment},
+        upsert=True
+    )
+    
+    await log_audit_action(user['user_id'], "assign_training", "employee", employee_id, {
+        "training_code": training_code,
+        "required": required,
+        "blocker_for_work": blocker_for_work
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Training '{training_code}' assigned to employee",
+        "assignment": assignment
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/record")
+async def record_training_completion(
+    employee_id: str,
+    training_code: str = Body(...),
+    completion_date: str = Body(...),
+    provider_name: Optional[str] = Body(None),
+    certificate_document_id: Optional[str] = Body(None),
+    notes: Optional[str] = Body(None),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Record a training completion for an employee.
+    Creates or updates the training record.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Calculate expiry date
+    expiry_date = calculate_training_expiry(completion_date, training_code)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    record_id = str(uuid.uuid4())
+    
+    # Get training name from catalogue or use code
+    catalogue_item = await db.training_catalogue.find_one({"id": training_code}, {"_id": 0})
+    training_name = catalogue_item.get('training_name', training_code) if catalogue_item else training_code
+    
+    # Check for existing record
+    existing = await db.training_records.find_one({
+        "employee_id": employee_id,
+        "requirement_id": training_code,
+        "record_status": {"$ne": "deleted"}
+    })
+    
+    if existing:
+        # Update existing record
+        await db.training_records.update_one(
+            {"id": existing['id']},
+            {"$set": {
+                "completion_date": normalize_date_only(completion_date),
+                "expiry_date": normalize_date_only(expiry_date),
+                "provider_name": provider_name,
+                "status": "completed",
+                "verified": False,  # Reset verification on update
+                "verification_status": "awaiting_review",
+                "updated_at": now,
+                "notes": notes
+            }}
+        )
+        record_id = existing['id']
+    else:
+        # Create new record
+        new_record = {
+            "id": record_id,
+            "employee_id": employee_id,
+            "requirement_id": training_code,
+            "training_name": training_name,
+            "mandatory": True,
+            "completion_date": normalize_date_only(completion_date),
+            "expiry_date": normalize_date_only(expiry_date),
+            "provider_name": provider_name,
+            "status": "completed",
+            "verified": False,
+            "verification_status": "awaiting_review",
+            "record_status": "active",
+            "created_at": now,
+            "updated_at": now,
+            "notes": notes
+        }
+        
+        if certificate_document_id:
+            new_record['certificate_document_id'] = certificate_document_id
+        
+        await db.training_records.insert_one(new_record)
+    
+    await log_audit_action(user['user_id'], "record_training", "employee", employee_id, {
+        "training_code": training_code,
+        "completion_date": completion_date
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Training '{training_name}' recorded",
+        "record_id": record_id,
+        "expiry_date": expiry_date
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/{record_id}/verify")
+async def verify_training(
+    employee_id: str,
+    record_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Verify a training record.
+    Only verified training counts toward readiness where evidence is required.
+    """
+    record = await db.training_records.find_one({
+        "id": record_id,
+        "employee_id": employee_id,
+        "record_status": {"$ne": "deleted"}
+    })
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    if record.get('verified'):
+        raise HTTPException(status_code=400, detail="Training already verified")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "verified": True,
+            "verification_status": "verified",
+            "verified_by": user['email'],
+            "verified_at": now,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "verify_training", "employee", employee_id, {
+        "record_id": record_id,
+        "training_name": record.get('training_name')
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Training '{record.get('training_name')}' verified",
+        "verified_by": user['email'],
+        "verified_at": now
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/{record_id}/reject")
+async def reject_training(
+    employee_id: str,
+    record_id: str,
+    reason: str = Body(..., embed=True, min_length=5),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Reject a training record.
+    Rejected training does not count toward readiness.
+    """
+    record = await db.training_records.find_one({
+        "id": record_id,
+        "employee_id": employee_id,
+        "record_status": {"$ne": "deleted"}
+    })
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "verified": False,
+            "verification_status": "rejected",
+            "rejection_reason": reason,
+            "rejected_by": user['email'],
+            "rejected_at": now,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "reject_training", "employee", employee_id, {
+        "record_id": record_id,
+        "training_name": record.get('training_name'),
+        "reason": reason
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Training '{record.get('training_name')}' rejected",
+        "rejected_by": user['email'],
+        "rejection_reason": reason
+    }
+
+
+@api_router.get("/dashboard/training-summary")
+async def get_dashboard_training_summary(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get training summary for dashboard widgets.
+    Shows overdue, due soon, and employees blocked by training.
+    """
+    # Get all employees (not applicants)
+    employees = await employees_repo.list_employees(
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1}
+    )
+    
+    summary = {
+        "training_overdue_count": 0,
+        "training_due_soon_count": 0,
+        "employees_blocked_by_training": 0,
+        "overdue_employees": [],
+        "due_soon_employees": [],
+        "blocked_employees": []
+    }
+    
+    for emp in employees:
+        training_status = await evaluate_employee_training_status(emp['id'], emp.get('role', ''))
+        
+        overall = training_status.get('overall')
+        blocker_count = training_status.get('blockerCount', 0)
+        
+        emp_info = {
+            "id": emp['id'],
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+        }
+        
+        if overall == 'overdue':
+            summary['training_overdue_count'] += 1
+            summary['overdue_employees'].append({
+                **emp_info,
+                "items": [i for i in training_status.get('items', []) if i.get('status') == 'expired']
+            })
+        
+        if overall == 'due_soon':
+            summary['training_due_soon_count'] += 1
+            summary['due_soon_employees'].append({
+                **emp_info,
+                "items": [i for i in training_status.get('items', []) if i.get('status') == 'due_soon']
+            })
+        
+        if blocker_count > 0:
+            summary['employees_blocked_by_training'] += 1
+            summary['blocked_employees'].append({
+                **emp_info,
+                "blockers": [i for i in training_status.get('items', []) if i.get('blocker') and i.get('status') in ['missing', 'expired', 'awaiting_review']]
+            })
     
     return summary
 

@@ -152,6 +152,10 @@ export default function EmployeeProfilePage() {
   const [deleteTrainingReason, setDeleteTrainingReason] = useState('');
   const [isDeletingTraining, setIsDeletingTraining] = useState(false);
   
+  // Training evaluation state (canonical evaluator result)
+  const [trainingEvaluation, setTrainingEvaluation] = useState(null);
+  const [loadingTrainingEvaluation, setLoadingTrainingEvaluation] = useState(false);
+  
   // Acknowledgement states (for Contract/Handbook acknowledgement flow)
   const [acknowledgementDialogOpen, setAcknowledgementDialogOpen] = useState(false);
   const [acknowledgingRequirement, setAcknowledgingRequirement] = useState(null);
@@ -346,6 +350,22 @@ export default function EmployeeProfilePage() {
       toast.error(err.response?.data?.detail || 'Failed to add note');
     } finally {
       setIsSubmittingMismatchNote(false);
+    }
+  };
+  
+  // Fetch training evaluation (canonical evaluator)
+  const fetchTrainingEvaluation = async () => {
+    if (!employeeId) return;
+    setLoadingTrainingEvaluation(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/training`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setTrainingEvaluation(response.data);
+    } catch (err) {
+      console.error('Failed to fetch training evaluation:', err);
+    } finally {
+      setLoadingTrainingEvaluation(false);
     }
   };
   
@@ -633,6 +653,7 @@ export default function EmployeeProfilePage() {
     fetchRecruitmentStatus();
     fetchReferenceStatus();
     fetchEmploymentMismatch();
+    fetchTrainingEvaluation();
   }, [employeeId, token]);
 
   // Fetch profile photo when employee has one
@@ -3809,6 +3830,47 @@ export default function EmployeeProfilePage() {
                             {complianceRequirements.work_readiness_3tier.reasons.length > 6 && (
                               <span className="text-xs text-gray-500">
                                 +{complianceRequirements.work_readiness_3tier.reasons.length - 6} more
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Training Status Summary */}
+                      {trainingEvaluation && (trainingEvaluation.blockerCount > 0 || trainingEvaluation.warningCount > 0) && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-sm font-medium text-gray-900 flex items-center gap-2">
+                            <GraduationCap className="h-4 w-4" />
+                            Training Status
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {trainingEvaluation.items
+                              .filter(item => item.status !== 'verified' && item.status !== 'completed')
+                              .slice(0, 4)
+                              .map((item, idx) => (
+                                <span 
+                                  key={idx}
+                                  className={`text-xs px-2 py-1 rounded ${
+                                    item.blocker && ['missing', 'expired'].includes(item.status)
+                                      ? 'bg-red-100 text-red-700'
+                                      : item.status === 'awaiting_review'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : item.status === 'due_soon'
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : 'bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {item.title}: {item.status === 'missing' ? 'Missing' :
+                                    item.status === 'expired' ? 'Expired' :
+                                    item.status === 'awaiting_review' ? 'Awaiting Review' :
+                                    item.status === 'due_soon' ? 'Due Soon' : item.status}
+                                  {item.blocker && item.status !== 'due_soon' && ' (Blocks Work)'}
+                                </span>
+                              ))
+                            }
+                            {trainingEvaluation.items.filter(i => i.status !== 'verified' && i.status !== 'completed').length > 4 && (
+                              <span className="text-xs text-gray-500">
+                                +{trainingEvaluation.items.filter(i => i.status !== 'verified' && i.status !== 'completed').length - 4} more
                               </span>
                             )}
                           </div>

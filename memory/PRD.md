@@ -4,6 +4,52 @@
 **Osabea Healthcare Solutions**
 
 
+## Training Audit Export Coverage - Phase 4 (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Integrated supplementary training into audit exports for CQC inspection readiness. Training audit consumes canonical training evaluation (no recalculation) and provides full verification metadata for evidence traceability.
+
+### New Endpoints
+1. **`GET /api/audit/training/summary`** - Organization-wide training compliance summary
+   - Returns: `total_employees`, `fully_compliant`, `with_warnings`, `with_blockers`
+   - Training item counts: `training_items_verified`, `training_items_pending`, `training_items_missing`, `training_items_expired`
+   - Lists blocked/warning employees with details
+
+2. **`GET /api/audit/employee/{id}/training`** - Individual employee training audit
+   - Returns canonical training evaluation with full verification metadata
+   - Fields: `overall_status`, `blocker_count`, `warning_count`, `is_work_ready_from_training`
+   - Items include: `code`, `title`, `blocker_for_work`, `status`, `verified_by`, `verified_at`, `certificate_document_id`
+
+3. **`GET /api/audit/training/export`** - Bulk export (JSON or CSV)
+   - `?format=json` - Full structured export for all employees
+   - `?format=csv` - Flat CSV download for spreadsheet analysis
+
+### Modified Endpoints
+- **`GET /api/employees/{id}/export-compliance-summary`** - Now includes `training_audit` section
+- **`GET /api/employees/{id}/export-compliance-pdf`** - PDF includes "Supplementary Training" section with status overview and item-level details
+
+### Audit View UI Updates
+- New **Supplementary Training** section on Audit View page
+- Cards: Fully Compliant, With Warnings, Blocked by Training
+- Training Items summary: ✓ Verified, ⏳ Pending, ✖ Missing
+- Export CSV button for bulk download
+- Blocked employees detail list (if any)
+
+### Architecture Compliance
+- ✅ No duplication: Export consumes existing canonical evaluation
+- ✅ No silent failures: Missing/expired/unverified training is explicit
+- ✅ UI matches backend truth: Audit view reads authoritative backend output
+- ✅ Blocking logic consistency: Audit export uses same rules as readiness engine
+
+### Test Results
+- Backend: 100% (31/31 tests passed)
+- Frontend: 100% (All UI elements verified)
+- Test report: `/app/test_reports/iteration_74.json`
+
+---
+
+
 ## Supplementary Training UI Integration (2026-03-31)
 **Status**: COMPLETE ✅
 

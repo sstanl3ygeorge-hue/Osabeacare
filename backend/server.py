@@ -29,6 +29,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
 from email_service import (
     EmailService, 
@@ -22282,6 +22284,12 @@ async def create_bulk_document_requests(
                     })
                     results["total_requests_created"] += 1
                     results["total_emails_sent"] += 1
+                    
+                    # Add source attribution for manual bulk requests
+                    await db.email_requests.update_one(
+                        {"id": result.get("request_id")},
+                        {"$set": {"created_source": "manual"}}
+                    )
                 elif result.get("status") == "duplicate":
                     emp_result["requirements"].append({
                         "id": req_item["id"],
@@ -22410,6 +22418,775 @@ async def cancel_bulk_requests(
         "cancelled": cancelled,
         "errors": errors
     }
+
+
+# ==================== SCHEDULED BULK REQUESTS SYSTEM ====================
+# Durable scheduled runner with catch-up logic, locking, and full audit trail
+
+class ScheduleTriggerType(str, Enum):
+    DAYS_BEFORE_EXPIRY = "days_before_expiry"
+    FIXED_DATE = "fixed_date"  # Future expansion
+    RULE_BASED = "rule_based"  # Future expansion
+
+
+class ScheduleTargetType(str, Enum):
+    DOCUMENTS = "documents"
+    TRAINING = "training"
+    FORMS = "forms"
+
+
+class ScheduledBulkRequestInput(BaseModel):
+    """Create or update a scheduled bulk request definition."""
+    name: str = Field(..., min_length=3, max_length=100)
+    description: Optional[str] = None
+    is_enabled: bool = True
+    target_type: ScheduleTargetType
+    trigger_type: ScheduleTriggerType = ScheduleTriggerType.DAYS_BEFORE_EXPIRY
+    days_before_expiry: int = Field(60, ge=1, le=365)
+    target_rules: Dict[str, Any] = Field(default_factory=lambda: {
+        "employee_statuses": ["onboarding", "active"],
+        "document_types": [],
+        "training_codes": [],
+        "form_types": [],
+        "role_ids": [],
+        "only_expiring": True
+    })
+    request_payload: Dict[str, Any] = Field(default_factory=lambda: {
+        "due_days": 14,
+        "custom_message": None,
+        "auto_detect_missing": False
+    })
+
+
+class ScheduledBulkRequestService:
+    """
+    Service for managing scheduled bulk requests with durable execution.
+    
+    Features:
+    - Database-backed schedule definitions
+    - Idempotent execution with catch-up logic
+    - Run locking to prevent duplicate execution
+    - Full run history with audit trail
+    - Reuses existing EmailRequestService (no parallel system)
+    """
+    
+    LOCK_TIMEOUT_MINUTES = 30  # Max time a run can hold the lock
+    
+    @staticmethod
+    async def create_schedule(data: dict, created_by: str) -> dict:
+        """Create a new scheduled bulk request definition."""
+        now = datetime.now(timezone.utc).isoformat()
+        schedule_id = str(uuid.uuid4())
+        
+        schedule = {
+            "id": schedule_id,
+            "name": data.get("name"),
+            "description": data.get("description"),
+            "is_enabled": data.get("is_enabled", True),
+            "target_type": data.get("target_type"),
+            "trigger_type": data.get("trigger_type", "days_before_expiry"),
+            "days_before_expiry": data.get("days_before_expiry", 60),
+            "target_rules": data.get("target_rules", {
+                "employee_statuses": ["onboarding", "active"],
+                "document_types": [],
+                "training_codes": [],
+                "form_types": [],
+                "role_ids": [],
+                "only_expiring": True
+            }),
+            "request_payload": data.get("request_payload", {
+                "due_days": 14,
+                "custom_message": None,
+                "auto_detect_missing": False
+            }),
+            "last_run_at": None,
+            "last_successful_run_at": None,
+            "next_due_check": now,  # Eligible for immediate check
+            "last_run_result": None,
+            "created_by": created_by,
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        await db.scheduled_bulk_requests.insert_one(schedule)
+        
+        # Clean up for response
+        schedule.pop("_id", None)
+        
+        await log_audit_action(created_by, "create_bulk_schedule", "schedule", schedule_id, {
+            "name": schedule["name"],
+            "target_type": schedule["target_type"],
+            "trigger_type": schedule["trigger_type"]
+        })
+        
+        return schedule
+    
+    @staticmethod
+    async def get_schedule(schedule_id: str) -> Optional[dict]:
+        """Get a schedule by ID."""
+        return await db.scheduled_bulk_requests.find_one({"id": schedule_id}, {"_id": 0})
+    
+    @staticmethod
+    async def list_schedules(include_disabled: bool = False) -> List[dict]:
+        """List all schedules."""
+        query = {} if include_disabled else {"is_enabled": True}
+        schedules = await db.scheduled_bulk_requests.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+        return schedules
+    
+    @staticmethod
+    async def update_schedule(schedule_id: str, data: dict, updated_by: str) -> Optional[dict]:
+        """Update a schedule definition."""
+        existing = await db.scheduled_bulk_requests.find_one({"id": schedule_id})
+        if not existing:
+            return None
+        
+        update_fields = {
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        allowed_fields = ["name", "description", "is_enabled", "days_before_expiry", 
+                         "target_rules", "request_payload"]
+        for field in allowed_fields:
+            if field in data:
+                update_fields[field] = data[field]
+        
+        await db.scheduled_bulk_requests.update_one(
+            {"id": schedule_id},
+            {"$set": update_fields}
+        )
+        
+        await log_audit_action(updated_by, "update_bulk_schedule", "schedule", schedule_id, update_fields)
+        
+        return await db.scheduled_bulk_requests.find_one({"id": schedule_id}, {"_id": 0})
+    
+    @staticmethod
+    async def enable_schedule(schedule_id: str, actor_id: str) -> bool:
+        """Enable a schedule."""
+        result = await db.scheduled_bulk_requests.update_one(
+            {"id": schedule_id},
+            {"$set": {
+                "is_enabled": True,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "next_due_check": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        if result.modified_count > 0:
+            await log_audit_action(actor_id, "enable_bulk_schedule", "schedule", schedule_id, {})
+            return True
+        return False
+    
+    @staticmethod
+    async def disable_schedule(schedule_id: str, actor_id: str) -> bool:
+        """Disable a schedule. Does NOT delete history or pending requests."""
+        result = await db.scheduled_bulk_requests.update_one(
+            {"id": schedule_id},
+            {"$set": {
+                "is_enabled": False,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        if result.modified_count > 0:
+            await log_audit_action(actor_id, "disable_bulk_schedule", "schedule", schedule_id, {})
+            return True
+        return False
+    
+    @staticmethod
+    async def acquire_run_lock(schedule_id: str, run_id: str) -> bool:
+        """
+        Acquire a lock for running a schedule.
+        Prevents duplicate execution across multiple app instances.
+        """
+        now = datetime.now(timezone.utc)
+        lock_expiry = now - timedelta(minutes=ScheduledBulkRequestService.LOCK_TIMEOUT_MINUTES)
+        
+        # Try to acquire lock (only if no active lock or lock expired)
+        result = await db.scheduled_bulk_requests.update_one(
+            {
+                "id": schedule_id,
+                "$or": [
+                    {"run_lock": {"$exists": False}},
+                    {"run_lock.acquired_at": {"$lt": lock_expiry.isoformat()}}
+                ]
+            },
+            {
+                "$set": {
+                    "run_lock": {
+                        "run_id": run_id,
+                        "acquired_at": now.isoformat()
+                    }
+                }
+            }
+        )
+        return result.modified_count > 0
+    
+    @staticmethod
+    async def release_run_lock(schedule_id: str, run_id: str):
+        """Release a run lock."""
+        await db.scheduled_bulk_requests.update_one(
+            {"id": schedule_id, "run_lock.run_id": run_id},
+            {"$unset": {"run_lock": ""}}
+        )
+    
+    @staticmethod
+    async def find_expiring_items_for_employee(
+        employee_id: str,
+        target_type: str,
+        days_before_expiry: int,
+        target_rules: dict
+    ) -> List[dict]:
+        """
+        Find items expiring within the specified window for an employee.
+        """
+        now = datetime.now(timezone.utc)
+        expiry_window_end = now + timedelta(days=days_before_expiry)
+        
+        expiring_items = []
+        
+        if target_type == "documents":
+            # Get expiring documents
+            doc_types = target_rules.get("document_types", [])
+            query = {
+                "employee_id": employee_id,
+                "status": {"$in": ["approved", "verified", "active"]},
+                "expiry_date": {"$exists": True, "$ne": None}
+            }
+            if doc_types:
+                query["document_type_id"] = {"$in": doc_types}
+            
+            async for doc in db.employee_documents.find(query, {"_id": 0}):
+                expiry_date = doc.get("expiry_date")
+                if expiry_date:
+                    try:
+                        if isinstance(expiry_date, str):
+                            exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                        else:
+                            exp_dt = expiry_date
+                        
+                        # Check if within the reminder window
+                        if now <= exp_dt <= expiry_window_end:
+                            expiring_items.append({
+                                "id": doc.get("document_type_id", doc.get("id")),
+                                "name": doc.get("document_type_name", "Document"),
+                                "type": "document",
+                                "expiry_date": expiry_date,
+                                "days_until_expiry": (exp_dt - now).days
+                            })
+                    except:
+                        pass
+        
+        elif target_type == "training":
+            # Get expiring training
+            training_codes = target_rules.get("training_codes", [])
+            query = {
+                "employee_id": employee_id,
+                "record_status": {"$nin": ["superseded", "deleted"]},
+                "expiry_date": {"$exists": True, "$ne": None}
+            }
+            if training_codes:
+                query["requirement_id"] = {"$in": training_codes}
+            
+            async for record in db.training_records.find(query, {"_id": 0}):
+                expiry_date = record.get("expiry_date")
+                if expiry_date:
+                    try:
+                        if isinstance(expiry_date, str):
+                            exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                        else:
+                            exp_dt = expiry_date
+                        
+                        if now <= exp_dt <= expiry_window_end:
+                            expiring_items.append({
+                                "id": record.get("requirement_id", record.get("id")),
+                                "name": record.get("training_name", "Training"),
+                                "type": "training",
+                                "expiry_date": expiry_date,
+                                "days_until_expiry": (exp_dt - now).days
+                            })
+                    except:
+                        pass
+        
+        return expiring_items
+    
+    @staticmethod
+    async def check_duplicate_request(employee_id: str, requirement_id: str, item_type: str) -> bool:
+        """
+        Check if there's already an active/open request for this item.
+        Prevents duplicate reminders within the same expiry cycle.
+        """
+        # Check for any non-resolved request in the last 90 days
+        ninety_days_ago = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+        
+        existing = await db.email_requests.find_one({
+            "person_id": employee_id,
+            "requirement_id": requirement_id,
+            "status": {"$in": ["sent", "pending_send", "clicked", "action_started"]},
+            "created_at": {"$gte": ninety_days_ago}
+        })
+        
+        return existing is not None
+    
+    @staticmethod
+    async def run_schedule(
+        schedule_id: str,
+        triggered_by: str = "scheduler",
+        actor_id: Optional[str] = None
+    ) -> dict:
+        """
+        Execute a scheduled bulk request run.
+        
+        - Idempotent: Safe to run multiple times
+        - Catch-up: Processes all due items since last successful run
+        - Locking: Prevents duplicate concurrent execution
+        - Attribution: Every request is marked with schedule source
+        """
+        run_id = str(uuid.uuid4())
+        started_at = datetime.now(timezone.utc)
+        
+        schedule = await db.scheduled_bulk_requests.find_one({"id": schedule_id}, {"_id": 0})
+        if not schedule:
+            return {"status": "error", "reason": "Schedule not found"}
+        
+        if not schedule.get("is_enabled"):
+            return {"status": "skipped", "reason": "Schedule is disabled"}
+        
+        # Acquire lock
+        if not await ScheduledBulkRequestService.acquire_run_lock(schedule_id, run_id):
+            return {"status": "skipped", "reason": "Another run is in progress"}
+        
+        try:
+            # Initialize run record
+            run_record = {
+                "id": run_id,
+                "schedule_id": schedule_id,
+                "schedule_name": schedule.get("name"),
+                "triggered_by": triggered_by,
+                "actor_id": actor_id,
+                "started_at": started_at.isoformat(),
+                "completed_at": None,
+                "status": "running",
+                "matched_employees": 0,
+                "created_requests": 0,
+                "skipped_duplicates": 0,
+                "skipped_ineligible": 0,
+                "errors": 0,
+                "error_details": [],
+                "request_ids": []
+            }
+            await db.schedule_run_history.insert_one(run_record)
+            
+            # Get target rules
+            target_type = schedule.get("target_type")
+            trigger_type = schedule.get("trigger_type")
+            days_before_expiry = schedule.get("days_before_expiry", 60)
+            target_rules = schedule.get("target_rules", {})
+            request_payload = schedule.get("request_payload", {})
+            
+            # Get eligible employees (NEVER applicants)
+            employee_statuses = target_rules.get("employee_statuses", ["onboarding", "active"])
+            # Ensure we never include applicants
+            safe_statuses = [s for s in employee_statuses if s not in ["applicant", "pending_application"]]
+            if not safe_statuses:
+                safe_statuses = ["onboarding", "active"]
+            
+            employees = await EmployeesRepository.list_employees(
+                filter_dict={"status": {"$in": safe_statuses}},
+                projection={"_id": 0, "id": 1, "email": 1, "first_name": 1, "last_name": 1, "role": 1, "status": 1}
+            )
+            
+            # Filter by role if specified
+            role_ids = target_rules.get("role_ids", [])
+            if role_ids:
+                employees = [e for e in employees if e.get("role") in role_ids]
+            
+            run_record["matched_employees"] = len(employees)
+            
+            # Process each employee
+            for emp in employees:
+                try:
+                    # Find expiring items
+                    expiring_items = await ScheduledBulkRequestService.find_expiring_items_for_employee(
+                        emp["id"], target_type, days_before_expiry, target_rules
+                    )
+                    
+                    if not expiring_items:
+                        run_record["skipped_ineligible"] += 1
+                        continue
+                    
+                    # Create requests for each expiring item
+                    for item in expiring_items:
+                        # Check for duplicate
+                        if await ScheduledBulkRequestService.check_duplicate_request(
+                            emp["id"], item["id"], item["type"]
+                        ):
+                            run_record["skipped_duplicates"] += 1
+                            continue
+                        
+                        # Build trigger reason
+                        trigger_reason = f"{item['name']} expires on {item['expiry_date']}; auto-request sent {item['days_until_expiry']} days before expiry"
+                        
+                        # Create request through existing EmailRequestService
+                        context = {
+                            "custom_message": request_payload.get("custom_message"),
+                            "created_source": "scheduled",
+                            "schedule_id": schedule_id,
+                            "schedule_name": schedule.get("name"),
+                            "trigger_reason": trigger_reason
+                        }
+                        
+                        result = await EmailRequestService.create_request(
+                            person_id=emp["id"],
+                            person_type="employee",
+                            requirement_id=item["id"],
+                            request_type=RequestType.UPLOAD_DOCUMENT,
+                            due_days=request_payload.get("due_days", 14),
+                            context=context,
+                            admin_id=actor_id or "system"
+                        )
+                        
+                        if result.get("status") == "success":
+                            run_record["created_requests"] += 1
+                            run_record["request_ids"].append(result.get("request_id"))
+                            
+                            # Update the request record with schedule attribution
+                            await db.email_requests.update_one(
+                                {"id": result.get("request_id")},
+                                {"$set": {
+                                    "created_source": "scheduled",
+                                    "schedule_id": schedule_id,
+                                    "schedule_name": schedule.get("name"),
+                                    "trigger_reason": trigger_reason
+                                }}
+                            )
+                        elif result.get("status") == "duplicate":
+                            run_record["skipped_duplicates"] += 1
+                        else:
+                            run_record["errors"] += 1
+                            run_record["error_details"].append(f"{emp['email']}: {result.get('reason', 'Unknown')}")
+                
+                except Exception as e:
+                    run_record["errors"] += 1
+                    run_record["error_details"].append(f"{emp.get('email', emp['id'])}: {str(e)}")
+            
+            # Complete run
+            completed_at = datetime.now(timezone.utc)
+            run_record["completed_at"] = completed_at.isoformat()
+            run_record["status"] = "completed"
+            
+            # Update run history
+            await db.schedule_run_history.update_one(
+                {"id": run_id},
+                {"$set": run_record}
+            )
+            
+            # Update schedule with last run info
+            await db.scheduled_bulk_requests.update_one(
+                {"id": schedule_id},
+                {"$set": {
+                    "last_run_at": completed_at.isoformat(),
+                    "last_successful_run_at": completed_at.isoformat(),
+                    "next_due_check": (completed_at + timedelta(days=1)).isoformat(),
+                    "last_run_result": {
+                        "run_id": run_id,
+                        "matched_employees": run_record["matched_employees"],
+                        "created_requests": run_record["created_requests"],
+                        "skipped_duplicates": run_record["skipped_duplicates"],
+                        "skipped_ineligible": run_record["skipped_ineligible"],
+                        "errors": run_record["errors"]
+                    }
+                }}
+            )
+            
+            # Clean up response
+            run_record.pop("_id", None)
+            return run_record
+            
+        finally:
+            await ScheduledBulkRequestService.release_run_lock(schedule_id, run_id)
+    
+    @staticmethod
+    async def run_due_schedules() -> dict:
+        """
+        Run all schedules that are due.
+        Called by the scheduler periodically.
+        Includes catch-up logic for missed runs.
+        """
+        now = datetime.now(timezone.utc)
+        
+        # Find all enabled schedules due for a check
+        due_schedules = await db.scheduled_bulk_requests.find({
+            "is_enabled": True,
+            "$or": [
+                {"next_due_check": {"$lte": now.isoformat()}},
+                {"next_due_check": {"$exists": False}},
+                {"last_run_at": {"$exists": False}}  # Never run
+            ]
+        }, {"_id": 0}).to_list(100)
+        
+        results = {
+            "run_at": now.isoformat(),
+            "schedules_checked": len(due_schedules),
+            "schedules_executed": 0,
+            "total_requests_created": 0,
+            "schedule_results": []
+        }
+        
+        for schedule in due_schedules:
+            try:
+                run_result = await ScheduledBulkRequestService.run_schedule(
+                    schedule["id"],
+                    triggered_by="scheduler_cron"
+                )
+                
+                if run_result.get("status") == "completed":
+                    results["schedules_executed"] += 1
+                    results["total_requests_created"] += run_result.get("created_requests", 0)
+                
+                results["schedule_results"].append({
+                    "schedule_id": schedule["id"],
+                    "schedule_name": schedule.get("name"),
+                    "result": run_result.get("status"),
+                    "requests_created": run_result.get("created_requests", 0)
+                })
+            except Exception as e:
+                logger.error(f"Failed to run schedule {schedule['id']}: {e}")
+                results["schedule_results"].append({
+                    "schedule_id": schedule["id"],
+                    "schedule_name": schedule.get("name"),
+                    "result": "error",
+                    "error": str(e)
+                })
+        
+        return results
+    
+    @staticmethod
+    async def get_run_history(schedule_id: str, limit: int = 20) -> List[dict]:
+        """Get run history for a schedule."""
+        runs = await db.schedule_run_history.find(
+            {"schedule_id": schedule_id},
+            {"_id": 0}
+        ).sort("started_at", -1).limit(limit).to_list(limit)
+        return runs
+
+
+# ==================== SCHEDULED BULK REQUEST ENDPOINTS ====================
+
+@api_router.post("/bulk/schedules")
+async def create_bulk_schedule(
+    schedule: ScheduledBulkRequestInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Create a new scheduled bulk request definition.
+    
+    Schedules automatically generate document/training renewal requests
+    based on expiry dates, using the existing email request lifecycle.
+    """
+    result = await ScheduledBulkRequestService.create_schedule(
+        data=schedule.model_dump(),
+        created_by=user['user_id']
+    )
+    return result
+
+
+@api_router.get("/bulk/schedules")
+async def list_bulk_schedules(
+    include_disabled: bool = False,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """List all scheduled bulk request definitions."""
+    schedules = await ScheduledBulkRequestService.list_schedules(include_disabled)
+    return {"schedules": schedules, "total": len(schedules)}
+
+
+@api_router.get("/bulk/schedules/{schedule_id}")
+async def get_bulk_schedule(
+    schedule_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Get a specific schedule definition."""
+    schedule = await ScheduledBulkRequestService.get_schedule(schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return schedule
+
+
+@api_router.put("/bulk/schedules/{schedule_id}")
+async def update_bulk_schedule(
+    schedule_id: str,
+    data: dict = Body(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Update a schedule definition."""
+    result = await ScheduledBulkRequestService.update_schedule(
+        schedule_id=schedule_id,
+        data=data,
+        updated_by=user['user_id']
+    )
+    if not result:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return result
+
+
+@api_router.post("/bulk/schedules/{schedule_id}/enable")
+async def enable_bulk_schedule(
+    schedule_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Enable a schedule for automatic execution."""
+    success = await ScheduledBulkRequestService.enable_schedule(schedule_id, user['user_id'])
+    if not success:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return {"status": "enabled", "schedule_id": schedule_id}
+
+
+@api_router.post("/bulk/schedules/{schedule_id}/disable")
+async def disable_bulk_schedule(
+    schedule_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Disable a schedule. Stops future runs but does NOT delete history
+    or cancel already-created pending requests.
+    """
+    success = await ScheduledBulkRequestService.disable_schedule(schedule_id, user['user_id'])
+    if not success:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return {"status": "disabled", "schedule_id": schedule_id}
+
+
+@api_router.post("/bulk/schedules/{schedule_id}/run-now")
+async def run_bulk_schedule_now(
+    schedule_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Manually trigger a schedule run immediately.
+    Useful for testing or catch-up after maintenance.
+    """
+    result = await ScheduledBulkRequestService.run_schedule(
+        schedule_id=schedule_id,
+        triggered_by="manual",
+        actor_id=user['user_id']
+    )
+    
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("reason"))
+    
+    return result
+
+
+@api_router.get("/bulk/schedules/{schedule_id}/history")
+async def get_schedule_run_history(
+    schedule_id: str,
+    limit: int = 20,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Get execution history for a schedule."""
+    # Verify schedule exists
+    schedule = await ScheduledBulkRequestService.get_schedule(schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    
+    runs = await ScheduledBulkRequestService.get_run_history(schedule_id, limit)
+    return {
+        "schedule_id": schedule_id,
+        "schedule_name": schedule.get("name"),
+        "runs": runs,
+        "total": len(runs)
+    }
+
+
+@api_router.post("/bulk/schedules/run-all-due")
+async def run_all_due_schedules(
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Manually trigger execution of all due schedules.
+    Primarily for admin testing or catch-up scenarios.
+    """
+    result = await ScheduledBulkRequestService.run_due_schedules()
+    
+    await log_audit_action(user['user_id'], "run_all_due_schedules", "system", "bulk", {
+        "schedules_executed": result.get("schedules_executed"),
+        "total_requests_created": result.get("total_requests_created")
+    })
+    
+    return result
+
+
+@api_router.get("/bulk/requests/attributed")
+async def get_attributed_requests(
+    source: Optional[str] = None,  # 'manual' or 'scheduled'
+    schedule_id: Optional[str] = None,
+    limit: int = 100,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Get requests with source attribution.
+    Shows which requests were created manually vs by schedules.
+    """
+    query = {"person_type": "employee"}
+    
+    if source:
+        query["created_source"] = source
+    
+    if schedule_id:
+        query["schedule_id"] = schedule_id
+    
+    requests = await db.email_requests.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Enrich with employee names
+    emp_ids = list(set(r.get("person_id") for r in requests if r.get("person_id")))
+    if emp_ids:
+        employees = await EmployeesRepository.list_employees(
+            filter_dict={"id": {"$in": emp_ids}},
+            projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1}
+        )
+        emp_map = {e["id"]: e for e in employees}
+        
+        for req in requests:
+            emp = emp_map.get(req.get("person_id"), {})
+            req["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Unknown"
+            req["employee_email"] = emp.get("email", "")
+    
+    return {
+        "requests": requests,
+        "total": len(requests)
+    }
+
+
+# ==================== APSCHEDULER SETUP ====================
+# Durable scheduler with periodic execution
+
+scheduler = AsyncIOScheduler()
+
+async def scheduled_bulk_request_job():
+    """
+    Periodic job to run all due scheduled bulk requests.
+    Runs every hour to catch up on any missed schedules.
+    """
+    try:
+        logger.info("Running scheduled bulk request check...")
+        result = await ScheduledBulkRequestService.run_due_schedules()
+        logger.info(f"Scheduled run complete: {result.get('schedules_executed')} schedules executed, "
+                   f"{result.get('total_requests_created')} requests created")
+    except Exception as e:
+        logger.error(f"Scheduled bulk request job failed: {e}")
+
+
+def start_scheduler():
+    """Start the APScheduler with durable job."""
+    if not scheduler.running:
+        # Run every hour at minute 15 (avoid exact hour boundaries)
+        scheduler.add_job(
+            scheduled_bulk_request_job,
+            CronTrigger(minute=15),  # Every hour at :15
+            id="scheduled_bulk_requests",
+            replace_existing=True,
+            misfire_grace_time=3600  # Allow catch-up within 1 hour
+        )
+        scheduler.start()
+        logger.info("APScheduler started for scheduled bulk requests")
 
 
 # ==================== NHS-LEVEL REFEREE OUTREACH SYSTEM ====================
@@ -26023,3 +26800,24 @@ async def startup_db_client():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+@app.on_event("startup")
+async def startup_scheduler():
+    """Start APScheduler for scheduled bulk requests."""
+    try:
+        start_scheduler()
+        logger.info("Scheduled bulk request scheduler started")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_scheduler():
+    """Gracefully shutdown the scheduler."""
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+            logger.info("Scheduler shutdown complete")
+    except Exception as e:
+        logger.error(f"Scheduler shutdown error: {e}")

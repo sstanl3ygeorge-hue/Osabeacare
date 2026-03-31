@@ -1,0 +1,133 @@
+{
+  "summary": "Step 5 Scheduled Bulk Requests testing completed. All 19 backend tests passed. Frontend UI verified - Scheduled Requests page loads correctly with navigation link, schedule cards display with all actions (History, Run Now, Edit, Enable/Disable), Create Schedule dialog has all required fields, Run History dialog shows all metrics (matched_employees, created_requests, skipped_duplicates, skipped_ineligible). APScheduler is running (confirmed in backend logs).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Run History Dialog",
+        "issues": ["Minor: Missing aria-describedby for DialogContent (accessibility warning in console)"]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scheduled_bulk_requests.py",
+    "/app/test_reports/pytest/scheduled_bulk_requests_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_scheduled_bulk_requests.py"
+  ],
+  "success_rate": {
+    "backend": "100% (19/19 tests passed)",
+    "frontend": "100% (All UI elements verified)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Created test schedule 'TEST_Training Renewal Reminders' during testing (disabled after test). Existing schedule 'DBS Renewal Reminders' (ID: 89656468-511e-4cec-a614-0ac47588c124) used for run tests.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Step 5 Scheduled Bulk Requests fully implemented and tested. Key features verified: (1) POST /api/bulk/schedules creates schedule with all fields (name, description, target_type, trigger_type, days_before_expiry, target_rules, request_payload), (2) GET /api/bulk/schedules lists all schedules with include_disabled option, (3) GET /api/bulk/schedules/{id} returns specific schedule, (4) PUT /api/bulk/schedules/{id} updates schedule definition, (5) POST /api/bulk/schedules/{id}/enable enables disabled schedule, (6) POST /api/bulk/schedules/{id}/disable disables schedule without deleting history, (7) POST /api/bulk/schedules/{id}/run-now manually triggers schedule run with full metrics, (8) GET /api/bulk/schedules/{id}/history shows run history with matched_employees, created_requests, skipped_duplicates, skipped_ineligible, errors, (9) POST /api/bulk/schedules/run-all-due runs all due schedules (catch-up), (10) GET /api/bulk/requests/attributed shows requests with source attribution (manual vs scheduled), (11) APScheduler runs every hour at :15 with misfire_grace_time=3600, (12) Frontend ScheduledRequestsPage.js loads with navigation link in sidebar, (13) Schedule cards show last run info and all action buttons, (14) Create Schedule dialog has all required fields, (15) Run History dialog shows all metrics. Test employees have no items expiring within 60 days so runs show skipped_ineligible=2.",
+  "features_tested": {
+    "schedule_crud_endpoints": {
+      "status": "PASS",
+      "details": "POST/GET/PUT for /api/bulk/schedules all working correctly"
+    },
+    "schedule_enable_disable": {
+      "status": "PASS",
+      "details": "POST /api/bulk/schedules/{id}/enable and /disable work correctly"
+    },
+    "schedule_run_now": {
+      "status": "PASS",
+      "details": "POST /api/bulk/schedules/{id}/run-now triggers manual run with full metrics"
+    },
+    "schedule_run_history": {
+      "status": "PASS",
+      "details": "GET /api/bulk/schedules/{id}/history returns all run metrics"
+    },
+    "run_all_due_schedules": {
+      "status": "PASS",
+      "details": "POST /api/bulk/schedules/run-all-due runs all due schedules with catch-up"
+    },
+    "source_attribution": {
+      "status": "PASS",
+      "details": "GET /api/bulk/requests/attributed filters by source (manual/scheduled) and schedule_id"
+    },
+    "deduplication": {
+      "status": "PASS",
+      "details": "Running schedule twice skips duplicates correctly"
+    },
+    "input_validation": {
+      "status": "PASS",
+      "details": "Missing name, short name, invalid target_type all return 422"
+    },
+    "apscheduler_running": {
+      "status": "PASS",
+      "details": "Backend logs confirm APScheduler started for scheduled bulk requests"
+    },
+    "frontend_page_load": {
+      "status": "PASS",
+      "details": "Scheduled Requests page loads with data-testid='scheduled-requests-page'"
+    },
+    "frontend_navigation": {
+      "status": "PASS",
+      "details": "Navigation link in sidebar at /portal/scheduled-requests"
+    },
+    "frontend_schedule_cards": {
+      "status": "PASS",
+      "details": "Schedule cards show name, status badge, days before expiry, last run info, all action buttons"
+    },
+    "frontend_create_dialog": {
+      "status": "PASS",
+      "details": "Create Schedule dialog has all required fields: name, description, target_type, days_before_expiry, due_days, custom_message, is_enabled"
+    },
+    "frontend_history_dialog": {
+      "status": "PASS",
+      "details": "Run History dialog shows all metrics: Employees, Sent, Duplicates, Not Due"
+    }
+  },
+  "verification_summary": {
+    "total_backend_tests": 19,
+    "backend_tests_passed": 19,
+    "api_endpoints_tested": [
+      "POST /api/bulk/schedules",
+      "GET /api/bulk/schedules",
+      "GET /api/bulk/schedules/{id}",
+      "PUT /api/bulk/schedules/{id}",
+      "POST /api/bulk/schedules/{id}/enable",
+      "POST /api/bulk/schedules/{id}/disable",
+      "POST /api/bulk/schedules/{id}/run-now",
+      "GET /api/bulk/schedules/{id}/history",
+      "POST /api/bulk/schedules/run-all-due",
+      "GET /api/bulk/requests/attributed"
+    ],
+    "ui_elements_verified": [
+      "Scheduled Requests page (data-testid=scheduled-requests-page)",
+      "Create Schedule button (data-testid=create-schedule-btn)",
+      "Schedule cards (data-testid=schedule-card-{id})",
+      "History button (data-testid=view-history-{id})",
+      "Run Now button (data-testid=run-now-{id})",
+      "Edit button (data-testid=edit-schedule-{id})",
+      "Enable/Disable toggle (data-testid=toggle-schedule-{id})",
+      "Schedule name input (data-testid=schedule-name-input)",
+      "Target type select (data-testid=target-type-select)",
+      "Save schedule button (data-testid=save-schedule-btn)"
+    ],
+    "schedule_run_metrics_verified": [
+      "matched_employees",
+      "created_requests",
+      "skipped_duplicates",
+      "skipped_ineligible",
+      "errors",
+      "triggered_by",
+      "started_at",
+      "completed_at"
+    ]
+  }
+}

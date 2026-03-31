@@ -48,12 +48,15 @@ export default function DualRowComplianceSection({
   const [complianceFile, setComplianceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // STEP 11E: Centralized open state for all requirement sections
   const [expandedSections, setExpandedSections] = useState({
     right_to_work: true,
     dbs: true,
     identity: true,
     proof_of_address: true,
-    agreements: true
+    agreements: true,
+    references: true  // Added for references
   });
   
   // Phase D2: Files drawer state

@@ -92,6 +92,54 @@ Clear distinction between supporting evidence and authoritative checks.
 ## Compliance File Audit Pass (2026-03-31)
 **Status**: COMPLETE ✅
 
+## STEP 11E+ Compliance Page Functionalization (2026-03-31)
+**Status**: Pass 1 IN PROGRESS
+
+### Pass 1A: Core Shell Components ✅ (2026-03-31)
+Created reusable shell components for all requirement sections.
+
+**New Components Created:**
+- `RequirementSectionShell.js` - Standard shell for all sections with:
+  - Title with blocking badge
+  - Summary line
+  - Action bar slot
+  - Toggle behavior
+  - Content area when open
+
+- `RequirementActionBar.js` - Standardized action slots:
+  - View (eye icon) - opens drawer/viewer
+  - Upload - upload new file
+  - Request - send initial request
+  - Resend - resend existing request  
+  - Update - update check/record
+  - History - view history
+  
+- `UploadRequirementCard.js` - Unified card for upload requirements (RTW, DBS, Identity, PoA)
+  - Evidence section with file preview
+  - Check/Verification section
+  - Request lifecycle status
+  - Counters and history link
+
+- `surfaceNormalizers.js` - Data normalization utilities:
+  - `normalizeUploadRequirementSurface()` - Transforms files/requests/checks into UI surface
+  - `normalizeReferenceRequirementSurface()` - Reference workflow surface
+  - `normalizeAgreementRequirementSurface()` - Agreement workflow surface
+  - Summary generation for each type
+  - PoA 2-file minimum rule
+
+### Pass 1B: Centralized Open State ✅ (2026-03-31)
+- Updated `DualRowComplianceSection` with centralized `expandedSections` state
+- Added `references` to expandedSections
+- Single `toggleSection()` handler for all sections
+
+### Remaining Passes
+- Pass 2: Upload workflow unification (use shared components)
+- Pass 3: Agreements rebuild (template/send/complete/verify)
+- Pass 4: References alignment (consistent shell/action bar)
+- Pass 5: Remove fake states (audit all badges/counts)
+
+---
+
 ### Backend Improvements
 - Files endpoint now returns `requests` array with full request history
 - Each request includes: status, source, sent_at, viewed_at, submitted_at, reminder_count

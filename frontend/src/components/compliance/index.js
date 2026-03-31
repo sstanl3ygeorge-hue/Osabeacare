@@ -5,11 +5,22 @@
 // Agreement row = form acknowledgements
 // Reference row = referee request/response/verification workflow
 
+// Core Shell Components (STEP 11E+)
+export { default as RequirementSectionShell } from './RequirementSectionShell';
+export { default as RequirementActionBar } from './RequirementActionBar';
+export { default as UploadRequirementCard } from './UploadRequirementCard';
+export * from './surfaceNormalizers';
+
+// Row Components
 export { default as EvidenceRow } from './EvidenceRow';
 export { default as CheckRow } from './CheckRow';
 export { default as AgreementRow } from './AgreementRow';
 export { default as ReferenceRow } from './ReferenceRow';
+
+// Container Components
 export { default as DualRowComplianceSection } from './DualRowComplianceSection';
+
+// Dialogs
 export { default as RecordCheckDialog } from './RecordCheckDialog';
 export { default as CompleteAgreementDialog } from './CompleteAgreementDialog';
 export { default as SendAgreementDialog } from './SendAgreementDialog';

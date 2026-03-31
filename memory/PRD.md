@@ -4,6 +4,79 @@
 **Osabea Healthcare Solutions**
 
 
+## Supplementary Training UI Integration (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Integrated Supplementary Training module into the compliance portal with Dashboard and Employee Profile visibility.
+
+### Dashboard Training Summary Card
+- **Endpoint**: `GET /api/dashboard/training-summary`
+- **Returns**: `training_overdue_count`, `training_due_soon_count`, `employees_blocked_by_training`, `blocked_employees` list
+- **UI**: Training Status card on Dashboard (conditionally renders when counts > 0)
+- **Displays**: Blocked count, Overdue count, Due Soon count with click-through to employee profiles
+
+### Employee Profile Training Evaluation
+- **Endpoint**: `GET /api/employees/{id}/training`
+- **Returns**: `overall` status, `blockerCount`, `warningCount`, `items` array with training details
+- **UI**: Training Evaluation section in readiness panel (conditionally renders when blockerCount > 0 or warningCount > 0)
+- **Integration**: Training blockers feed into 3-tier work readiness calculation
+
+### UI Behavior
+- Dashboard: Training Status card shows summary across all employees
+- Employee Profile: Training Evaluation in readiness panel shows individual training status
+- Conditional rendering: Sections only appear when there are training issues
+- Backend truth: All values come from backend API, no client-side fallback logic
+
+### Test Results
+- Backend: 100% (22/22 tests passed)
+- Frontend: 100% (All UI elements verified)
+- Test report: `/app/test_reports/iteration_73.json`
+
+---
+
+
+## Bulk Document Requests (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented bulk document request functionality allowing admins to request multiple documents from multiple employees at once using the existing email request lifecycle.
+
+### Endpoints
+1. **`POST /api/bulk/document-requests`**
+   - Request multiple documents from multiple employees
+   - Input: `employee_ids`, `requirement_ids` (optional - defaults to all missing), `message`, `due_days`
+   - Output: `total_employees`, `total_requests_created`, `total_emails_sent`, `total_skipped`, `details`, `errors`
+   - Uses `EmailRequestService` for deduplication and email delivery
+
+2. **`GET /api/bulk/pending-requests`**
+   - Get pending document requests across all employees
+   - Enriches with employee names and requirement names
+
+3. **`POST /api/bulk/cancel-requests`**
+   - Cancel multiple pending document requests at once
+   - Input: `request_ids`, `reason`
+
+### Frontend UI
+- **Bulk Mode Toggle**: "Bulk Requests" button in Employees page header
+- **Selection UI**: Checkboxes for each employee, "Select All", selection count
+- **Bulk Request Dialog**:
+  - Request type: "All missing documents (auto-detect)" or "Specific document types"
+  - Due days selector (7/14/21/30 days)
+  - Custom message textarea
+  - Result summary after sending (emails sent, requests created, skipped)
+
+### Deduplication
+- System prevents duplicate requests for same employee + requirement
+- Status "Active request already exists" returned for duplicates
+
+### Test Results
+- Backend: 100% (All bulk endpoints verified)
+- Frontend: 100% (Bulk mode UI fully functional)
+- Test report: `/app/test_reports/iteration_73.json`
+
+---
+
 
 ## NHS-Level Compliance Hardening (2026-03-31)
 **Status**: COMPLETE ✅

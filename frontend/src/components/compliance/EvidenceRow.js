@@ -61,12 +61,12 @@ export default function EvidenceRow({
     paired_check_key
   } = row;
 
-  // Status colors
+  // Status colors - NEUTRAL for evidence rows (Phase 4B)
+  // Evidence rows should never show green/red - they are supporting documents
   const getStatusColor = () => {
+    // All evidence status badges are neutral grey
     if (counts.active_files === 0) return 'bg-gray-100 text-gray-600';
-    if (counts.awaiting_extraction_review > 0) return 'bg-purple-100 text-purple-700';
-    if (counts.awaiting_verification > 0) return 'bg-blue-100 text-blue-700';
-    if (counts.verified > 0) return 'bg-green-100 text-green-700';
+    if (counts.awaiting_extraction_review > 0) return 'bg-gray-100 text-gray-600';
     return 'bg-gray-100 text-gray-600';
   };
 
@@ -98,39 +98,39 @@ export default function EvidenceRow({
 
   return (
     <div 
-      className="border border-gray-200 rounded-xl bg-white overflow-hidden"
+      className="border border-gray-200 rounded-xl bg-gray-50/30 overflow-hidden"
       data-testid={`evidence-row-${key}`}
     >
       {/* Row Header */}
       <div 
-        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-100/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
-          {/* Icon */}
-          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
-            <FileText className="h-5 w-5 text-blue-600" />
+          {/* Icon - Neutral grey for evidence */}
+          <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <FileText className="h-5 w-5 text-gray-500" />
           </div>
           
           {/* Title and Summary */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h4 className="font-medium text-text-primary">{title}</h4>
-              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-600 border-blue-200">
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-gray-100 text-gray-600 border-gray-300">
                 Evidence
               </Badge>
             </div>
             <p className="text-sm text-text-muted truncate">{status_summary}</p>
           </div>
           
-          {/* Status Badge */}
+          {/* File Count Badge - Always neutral */}
           <Badge className={`${getStatusColor()} text-xs`}>
             {counts.active_files > 0 ? `${counts.active_files} file${counts.active_files !== 1 ? 's' : ''}` : 'No files'}
           </Badge>
           
-          {/* Extraction Awaiting Review Badge */}
+          {/* Extraction Awaiting Review Badge - Subtle indicator */}
           {counts.awaiting_extraction_review > 0 && (
-            <Badge className="bg-purple-100 text-purple-700 text-xs">
+            <Badge className="bg-purple-50 text-purple-600 border border-purple-200 text-xs">
               {counts.awaiting_extraction_review} extraction review
             </Badge>
           )}
@@ -232,7 +232,6 @@ export default function EvidenceRow({
                       <p className="text-sm font-medium text-text-primary truncate">{doc.file_name}</p>
                       <p className="text-xs text-text-muted">
                         {formatBackendDate(doc.uploaded_at, { format: 'medium' })}
-                        {doc.verified && ' • Verified'}
                         {doc.extraction_status === 'awaiting_review' && ' • Extraction pending'}
                       </p>
                     </div>
@@ -316,13 +315,12 @@ export default function EvidenceRow({
             </div>
           )}
           
-          {/* Stats Summary */}
+          {/* Stats Summary - File counts only (verification status shown on Check row) */}
           <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-4 text-xs text-text-muted">
-            <span>{counts.verified || 0} verified</span>
-            <span>{counts.awaiting_verification || 0} awaiting verification</span>
-            <span>{counts.rejected || 0} rejected</span>
+            <span>{counts.active_files || 0} active</span>
+            <span>{counts.awaiting_verification || 0} pending review</span>
             <span>{counts.superseded || 0} superseded</span>
-            <span>{counts.history || 0} total history</span>
+            <span>{counts.history || 0} in history</span>
           </div>
         </div>
       )}

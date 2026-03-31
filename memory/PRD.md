@@ -4,6 +4,50 @@
 **Osabea Healthcare Solutions**
 
 
+## Automatic Training Renewal Reminders (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented automatic training renewal reminders with multi-threshold notifications (60, 30, 7 days before expiry). Uses the existing APScheduler-backed bulk request system.
+
+### Features Implemented
+1. **Quick Setup Training Reminders** (Backend + Frontend)
+   - POST `/api/bulk/schedules/quick-setup-training-reminders` endpoint
+   - Creates 3 pre-configured schedules with custom messages
+   - Idempotent: Won't create duplicates if already configured
+   - UI button on Scheduled Requests page
+
+2. **Expiring Training Summary API**
+   - GET `/api/training/expiring-summary?days=60`
+   - Returns buckets: critical (0-7 days), warning (8-30 days), upcoming (31-60 days)
+   - Used for dashboard alerts
+
+3. **Enhanced Scheduled Requests UI**
+   - "Quick Setup Training Reminders" button (purple)
+   - Expiring training alert banner when items are due
+   - Empty state with quick setup CTA
+
+### Reminder Thresholds
+| Threshold | Message |
+|-----------|---------|
+| 60 days | Early warning - start planning renewal |
+| 30 days | Standard reminder - upload renewed certificate |
+| 7 days | URGENT - immediate action required |
+
+### Technical Details
+- Runs via APScheduler at :15 every hour
+- Prevents duplicate reminders (90-day check window)
+- Uses existing EmailRequestService for sending
+- Full audit trail via `schedule_run_history` collection
+
+### Test Results
+- Backend: 100% (11/11 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_84.json`
+
+---
+
+
 ## Step 10: Training Intake Wizard - Phases 4-6 Frontend (2026-03-31)
 **Status**: COMPLETE ✅
 

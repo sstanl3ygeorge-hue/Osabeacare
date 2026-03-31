@@ -21,6 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
+import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog } from '../../components/compliance';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -278,6 +279,14 @@ export default function EmployeeProfilePage() {
   const [trainingRequestOpen, setTrainingRequestOpen] = useState(false);
   const [proposedTrainingItems, setProposedTrainingItems] = useState([]);
   const [loadingProposedItems, setLoadingProposedItems] = useState(false);
+  
+  // Dual-Row Compliance Model State (Step 11)
+  const [recordCheckDialogOpen, setRecordCheckDialogOpen] = useState(false);
+  const [recordCheckType, setRecordCheckType] = useState(null);
+  const [completeAgreementDialogOpen, setCompleteAgreementDialogOpen] = useState(false);
+  const [completeAgreementKey, setCompleteAgreementKey] = useState(null);
+  const [completeAgreementTitle, setCompleteAgreementTitle] = useState('');
+  const [completeAgreementMode, setCompleteAgreementMode] = useState('admin_assisted');
   
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
   const fetchRecruitmentStatus = async () => {
@@ -4285,6 +4294,92 @@ export default function EmployeeProfilePage() {
                 </div>
               ) : (
                 <div className="space-y-6">
+                  {/* ============================================ */}
+                  {/* DUAL-ROW COMPLIANCE SECTION (Step 11) */}
+                  {/* Separates evidence from employer checks */}
+                  {/* ============================================ */}
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-heading text-lg font-semibold text-text-primary flex items-center gap-2">
+                        <Shield className="h-5 w-5 text-primary" />
+                        Compliance File — Dual-Row Model
+                      </h3>
+                      <Badge variant="outline" className="text-xs bg-purple-50 text-purple-600 border-purple-200">
+                        Step 11
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-text-muted mb-4">
+                      Evidence rows show uploaded files (supporting evidence). Check rows show employer verification outcomes (authoritative for readiness).
+                    </p>
+                    
+                    <DualRowComplianceSection
+                      employeeId={employeeId}
+                      employeeEmail={employee?.email}
+                      employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+                      onUpload={(key) => {
+                        // Trigger document upload for the specified requirement
+                        setSelectedRequirement(key);
+                        setUploadDialogOpen(true);
+                      }}
+                      onRequest={(key, title) => {
+                        // Trigger request dialog
+                        setSelectedRequirement(key);
+                        setRequestDialogOpen(true);
+                      }}
+                      onPreviewFile={(doc) => {
+                        if (doc.file_url) {
+                          setPreviewUrl(doc.file_url);
+                          setPreviewOpen(true);
+                        }
+                      }}
+                      onExtractReview={(docId) => {
+                        setDocExtractionDocumentId(docId);
+                        setDocExtractionReviewOpen(true);
+                      }}
+                      onRecordCheck={(checkType) => {
+                        setRecordCheckType(checkType);
+                        setRecordCheckDialogOpen(true);
+                      }}
+                      onSendAgreement={(agreementKey, title) => {
+                        // For now, open the complete agreement dialog
+                        // In future, implement send form functionality
+                        setCompleteAgreementKey(agreementKey);
+                        setCompleteAgreementTitle(title);
+                        setCompleteAgreementMode('admin_assisted');
+                        setCompleteAgreementDialogOpen(true);
+                      }}
+                      onFillAgreement={(agreementKey, title) => {
+                        setCompleteAgreementKey(agreementKey);
+                        setCompleteAgreementTitle(title);
+                        setCompleteAgreementMode('admin_assisted');
+                        setCompleteAgreementDialogOpen(true);
+                      }}
+                      onCompleteByPhone={(agreementKey, title) => {
+                        setCompleteAgreementKey(agreementKey);
+                        setCompleteAgreementTitle(title);
+                        setCompleteAgreementMode('phone_assisted');
+                        setCompleteAgreementDialogOpen(true);
+                      }}
+                      onViewHistory={(key) => {
+                        // History view functionality can be added later
+                        toast.info(`View history for ${key}`);
+                      }}
+                      isAuditor={isAuditor()}
+                      onRefresh={() => {
+                        fetchData();
+                        fetchCompliance();
+                      }}
+                    />
+                  </div>
+                  
+                  {/* Divider between dual-row and legacy view */}
+                  <div className="border-t border-gray-200 my-8 pt-6">
+                    <details className="group">
+                      <summary className="cursor-pointer text-sm text-text-muted hover:text-text-primary flex items-center gap-2">
+                        <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
+                        <span>Legacy Checklist View (Previous Format)</span>
+                      </summary>
+                      <div className="mt-4">
                   {/* Group requirements by category */}
                   {/* Care-focused category order - highest risk first */}
                   {(() => {

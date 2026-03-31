@@ -1,0 +1,331 @@
+import { useState } from 'react';
+import axios from 'axios';
+import { useAuth } from '../../context/AuthContext';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { toast } from 'sonner';
+import { 
+  Upload, FileText, RefreshCw, CheckCircle, XCircle, Eye, Clock, 
+  AlertTriangle, ChevronDown, ChevronUp, MoreHorizontal, History,
+  FileSearch, Trash2, Archive
+} from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
+import { formatBackendDate } from '../../lib/dateUtils';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+/**
+ * EvidenceRow - Renders an evidence row in the dual-row compliance model
+ * 
+ * Evidence rows display uploaded/supporting files and provide actions like:
+ * - Upload / Add file
+ * - Request
+ * - Review extraction
+ * - Mark uploaded in error
+ * - Supersede
+ * - View history
+ * 
+ * Evidence rows do NOT affect readiness directly - they support check rows.
+ */
+export default function EvidenceRow({
+  row,
+  employeeId,
+  employeeEmail,
+  onRefresh,
+  onUpload,
+  onRequest,
+  onPreviewFile,
+  onExtractReview,
+  isAuditor = false
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const { token } = useAuth();
+
+  const {
+    key,
+    title,
+    status,
+    status_summary,
+    counts = {},
+    file_warnings = [],
+    documents_preview = [],
+    has_more_documents,
+    pending_requests = [],
+    allowed_actions = [],
+    paired_check_key
+  } = row;
+
+  // Status colors
+  const getStatusColor = () => {
+    if (counts.active_files === 0) return 'bg-gray-100 text-gray-600';
+    if (counts.awaiting_extraction_review > 0) return 'bg-purple-100 text-purple-700';
+    if (counts.awaiting_verification > 0) return 'bg-blue-100 text-blue-700';
+    if (counts.verified > 0) return 'bg-green-100 text-green-700';
+    return 'bg-gray-100 text-gray-600';
+  };
+
+  // Mark document as uploaded in error
+  const handleMarkUploadedInError = async (docId, fileName) => {
+    if (!confirm(`Mark "${fileName}" as uploaded in error? It will be excluded from active counts.`)) return;
+    
+    setIsProcessing(true);
+    try {
+      await axios.post(`${API}/documents/${docId}/mark-uploaded-in-error`, {
+        reason: 'Marked by admin as uploaded in error'
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Document marked as uploaded in error');
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to mark document');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Supersede document
+  const handleSupersede = async (docId, fileName) => {
+    // In a full implementation, this would open a dialog to select the superseding document
+    toast.info('Select the newer document to supersede this one');
+  };
+
+  return (
+    <div 
+      className="border border-gray-200 rounded-xl bg-white overflow-hidden"
+      data-testid={`evidence-row-${key}`}
+    >
+      {/* Row Header */}
+      <div 
+        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          {/* Icon */}
+          <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
+            <FileText className="h-5 w-5 text-blue-600" />
+          </div>
+          
+          {/* Title and Summary */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="font-medium text-text-primary">{title}</h4>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-600 border-blue-200">
+                Evidence
+              </Badge>
+            </div>
+            <p className="text-sm text-text-muted truncate">{status_summary}</p>
+          </div>
+          
+          {/* Status Badge */}
+          <Badge className={`${getStatusColor()} text-xs`}>
+            {counts.active_files > 0 ? `${counts.active_files} file${counts.active_files !== 1 ? 's' : ''}` : 'No files'}
+          </Badge>
+          
+          {/* Extraction Awaiting Review Badge */}
+          {counts.awaiting_extraction_review > 0 && (
+            <Badge className="bg-purple-100 text-purple-700 text-xs">
+              {counts.awaiting_extraction_review} extraction review
+            </Badge>
+          )}
+        </div>
+        
+        {/* Actions */}
+        <div className="flex items-center gap-2 ml-4">
+          {!isAuditor && (
+            <>
+              {/* Primary Action: Upload or Add File */}
+              {allowed_actions.includes('upload') && counts.active_files === 0 && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={(e) => { e.stopPropagation(); if (onUpload) onUpload(key); }}
+                  className="h-8 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg"
+                  data-testid={`upload-${key}`}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                  Upload
+                </Button>
+              )}
+              
+              {allowed_actions.includes('add_file') && counts.active_files > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { e.stopPropagation(); if (onUpload) onUpload(key); }}
+                  className="h-8 text-xs rounded-lg"
+                  data-testid={`add-file-${key}`}
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1" />
+                  Add
+                </Button>
+              )}
+              
+              {/* Request Action */}
+              {allowed_actions.includes('request') && employeeEmail && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { e.stopPropagation(); if (onRequest) onRequest(key, title); }}
+                  className="h-8 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg"
+                  data-testid={`request-${key}`}
+                >
+                  Request
+                </Button>
+              )}
+            </>
+          )}
+          
+          {/* Expand/Collapse */}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0"
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          >
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </Button>
+        </div>
+      </div>
+      
+      {/* File Warnings */}
+      {file_warnings.length > 0 && (
+        <div className="px-4 pb-2">
+          {file_warnings.map((warning, idx) => (
+            <div 
+              key={idx}
+              className={`flex items-center gap-2 text-xs p-2 rounded-lg ${
+                warning.level === 'strong' ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'
+              }`}
+            >
+              <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+              <span>{warning.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Expanded Content */}
+      {expanded && (
+        <div className="border-t border-gray-100 p-4 bg-gray-50/50">
+          {/* Documents List */}
+          {documents_preview.length > 0 ? (
+            <div className="space-y-2">
+              <h5 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
+                Active Files ({counts.active_files})
+              </h5>
+              
+              {documents_preview.map((doc, idx) => (
+                <div 
+                  key={doc.id || idx}
+                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100"
+                >
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-text-primary truncate">{doc.file_name}</p>
+                      <p className="text-xs text-text-muted">
+                        {formatBackendDate(doc.uploaded_at, { format: 'medium' })}
+                        {doc.verified && ' • Verified'}
+                        {doc.extraction_status === 'awaiting_review' && ' • Extraction pending'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-1">
+                    {/* View */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0"
+                      onClick={() => onPreviewFile && onPreviewFile(doc)}
+                      title="View file"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    
+                    {/* Extraction Review */}
+                    {doc.extraction_status === 'awaiting_review' && onExtractReview && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 text-purple-600"
+                        onClick={() => onExtractReview(doc.id)}
+                        title="Review extraction"
+                      >
+                        <FileSearch className="h-4 w-4" />
+                      </Button>
+                    )}
+                    
+                    {/* More Actions */}
+                    {!isAuditor && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => handleMarkUploadedInError(doc.id, doc.file_name)}>
+                            <Trash2 className="h-4 w-4 mr-2 text-red-500" />
+                            Mark Uploaded in Error
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleSupersede(doc.id, doc.file_name)}>
+                            <Archive className="h-4 w-4 mr-2" />
+                            Supersede
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                </div>
+              ))}
+              
+              {has_more_documents && (
+                <Button variant="link" className="text-xs text-primary p-0 h-auto">
+                  View all {counts.active_files} files
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-text-muted">
+              <FileText className="h-8 w-8 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm">No files uploaded yet</p>
+            </div>
+          )}
+          
+          {/* Pending Requests */}
+          {pending_requests.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <h5 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
+                Pending Requests ({pending_requests.length})
+              </h5>
+              {pending_requests.map((req, idx) => (
+                <div key={req.id || idx} className="flex items-center gap-2 text-sm text-blue-600">
+                  <Clock className="h-4 w-4" />
+                  <span>Request sent {formatBackendDate(req.created_at, { format: 'relative' })}</span>
+                  <Badge variant="outline" className="text-xs">{req.status}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {/* Stats Summary */}
+          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-4 text-xs text-text-muted">
+            <span>{counts.verified || 0} verified</span>
+            <span>{counts.awaiting_verification || 0} awaiting verification</span>
+            <span>{counts.rejected || 0} rejected</span>
+            <span>{counts.superseded || 0} superseded</span>
+            <span>{counts.history || 0} total history</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

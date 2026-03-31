@@ -4,6 +4,51 @@
 **Osabea Healthcare Solutions**
 
 
+## Cross-Document Intelligence - Phase 4: Name Mismatch Detection (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented cross-document name intelligence to detect and flag discrepancies across extracted documents. Compares holder_name from DBS, RTW, ID, and other documents for the same employee. Uses smart normalization (removes titles, handles order variations) with severity-based alerts.
+
+### Name Comparison Algorithm
+1. **Title Removal**: Strips mr, mrs, ms, dr, prof, etc.
+2. **Normalization**: Lowercase, remove punctuation
+3. **Order Independence**: Sorts name parts for comparison
+4. **Jaccard Similarity**: Calculates overlap between name sets
+
+### Severity Levels
+- **NONE**: All names match exactly (after normalization)
+- **LOW**: Minor variations (title, middle name presence)
+- **MEDIUM**: Significant but potentially valid (maiden name, abbreviation)
+- **HIGH**: Major discrepancy requiring investigation
+- **CRITICAL**: Names appear to be for different individuals
+
+### Endpoints
+- `GET /api/employees/{id}/name-mismatches` - Full analysis for one employee
+- `GET /api/compliance/name-mismatches` - All employees with mismatches (sorted by severity)
+- `POST /api/employees/{id}/name-mismatches/review` - Admin actions (dismiss, flag, resolve)
+
+### Frontend Integration
+- Name mismatch warning alert in employee profile (color-coded by severity)
+- Expandable details showing:
+  - Registered name vs document names
+  - All name variants with document sources
+  - Pairwise comparisons with similarity percentages
+  - Recommended actions
+
+### Test Results
+- Backend: 100% (24/24 tests passed)
+- Frontend: 100% (All features verified)
+- Test report: `/app/test_reports/iteration_80.json`
+
+### Verification
+- Title normalization: "ALONGE MR OLAKUNLE MOSES" ↔ "ALONGE OLAKUNLE MOSES" = 100% match
+- Partial match: "Olakunle Alonge" (registered) ↔ document names = 67% match
+- Correctly identified as "none" severity (acceptable variation)
+
+---
+
+
 ## Universal Document Extraction - Phase 2: DBS, RTW, ID (2026-03-31)
 **Status**: COMPLETE ✅
 

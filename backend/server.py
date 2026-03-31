@@ -22046,6 +22046,736 @@ async def get_pending_document_extraction_reviews(
     }
 
 
+# ==================== REFERENCE INTEGRITY HARDENING ====================
+# Step 7: 3-layer reference truth model for NHS-level compliance
+# 
+# Key principles:
+# 1. Declared referee ≠ Verified reference
+# 2. Candidate upload ≠ Independent response
+# 3. Mismatches block verification unless explicitly overridden
+# 4. 2-step verification: Review → Verify
+
+class ReferenceEvidenceSource(str, Enum):
+    """Evidence source types for references."""
+    CANDIDATE_UPLOAD = "candidate_upload"  # Uploaded by applicant - NOT independently verified
+    REFEREE_RESPONSE = "referee_response"  # Received through secure form - INDEPENDENT
+    ADMIN_UPLOADED_ON_BEHALF = "admin_uploaded_on_behalf"  # Admin uploaded after phone call, etc.
+    LEGACY_IMPORT = "legacy_import"  # Pre-existing data
+
+
+class ReferenceIdentityConfidence(str, Enum):
+    """Confidence levels for referee identity matching."""
+    MATCH = "match"
+    PARTIAL_MATCH = "partial_match"
+    MISMATCH = "mismatch"
+    REVIEW_REQUIRED = "review_required"
+
+
+class ReferenceIntegrityService:
+    """
+    Service for reference integrity hardening.
+    
+    Ensures references only count toward readiness when:
+    1. Independent response exists (not just candidate upload)
+    2. Response submitted through secure form or admin-verified channel
+    3. Identity comparison is acceptable or explicitly overridden
+    4. Admin verification is completed
+    """
+    
+    @staticmethod
+    def build_declared_referee(employee: dict, ref_num: int) -> dict:
+        """Extract declared referee info from application data."""
+        prefix = f"reference_{ref_num}_"
+        return {
+            "name": employee.get(f"{prefix}name"),
+            "email": employee.get(f"{prefix}email"),
+            "phone": employee.get(f"{prefix}phone"),
+            "organisation": employee.get(f"{prefix}company"),
+            "relationship": employee.get(f"{prefix}relationship"),
+            "role_title": employee.get(f"{prefix}job_title"),
+            "from_cv": employee.get(f"{prefix}from_cv"),
+        }
+    
+    @staticmethod
+    def build_response_data(employee: dict, ref_num: int) -> dict:
+        """Extract independent response data."""
+        prefix = f"reference_{ref_num}_"
+        response_data = employee.get(f"{prefix}response_data", {})
+        
+        # Determine evidence source
+        source = employee.get(f"{prefix}evidence_source")
+        if not source:
+            # Infer from existing data
+            if response_data and response_data.get("submitted_via") == "secure_form":
+                source = ReferenceEvidenceSource.REFEREE_RESPONSE.value
+            elif employee.get(f"{prefix}evidence_path"):
+                source = ReferenceEvidenceSource.CANDIDATE_UPLOAD.value
+            else:
+                source = None
+        
+        # Get attached documents
+        attached_docs = []
+        evidence_path = employee.get(f"{prefix}evidence_path")
+        if evidence_path:
+            attached_docs.append(evidence_path)
+        
+        return {
+            "source": source,
+            "responder_name": response_data.get("completed_by_name") or response_data.get("referee_name"),
+            "responder_email": response_data.get("completed_by_email") or employee.get(f"{prefix}request_sent_to"),
+            "responder_organisation": response_data.get("current_employer"),
+            "submitted_at": response_data.get("submitted_at"),
+            "attached_document_ids": attached_docs,
+            "raw_response": response_data if response_data else None
+        }
+    
+    @staticmethod
+    def compute_comparison(declared: dict, response: dict, employee_name: str = "") -> dict:
+        """
+        Compare declared referee with actual response.
+        
+        Returns comparison result with:
+        - Match status for each field
+        - Overall identity confidence
+        - Mismatch flags
+        """
+        mismatch_flags = []
+        
+        # Name comparison (most critical)
+        declared_name = (declared.get("name") or "").lower().strip()
+        responder_name = (response.get("responder_name") or "").lower().strip()
+        
+        name_match = None
+        if declared_name and responder_name:
+            # Check for at least one name part matching
+            declared_parts = set(declared_name.split())
+            responder_parts = set(responder_name.split())
+            common = declared_parts.intersection(responder_parts)
+            
+            if declared_name == responder_name:
+                name_match = True
+            elif len(common) >= 1:
+                name_match = True  # Partial match is acceptable
+            else:
+                name_match = False
+                mismatch_flags.append("referee_name_mismatch")
+        
+        # Email comparison
+        declared_email = (declared.get("email") or "").lower().strip()
+        responder_email = (response.get("responder_email") or "").lower().strip()
+        
+        email_match = None
+        if declared_email and responder_email:
+            email_match = declared_email == responder_email
+            if not email_match:
+                mismatch_flags.append("referee_email_mismatch")
+        
+        # Organisation comparison
+        declared_org = (declared.get("organisation") or "").lower().strip()
+        responder_org = (response.get("responder_organisation") or "").lower().strip()
+        
+        org_match = None
+        if declared_org and responder_org:
+            org_match = (declared_org in responder_org) or (responder_org in declared_org)
+            if not org_match:
+                mismatch_flags.append("organisation_mismatch")
+        
+        # Check for candidate-upload-only scenario
+        if response.get("source") == ReferenceEvidenceSource.CANDIDATE_UPLOAD.value:
+            mismatch_flags.append("candidate_upload_only")
+        
+        # Check for unlinked document
+        if not response.get("submitted_at") and not response.get("raw_response"):
+            mismatch_flags.append("unlinked_reference_document")
+        
+        # Determine overall confidence
+        if not response.get("source") or not response.get("submitted_at"):
+            identity_confidence = ReferenceIdentityConfidence.REVIEW_REQUIRED.value
+        elif "referee_name_mismatch" in mismatch_flags:
+            identity_confidence = ReferenceIdentityConfidence.MISMATCH.value
+        elif len(mismatch_flags) > 0:
+            identity_confidence = ReferenceIdentityConfidence.PARTIAL_MATCH.value
+        elif name_match is True:
+            identity_confidence = ReferenceIdentityConfidence.MATCH.value
+        else:
+            identity_confidence = ReferenceIdentityConfidence.REVIEW_REQUIRED.value
+        
+        return {
+            "name_match": name_match,
+            "email_match": email_match,
+            "organisation_match": org_match,
+            "identity_confidence": identity_confidence,
+            "mismatch_flags": mismatch_flags
+        }
+    
+    @staticmethod
+    async def get_reference_integrity(employee_id: str, ref_num: int) -> dict:
+        """
+        Get full reference integrity data for a specific reference.
+        
+        Returns 3-layer truth model:
+        1. declared_referee - What applicant entered
+        2. response - What came back independently
+        3. comparison - System-determined match state
+        """
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if not employee:
+            return None
+        
+        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+        
+        declared = ReferenceIntegrityService.build_declared_referee(employee, ref_num)
+        response = ReferenceIntegrityService.build_response_data(employee, ref_num)
+        comparison = ReferenceIntegrityService.compute_comparison(declared, response, employee_name)
+        
+        prefix = f"reference_{ref_num}_"
+        
+        # Build verification status
+        verification = {
+            "status": "not_started",
+            "verified": employee.get(f"{prefix}verified", False),
+            "verified_by": employee.get(f"{prefix}verified_by"),
+            "verified_at": employee.get(f"{prefix}verified_at"),
+            "reviewed": employee.get(f"{prefix}reviewed", False),
+            "reviewed_by": employee.get(f"{prefix}reviewed_by"),
+            "reviewed_at": employee.get(f"{prefix}reviewed_at"),
+            "override_reason": employee.get(f"{prefix}override_reason") or employee.get(f"{prefix}mismatch_notes"),
+            "override_by": employee.get(f"{prefix}mismatch_reviewed_by"),
+            "override_at": employee.get(f"{prefix}mismatch_reviewed_at"),
+        }
+        
+        # Determine status
+        if verification["verified"]:
+            verification["status"] = "verified"
+        elif verification["reviewed"]:
+            verification["status"] = "awaiting_verification"
+        elif response.get("submitted_at"):
+            verification["status"] = "awaiting_review"
+        elif employee.get(f"{prefix}request_sent"):
+            verification["status"] = "request_sent"
+        elif declared.get("name"):
+            verification["status"] = "declared"
+        
+        # Determine if reference is blocked
+        blocked_by_integrity = False
+        blocking_reason = None
+        
+        if "candidate_upload_only" in comparison.get("mismatch_flags", []):
+            blocked_by_integrity = True
+            blocking_reason = "Candidate upload only - no independent response received"
+        elif comparison.get("identity_confidence") == ReferenceIdentityConfidence.MISMATCH.value:
+            if not verification.get("override_reason"):
+                blocked_by_integrity = True
+                blocking_reason = "Identity mismatch detected - admin override required"
+        
+        return {
+            "reference_num": ref_num,
+            "declared_referee": declared,
+            "response": response,
+            "comparison": comparison,
+            "verification": verification,
+            "blocked_by_integrity": blocked_by_integrity,
+            "blocking_reason": blocking_reason,
+            "counts_toward_readiness": ReferenceIntegrityService.counts_toward_readiness(
+                response, comparison, verification
+            ),
+            "lifecycle_status": ReferenceIntegrityService.get_lifecycle_status(employee, ref_num)
+        }
+    
+    @staticmethod
+    def counts_toward_readiness(response: dict, comparison: dict, verification: dict) -> bool:
+        """
+        Determine if a reference counts toward the minimum 2 requirement.
+        
+        Must have:
+        - verification.status === 'verified'
+        - response.submitted_at != null
+        - source in ('referee_response', 'admin_uploaded_on_behalf')
+        - not blocked_by_integrity (or override exists)
+        """
+        if not verification.get("verified"):
+            return False
+        
+        if not response.get("submitted_at"):
+            return False
+        
+        valid_sources = [
+            ReferenceEvidenceSource.REFEREE_RESPONSE.value,
+            ReferenceEvidenceSource.ADMIN_UPLOADED_ON_BEHALF.value
+        ]
+        if response.get("source") not in valid_sources:
+            # Candidate upload alone doesn't count
+            return False
+        
+        # Check for unresolved mismatch
+        if comparison.get("identity_confidence") == ReferenceIdentityConfidence.MISMATCH.value:
+            if not verification.get("override_reason"):
+                return False
+        
+        return True
+    
+    @staticmethod
+    def get_lifecycle_status(employee: dict, ref_num: int) -> dict:
+        """Get detailed lifecycle status for a reference."""
+        prefix = f"reference_{ref_num}_"
+        
+        return {
+            "declared": bool(employee.get(f"{prefix}name")),
+            "request_sent": employee.get(f"{prefix}request_sent", False),
+            "request_sent_at": employee.get(f"{prefix}request_sent_at"),
+            "viewed": employee.get(f"{prefix}request_viewed", False),
+            "viewed_at": employee.get(f"{prefix}request_viewed_at"),
+            "response_received": bool(employee.get(f"{prefix}response_data")),
+            "response_received_at": employee.get(f"{prefix}response_data", {}).get("submitted_at") if isinstance(employee.get(f"{prefix}response_data"), dict) else None,
+            "awaiting_review": bool(employee.get(f"{prefix}response_data")) and not employee.get(f"{prefix}reviewed"),
+            "reviewed": employee.get(f"{prefix}reviewed", False),
+            "reviewed_at": employee.get(f"{prefix}reviewed_at"),
+            "verified": employee.get(f"{prefix}verified", False),
+            "verified_at": employee.get(f"{prefix}verified_at"),
+            "rejected": employee.get(f"{prefix}rejected", False),
+            "rejected_at": employee.get(f"{prefix}rejected_at"),
+        }
+    
+    @staticmethod
+    async def override_mismatch(
+        employee_id: str,
+        ref_num: int,
+        override_reason: str,
+        admin_id: str
+    ) -> dict:
+        """
+        Override a reference mismatch with documented justification.
+        
+        Required for references with identity_confidence = 'mismatch'.
+        """
+        if not override_reason or len(override_reason.strip()) < 20:
+            raise HTTPException(
+                status_code=400, 
+                detail="Override reason must be at least 20 characters with clear justification"
+            )
+        
+        now = datetime.now(timezone.utc).isoformat()
+        prefix = f"reference_{ref_num}_"
+        
+        update = {
+            f"{prefix}mismatch_notes": override_reason,
+            f"{prefix}mismatch_override_reason": override_reason,
+            f"{prefix}mismatch_override_by": admin_id,
+            f"{prefix}mismatch_override_at": now,
+            f"{prefix}override_reason": override_reason
+        }
+        
+        await db.employees.update_one({"id": employee_id}, {"$set": update})
+        
+        await log_audit_action(admin_id, "override_reference_mismatch", "employee", employee_id, {
+            "reference_num": ref_num,
+            "override_reason": override_reason
+        })
+        
+        return {
+            "status": "success",
+            "message": f"Reference {ref_num} mismatch override recorded",
+            "override_reason": override_reason
+        }
+    
+    @staticmethod
+    async def reject_reference(
+        employee_id: str,
+        ref_num: int,
+        rejection_reason: str,
+        admin_id: str
+    ) -> dict:
+        """Reject a reference - requires new reference to be provided."""
+        now = datetime.now(timezone.utc).isoformat()
+        prefix = f"reference_{ref_num}_"
+        
+        update = {
+            f"{prefix}rejected": True,
+            f"{prefix}rejected_at": now,
+            f"{prefix}rejected_by": admin_id,
+            f"{prefix}rejection_reason": rejection_reason,
+            f"{prefix}request_status": "rejected",
+            f"{prefix}verified": False
+        }
+        
+        await db.employees.update_one({"id": employee_id}, {"$set": update})
+        
+        await log_audit_action(admin_id, "reject_reference", "employee", employee_id, {
+            "reference_num": ref_num,
+            "rejection_reason": rejection_reason
+        })
+        
+        return {"status": "success", "message": f"Reference {ref_num} rejected"}
+
+
+# ==================== REFERENCE INTEGRITY ENDPOINTS ====================
+
+@api_router.get("/references/{employee_id}/{ref_num}/integrity")
+async def get_reference_integrity_detailed(
+    employee_id: str,
+    ref_num: int,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get full 3-layer reference integrity data.
+    
+    Returns:
+    - declared_referee: What applicant entered
+    - response: What came back independently
+    - comparison: Match state and confidence
+    - verification: Status and audit trail
+    - lifecycle_status: Request chain status
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    result = await ReferenceIntegrityService.get_reference_integrity(employee_id, ref_num)
+    if not result:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    return result
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/override-mismatch")
+async def override_reference_mismatch(
+    employee_id: str,
+    ref_num: int,
+    override_reason: str = Body(..., embed=True, min_length=20),
+    user: dict = Depends(require_admin)
+):
+    """
+    Override a reference identity mismatch.
+    
+    Required when comparison.identity_confidence = 'mismatch'.
+    Must provide documented justification (min 20 characters).
+    """
+    return await ReferenceIntegrityService.override_mismatch(
+        employee_id, ref_num, override_reason, user['user_id']
+    )
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/reject")
+async def reject_reference(
+    employee_id: str,
+    ref_num: int,
+    rejection_reason: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """Reject a reference. Employee will need to provide a new reference."""
+    return await ReferenceIntegrityService.reject_reference(
+        employee_id, ref_num, rejection_reason, user['user_id']
+    )
+
+
+@api_router.get("/employees/{employee_id}/references-integrity")
+async def get_all_references_integrity(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get integrity status for all references.
+    
+    Shows how many references count toward readiness minimum.
+    """
+    ref1 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
+    ref2 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
+    
+    if not ref1:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Count valid references
+    valid_count = 0
+    if ref1 and ref1.get("counts_toward_readiness"):
+        valid_count += 1
+    if ref2 and ref2.get("counts_toward_readiness"):
+        valid_count += 1
+    
+    return {
+        "reference_1": ref1,
+        "reference_2": ref2,
+        "valid_reference_count": valid_count,
+        "minimum_required": 2,
+        "meets_minimum": valid_count >= 2,
+        "blocking_issues": [
+            r.get("blocking_reason") for r in [ref1, ref2] 
+            if r and r.get("blocked_by_integrity")
+        ]
+    }
+
+
+# ==================== COMPLIANCE PAGE DATA RESTRUCTURE ====================
+
+@api_router.get("/employees/{employee_id}/compliance-structured")
+async def get_compliance_structured(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get compliance data in restructured format for inspection-ready UI.
+    
+    Sections:
+    1. Work Readiness Summary
+    2. Identity & Legal (ID, RTW, DBS)
+    3. Address Verification (Proof of Address 1 & 2)
+    4. Recruitment Integrity (References, CV gaps, mismatches)
+    5. Health & Required Forms
+    6. Training
+    7. Request & Evidence Trail
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get readiness
+    readiness = await get_employee_readiness(employee_id)
+    
+    # Get compliance requirements
+    compliance = await get_compliance_requirements(employee_id, user)
+    req_list = compliance.get("requirements", [])
+    req_lookup = {r.get("id"): r for r in req_list}
+    
+    # Get training evaluation
+    training_eval = await evaluate_employee_training_status(employee_id, employee.get("role", ""))
+    
+    # Get reference integrity
+    ref1_integrity = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
+    ref2_integrity = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
+    
+    # Get proof of address count
+    poa_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "proof_of_address",
+        "verified": True
+    }, {"_id": 0, "id": 1, "file_name": 1, "verified_at": 1, "document_date": 1, "meets_recency_requirement": 1}).to_list(10)
+    
+    # Get pending requests
+    pending_requests = await db.email_requests.find({
+        "person_id": employee_id,
+        "status": {"$in": ["sent", "clicked", "action_started"]}
+    }, {"_id": 0}).sort("created_at", -1).to_list(50)
+    
+    # Build sections
+    sections = {
+        # Section 1: Work Readiness Summary
+        "work_readiness_summary": {
+            "status": readiness.get("status"),
+            "status_label": readiness.get("status_label", readiness.get("status")),
+            "can_work": readiness.get("status") == "ready_to_work",
+            "blockers": readiness.get("blockers", []),
+            "awaiting_review_items": [
+                r for r in req_list 
+                if r.get("status") in ["submitted", "awaiting_review"]
+            ],
+            "missing_count": len([r for r in req_list if r.get("status") == "missing"]),
+            "pending_count": len([r for r in req_list if r.get("status") == "pending"]),
+        },
+        
+        # Section 2: Identity & Legal
+        "identity_legal": {
+            "id_document": req_lookup.get("id_document", {}),
+            "right_to_work": req_lookup.get("right_to_work", {}),
+            "dbs_certificate": req_lookup.get("dbs_certificate", {}),
+        },
+        
+        # Section 3: Address Verification
+        "address_verification": {
+            "requirement": "2 verified proof-of-address documents required",
+            "verified_count": len(poa_docs),
+            "minimum_required": 2,
+            "meets_minimum": len(poa_docs) >= 2,
+            "documents": poa_docs,
+            "status": "complete" if len(poa_docs) >= 2 else "incomplete",
+            "blocking": len(poa_docs) < 2,
+            "blocking_reason": f"Proof of Address: {len(poa_docs)}/2 Verified" if len(poa_docs) < 2 else None
+        },
+        
+        # Section 4: Recruitment Integrity
+        "recruitment_integrity": {
+            "reference_1": {
+                "declared": ref1_integrity.get("declared_referee") if ref1_integrity else None,
+                "response_source": ref1_integrity.get("response", {}).get("source") if ref1_integrity else None,
+                "identity_confidence": ref1_integrity.get("comparison", {}).get("identity_confidence") if ref1_integrity else None,
+                "mismatch_flags": ref1_integrity.get("comparison", {}).get("mismatch_flags", []) if ref1_integrity else [],
+                "verification_status": ref1_integrity.get("verification", {}).get("status") if ref1_integrity else "not_started",
+                "counts_toward_readiness": ref1_integrity.get("counts_toward_readiness", False) if ref1_integrity else False,
+                "blocked_by_integrity": ref1_integrity.get("blocked_by_integrity", False) if ref1_integrity else False,
+                "blocking_reason": ref1_integrity.get("blocking_reason") if ref1_integrity else None,
+                "lifecycle": ref1_integrity.get("lifecycle_status") if ref1_integrity else None
+            },
+            "reference_2": {
+                "declared": ref2_integrity.get("declared_referee") if ref2_integrity else None,
+                "response_source": ref2_integrity.get("response", {}).get("source") if ref2_integrity else None,
+                "identity_confidence": ref2_integrity.get("comparison", {}).get("identity_confidence") if ref2_integrity else None,
+                "mismatch_flags": ref2_integrity.get("comparison", {}).get("mismatch_flags", []) if ref2_integrity else [],
+                "verification_status": ref2_integrity.get("verification", {}).get("status") if ref2_integrity else "not_started",
+                "counts_toward_readiness": ref2_integrity.get("counts_toward_readiness", False) if ref2_integrity else False,
+                "blocked_by_integrity": ref2_integrity.get("blocked_by_integrity", False) if ref2_integrity else False,
+                "blocking_reason": ref2_integrity.get("blocking_reason") if ref2_integrity else None,
+                "lifecycle": ref2_integrity.get("lifecycle_status") if ref2_integrity else None
+            },
+            "valid_reference_count": sum([
+                1 if ref1_integrity and ref1_integrity.get("counts_toward_readiness") else 0,
+                1 if ref2_integrity and ref2_integrity.get("counts_toward_readiness") else 0
+            ]),
+            "minimum_required": 2,
+            "employment_history_gaps": employee.get("employment_gaps", []),
+            "cv_mismatch_flags": employee.get("employment_history_mismatch", {}).get("mismatch_flags", []) if isinstance(employee.get("employment_history_mismatch"), dict) else [],
+        },
+        
+        # Section 5: Health & Required Forms
+        "health_forms": {
+            "health_declaration": req_lookup.get("health_declaration", {}),
+            "interview_form": req_lookup.get("interview_form", {}),
+            "hmrc_checklist": req_lookup.get("hmrc_checklist", {}),
+            "personal_details": req_lookup.get("personal_details_form", {}),
+        },
+        
+        # Section 6: Training
+        "training": {
+            "overall_status": training_eval.get("overall"),
+            "blocker_count": training_eval.get("blockerCount", 0),
+            "warning_count": training_eval.get("warningCount", 0),
+            "items": training_eval.get("items", []),
+            "is_work_ready_from_training": training_eval.get("blockerCount", 0) == 0,
+        },
+        
+        # Section 7: Request & Evidence Trail
+        "request_trail": {
+            "pending_requests": [
+                {
+                    "id": r.get("id"),
+                    "requirement_id": r.get("requirement_id"),
+                    "type": r.get("request_type"),
+                    "status": r.get("status"),
+                    "sent_at": r.get("created_at"),
+                    "viewed_at": next((e.get("timestamp") for e in r.get("events", []) if e.get("type") == "clicked"), None),
+                    "created_source": r.get("created_source", "manual"),
+                    "schedule_name": r.get("schedule_name"),
+                }
+                for r in pending_requests
+            ],
+            "total_pending": len(pending_requests),
+        }
+    }
+    
+    return sections
+
+
+@api_router.post("/employees/{employee_id}/request-missing-items")
+async def request_missing_compliance_items(
+    employee_id: str,
+    include_proof_of_address: bool = True,
+    include_references: bool = True,
+    include_training: bool = True,
+    include_forms: bool = True,
+    custom_message: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Request all missing compliance items from an employee.
+    
+    Creates requests through the existing EmailRequestService.
+    """
+    employee = await db.employees.find_one(
+        {"id": employee_id}, 
+        {"_id": 0, "id": 1, "email": 1, "first_name": 1, "last_name": 1}
+    )
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    compliance = await get_compliance_requirements(employee_id, user)
+    req_list = compliance.get("requirements", [])
+    
+    missing_items = []
+    
+    # Get missing items by category
+    for req in req_list:
+        if req.get("status") not in ["missing", "not_started", "required"]:
+            continue
+        
+        req_id = req.get("id")
+        category = req.get("category", "")
+        
+        # Filter by selected categories
+        if "proof_of_address" in req_id and not include_proof_of_address:
+            continue
+        if "reference" in req_id and not include_references:
+            continue
+        if req.get("type") == "training" and not include_training:
+            continue
+        if category == "forms" and not include_forms:
+            continue
+        
+        missing_items.append(req)
+    
+    # Check proof of address count
+    if include_proof_of_address:
+        poa_count = await db.employee_documents.count_documents({
+            "employee_id": employee_id,
+            "requirement_id": "proof_of_address",
+            "verified": True
+        })
+        if poa_count < 2:
+            # Add both proof of address requirements
+            for i in range(2 - poa_count):
+                missing_items.append({
+                    "id": f"proof_of_address_{i+1}",
+                    "name": f"Proof of Address {i+1}"
+                })
+    
+    # Create requests for each missing item
+    results = {
+        "employee_id": employee_id,
+        "requests_created": 0,
+        "requests_skipped": 0,
+        "items": []
+    }
+    
+    for item in missing_items:
+        try:
+            context = {"custom_message": custom_message} if custom_message else None
+            result = await EmailRequestService.create_request(
+                person_id=employee_id,
+                person_type="employee",
+                requirement_id=item.get("id"),
+                request_type=RequestType.UPLOAD_DOCUMENT,
+                due_days=14,
+                context=context,
+                admin_id=user['user_id']
+            )
+            
+            if result.get("status") == "success":
+                results["requests_created"] += 1
+                results["items"].append({
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "status": "sent"
+                })
+            else:
+                results["requests_skipped"] += 1
+                results["items"].append({
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "status": "skipped",
+                    "reason": result.get("reason")
+                })
+        except Exception as e:
+            results["requests_skipped"] += 1
+            results["items"].append({
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "status": "error",
+                "reason": str(e)
+            })
+    
+    await log_audit_action(user['user_id'], "request_missing_items", "employee", employee_id, {
+        "requests_created": results["requests_created"],
+        "item_count": len(missing_items)
+    })
+    
+    return results
+
+
 # ==================== CV EMPLOYMENT HISTORY EXTRACTION ====================
 # Phase 2: CV Extraction (Assist Only) - GPT-based extraction
 

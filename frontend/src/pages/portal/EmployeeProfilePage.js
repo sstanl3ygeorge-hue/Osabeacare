@@ -18,12 +18,13 @@ import { toast } from 'sonner';
 import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import RecurringComplianceSection from '../../components/portal/RecurringComplianceSection';
+import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
-  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer,
+  Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FileSearch,
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight,
   Briefcase, UserCheck, FileWarning, CalendarClock, Send
 } from 'lucide-react';
@@ -251,6 +252,11 @@ export default function EmployeeProfilePage() {
   const [docCorrectionReason, setDocCorrectionReason] = useState('');
   const [docCorrectionNewCategory, setDocCorrectionNewCategory] = useState('');
   const [isSubmittingDocCorrection, setIsSubmittingDocCorrection] = useState(false);
+  
+  // Document Extraction Review State (Phase 2 - DBS, RTW, ID)
+  const [docExtractionReviewOpen, setDocExtractionReviewOpen] = useState(false);
+  const [docExtractionDocumentId, setDocExtractionDocumentId] = useState(null);
+  const [docExtractionDocumentName, setDocExtractionDocumentName] = useState('');
   
   const { token, isAuditor, isAdmin, user } = useAuth();
   
@@ -1194,6 +1200,40 @@ export default function EmployeeProfilePage() {
     } finally {
       setIsSubmittingDocCorrection(false);
     }
+  };
+
+  // ========================================
+  // DOCUMENT EXTRACTION REVIEW (Phase 2)
+  // ========================================
+  
+  // Requirement IDs that support extraction
+  const EXTRACTABLE_REQUIREMENTS = [
+    'dbs_certificate', 'dbs_check',
+    'right_to_work_documents', 'right_to_work_check',
+    'id_document', 'passport', 'driving_licence',
+    'proof_of_address', 'proof_of_address_1', 'proof_of_address_2'
+  ];
+  
+  // Check if a requirement supports extraction
+  const isExtractableRequirement = (requirementId) => {
+    return EXTRACTABLE_REQUIREMENTS.some(r => requirementId?.toLowerCase().includes(r.toLowerCase()));
+  };
+  
+  // Open document extraction review
+  const openDocExtraction = (documentId, documentName) => {
+    setDocExtractionDocumentId(documentId);
+    setDocExtractionDocumentName(documentName);
+    setDocExtractionReviewOpen(true);
+  };
+  
+  // Handle extraction review complete
+  const handleDocExtractionComplete = () => {
+    setDocExtractionReviewOpen(false);
+    setDocExtractionDocumentId(null);
+    setDocExtractionDocumentName('');
+    fetchData();
+    fetchCompliance();
+    toast.success('Document extraction reviewed successfully');
   };
 
   const handleBulkUpload = async () => {
@@ -5091,6 +5131,20 @@ export default function EmployeeProfilePage() {
                                                     {isFormGenerated ? 'Delete Submission' : 'Delete File'}
                                                   </DropdownMenuItem>
                                                 )}
+                                                
+                                                {/* Extract Document Data - Phase 2: DBS, RTW, ID, POA */}
+                                                {isExtractableRequirement(req.id) && activeFile && !isFormGenerated && (
+                                                  <>
+                                                    <DropdownMenuSeparator />
+                                                    <DropdownMenuItem 
+                                                      onClick={() => openDocExtraction(activeFile.file_id, activeFile.file_label || activeFile.original_filename || req.name)}
+                                                      data-testid={`extract-compliance-${req.id}`}
+                                                    >
+                                                      <FileSearch className="h-4 w-4 mr-2 text-primary" />
+                                                      Extract Document Data
+                                                    </DropdownMenuItem>
+                                                  </>
+                                                )}
                                               </>
                                             );
                                           })()}
@@ -5577,6 +5631,20 @@ export default function EmployeeProfilePage() {
                                             <FormInput className="h-4 w-4 mr-2 text-purple-500" />
                                             Move to Different Category
                                           </DropdownMenuItem>
+                                          
+                                          {/* Extract Document Data - Phase 2: DBS, RTW, ID, POA */}
+                                          {isExtractableRequirement(req.id) && (
+                                            <>
+                                              <DropdownMenuSeparator />
+                                              <DropdownMenuItem 
+                                                onClick={() => openDocExtraction(doc.file_id, doc.file_label || doc.original_filename || req.name)}
+                                                data-testid={`extract-doc-${doc.file_id}`}
+                                              >
+                                                <FileSearch className="h-4 w-4 mr-2 text-primary" />
+                                                Extract Document Data
+                                              </DropdownMenuItem>
+                                            </>
+                                          )}
                                           
                                           {/* Reopen for Review - only for verified documents */}
                                           {doc.verified && (
@@ -7363,6 +7431,19 @@ export default function EmployeeProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Document Extraction Review Modal - Phase 2: DBS, RTW, ID, POA */}
+      {docExtractionReviewOpen && docExtractionDocumentId && (
+        <DocumentExtractionReview
+          documentId={docExtractionDocumentId}
+          onClose={() => {
+            setDocExtractionReviewOpen(false);
+            setDocExtractionDocumentId(null);
+          }}
+          onApproved={handleDocExtractionComplete}
+          documentName={docExtractionDocumentName}
+        />
+      )}
 
       {/* Requirement History Dialog */}
       <Dialog open={requirementHistoryOpen} onOpenChange={setRequirementHistoryOpen}>

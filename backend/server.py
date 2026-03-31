@@ -26757,6 +26757,201 @@ async def run_all_due_schedules(
     return result
 
 
+@api_router.post("/bulk/schedules/quick-setup-training-reminders")
+async def quick_setup_training_reminders(
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Quick setup: Creates 3 training renewal reminder schedules at 60, 30, and 7 days.
+    
+    This creates a complete multi-threshold reminder system for training certificates:
+    - 60 days before expiry: Early warning
+    - 30 days before expiry: Standard reminder  
+    - 7 days before expiry: Urgent final notice
+    
+    Each schedule runs hourly and prevents duplicate reminders within the same expiry cycle.
+    """
+    # Check if training schedules already exist
+    existing = await db.scheduled_bulk_requests.find({
+        "target_type": "training",
+        "name": {"$regex": "Training Renewal"}
+    }, {"_id": 0}).to_list(10)
+    
+    if len(existing) >= 3:
+        return {
+            "status": "already_configured",
+            "message": "Training renewal reminders are already set up",
+            "existing_schedules": [{"id": s["id"], "name": s["name"], "is_enabled": s.get("is_enabled", True)} for s in existing]
+        }
+    
+    # Define the 3 reminder thresholds
+    reminder_configs = [
+        {
+            "name": "Training Renewal - 60 Day Early Warning",
+            "description": "Sends early reminders 60 days before training expires. Gives employees ample time to renew.",
+            "days_before_expiry": 60,
+            "custom_message": "Your training certification is due to expire in approximately 60 days. Please start planning your renewal now to ensure continuous compliance."
+        },
+        {
+            "name": "Training Renewal - 30 Day Reminder",
+            "description": "Standard reminder 30 days before expiry. Main renewal notice.",
+            "days_before_expiry": 30,
+            "custom_message": "Your training certification will expire in 30 days. Please upload your renewed certificate or complete the training as soon as possible."
+        },
+        {
+            "name": "Training Renewal - 7 Day Urgent Notice",
+            "description": "Urgent final notice 7 days before expiry. Critical deadline warning.",
+            "days_before_expiry": 7,
+            "custom_message": "URGENT: Your training certification expires in 7 days. Immediate action required to maintain compliance and work readiness."
+        }
+    ]
+    
+    created_schedules = []
+    
+    for config in reminder_configs:
+        # Skip if a similar schedule already exists
+        existing_similar = await db.scheduled_bulk_requests.find_one({
+            "target_type": "training",
+            "days_before_expiry": config["days_before_expiry"]
+        })
+        if existing_similar:
+            created_schedules.append({
+                "id": existing_similar["id"],
+                "name": existing_similar["name"],
+                "status": "already_exists"
+            })
+            continue
+        
+        schedule_data = {
+            "name": config["name"],
+            "description": config["description"],
+            "is_enabled": True,
+            "target_type": "training",
+            "trigger_type": "days_before_expiry",
+            "days_before_expiry": config["days_before_expiry"],
+            "target_rules": {
+                "employee_statuses": ["onboarding", "active"],
+                "training_codes": [],  # All training types
+                "only_expiring": True
+            },
+            "request_payload": {
+                "due_days": 14,
+                "custom_message": config["custom_message"]
+            }
+        }
+        
+        schedule = await ScheduledBulkRequestService.create_schedule(
+            data=schedule_data,
+            created_by=user['user_id']
+        )
+        
+        created_schedules.append({
+            "id": schedule["id"],
+            "name": schedule["name"],
+            "days_before_expiry": config["days_before_expiry"],
+            "status": "created"
+        })
+    
+    await log_audit_action(user['user_id'], "quick_setup_training_reminders", "system", "bulk", {
+        "schedules_created": len([s for s in created_schedules if s.get("status") == "created"])
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Training renewal reminders configured successfully",
+        "schedules": created_schedules
+    }
+
+
+@api_router.get("/training/expiring-summary")
+async def get_expiring_training_summary(
+    days: int = 60,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get a summary of expiring training across all employees.
+    Used for dashboard widgets and alerts.
+    """
+    now = datetime.now(timezone.utc)
+    expiry_window = now + timedelta(days=days)
+    
+    # Query training records with expiry within window
+    pipeline = [
+        {
+            "$match": {
+                "record_status": {"$nin": ["superseded", "deleted"]},
+                "expiry_date": {"$exists": True, "$ne": None}
+            }
+        },
+        {
+            "$addFields": {
+                "expiry_dt": {"$dateFromString": {"dateString": "$expiry_date"}}
+            }
+        },
+        {
+            "$match": {
+                "expiry_dt": {"$lte": expiry_window, "$gte": now}
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "bucket": {
+                        "$switch": {
+                            "branches": [
+                                {"case": {"$lte": ["$expiry_dt", now + timedelta(days=7)]}, "then": "critical"},
+                                {"case": {"$lte": ["$expiry_dt", now + timedelta(days=30)]}, "then": "warning"},
+                            ],
+                            "default": "upcoming"
+                        }
+                    }
+                },
+                "count": {"$sum": 1},
+                "employee_ids": {"$addToSet": "$employee_id"}
+            }
+        }
+    ]
+    
+    try:
+        results = await db.training_records.aggregate(pipeline).to_list(10)
+        
+        summary = {
+            "critical": {"count": 0, "employee_count": 0},  # 0-7 days
+            "warning": {"count": 0, "employee_count": 0},   # 8-30 days
+            "upcoming": {"count": 0, "employee_count": 0}   # 31-60 days
+        }
+        
+        for result in results:
+            bucket = result["_id"]["bucket"]
+            summary[bucket] = {
+                "count": result["count"],
+                "employee_count": len(result["employee_ids"])
+            }
+        
+        summary["total"] = sum(s["count"] for s in summary.values())
+        summary["total_employees"] = len(set().union(*[set(r.get("employee_ids", [])) for r in results]))
+        
+        return summary
+    except Exception as e:
+        # Fallback for date parsing issues
+        logger.error(f"Error in expiring training summary: {e}")
+        
+        # Simple count fallback
+        expiring_count = await db.training_records.count_documents({
+            "record_status": {"$nin": ["superseded", "deleted"]},
+            "expiry_date": {"$exists": True, "$ne": None}
+        })
+        
+        return {
+            "critical": {"count": 0, "employee_count": 0},
+            "warning": {"count": 0, "employee_count": 0},
+            "upcoming": {"count": expiring_count, "employee_count": 0},
+            "total": expiring_count,
+            "total_employees": 0,
+            "note": "Aggregation simplified due to date format"
+        }
+
+
 @api_router.get("/bulk/requests/attributed")
 async def get_attributed_requests(
     source: Optional[str] = None,  # 'manual' or 'scheduled'

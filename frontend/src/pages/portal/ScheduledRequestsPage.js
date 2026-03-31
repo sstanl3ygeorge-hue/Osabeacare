@@ -30,6 +30,9 @@ export default function ScheduledRequestsPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRunning, setIsRunning] = useState({});
   
+  const [isQuickSetupRunning, setIsQuickSetupRunning] = useState(false);
+  const [expiringSummary, setExpiringSummary] = useState(null);
+  
   // Form state
   const [formData, setFormData] = useState({
     name: '',
@@ -45,6 +48,7 @@ export default function ScheduledRequestsPage() {
 
   useEffect(() => {
     fetchSchedules();
+    fetchExpiringSummary();
   }, [token]);
 
   const fetchSchedules = async () => {
@@ -57,6 +61,39 @@ export default function ScheduledRequestsPage() {
       toast.error('Failed to fetch schedules');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchExpiringSummary = async () => {
+    try {
+      const response = await axios.get(`${API}/training/expiring-summary?days=60`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setExpiringSummary(response.data);
+    } catch (error) {
+      console.error('Failed to fetch expiring summary:', error);
+    }
+  };
+
+  const handleQuickSetupTrainingReminders = async () => {
+    setIsQuickSetupRunning(true);
+    try {
+      const response = await axios.post(`${API}/bulk/schedules/quick-setup-training-reminders`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (response.data.status === 'already_configured') {
+        toast.info('Training renewal reminders are already configured');
+      } else {
+        const created = response.data.schedules.filter(s => s.status === 'created').length;
+        toast.success(`Created ${created} training reminder schedule(s)`);
+      }
+      
+      fetchSchedules();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to set up training reminders');
+    } finally {
+      setIsQuickSetupRunning(false);
     }
   };
 
@@ -221,15 +258,77 @@ export default function ScheduledRequestsPage() {
             Automate renewal reminders for documents and training
           </p>
         </div>
-        <Button 
-          onClick={() => { resetForm(); setCreateDialogOpen(true); }}
-          className="bg-primary hover:bg-primary-hover text-white rounded-xl"
-          data-testid="create-schedule-btn"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Create Schedule
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleQuickSetupTrainingReminders}
+            disabled={isQuickSetupRunning}
+            variant="outline"
+            className="rounded-xl border-purple-200 text-purple-700 hover:bg-purple-50"
+            data-testid="quick-setup-training-btn"
+          >
+            {isQuickSetupRunning ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <GraduationCap className="h-4 w-4 mr-2" />
+            )}
+            Quick Setup Training Reminders
+          </Button>
+          <Button 
+            onClick={() => { resetForm(); setCreateDialogOpen(true); }}
+            className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+            data-testid="create-schedule-btn"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Create Schedule
+          </Button>
+        </div>
       </div>
+
+      {/* Expiring Training Alert */}
+      {expiringSummary && expiringSummary.total > 0 && (
+        <Card className="border-amber-200 bg-amber-50/50 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                  <AlertTriangle className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-semibold text-amber-800">
+                    Training Certificates Expiring Soon
+                  </h3>
+                  <p className="text-sm text-amber-700">
+                    {expiringSummary.total} training record(s) expiring in the next 60 days across {expiringSummary.total_employees || 'multiple'} employee(s)
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 text-sm">
+                {expiringSummary.critical?.count > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-red-100 text-red-700 rounded-lg">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="font-medium">{expiringSummary.critical.count}</span>
+                    <span>within 7 days</span>
+                  </div>
+                )}
+                {expiringSummary.warning?.count > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg">
+                    <Clock className="h-4 w-4" />
+                    <span className="font-medium">{expiringSummary.warning.count}</span>
+                    <span>within 30 days</span>
+                  </div>
+                )}
+                {expiringSummary.upcoming?.count > 0 && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                    <Calendar className="h-4 w-4" />
+                    <span className="font-medium">{expiringSummary.upcoming.count}</span>
+                    <span>within 60 days</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Schedule Cards */}
       {schedules.length === 0 ? (
@@ -239,16 +338,33 @@ export default function ScheduledRequestsPage() {
             <h3 className="font-heading text-lg font-semibold text-text-primary mb-2">
               No Scheduled Requests
             </h3>
-            <p className="text-text-muted mb-4">
+            <p className="text-text-muted mb-4 max-w-md mx-auto">
               Create a schedule to automatically send renewal reminders before documents or training expire.
             </p>
-            <Button 
-              onClick={() => { resetForm(); setCreateDialogOpen(true); }}
-              className="bg-primary hover:bg-primary-hover text-white rounded-xl"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Create Your First Schedule
-            </Button>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Button 
+                onClick={handleQuickSetupTrainingReminders}
+                disabled={isQuickSetupRunning}
+                className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl"
+                data-testid="empty-quick-setup-btn"
+              >
+                {isQuickSetupRunning ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <GraduationCap className="h-4 w-4 mr-2" />
+                )}
+                Quick Setup Training Reminders
+              </Button>
+              <span className="text-text-muted text-sm">or</span>
+              <Button 
+                onClick={() => { resetForm(); setCreateDialogOpen(true); }}
+                variant="outline"
+                className="rounded-xl"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Create Custom Schedule
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (

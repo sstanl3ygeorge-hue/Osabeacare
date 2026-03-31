@@ -12062,6 +12062,595 @@ async def get_evidence_edit_history(
     return logs
 
 
+# ===========================================================================
+# PHASE D1: FILE INTERACTION + REQUEST LIFECYCLE ENDPOINTS
+# Turns the Compliance File from a status page into an operations page.
+# ===========================================================================
+
+# --- Pydantic Models for Phase D1 ---
+class ResendRequestInput(BaseModel):
+    custom_message: Optional[str] = None
+    due_days: int = 14
+
+class RequestReplacementInput(BaseModel):
+    file_id: Optional[str] = None  # Specific file to replace, or None for general replacement
+    reason: str
+    custom_message: Optional[str] = None
+    due_days: int = 14
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_key}/files")
+async def get_requirement_files(
+    employee_id: str,
+    requirement_key: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all files for a requirement with full lifecycle data.
+    
+    Returns:
+    - active_files: Currently active files with full metadata
+    - historical_files: Superseded, rejected, uploaded_in_error, moved files
+    - multi_file_config: Whether multi-file is supported, max count, required count
+    - request_linkage: If files came from requests, show that relationship
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get requirement config
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    requirement = next((item for item in all_items if item['id'] == requirement_key), None)
+    
+    # Legacy mapping for requirement keys
+    legacy_mapping = {
+        "dbs_certificate": ["dbs", "dbs_certificate"],
+        "identity_documents": ["identity_rtw", "identity_documents"],
+        "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+        "proof_of_address": ["proof_of_address", "address_proof"],
+    }
+    req_ids_to_search = legacy_mapping.get(requirement_key, [requirement_key])
+    
+    # Multi-file configuration
+    multi_file_config = {
+        "multi_file": requirement.get('multi_file', False) if requirement else False,
+        "max_active_files": requirement.get('max_active_files') if requirement else None,
+        "required_count": requirement.get('required_count') if requirement else None,
+    }
+    
+    # Special cases for multi-file requirements
+    if requirement_key == 'proof_of_address':
+        multi_file_config = {
+            "multi_file": True,
+            "max_active_files": 5,
+            "required_count": 2,
+        }
+    elif requirement_key in ['right_to_work_documents', 'identity_documents']:
+        multi_file_config = {
+            "multi_file": True,
+            "max_active_files": 10,
+            "required_count": 1,
+        }
+    
+    # Query for ALL files (active and historical)
+    all_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": req_ids_to_search}
+    }, {"_id": 0}).to_list(200)
+    
+    active_files = []
+    historical_files = []
+    
+    for doc in all_docs:
+        file_status = doc.get('status', 'active')
+        is_historical = file_status in ['superseded', 'rejected', 'uploaded_in_error', 'moved', 'archived', 'deleted']
+        
+        # Get request linkage if exists
+        request_linkage = None
+        if doc.get('source_request_id'):
+            request = await db.email_requests.find_one(
+                {"request_id": doc['source_request_id']},
+                {"_id": 0, "request_id": 1, "created_at": 1, "status": 1, "source": 1}
+            )
+            if request:
+                request_linkage = {
+                    "request_id": request.get('request_id'),
+                    "submitted_at": doc.get('uploaded_at'),
+                    "request_source": request.get('source', 'manual')
+                }
+        
+        # Get extraction status
+        extraction_status = None
+        extraction = await db.document_extractions.find_one(
+            {"document_id": doc['id']},
+            {"_id": 0, "status": 1, "extracted_at": 1, "reviewed_at": 1, "reviewed_by": 1}
+        )
+        if extraction:
+            extraction_status = {
+                "status": extraction.get('status', 'pending'),
+                "extracted_at": extraction.get('extracted_at'),
+                "reviewed_at": extraction.get('reviewed_at'),
+                "reviewed_by": extraction.get('reviewed_by')
+            }
+        
+        file_data = {
+            "file_id": doc['id'],
+            "file_name": doc.get('original_filename', 'document'),
+            "file_url": doc.get('file_url'),
+            "file_label": doc.get('document_label'),
+            "status": file_status,
+            "source_type": doc.get('source_type', 'manual_upload'),
+            "uploaded_by": doc.get('uploaded_by_name') or doc.get('uploaded_by'),
+            "uploaded_at": doc.get('uploaded_at'),
+            "document_date": doc.get('document_date'),
+            "expiry_date": doc.get('expiry_date'),
+            "verified": doc.get('verified', False),
+            "verified_by": doc.get('verified_by_name') or doc.get('verified_by'),
+            "verified_at": doc.get('verified_at'),
+            "rejected": doc.get('rejected', False),
+            "rejected_by": doc.get('rejected_by'),
+            "rejected_at": doc.get('rejected_at'),
+            "rejection_reason": doc.get('rejection_reason'),
+            "extraction_status": extraction_status,
+            "request_linkage": request_linkage,
+            "superseded_by": doc.get('superseded_by'),
+            "superseded_at": doc.get('superseded_at'),
+            "supersede_reason": doc.get('supersede_reason'),
+            "uploaded_in_error_reason": doc.get('uploaded_in_error_reason'),
+            "moved_to": doc.get('moved_to_requirement'),
+            "moved_at": doc.get('moved_at'),
+            "move_reason": doc.get('move_reason'),
+            "notes": doc.get('notes')
+        }
+        
+        if is_historical:
+            historical_files.append(file_data)
+        else:
+            active_files.append(file_data)
+    
+    # Sort by date
+    active_files.sort(key=lambda x: x.get('uploaded_at') or '', reverse=True)
+    historical_files.sort(key=lambda x: x.get('uploaded_at') or '', reverse=True)
+    
+    return {
+        "requirement_key": requirement_key,
+        "requirement_name": requirement.get('name') if requirement else requirement_key,
+        "employee_id": employee_id,
+        "active_files": active_files,
+        "active_file_count": len(active_files),
+        "historical_files": historical_files,
+        "historical_file_count": len(historical_files),
+        "pending_review_count": sum(1 for f in active_files if f.get('extraction_status', {}).get('status') == 'awaiting_review'),
+        "verified_count": sum(1 for f in active_files if f.get('verified')),
+        "multi_file_config": multi_file_config
+    }
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_key}/unified-history")
+async def get_requirement_unified_history(
+    employee_id: str,
+    requirement_key: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get unified timeline history for a requirement.
+    
+    Includes:
+    - uploaded, requested, viewed, submitted
+    - extraction reviewed, verified, rejected
+    - superseded, moved, marked uploaded in error
+    - check recorded/updated (for check-type requirements)
+    - agreement completion events (for agreement-type requirements)
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    timeline = []
+    
+    # 1. Get audit logs for this requirement
+    audit_logs = await db.audit_logs.find({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": requirement_key},
+            {"entity_id": requirement_key},
+            {"details.requirement_id": requirement_key}
+        ]
+    }, {"_id": 0}).sort("timestamp", -1).to_list(200)
+    
+    for log in audit_logs:
+        timeline.append({
+            "event_type": log.get('action_type') or log.get('action'),
+            "timestamp": log.get('timestamp') or log.get('created_at'),
+            "user_id": log.get('user_id'),
+            "user_name": log.get('user_name'),
+            "details": log.get('details', {}),
+            "source": "audit_log"
+        })
+    
+    # 2. Get request history (sent, viewed, submitted, etc.)
+    requests = await db.email_requests.find({
+        "person_id": employee_id,
+        "requirement_id": requirement_key
+    }, {"_id": 0}).sort("created_at", -1).to_list(100)
+    
+    for req in requests:
+        # Request created/sent event
+        timeline.append({
+            "event_type": "request_sent",
+            "timestamp": req.get('sent_at') or req.get('created_at'),
+            "user_id": req.get('created_by'),
+            "user_name": req.get('created_by_name'),
+            "details": {
+                "request_id": req.get('request_id'),
+                "request_type": req.get('request_type'),
+                "due_date": req.get('due_date'),
+                "source": req.get('source', 'manual')
+            },
+            "source": "request"
+        })
+        
+        # Request events (clicked, submitted, etc.)
+        events = req.get('events', [])
+        for event in events:
+            timeline.append({
+                "event_type": f"request_{event.get('event_type', 'event')}",
+                "timestamp": event.get('timestamp'),
+                "user_id": event.get('user_id'),
+                "user_name": event.get('user_name'),
+                "details": {
+                    "request_id": req.get('request_id'),
+                    "event_data": event.get('data')
+                },
+                "source": "request_event"
+            })
+    
+    # 3. Get evidence edit logs
+    edit_logs = await db.evidence_edit_logs.find({
+        "employee_id": employee_id,
+        "requirement_id": requirement_key
+    }, {"_id": 0}).sort("changed_at", -1).to_list(100)
+    
+    for log in edit_logs:
+        timeline.append({
+            "event_type": "evidence_edited",
+            "timestamp": log.get('changed_at'),
+            "user_id": log.get('changed_by'),
+            "user_name": log.get('changed_by_name'),
+            "details": {
+                "file_id": log.get('file_id'),
+                "field_changed": log.get('field_name'),
+                "old_value": log.get('old_value'),
+                "new_value": log.get('new_value')
+            },
+            "source": "evidence_edit"
+        })
+    
+    # 4. Get check/verification records (for check-type requirements)
+    # Map both evidence keys and check keys to collections
+    check_collections = {
+        'right_to_work_check': 'rtw_checks',
+        'right_to_work_documents': 'rtw_checks',  # Evidence key also shows checks
+        'rtw_check': 'rtw_checks',
+        'dbs_status_check': 'dbs_checks',
+        'dbs_certificate': 'dbs_checks',  # Evidence key also shows checks
+        'dbs_check': 'dbs_checks',
+        'identity_verification': 'identity_verifications',
+        'identity_documents': 'identity_verifications',
+        'address_verification': 'address_verifications',
+        'proof_of_address': 'address_verifications'  # Evidence key also shows checks
+    }
+    
+    if requirement_key in check_collections:
+        collection_name = check_collections[requirement_key]
+        checks = await db[collection_name].find({
+            "employee_id": employee_id
+        }, {"_id": 0}).sort("created_at", -1).to_list(50)
+        
+        for check in checks:
+            timeline.append({
+                "event_type": "check_recorded",
+                "timestamp": check.get('checked_at') or check.get('check_date') or check.get('created_at'),
+                "user_id": check.get('checked_by'),
+                "user_name": check.get('checked_by_name'),
+                "details": {
+                    "check_id": check.get('id'),
+                    "method": check.get('method') or check.get('check_method') or check.get('verification_method'),
+                    "outcome": check.get('outcome'),
+                    "valid_until": check.get('valid_until')
+                },
+                "source": "check_record"
+            })
+    
+    # 5. Get agreement acknowledgements (for agreement-type requirements)
+    agreement_types = {
+        'contract_acceptance': 'contract_acceptance',
+        'handbook_acknowledgement': 'handbook_acknowledgement'
+    }
+    
+    if requirement_key in agreement_types:
+        agreements = await db.agreement_acknowledgements.find({
+            "employee_id": employee_id,
+            "agreement_type": agreement_types[requirement_key]
+        }, {"_id": 0}).sort("completed_at", -1).to_list(50)
+        
+        for agr in agreements:
+            timeline.append({
+                "event_type": "agreement_completed",
+                "timestamp": agr.get('completed_at'),
+                "user_id": agr.get('completed_by'),
+                "user_name": agr.get('completed_by_name'),
+                "details": {
+                    "acknowledgement_id": agr.get('id'),
+                    "version_acknowledged": agr.get('version_acknowledged'),
+                    "completion_mode": agr.get('completion_mode')
+                },
+                "source": "agreement"
+            })
+    
+    # Sort timeline by timestamp (newest first)
+    timeline.sort(key=lambda x: x.get('timestamp') or '', reverse=True)
+    
+    return {
+        "requirement_key": requirement_key,
+        "employee_id": employee_id,
+        "timeline": timeline,
+        "total_events": len(timeline)
+    }
+
+
+@api_router.get("/employees/{employee_id}/requirements/{requirement_key}/requests")
+async def get_requirement_requests(
+    employee_id: str,
+    requirement_key: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get request lifecycle data for a requirement.
+    
+    Returns:
+    - Current request status chain
+    - sent_at, viewed_at, submitted_at
+    - request source: manual or scheduled
+    - replacement request history
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get all requests for this requirement
+    requests = await db.email_requests.find({
+        "person_id": employee_id,
+        "requirement_id": requirement_key
+    }, {"_id": 0}).sort("created_at", -1).to_list(50)
+    
+    request_history = []
+    current_request = None
+    
+    for req in requests:
+        # Extract event timestamps
+        events = req.get('events', [])
+        clicked_at = next((e.get('timestamp') for e in events if e.get('event_type') == 'clicked'), None)
+        submitted_at = next((e.get('timestamp') for e in events if e.get('event_type') == 'submitted'), None)
+        
+        request_data = {
+            "request_id": req.get('request_id'),
+            "status": req.get('status'),
+            "request_type": req.get('request_type'),
+            "source": req.get('source', 'manual'),  # manual or scheduled
+            "created_at": req.get('created_at'),
+            "sent_at": req.get('sent_at'),
+            "viewed_at": clicked_at,  # Using clicked as proxy for viewed
+            "submitted_at": submitted_at,
+            "completed_at": req.get('completed_at'),
+            "due_date": req.get('due_date'),
+            "is_replacement": req.get('is_replacement_request', False),
+            "replacement_for_file_id": req.get('replacement_for_file_id'),
+            "reminder_count": req.get('reminder_count', 0),
+            "events": events
+        }
+        
+        request_history.append(request_data)
+        
+        # Most recent non-completed request is "current"
+        if not current_request and req.get('status') not in ['completed', 'expired', 'cancelled', 'superseded']:
+            current_request = request_data
+    
+    # Determine overall request status
+    overall_status = "not_requested"
+    if current_request:
+        if current_request.get('submitted_at'):
+            overall_status = "submitted"
+        elif current_request.get('viewed_at'):
+            overall_status = "viewed"
+        elif current_request.get('sent_at'):
+            overall_status = "sent"
+        else:
+            overall_status = "pending"
+    elif request_history:
+        # Check if any request was completed
+        completed = [r for r in request_history if r.get('status') == 'completed']
+        if completed:
+            overall_status = "completed"
+        else:
+            overall_status = "expired_or_cancelled"
+    
+    return {
+        "requirement_key": requirement_key,
+        "employee_id": employee_id,
+        "overall_status": overall_status,
+        "current_request": current_request,
+        "request_history": request_history,
+        "total_requests": len(request_history),
+        "last_requested_at": requests[0].get('created_at') if requests else None,
+        "last_submitted_at": next((r.get('submitted_at') for r in request_history if r.get('submitted_at')), None)
+    }
+
+
+# NOTE: The following document action endpoints already exist later in the file:
+# - POST /documents/{document_id}/supersede (line ~26118)
+# - POST /documents/{document_id}/move-category (line ~26169)
+# - POST /documents/{document_id}/mark-uploaded-in-error (line ~26068)
+# They use the DocumentStatus enum and status_history tracking.
+# The Phase D1 resend-request and request-replacement endpoints are below.
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_key}/resend-request")
+async def resend_document_request(
+    employee_id: str,
+    requirement_key: str,
+    payload: ResendRequestInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Resend a document request for a requirement.
+    
+    - Appends to history, does NOT overwrite prior request state
+    - New request created with reference to previous
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if not employee.get('email'):
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    # Get previous request if exists
+    previous_request = await db.email_requests.find_one(
+        {"person_id": employee_id, "requirement_id": requirement_key},
+        {"_id": 0},
+        sort=[("created_at", -1)]
+    )
+    
+    # Mark previous as superseded if pending
+    if previous_request and previous_request.get('status') in ['sent', 'clicked', 'action_started'] and previous_request.get('request_id'):
+        await db.email_requests.update_one(
+            {"request_id": previous_request.get('request_id')},
+            {"$set": {"status": "superseded", "superseded_at": datetime.now(timezone.utc).isoformat()}}
+        )
+    
+    # Create new request
+    context = {}
+    if payload.custom_message:
+        context['custom_message'] = payload.custom_message
+    if previous_request:
+        context['previous_request_id'] = previous_request.get('request_id')
+        context['is_resend'] = True
+    
+    try:
+        result = await EmailRequestService.create_request(
+            person_id=employee_id,
+            person_type="employee",
+            requirement_id=requirement_key,
+            request_type=RequestType.UPLOAD_DOCUMENT,
+            due_days=payload.due_days,
+            context=context if context else None,
+            admin_id=user['user_id']
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=result.get("reason", "Failed to send request"))
+        
+        await log_audit_action(user['user_id'], "document_request_resent", "employee", employee_id, {
+            "requirement_id": requirement_key,
+            "new_request_id": result.get("request_id"),
+            "previous_request_id": previous_request.get('request_id') if previous_request else None
+        })
+        
+        return {
+            "success": True,
+            "message": f"Request resent to {employee['email']}",
+            "request_id": result.get("request_id"),
+            "due_date": result.get("due_date"),
+            "previous_request_superseded": previous_request.get('request_id') if previous_request else None
+        }
+    except Exception as e:
+        logger.error(f"Failed to resend document request: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/employees/{employee_id}/requirements/{requirement_key}/request-replacement")
+async def request_document_replacement(
+    employee_id: str,
+    requirement_key: str,
+    payload: RequestReplacementInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Request a replacement for an existing document.
+    
+    - Linked to original requirement
+    - Optionally linked to specific file being replaced
+    - Clear audit trail
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if not employee.get('email'):
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    # If specific file, verify it exists
+    if payload.file_id:
+        file_doc = await db.employee_documents.find_one({"id": payload.file_id}, {"_id": 0})
+        if not file_doc:
+            raise HTTPException(status_code=404, detail="Specified file not found")
+    
+    context = {
+        "is_replacement_request": True,
+        "replacement_reason": payload.reason,
+        "replacement_for_file_id": payload.file_id
+    }
+    if payload.custom_message:
+        context['custom_message'] = payload.custom_message
+    
+    try:
+        result = await EmailRequestService.create_request(
+            person_id=employee_id,
+            person_type="employee",
+            requirement_id=requirement_key,
+            request_type=RequestType.UPLOAD_DOCUMENT,
+            due_days=payload.due_days,
+            context=context,
+            admin_id=user['user_id']
+        )
+        
+        if result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=result.get("reason", "Failed to send request"))
+        
+        # Store replacement metadata in request
+        await db.email_requests.update_one(
+            {"request_id": result.get("request_id")},
+            {"$set": {
+                "is_replacement_request": True,
+                "replacement_for_file_id": payload.file_id,
+                "replacement_reason": payload.reason
+            }}
+        )
+        
+        await log_audit_action(user['user_id'], "document_replacement_requested", "employee", employee_id, {
+            "requirement_id": requirement_key,
+            "request_id": result.get("request_id"),
+            "file_id": payload.file_id,
+            "reason": payload.reason
+        })
+        
+        return {
+            "success": True,
+            "message": f"Replacement request sent to {employee['email']}",
+            "request_id": result.get("request_id"),
+            "due_date": result.get("due_date"),
+            "replacement_for_file_id": payload.file_id
+        }
+    except Exception as e:
+        logger.error(f"Failed to request document replacement: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===========================================================================
+# END PHASE D1 ENDPOINTS
+# ===========================================================================
+
 
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")
 async def verify_requirement(

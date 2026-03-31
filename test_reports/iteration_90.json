@@ -1,0 +1,77 @@
+{
+  "summary": "Phase D1 Backend Endpoints for File Interaction + Request Lifecycle - All endpoints tested and working. Fixed a KeyError bug in resend-request endpoint.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase_d1_file_interaction.py",
+    "/app/test_reports/pytest/phase_d1_file_interaction_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fixed KeyError bug in resend-request endpoint (line 12528) - was using previous_request['request_id'] instead of previous_request.get('request_id')"
+  ],
+  "updated_files": [
+    "/app/backend/server.py"
+  ],
+  "success_rate": {
+    "backend": "100% (23 passed, 3 skipped due to no test data)",
+    "frontend": "N/A (backend-only testing)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Used existing test employee d88335f6-1b18-435a-8086-28af4a583f77",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase D1 endpoints fully tested. All 9 endpoints working: GET /files, GET /unified-history, GET /requests, POST /mark-uploaded-in-error, POST /supersede, POST /move-category, POST /resend-request, POST /request-replacement. Proof of Address correctly shows required_count: 2 (NHS standard). Unified-history includes check_recorded events.",
+  "features_tested": {
+    "GET_requirements_files": {
+      "status": "PASS",
+      "details": "Returns active_files, historical_files, multi_file_config correctly"
+    },
+    "GET_requirements_unified_history": {
+      "status": "PASS",
+      "details": "Returns timeline with check_recorded events, request events, evidence edits"
+    },
+    "GET_requirements_requests": {
+      "status": "PASS",
+      "details": "Returns overall_status, current_request, request_history correctly"
+    },
+    "proof_of_address_multi_file_config": {
+      "status": "PASS",
+      "details": "Shows required_count: 2 (NHS standard)"
+    },
+    "POST_mark_uploaded_in_error": {
+      "status": "PASS",
+      "details": "Marks document with reason, returns 404 for non-existent docs"
+    },
+    "POST_supersede": {
+      "status": "PASS",
+      "details": "Marks old document as superseded, returns 404 for non-existent docs"
+    },
+    "POST_move_category": {
+      "status": "PASS",
+      "details": "Changes requirement_id, returns 404 for non-existent docs"
+    },
+    "POST_resend_request": {
+      "status": "PASS",
+      "details": "Creates new request (after bug fix), supersedes previous pending request"
+    },
+    "POST_request_replacement": {
+      "status": "PASS",
+      "details": "Creates replacement request with reason and optional file_id"
+    }
+  },
+  "bug_fixed": {
+    "location": "/app/backend/server.py line 12528",
+    "issue": "KeyError when accessing previous_request['request_id'] - previous request may not have request_id field",
+    "fix": "Changed to previous_request.get('request_id') with additional null check"
+  }
+}

@@ -9,7 +9,7 @@ import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
-  Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList
+  Clock, AlertCircle, CheckCircle, ExternalLink, ClipboardList, GraduationCap
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;

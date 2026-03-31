@@ -11,7 +11,9 @@ import { Label } from '../../components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../../components/ui/dropdown-menu';
 import { Badge } from '../../components/ui/badge';
 import { toast } from 'sonner';
-import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle, Shield, CheckCircle, Clock, Users } from 'lucide-react';
+import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash2, RotateCcw, FileDown, AlertTriangle, Shield, CheckCircle, Clock, Users, Mail, Send, X, CheckSquare, Square } from 'lucide-react';
+import { Checkbox } from '../../components/ui/checkbox';
+import { Textarea } from '../../components/ui/textarea';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -46,6 +48,19 @@ export default function EmployeesPage() {
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
+  
+  // Bulk request states
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [bulkRequestOpen, setBulkRequestOpen] = useState(false);
+  const [bulkRequestType, setBulkRequestType] = useState('missing'); // 'missing' or 'specific'
+  const [bulkRequirements, setBulkRequirements] = useState([]);
+  const [selectedRequirements, setSelectedRequirements] = useState([]);
+  const [bulkMessage, setBulkMessage] = useState('');
+  const [bulkDueDays, setBulkDueDays] = useState(14);
+  const [isBulkRequesting, setIsBulkRequesting] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+  
   const { token, isAuditor, user } = useAuth();
 
   // Sync state to URL params for navigation preservation
@@ -172,6 +187,120 @@ export default function EmployeesPage() {
 
   const isSuperAdmin = () => user?.role === 'super_admin';
 
+  // Bulk request handlers
+  const toggleEmployeeSelection = (empId) => {
+    setSelectedEmployees(prev => 
+      prev.includes(empId) 
+        ? prev.filter(id => id !== empId)
+        : [...prev, empId]
+    );
+  };
+
+  const selectAllEmployees = () => {
+    const currentlyFiltered = getFilteredEmployees();
+    const allIds = currentlyFiltered.map(e => e.id);
+    setSelectedEmployees(allIds);
+  };
+
+  const clearSelection = () => {
+    setSelectedEmployees([]);
+  };
+
+  const fetchDocumentTypes = async () => {
+    try {
+      const response = await axios.get(`${API}/document-types`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setBulkRequirements(response.data.filter(dt => dt.required));
+    } catch (error) {
+      console.error('Failed to fetch document types:', error);
+    }
+  };
+
+  const openBulkRequestDialog = () => {
+    if (selectedEmployees.length === 0) {
+      toast.error('Please select at least one employee');
+      return;
+    }
+    fetchDocumentTypes();
+    setBulkRequestOpen(true);
+    setBulkResult(null);
+  };
+
+  const handleBulkRequest = async () => {
+    setIsBulkRequesting(true);
+    try {
+      const payload = {
+        employee_ids: selectedEmployees,
+        requirement_ids: bulkRequestType === 'specific' ? selectedRequirements : null,
+        message: bulkMessage || null,
+        due_days: bulkDueDays,
+        send_immediately: true
+      };
+      
+      const response = await axios.post(`${API}/bulk/document-requests`, payload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      setBulkResult(response.data);
+      
+      if (response.data.total_requests_created > 0) {
+        toast.success(`Sent ${response.data.total_requests_created} document requests to ${response.data.total_employees} employees`);
+      } else if (response.data.total_skipped > 0) {
+        toast.info(`No new requests needed - ${response.data.total_skipped} employees already up to date`);
+      }
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to send bulk requests');
+    } finally {
+      setIsBulkRequesting(false);
+    }
+  };
+
+  const closeBulkDialog = () => {
+    setBulkRequestOpen(false);
+    setBulkRequestType('missing');
+    setSelectedRequirements([]);
+    setBulkMessage('');
+    setBulkDueDays(14);
+    setBulkResult(null);
+  };
+
+  const exitBulkMode = () => {
+    setBulkMode(false);
+    setSelectedEmployees([]);
+  };
+  
+  // Helper to get filtered employees list
+  const getFilteredEmployees = () => {
+    let filtered = workReadinessFilter 
+      ? employees.filter(emp => emp.work_readiness_3tier?.status === workReadinessFilter)
+      : employees;
+    
+    if (requirementFilter) {
+      filtered = filtered.filter(emp => {
+        const requirements = emp.compliance_requirements?.statuses?.requirements || [];
+        if (requirementFilter === 'dbs') {
+          return requirements.some(r => 
+            r.name?.toLowerCase().includes('dbs') && 
+            (r.status === 'missing' || r.status === 'pending' || r.status === 'expired')
+          );
+        } else if (requirementFilter === 'rtw') {
+          return requirements.some(r => 
+            (r.name?.toLowerCase().includes('right to work') || r.name?.toLowerCase().includes('rtw')) && 
+            (r.status === 'missing' || r.status === 'pending' || r.status === 'expired')
+          );
+        } else if (requirementFilter === 'references') {
+          return requirements.some(r => 
+            r.name?.toLowerCase().includes('reference') && 
+            (r.status === 'missing' || r.status === 'pending' || r.status === 'expired')
+          );
+        }
+        return true;
+      });
+    }
+    return filtered;
+  };
+
   const handleAddEmployee = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -228,6 +357,55 @@ export default function EmployeesPage() {
         </div>
         
         <div className="flex items-center gap-2">
+          {/* Bulk Mode Toggle */}
+          {!isAuditor() && (
+            bulkMode ? (
+              <div className="flex items-center gap-2 bg-primary/10 px-3 py-1.5 rounded-xl border border-primary/30">
+                <span className="text-sm font-medium text-primary">
+                  {selectedEmployees.length} selected
+                </span>
+                <Button 
+                  size="sm" 
+                  variant="ghost"
+                  onClick={selectAllEmployees}
+                  className="h-7 px-2 text-primary hover:bg-primary/20"
+                  data-testid="select-all-btn"
+                >
+                  Select All
+                </Button>
+                <Button 
+                  size="sm"
+                  onClick={openBulkRequestDialog}
+                  disabled={selectedEmployees.length === 0}
+                  className="h-7 bg-primary hover:bg-primary-hover text-white"
+                  data-testid="bulk-request-btn"
+                >
+                  <Mail className="h-3.5 w-3.5 mr-1.5" />
+                  Request Documents
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="ghost"
+                  onClick={exitBulkMode}
+                  className="h-7 px-2 text-gray-500 hover:bg-gray-100"
+                  data-testid="exit-bulk-mode-btn"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <Button 
+                variant="outline" 
+                onClick={() => setBulkMode(true)}
+                className="rounded-xl"
+                data-testid="enter-bulk-mode-btn"
+              >
+                <Mail className="mr-2 h-4 w-4" />
+                Bulk Requests
+              </Button>
+            )
+          )}
+          
           {/* Link to Recruitment Pipeline */}
           <Button 
             variant="outline" 
@@ -506,6 +684,21 @@ export default function EmployeesPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-[#E4E8EB] bg-[#F8FAFA]">
+                    {bulkMode && (
+                      <th className="p-4 w-10">
+                        <Checkbox
+                          checked={selectedEmployees.length === filteredEmployees.length && filteredEmployees.length > 0}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedEmployees(filteredEmployees.map(e => e.id));
+                            } else {
+                              setSelectedEmployees([]);
+                            }
+                          }}
+                          data-testid="select-all-checkbox"
+                        />
+                      </th>
+                    )}
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Employee</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm hidden md:table-cell">Role</th>
                     <th className="text-left p-4 font-medium text-text-muted text-sm">Work Status</th>
@@ -530,7 +723,19 @@ export default function EmployeesPage() {
                     const firstReason = workReadiness3tier.reasons?.[0]?.message;
                     
                     return (
-                    <tr key={emp.id} className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''}`}>
+                    <tr 
+                      key={emp.id} 
+                      className={`border-b border-[#E4E8EB] hover:bg-[#F8FAFA] transition-colors ${emp.status === 'archived' ? 'opacity-60' : ''} ${selectedEmployees.includes(emp.id) ? 'bg-primary/5' : ''}`}
+                    >
+                      {bulkMode && (
+                        <td className="p-4 w-10">
+                          <Checkbox
+                            checked={selectedEmployees.includes(emp.id)}
+                            onCheckedChange={() => toggleEmployeeSelection(emp.id)}
+                            data-testid={`select-emp-${emp.id}`}
+                          />
+                        </td>
+                      )}
                       <td className="p-4">
                         <Link to={`/portal/employees/${emp.id}`} className="flex items-center gap-3" data-testid={`emp-link-${emp.id}`}>
                           <EmployeeAvatar
@@ -746,6 +951,164 @@ export default function EmployeesPage() {
               Delete Permanently
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Document Request Dialog */}
+      <Dialog open={bulkRequestOpen} onOpenChange={(open) => !open && closeBulkDialog()}>
+        <DialogContent className="bg-white sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Mail className="h-5 w-5 text-primary" />
+              Bulk Document Requests
+            </DialogTitle>
+            <DialogDescription>
+              Request documents from {selectedEmployees.length} selected employee{selectedEmployees.length !== 1 ? 's' : ''}.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {bulkResult ? (
+            // Show results after request is sent
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="p-3 bg-green-50 rounded-xl border border-green-200">
+                  <p className="text-2xl font-bold text-green-700">{bulkResult.total_emails_sent}</p>
+                  <p className="text-xs text-green-600">Emails Sent</p>
+                </div>
+                <div className="p-3 bg-blue-50 rounded-xl border border-blue-200">
+                  <p className="text-2xl font-bold text-blue-700">{bulkResult.total_requests_created}</p>
+                  <p className="text-xs text-blue-600">Requests Created</p>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+                  <p className="text-2xl font-bold text-gray-700">{bulkResult.total_skipped}</p>
+                  <p className="text-xs text-gray-600">Skipped</p>
+                </div>
+              </div>
+              
+              {bulkResult.errors.length > 0 && (
+                <div className="p-3 bg-red-50 rounded-xl border border-red-200">
+                  <p className="text-sm font-medium text-red-700 mb-1">Errors:</p>
+                  <ul className="text-xs text-red-600 list-disc list-inside">
+                    {bulkResult.errors.slice(0, 5).map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                    {bulkResult.errors.length > 5 && (
+                      <li>...and {bulkResult.errors.length - 5} more</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+              
+              <DialogFooter>
+                <Button onClick={closeBulkDialog} className="bg-primary hover:bg-primary-hover text-white rounded-xl">
+                  Done
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            // Show request form
+            <div className="space-y-4 py-4">
+              {/* Request Type Selection */}
+              <div className="space-y-2">
+                <Label className="font-medium">What to request</Label>
+                <Select value={bulkRequestType} onValueChange={setBulkRequestType}>
+                  <SelectTrigger className="rounded-xl" data-testid="bulk-request-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="missing">All missing documents (auto-detect)</SelectItem>
+                    <SelectItem value="specific">Specific document types</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              {/* Specific Requirements Selection */}
+              {bulkRequestType === 'specific' && (
+                <div className="space-y-2">
+                  <Label className="font-medium">Select document types</Label>
+                  <div className="max-h-40 overflow-y-auto border rounded-xl p-2 space-y-1">
+                    {bulkRequirements.length === 0 ? (
+                      <p className="text-sm text-gray-500 p-2">Loading document types...</p>
+                    ) : (
+                      bulkRequirements.map(req => (
+                        <label 
+                          key={req.id} 
+                          className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer"
+                        >
+                          <Checkbox
+                            checked={selectedRequirements.includes(req.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedRequirements([...selectedRequirements, req.id]);
+                              } else {
+                                setSelectedRequirements(selectedRequirements.filter(id => id !== req.id));
+                              }
+                            }}
+                          />
+                          <span className="text-sm">{req.name}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Due Days */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="font-medium">Due in (days)</Label>
+                  <Select value={String(bulkDueDays)} onValueChange={(v) => setBulkDueDays(Number(v))}>
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">7 days</SelectItem>
+                      <SelectItem value="14">14 days</SelectItem>
+                      <SelectItem value="21">21 days</SelectItem>
+                      <SelectItem value="30">30 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              {/* Custom Message */}
+              <div className="space-y-2">
+                <Label className="font-medium">Custom message (optional)</Label>
+                <Textarea
+                  placeholder="Add a personal note to the request email..."
+                  value={bulkMessage}
+                  onChange={(e) => setBulkMessage(e.target.value)}
+                  className="rounded-xl resize-none"
+                  rows={3}
+                  data-testid="bulk-message"
+                />
+              </div>
+              
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={closeBulkDialog} className="rounded-xl">
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleBulkRequest} 
+                  disabled={isBulkRequesting || (bulkRequestType === 'specific' && selectedRequirements.length === 0)}
+                  className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+                  data-testid="send-bulk-request-btn"
+                >
+                  {isBulkRequesting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Send Requests
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

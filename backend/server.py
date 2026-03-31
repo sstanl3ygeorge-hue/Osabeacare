@@ -21815,6 +21815,268 @@ async def get_employee_document_requests(employee_id: str, user: dict = Depends(
     return requests
 
 
+# ==================== BULK DOCUMENT REQUESTS ====================
+
+class BulkDocumentRequestInput(BaseModel):
+    """Request multiple documents from multiple employees."""
+    employee_ids: List[str] = Field(..., description="List of employee IDs to request from")
+    requirement_ids: Optional[List[str]] = Field(None, description="Specific requirements to request. If None, requests all missing items.")
+    message: Optional[str] = Field(None, description="Custom message to include in emails")
+    due_days: int = Field(14, description="Days until request is due")
+    send_immediately: bool = Field(True, description="Send emails immediately vs. queue for review")
+
+
+class BulkRequestResult(BaseModel):
+    """Result of a bulk document request operation."""
+    total_employees: int
+    total_requests_created: int
+    total_emails_sent: int
+    total_skipped: int
+    details: List[Dict[str, Any]]
+    errors: List[str]
+
+
+@api_router.post("/bulk/document-requests", response_model=BulkRequestResult)
+async def create_bulk_document_requests(
+    request: BulkDocumentRequestInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Create document requests for multiple employees at once.
+    
+    Use cases:
+    - Annual recertification (e.g., all employees need updated DBS)
+    - Bulk onboarding (request all missing items from new hires)
+    - Policy rollout (request acknowledgment from all active staff)
+    """
+    if not request.employee_ids:
+        raise HTTPException(status_code=400, detail="At least one employee ID required")
+    
+    if len(request.employee_ids) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 employees per batch")
+    
+    # Get all employees (staff only - exclude applicants)
+    employees = await EmployeesRepository.list_employees(
+        filter_dict={"id": {"$in": request.employee_ids}},
+        projection={"_id": 0, "id": 1, "email": 1, "first_name": 1, "last_name": 1, "status": 1}
+    )
+    
+    if not employees:
+        raise HTTPException(status_code=404, detail="No employees found with given IDs")
+    
+    employee_map = {e["id"]: e for e in employees}
+    
+    # Get document type names for audit
+    doc_types = {}
+    if request.requirement_ids:
+        async for dt in db.document_types.find({"id": {"$in": request.requirement_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            doc_types[dt["id"]] = dt["name"]
+    
+    results = {
+        "total_employees": len(request.employee_ids),
+        "total_requests_created": 0,
+        "total_emails_sent": 0,
+        "total_skipped": 0,
+        "details": [],
+        "errors": []
+    }
+    
+    for emp_id in request.employee_ids:
+        emp = employee_map.get(emp_id)
+        if not emp:
+            results["errors"].append(f"Employee {emp_id} not found")
+            results["total_skipped"] += 1
+            continue
+        
+        emp_result = {
+            "employee_id": emp_id,
+            "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "email": emp.get("email"),
+            "requests_created": 0,
+            "requirements": []
+        }
+        
+        # Determine which requirements to request
+        requirements_to_request = []
+        
+        if request.requirement_ids:
+            # Specific requirements provided
+            requirements_to_request = [{"id": rid, "name": doc_types.get(rid, rid)} for rid in request.requirement_ids]
+        else:
+            # Get all missing items for this employee
+            try:
+                compliance_data = await get_compliance_requirements(emp_id, user)
+                reqs = compliance_data.get("requirements", [])
+                requirements_to_request = [
+                    {"id": req["id"], "name": req["name"]} 
+                    for req in reqs 
+                    if req.get("status") in ["missing", "not_started", "required"]
+                ]
+            except Exception as e:
+                logger.error(f"Failed to get compliance for {emp_id}: {e}")
+                results["errors"].append(f"Failed to get requirements for {emp['email']}: {str(e)}")
+                continue
+        
+        if not requirements_to_request:
+            emp_result["note"] = "No missing requirements"
+            results["details"].append(emp_result)
+            results["total_skipped"] += 1
+            continue
+        
+        # Create requests for each requirement
+        for req_item in requirements_to_request:
+            try:
+                context = {"custom_message": request.message} if request.message else None
+                result = await EmailRequestService.create_request(
+                    person_id=emp_id,
+                    person_type="employee",
+                    requirement_id=req_item["id"],
+                    request_type=RequestType.UPLOAD_DOCUMENT,
+                    due_days=request.due_days,
+                    context=context,
+                    admin_id=user['user_id']
+                )
+                
+                if result.get("status") == "success":
+                    emp_result["requests_created"] += 1
+                    emp_result["requirements"].append({
+                        "id": req_item["id"],
+                        "name": req_item["name"],
+                        "request_id": result.get("request_id"),
+                        "status": "sent"
+                    })
+                    results["total_requests_created"] += 1
+                    results["total_emails_sent"] += 1
+                elif result.get("status") == "duplicate":
+                    emp_result["requirements"].append({
+                        "id": req_item["id"],
+                        "name": req_item["name"],
+                        "status": "already_requested"
+                    })
+                else:
+                    emp_result["requirements"].append({
+                        "id": req_item["id"],
+                        "name": req_item["name"],
+                        "status": "failed",
+                        "reason": result.get("reason", "Unknown error")
+                    })
+            except Exception as e:
+                logger.error(f"Failed to create request for {emp_id}/{req_item['id']}: {e}")
+                emp_result["requirements"].append({
+                    "id": req_item["id"],
+                    "name": req_item["name"],
+                    "status": "error",
+                    "reason": str(e)
+                })
+        
+        results["details"].append(emp_result)
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "bulk_document_requests", "system", "bulk", {
+        "employee_count": results["total_employees"],
+        "requests_created": results["total_requests_created"],
+        "emails_sent": results["total_emails_sent"],
+        "requirement_ids": request.requirement_ids
+    })
+    
+    return results
+
+
+@api_router.get("/bulk/pending-requests")
+async def get_bulk_pending_requests(
+    status: Optional[str] = None,
+    limit: int = 100,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Get pending document requests across all employees for monitoring.
+    """
+    query = {"person_type": "employee"}
+    if status:
+        query["status"] = status
+    else:
+        query["status"] = {"$in": ["sent", "pending_send", "clicked", "action_started"]}
+    
+    requests = await db.email_requests.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Enrich with employee names
+    emp_ids = list(set(r.get("person_id") for r in requests if r.get("person_id")))
+    employees = await EmployeesRepository.list_employees(
+        filter_dict={"id": {"$in": emp_ids}},
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    emp_map = {e["id"]: e for e in employees}
+    
+    # Get requirement names
+    req_ids = list(set(r.get("requirement_id") for r in requests if r.get("requirement_id")))
+    doc_types = {}
+    async for dt in db.document_types.find({"id": {"$in": req_ids}}, {"_id": 0, "id": 1, "name": 1}):
+        doc_types[dt["id"]] = dt["name"]
+    
+    for req in requests:
+        emp = emp_map.get(req.get("person_id"), {})
+        req["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip() or "Unknown"
+        req["employee_email"] = emp.get("email", "")
+        req["requirement_name"] = doc_types.get(req.get("requirement_id"), req.get("requirement_id", "Unknown"))
+    
+    return {
+        "total": len(requests),
+        "requests": requests
+    }
+
+
+@api_router.post("/bulk/cancel-requests")
+async def cancel_bulk_requests(
+    request_ids: List[str] = Body(..., embed=True),
+    reason: Optional[str] = Body(None, embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Cancel multiple pending document requests at once.
+    """
+    if not request_ids:
+        raise HTTPException(status_code=400, detail="At least one request ID required")
+    
+    cancelled = 0
+    errors = []
+    
+    for req_id in request_ids:
+        try:
+            result = await db.email_requests.update_one(
+                {"id": req_id, "status": {"$in": ["sent", "pending_send", "clicked", "action_started"]}},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "resolved_at": datetime.now(timezone.utc).isoformat(),
+                        "cancellation_reason": reason
+                    },
+                    "$push": {
+                        "events": {
+                            "type": "cancelled",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "actor_id": user['user_id'],
+                            "reason": reason
+                        }
+                    }
+                }
+            )
+            if result.modified_count > 0:
+                cancelled += 1
+        except Exception as e:
+            errors.append(f"Failed to cancel {req_id}: {str(e)}")
+    
+    await log_audit_action(user['user_id'], "bulk_cancel_requests", "system", "bulk", {
+        "request_ids": request_ids,
+        "cancelled": cancelled,
+        "reason": reason
+    })
+    
+    return {
+        "cancelled": cancelled,
+        "errors": errors
+    }
+
+
 # ==================== NHS-LEVEL REFEREE OUTREACH SYSTEM ====================
 
 REFEREE_FORM_TEMPLATE = {

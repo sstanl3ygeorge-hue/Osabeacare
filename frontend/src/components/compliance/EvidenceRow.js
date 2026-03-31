@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { 
   Upload, FileText, RefreshCw, CheckCircle, XCircle, Eye, Clock, 
   AlertTriangle, ChevronDown, ChevronUp, MoreHorizontal, History,
-  FileSearch, Trash2, Archive
+  FileSearch, Trash2, Archive, Send
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { formatBackendDate } from '../../lib/dateUtils';
-import { RequestStatusInline } from './RequestStatusBadge';
+import RequestLifecycleInline, { RequestLifecycleSummary } from './RequestLifecycleInline';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -61,8 +61,12 @@ export default function EvidenceRow({
     has_more_documents,
     pending_requests = [],
     allowed_actions = [],
-    paired_check_key
+    paired_check_key,
+    request_lifecycle  // Phase D4: Inline request lifecycle data
   } = row;
+  
+  // Check if this is a multi-file requirement (like proof of address)
+  const isMultiFile = key === 'proof_of_address_evidence' || key === 'proof_of_address';
 
   // Status colors - NEUTRAL for evidence rows (Phase 4B)
   // Evidence rows should never show green/red - they are supporting documents
@@ -125,8 +129,11 @@ export default function EvidenceRow({
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-sm text-text-muted truncate">{status_summary}</p>
-              {/* Request Status Inline - Phase D3 */}
-              <RequestStatusInline employeeId={employeeId} requirementKey={key} />
+              {/* Request Status Summary - Phase D4 */}
+              <RequestLifecycleSummary 
+                requestLifecycle={request_lifecycle} 
+                requirementKey={key} 
+              />
             </div>
           </div>
           
@@ -332,19 +339,23 @@ export default function EvidenceRow({
             </div>
           )}
           
-          {/* Pending Requests */}
-          {pending_requests.length > 0 && (
+          {/* Request Lifecycle - Phase D4 */}
+          {request_lifecycle && (
             <div className="mt-4 pt-4 border-t border-gray-100">
               <h5 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
-                Pending Requests ({pending_requests.length})
+                Request Status
               </h5>
-              {pending_requests.map((req, idx) => (
-                <div key={req.id || idx} className="flex items-center gap-2 text-sm text-blue-600">
-                  <Clock className="h-4 w-4" />
-                  <span>Request sent {formatBackendDate(req.created_at, { format: 'relative' })}</span>
-                  <Badge variant="outline" className="text-xs">{req.status}</Badge>
-                </div>
-              ))}
+              <RequestLifecycleInline
+                requestLifecycle={request_lifecycle}
+                employeeId={employeeId}
+                employeeEmail={employeeEmail}
+                requirementKey={key}
+                requirementTitle={title}
+                onRequest={onRequest}
+                onRefresh={onRefresh}
+                isMultiFile={isMultiFile}
+                showQuickActions={!isAuditor}
+              />
             </div>
           )}
           

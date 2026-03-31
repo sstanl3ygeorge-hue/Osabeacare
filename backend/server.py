@@ -26817,11 +26817,106 @@ async def get_compliance_file(
                 "message": f"Many active files ({active_count}) - consider archiving old versions"
             })
         
-        # Pending requests
-        pending_requests = []
+        # Collect all requests for this requirement
+        all_requests = []
         for req_key in doc_requirement_keys:
-            reqs = request_by_requirement.get(req_key, [])
-            pending_requests.extend([r for r in reqs if r.get("status") in ["sent", "clicked", "action_started"]])
+            all_requests.extend(request_by_requirement.get(req_key, []))
+        
+        # Sort by created_at descending
+        all_requests.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        
+        # Pending (active) requests
+        pending_requests = [r for r in all_requests if r.get("status") in ["sent", "clicked", "action_started"]]
+        
+        # Build request lifecycle data
+        current_request = None
+        for req in all_requests:
+            if req.get("status") not in ["completed", "expired", "cancelled", "superseded"]:
+                current_request = req
+                break
+        
+        # Extract event timestamps from current request
+        request_lifecycle = {
+            "status": "not_requested",
+            "current_request": None,
+            "last_requested_at": all_requests[0].get("created_at") if all_requests else None,
+            "last_viewed_at": None,
+            "last_submitted_at": None,
+            "source": None,
+            "is_stale": False,
+            "stale_days": 0,
+            "files_submitted": 0,
+            "files_needed": config.get("required_count", 1) if config.get("multi_file") else 1,
+            "can_resend": False,
+            "can_request_replacement": False,
+            "is_replacement_request": False
+        }
+        
+        if current_request:
+            events = current_request.get("events", [])
+            clicked_at = next((e.get("timestamp") for e in events if e.get("event_type") == "clicked"), None)
+            submitted_at = next((e.get("timestamp") for e in events if e.get("event_type") == "submitted"), None)
+            
+            # Determine status from events
+            if submitted_at:
+                request_lifecycle["status"] = "submitted"
+            elif clicked_at:
+                request_lifecycle["status"] = "viewed"
+            elif current_request.get("sent_at"):
+                request_lifecycle["status"] = "sent"
+            else:
+                request_lifecycle["status"] = "pending"
+            
+            request_lifecycle["current_request"] = {
+                "id": current_request.get("request_id") or current_request.get("id"),
+                "status": current_request.get("status"),
+                "source": current_request.get("source", "manual"),
+                "sent_at": current_request.get("sent_at"),
+                "viewed_at": clicked_at,
+                "submitted_at": submitted_at,
+                "due_date": current_request.get("due_date"),
+                "reminder_count": current_request.get("reminder_count", 0),
+                "is_replacement": current_request.get("is_replacement_request", False)
+            }
+            
+            request_lifecycle["last_viewed_at"] = clicked_at
+            request_lifecycle["last_submitted_at"] = submitted_at
+            request_lifecycle["source"] = current_request.get("source", "manual")
+            request_lifecycle["is_replacement_request"] = current_request.get("is_replacement_request", False)
+            
+            # Check if stale (sent but not submitted after N days)
+            sent_at = current_request.get("sent_at")
+            if sent_at and not submitted_at:
+                try:
+                    from datetime import datetime, timezone
+                    sent_date = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+                    days_since = (datetime.now(timezone.utc) - sent_date).days
+                    if days_since >= 7:
+                        request_lifecycle["is_stale"] = True
+                        request_lifecycle["stale_days"] = days_since
+                        request_lifecycle["can_resend"] = True
+                except:
+                    pass
+            
+            # Can resend if request is sent but not submitted
+            if request_lifecycle["status"] in ["sent", "viewed"]:
+                request_lifecycle["can_resend"] = True
+        else:
+            # No current request
+            request_lifecycle["status"] = "not_requested"
+        
+        # Can request replacement if files exist and verified
+        if verified_count > 0:
+            request_lifecycle["can_request_replacement"] = True
+        
+        # Multi-file awareness - count submitted files in this request cycle
+        if config.get("multi_file"):
+            # Count files uploaded since last request
+            last_request_date = all_requests[0].get("created_at") if all_requests else None
+            if last_request_date:
+                files_submitted = len([d for d in active_docs if d.get("uploaded_at", d.get("created_at", "")) >= last_request_date])
+                request_lifecycle["files_submitted"] = files_submitted
+            request_lifecycle["files_needed"] = max(0, (config.get("required_count", 2)) - active_count)
         
         # Determine allowed actions for evidence row
         allowed_actions = []
@@ -26894,7 +26989,10 @@ async def get_compliance_file(
                     "created_at": r.get("created_at")
                 }
                 for r in pending_requests[:3]
-            ]
+            ],
+            
+            # Request lifecycle (Phase D4)
+            "request_lifecycle": request_lifecycle
         }
     
     # =========================================================================

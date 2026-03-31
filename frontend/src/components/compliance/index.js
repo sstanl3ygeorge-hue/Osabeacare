@@ -10,3 +10,4 @@ export { default as AgreementRow } from './AgreementRow';
 export { default as DualRowComplianceSection } from './DualRowComplianceSection';
 export { default as RecordCheckDialog } from './RecordCheckDialog';
 export { default as CompleteAgreementDialog } from './CompleteAgreementDialog';
+export { default as SendAgreementDialog } from './SendAgreementDialog';

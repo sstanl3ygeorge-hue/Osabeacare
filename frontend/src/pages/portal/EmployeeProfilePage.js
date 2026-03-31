@@ -21,7 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
-import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog, SendAgreementDialog } from '../../components/compliance';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -287,6 +287,9 @@ export default function EmployeeProfilePage() {
   const [completeAgreementKey, setCompleteAgreementKey] = useState(null);
   const [completeAgreementTitle, setCompleteAgreementTitle] = useState('');
   const [completeAgreementMode, setCompleteAgreementMode] = useState('admin_assisted');
+  const [sendAgreementDialogOpen, setSendAgreementDialogOpen] = useState(false);
+  const [sendAgreementKey, setSendAgreementKey] = useState(null);
+  const [sendAgreementTitle, setSendAgreementTitle] = useState('');
   
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
   const fetchRecruitmentStatus = async () => {
@@ -4322,9 +4325,9 @@ export default function EmployeeProfilePage() {
                         setUploadDialogOpen(true);
                       }}
                       onRequest={(key, title) => {
-                        // Trigger request dialog
+                        // Trigger request document dialog
                         setSelectedRequirement(key);
-                        setRequestDialogOpen(true);
+                        setRequestDocDialogOpen(true);
                       }}
                       onPreviewFile={(doc) => {
                         if (doc.file_url) {
@@ -4341,12 +4344,10 @@ export default function EmployeeProfilePage() {
                         setRecordCheckDialogOpen(true);
                       }}
                       onSendAgreement={(agreementKey, title) => {
-                        // For now, open the complete agreement dialog
-                        // In future, implement send form functionality
-                        setCompleteAgreementKey(agreementKey);
-                        setCompleteAgreementTitle(title);
-                        setCompleteAgreementMode('admin_assisted');
-                        setCompleteAgreementDialogOpen(true);
+                        // Open the send agreement dialog to email form to employee
+                        setSendAgreementKey(agreementKey);
+                        setSendAgreementTitle(title);
+                        setSendAgreementDialogOpen(true);
                       }}
                       onFillAgreement={(agreementKey, title) => {
                         setCompleteAgreementKey(agreementKey);
@@ -5446,6 +5447,9 @@ export default function EmployeeProfilePage() {
                     );
                   });
                   })()}
+                      </div>
+                    </details>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -9451,6 +9455,61 @@ export default function EmployeeProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      {/* ========== DUAL-ROW COMPLIANCE MODEL DIALOGS (STEP 11) ========== */}
+      
+      {/* Record Check Dialog */}
+      <RecordCheckDialog
+        open={recordCheckDialogOpen}
+        onClose={() => {
+          setRecordCheckDialogOpen(false);
+          setRecordCheckType(null);
+        }}
+        employeeId={employeeId}
+        checkType={recordCheckType}
+        onComplete={() => {
+          fetchData();
+          fetchCompliance();
+        }}
+      />
+      
+      {/* Complete Agreement Dialog */}
+      <CompleteAgreementDialog
+        open={completeAgreementDialogOpen}
+        onClose={() => {
+          setCompleteAgreementDialogOpen(false);
+          setCompleteAgreementKey(null);
+          setCompleteAgreementTitle('');
+          setCompleteAgreementMode('admin_assisted');
+        }}
+        employeeId={employeeId}
+        agreementKey={completeAgreementKey}
+        agreementTitle={completeAgreementTitle}
+        mode={completeAgreementMode}
+        onComplete={() => {
+          fetchData();
+          fetchCompliance();
+        }}
+      />
+      
+      {/* Send Agreement Dialog */}
+      <SendAgreementDialog
+        open={sendAgreementDialogOpen}
+        onClose={() => {
+          setSendAgreementDialogOpen(false);
+          setSendAgreementKey(null);
+          setSendAgreementTitle('');
+        }}
+        employeeId={employeeId}
+        employeeEmail={employee?.email}
+        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        agreementKey={sendAgreementKey}
+        agreementTitle={sendAgreementTitle}
+        onComplete={() => {
+          fetchData();
+          fetchCompliance();
+        }}
+      />
     </div>
   );
 }

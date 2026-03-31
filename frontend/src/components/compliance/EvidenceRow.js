@@ -150,7 +150,7 @@ export default function EvidenceRow({
           )}
         </div>
         
-        {/* Actions */}
+        {/* Actions - Simplified to 3 primaries: Upload/Add, Request, View Files */}
         <div className="flex items-center gap-2 ml-4">
           {/* View Files - Always show when there are files */}
           {counts.active_files > 0 && (
@@ -158,7 +158,7 @@ export default function EvidenceRow({
               size="sm"
               variant="outline"
               onClick={(e) => { e.stopPropagation(); if (onViewFiles) onViewFiles(key, title); }}
-              className="h-8 text-xs rounded-lg"
+              className="h-8 text-xs rounded-lg border-gray-300"
               data-testid={`view-files-${key}`}
             >
               <Eye className="h-3.5 w-3.5 mr-1" />
@@ -168,13 +168,13 @@ export default function EvidenceRow({
           
           {!isAuditor && (
             <>
-              {/* Primary Action: Upload or Add File */}
+              {/* Upload (no files) or Add (has files) */}
               {allowed_actions.includes('upload') && counts.active_files === 0 && (
                 <Button
                   size="sm"
-                  variant="default"
+                  variant="outline"
                   onClick={(e) => { e.stopPropagation(); if (onUpload) onUpload(key); }}
-                  className="h-8 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg"
+                  className="h-8 text-xs rounded-lg border-gray-300"
                   data-testid={`upload-${key}`}
                 >
                   <Upload className="h-3.5 w-3.5 mr-1" />
@@ -185,9 +185,9 @@ export default function EvidenceRow({
               {allowed_actions.includes('add_file') && counts.active_files > 0 && (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onClick={(e) => { e.stopPropagation(); if (onUpload) onUpload(key); }}
-                  className="h-8 text-xs rounded-lg"
+                  className="h-8 text-xs text-gray-600 hover:text-gray-800"
                   data-testid={`add-file-${key}`}
                 >
                   <Upload className="h-3.5 w-3.5 mr-1" />
@@ -195,7 +195,7 @@ export default function EvidenceRow({
                 </Button>
               )}
               
-              {/* Request Action */}
+              {/* Request - Only show if requestable and has email */}
               {allowed_actions.includes('request') && employeeEmail && (
                 <Button
                   size="sm"
@@ -209,18 +209,6 @@ export default function EvidenceRow({
               )}
             </>
           )}
-          
-          {/* History Button - Phase D3 */}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={(e) => { e.stopPropagation(); if (onViewHistory) onViewHistory(key, title); }}
-            className="h-8 w-8 p-0 text-text-muted hover:text-text-primary"
-            data-testid={`history-${key}`}
-            title="View History"
-          >
-            <History className="h-4 w-4" />
-          </Button>
           
           {/* Expand/Collapse */}
           <Button
@@ -367,11 +355,24 @@ export default function EvidenceRow({
           )}
           
           {/* Stats Summary - File counts only (verification status shown on Check row) */}
-          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-4 text-xs text-text-muted">
-            <span>{counts.active_files || 0} active</span>
-            <span>{counts.awaiting_verification || 0} pending review</span>
-            <span>{counts.superseded || 0} superseded</span>
-            <span>{counts.history || 0} in history</span>
+          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+            <div className="flex flex-wrap gap-4 text-xs text-text-muted">
+              <span>{counts.active_files || 0} active</span>
+              <span>{counts.awaiting_verification || 0} pending review</span>
+              <span>{counts.superseded || 0} superseded</span>
+              <span>{counts.history || 0} in history</span>
+            </div>
+            {/* History Button - Moved to expanded section */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onViewHistory && onViewHistory(key, title)}
+              className="h-7 text-xs text-text-muted hover:text-text-primary"
+              data-testid={`history-${key}`}
+            >
+              <History className="h-3.5 w-3.5 mr-1" />
+              View History
+            </Button>
           </div>
         </div>
       )}

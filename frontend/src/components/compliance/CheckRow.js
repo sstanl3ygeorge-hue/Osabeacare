@@ -184,20 +184,6 @@ export default function CheckRow({
             </>
           )}
           
-          {/* View History */}
-          {counts.history > 0 && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={(e) => { e.stopPropagation(); if (onViewHistory) onViewHistory(key); }}
-              className="h-8 text-xs"
-              data-testid={`history-${key}`}
-            >
-              <History className="h-3.5 w-3.5 mr-1" />
-              {counts.history}
-            </Button>
-          )}
-          
           {/* Expand/Collapse */}
           <Button
             size="sm"
@@ -275,6 +261,23 @@ export default function CheckRow({
               </div>
             </div>
           )}
+          
+          {/* Footer with History */}
+          <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+            <span className="text-xs text-text-muted">
+              {counts.history > 0 ? `${counts.history} previous check${counts.history !== 1 ? 's' : ''}` : 'First check'}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onViewHistory && onViewHistory(key, title)}
+              className="h-7 text-xs text-text-muted hover:text-text-primary"
+              data-testid={`history-${key}`}
+            >
+              <History className="h-3.5 w-3.5 mr-1" />
+              View History
+            </Button>
+          </div>
         </div>
       )}
       

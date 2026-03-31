@@ -55,6 +55,40 @@ Verified all P0 functional workflows are working.
 - ✅ Multi-file rows (DBS with 2 files) can manage each file independently
 - ✅ Safe file correction (no destructive delete, audit preserved)
 
+## Compliance File Stabilisation - STEP B (2026-03-31)
+**Status**: COMPLETE ✅
+
+### STEP B.1: Simplified Row Actions ✅ (2026-03-31)
+Reduced visible buttons to 3 primaries per row type.
+
+**Evidence Rows (Neutral):**
+- View Files (when files exist)
+- Upload (no files) / Add (has files)
+- Request (if requestable)
+- History button moved to expanded section footer
+
+**Check Rows (Authoritative):**
+- Record Check (when no check) or Update (when has check)
+- History button moved to expanded section footer
+- Shows "X previous checks" count
+
+### STEP B.2: Visual Hierarchy ✅ (2026-03-31)
+Clear distinction between supporting evidence and authoritative checks.
+
+**Evidence Row Styling:**
+- Neutral grey background (`bg-gray-50/30`)
+- Grey icon (`text-gray-500`)
+- Grey badges and status indicators
+- Never shows green/red - they are supporting documents
+
+**Check Row Styling:**
+- Green (`bg-green-50/30`, `text-green-600`) - Verified
+- Amber (`bg-amber-50/30`, `text-amber-600`) - Partial/Follow-up
+- Red (`bg-red-50/30`, `text-red-600`) - Not Recorded
+- Check rows ARE the authoritative source for readiness
+
+**Testing:** 9/9 UI tests passed (iteration_96.json). 100% success rate.
+
 ---
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)

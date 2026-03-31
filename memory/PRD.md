@@ -40,14 +40,32 @@ Implemented the complete frontend UI for the Dual-Row Evidence/Check Model:
 - `CompleteAgreementDialog.js` - Dialog for completing agreements (admin-assisted, phone-assisted)
 - `SendAgreementDialog.js` - Dialog for sending agreement forms to employees via secure link
 
+### Phase 4A: High-Value Cleanup ✅ (2026-03-31)
+Implemented operational workflow improvements:
+
+**New Components:**
+- `ComplianceActionBar.js` - Global action bar with Upload Evidence, Request Missing Items, Enter Check dropdown, Export
+- `WhatsNeededPanel.js` - Bottom panel showing blocking/warning items with "Request All Missing" button
+- `TrainingSummaryCard.js` - Compact training summary with Manage Training link
+
+**UI Changes:**
+- ✅ **Top Action Bar** added directly under CardHeader with 4 action buttons
+- ✅ **Enter Check dropdown** shows 4 check types (RTW, DBS, Identity, Address)
+- ✅ **Training Summary** replaced detailed training rows (link to Training tab)
+- ✅ **What's Needed Panel** shows blocking/warning items at bottom
+- ✅ **All Files tab removed** from navigation (consolidated into Compliance File)
+- ✅ **Compact Status Panel** - Simplified work readiness display (only shows when NOT_READY or READY_WITH_CONDITIONS)
+- ✅ **Removed "Complete Required Items First"** instruction panel (redundant)
+
+**Tab Navigation:**
+Now shows 7 tabs: Overview, Compliance File, Policies, Training, Audit Log, Recruitment, Recurring
+
 **UI Features:**
 - Section-based layout (Right to Work, DBS, Identity, Proof of Address, Agreements)
 - Collapsible sections with blocking item badges
 - Evidence rows: Blue file icon, file counts, extraction review badges
 - Check rows: Green/Amber/Red status indicators, verification method and date
 - Agreement rows: Purple icon, version acknowledged, completion mode
-- Blocking requirements banner with clear messaging
-- "Serializer: dual_row_v1" footer for debugging
 - Legacy Checklist View preserved as collapsible backup
 
 ### Key Principle

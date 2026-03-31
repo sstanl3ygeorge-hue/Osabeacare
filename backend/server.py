@@ -26002,19 +26002,27 @@ async def get_compliance_file(
     user: dict = Depends(get_current_user)
 ):
     """
-    Compliance File - Single operational workflow page.
+    Compliance File - Dual-Row Model (Step 11)
     
-    Shows for each requirement:
-    - Status summary (not just file count)
-    - Verified count, pending count, requested count
-    - Missing items
-    - Extraction review status
-    - Verification actions needed
-    - Request history
+    Returns explicit paired rows for each compliance area:
+    - Evidence row (uploaded/supporting files)
+    - Check row (employer/admin verification outcome)
+    - Agreement row (form acknowledgements)
+    
+    Each row includes:
+    - row_type: "evidence" | "check" | "form_acknowledgement"
+    - allowed_actions: explicit list of available actions
+    - readiness_relevance: whether it affects readiness directly
+    - counts: active files, verified, pending review, etc.
+    - migration_info: if backfilled, shows created_source and migration_basis
     """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # =========================================================================
+    # FETCH ALL DATA
+    # =========================================================================
     
     # Get all documents for employee
     documents = await db.employee_documents.find(
@@ -26045,14 +26053,22 @@ async def get_compliance_file(
             request_by_requirement[req_id] = []
         request_by_requirement[req_id].append(req)
     
+    # Get check records (Step 11)
+    rtw_check = await CheckRecordService.get_current_rtw_check(employee_id)
+    dbs_check = await CheckRecordService.get_current_dbs_check(employee_id)
+    identity_check = await CheckRecordService.get_current_identity_verification(employee_id)
+    address_verification = await CheckRecordService.get_current_address_verification(employee_id)
+    
+    # Get check history counts
+    rtw_history = await CheckRecordService.get_rtw_check_history(employee_id, limit=50)
+    dbs_history = await CheckRecordService.get_dbs_check_history(employee_id, limit=50)
+    
+    # Get agreements
+    agreements = await AgreementAcknowledgementService.get_employee_agreements(employee_id)
+    
     # Get reference integrity
     ref1 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
     ref2 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
-    
-    # Get compliance requirements for status
-    compliance = await get_compliance_requirements(employee_id, user)
-    req_list = compliance.get("requirements", [])
-    req_lookup = {r.get("id"): r for r in req_list}
     
     # Group documents by requirement
     docs_by_requirement = {}
@@ -26062,23 +26078,33 @@ async def get_compliance_file(
             docs_by_requirement[req_id] = []
         docs_by_requirement[req_id].append(doc)
     
-    # Build requirement rows
-    def build_requirement_row(req_key: str, config: dict = None) -> dict:
-        config = config or RequirementConfig.get(req_key)
-        req_info = req_lookup.get(req_key, {})
-        docs = docs_by_requirement.get(req_key, [])
-        reqs = request_by_requirement.get(req_key, [])
+    # =========================================================================
+    # HELPER: Build Evidence Row
+    # =========================================================================
+    def build_evidence_row(
+        key: str, 
+        title: str, 
+        doc_requirement_keys: List[str],
+        paired_check_key: str,
+        config: dict = None
+    ) -> dict:
+        """Build an evidence row (supporting files only)."""
+        config = config or RequirementConfig.get_dual_row_config(key) or RequirementConfig.get(key)
         
-        # Filter out superseded/error documents for counts
-        active_docs = [d for d in docs if d.get("status") not in [
+        # Collect documents from multiple requirement keys
+        all_docs = []
+        for req_key in doc_requirement_keys:
+            all_docs.extend(docs_by_requirement.get(req_key, []))
+        
+        # Filter out superseded/error documents
+        active_docs = [d for d in all_docs if d.get("status") not in [
             DocumentStatus.SUPERSEDED.value, 
             DocumentStatus.UPLOADED_IN_ERROR.value,
             DocumentStatus.MISFILED.value
         ]]
         
         verified_count = len([d for d in active_docs if d.get("verified")])
-        awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") != DocumentStatus.REJECTED.value])
-        rejected_count = len([d for d in active_docs if d.get("status") == DocumentStatus.REJECTED.value])
+        awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") not in [DocumentStatus.REJECTED.value]])
         
         # Check extraction status
         awaiting_extraction = 0
@@ -26087,103 +26113,472 @@ async def get_compliance_file(
             if ext and ext.get("review_status") == "awaiting_review":
                 awaiting_extraction += 1
         
+        # Active file limit warnings
+        active_count = len(active_docs)
+        file_warnings = []
+        if active_count >= ACTIVE_FILE_LIMITS["strong_warning"]:
+            file_warnings.append({
+                "level": "strong",
+                "message": f"Too many active files ({active_count}) - review and archive/supersede duplicates"
+            })
+        elif active_count >= ACTIVE_FILE_LIMITS["soft_warning"]:
+            file_warnings.append({
+                "level": "soft",
+                "message": f"Many active files ({active_count}) - consider archiving old versions"
+            })
+        
         # Pending requests
-        pending_requests = [r for r in reqs if r.get("status") in ["sent", "clicked", "action_started"]]
+        pending_requests = []
+        for req_key in doc_requirement_keys:
+            reqs = request_by_requirement.get(req_key, [])
+            pending_requests.extend([r for r in reqs if r.get("status") in ["sent", "clicked", "action_started"]])
         
-        # Build status summary
-        min_required = config.get("min_required", 1)
-        status_parts = []
-        
-        if min_required and verified_count >= min_required:
-            status = "complete"
-            status_parts.append(f"{verified_count}/{min_required} verified")
-        elif min_required and verified_count > 0:
-            status = "partial"
-            status_parts.append(f"{verified_count}/{min_required} verified")
-        elif awaiting_verification > 0 or awaiting_extraction > 0:
-            status = "awaiting_review"
-            if awaiting_extraction > 0:
-                status_parts.append(f"{awaiting_extraction} awaiting extraction review")
-            if awaiting_verification > 0:
-                status_parts.append(f"{awaiting_verification} awaiting verification")
-        elif len(pending_requests) > 0:
-            status = "requested"
-            status_parts.append(f"Requested on {pending_requests[0].get('created_at', '')[:10]}")
-        else:
-            status = "missing"
-            status_parts.append("Missing")
+        # Determine allowed actions for evidence row
+        allowed_actions = []
+        if config.get("allow_admin_upload", True):
+            allowed_actions.append("upload")
+        if config.get("multi_file", False) and active_count > 0:
+            allowed_actions.append("add_file")
+        if config.get("allow_request", True):
+            allowed_actions.append("request")
+        if config.get("allow_extraction", False) and active_count > 0:
+            allowed_actions.append("review_extraction")
+        if config.get("allow_verification", False) and awaiting_verification > 0:
+            allowed_actions.append("verify")
+            allowed_actions.append("reject")
+        allowed_actions.extend(["mark_uploaded_in_error", "supersede", "view_history"])
         
         return {
-            "key": req_key,
-            "title": config.get("title", req_key.replace("_", " ").title()),
-            "config": config,
-            "status": status,
-            "status_summary": "; ".join(status_parts),
+            "key": key,
+            "title": title,
+            "row_type": "evidence",
+            "paired_check_key": paired_check_key,
+            
+            # Readiness relevance
+            "affects_readiness": False,  # Evidence alone doesn't satisfy readiness
+            "is_supporting_evidence": True,
+            "blocker_text": None,  # Evidence rows don't block
+            
+            # Counts
             "counts": {
-                "total_files": len(docs),
-                "active_files": len(active_docs),
+                "active_files": active_count,
+                "total_files": len(all_docs),
                 "verified": verified_count,
                 "awaiting_verification": awaiting_verification,
-                "awaiting_extraction": awaiting_extraction,
-                "rejected": rejected_count,
-                "superseded": len([d for d in docs if d.get("status") == DocumentStatus.SUPERSEDED.value])
+                "awaiting_extraction_review": awaiting_extraction,
+                "rejected": len([d for d in all_docs if d.get("status") == DocumentStatus.REJECTED.value]),
+                "superseded": len([d for d in all_docs if d.get("status") == DocumentStatus.SUPERSEDED.value]),
+                "pending_requests": len(pending_requests),
+                "history": len(all_docs)
             },
-            "min_required": min_required,
-            "meets_requirement": min_required is None or verified_count >= min_required,
-            "blocking": min_required and verified_count < min_required,
-            "documents": [
+            
+            # File limit warnings
+            "file_warnings": file_warnings,
+            
+            # Status summary
+            "status": "has_files" if active_count > 0 else "empty",
+            "status_summary": f"{active_count} active file{'s' if active_count != 1 else ''}" if active_count > 0 else "No files uploaded",
+            
+            # Allowed actions
+            "allowed_actions": allowed_actions,
+            
+            # Documents (limited to top 3 inline, full list in expanded view)
+            "documents_preview": [
                 {
                     "id": d.get("id"),
                     "file_name": d.get("file_name") or d.get("original_filename"),
                     "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
                     "status": d.get("status", "uploaded"),
                     "verified": d.get("verified", False),
-                    "verified_at": d.get("verified_at"),
-                    "extraction": extractions.get(d["id"])
+                    "extraction_status": extractions.get(d["id"], {}).get("review_status")
                 }
-                for d in docs
+                for d in active_docs[:3]
             ],
+            "has_more_documents": active_count > 3,
+            
+            # Pending requests
             "pending_requests": [
                 {
                     "id": r.get("id"),
                     "status": r.get("status"),
-                    "created_at": r.get("created_at"),
-                    "viewed_at": next((e.get("timestamp") for e in r.get("events", []) if e.get("type") == "clicked"), None)
+                    "created_at": r.get("created_at")
                 }
-                for r in pending_requests
-            ],
-            "actions": {
-                "can_request": config.get("allow_request", True),
-                "can_upload": config.get("allow_admin_upload", True),
-                "can_add_file": config.get("multi_file", False) and len(active_docs) > 0,
-                "needs_extraction_review": awaiting_extraction > 0,
-                "needs_verification": awaiting_verification > 0 and awaiting_extraction == 0
-            }
+                for r in pending_requests[:3]
+            ]
         }
     
-    # Build sections
+    # =========================================================================
+    # HELPER: Build Check Row
+    # =========================================================================
+    def build_check_row(
+        key: str,
+        title: str,
+        check_data: Optional[dict],
+        check_history: List[dict],
+        paired_evidence_key: str,
+        blocker_code: str,
+        blocker_message: str,
+        config: dict = None
+    ) -> dict:
+        """Build a check row (employer/admin verification outcome)."""
+        config = config or RequirementConfig.get_dual_row_config(key) or {}
+        
+        has_check = check_data is not None
+        is_verified = has_check and check_data.get("outcome") == "verified"
+        
+        # Build status summary
+        if is_verified:
+            method = check_data.get("method", "").replace("_", " ").title()
+            checked_at = check_data.get("checked_at", "")[:10]
+            status_summary = f"Verified • Method: {method} • Checked {checked_at}"
+            status = "verified"
+        elif has_check:
+            outcome = check_data.get("outcome", "unknown").replace("_", " ").title()
+            status_summary = f"{outcome}"
+            status = "recorded"
+        else:
+            status_summary = "Not Recorded"
+            status = "not_recorded"
+        
+        # Determine blocker text
+        blocker_text = None
+        if not is_verified:
+            blocker_text = blocker_message
+        
+        # Check for follow-up or review due
+        follow_up_info = None
+        if has_check:
+            follow_up_field = check_data.get("follow_up_due_at") or check_data.get("review_due_at")
+            if follow_up_field:
+                try:
+                    due_date = datetime.fromisoformat(follow_up_field.replace('Z', '+00:00')).date() if isinstance(follow_up_field, str) else follow_up_field
+                    days_until = (due_date - datetime.now(timezone.utc).date()).days
+                    
+                    # Use "Review Due" not "Expires" for DBS (per spec)
+                    label = "Review Due" if "dbs" in key.lower() else "Follow-up Due"
+                    
+                    follow_up_info = {
+                        "label": label,
+                        "date": follow_up_field,
+                        "days_until": days_until,
+                        "is_overdue": days_until < 0,
+                        "is_due_soon": 0 <= days_until <= 30
+                    }
+                except:
+                    pass
+        
+        # Migration transparency
+        migration_info = None
+        if has_check and check_data.get("created_source") == "migration":
+            migration_info = {
+                "created_source": "migration",
+                "migration_basis": check_data.get("migration_basis"),
+                "migrated_at": check_data.get("migrated_at")
+            }
+        
+        # Determine allowed actions
+        allowed_actions = ["record_check"] if not has_check else ["update_check"]
+        if has_check and check_data.get("outcome") != "verified":
+            allowed_actions.append("verify")
+        allowed_actions.append("view_history")
+        
+        return {
+            "key": key,
+            "title": title,
+            "row_type": "check",
+            "paired_evidence_key": paired_evidence_key,
+            
+            # Readiness relevance
+            "affects_readiness": True,
+            "is_supporting_evidence": False,
+            "blocker_text": blocker_text,
+            
+            # Check data
+            "has_check": has_check,
+            "is_verified": is_verified,
+            "check_data": {
+                "id": check_data.get("id") if has_check else None,
+                "method": check_data.get("method") if has_check else None,
+                "outcome": check_data.get("outcome") if has_check else None,
+                "checked_at": check_data.get("checked_at") if has_check else None,
+                "checked_by": check_data.get("checked_by") if has_check else None,
+                "notes": check_data.get("notes") if has_check else None,
+                "evidence_document_id": check_data.get("evidence_document_id") if has_check else None
+            } if has_check else None,
+            
+            # Follow-up / Review due info
+            "follow_up_info": follow_up_info,
+            
+            # Counts
+            "counts": {
+                "history": len(check_history)
+            },
+            
+            # Status summary
+            "status": status,
+            "status_summary": status_summary,
+            
+            # Allowed actions
+            "allowed_actions": allowed_actions,
+            
+            # Migration info
+            "migration_info": migration_info
+        }
+    
+    # =========================================================================
+    # HELPER: Build Address Verification Row (special case - count-based)
+    # =========================================================================
+    def build_address_verification_row() -> dict:
+        """Build address verification row (needs 2/2 verified)."""
+        has_verification = address_verification is not None
+        verified_count = address_verification.get("verified_count", 0) if has_verification else 0
+        meets_requirement = address_verification.get("meets_requirement", False) if has_verification else False
+        
+        status_summary = f"{verified_count}/2 verified"
+        blocker_text = None if meets_requirement else f"Address Verification: {verified_count}/2 verified"
+        
+        allowed_actions = ["record_check"] if not has_verification else ["update_check"]
+        allowed_actions.append("view_history")
+        
+        return {
+            "key": "address_verification",
+            "title": "Address Verification",
+            "row_type": "check",
+            "paired_evidence_key": "proof_of_address_evidence",
+            
+            "affects_readiness": True,
+            "is_supporting_evidence": False,
+            "blocker_text": blocker_text,
+            
+            "has_check": has_verification,
+            "is_verified": meets_requirement,
+            "check_data": {
+                "id": address_verification.get("id") if has_verification else None,
+                "verified_count": verified_count,
+                "minimum_required": 2,
+                "meets_requirement": meets_requirement,
+                "verified_document_ids": address_verification.get("verified_document_ids", []) if has_verification else [],
+                "verified_at": address_verification.get("verified_at") if has_verification else None,
+                "verified_by": address_verification.get("verified_by") if has_verification else None,
+                "recency_policy_passed": address_verification.get("recency_policy_passed", True) if has_verification else None
+            } if has_verification else None,
+            
+            "counts": {
+                "verified_count": verified_count,
+                "required_count": 2,
+                "history": 0  # TODO: Add history tracking
+            },
+            
+            "status": "verified" if meets_requirement else ("partial" if verified_count > 0 else "not_recorded"),
+            "status_summary": status_summary,
+            
+            "allowed_actions": allowed_actions,
+            "migration_info": None
+        }
+    
+    # =========================================================================
+    # HELPER: Build Agreement Row
+    # =========================================================================
+    def build_agreement_row(
+        key: str,
+        title: str,
+        agreement_type: str
+    ) -> dict:
+        """Build an agreement row (form acknowledgement)."""
+        # Find acknowledgements for this type
+        acks = [a for a in agreements.get("acknowledgements", []) 
+                if a.get("agreement_type") == agreement_type]
+        pending_reqs = [r for r in agreements.get("pending_requests", [])
+                       if r.get("agreement_type") == agreement_type]
+        
+        has_acknowledgement = len(acks) > 0
+        latest_ack = acks[0] if has_acknowledgement else None  # Already sorted desc
+        is_verified = has_acknowledgement and latest_ack.get("verification_status") == "verified"
+        
+        # Status summary
+        if is_verified:
+            version = latest_ack.get("version_acknowledged", "")
+            completed_at = latest_ack.get("completed_at", "")[:10]
+            mode = latest_ack.get("completion_mode", "").replace("_", " ").title()
+            status_summary = f"Verified • {version} • {mode} on {completed_at}"
+            status = "verified"
+        elif has_acknowledgement:
+            verification_status = latest_ack.get("verification_status", "unknown").replace("_", " ").title()
+            status_summary = verification_status
+            status = "awaiting_review" if latest_ack.get("verification_status") == "awaiting_review" else "recorded"
+        elif len(pending_reqs) > 0:
+            status_summary = f"Sent, awaiting completion"
+            status = "sent"
+        else:
+            status_summary = "Not completed"
+            status = "not_completed"
+        
+        blocker_text = None
+        if not is_verified:
+            blocker_text = f"{title} required"
+        
+        # Allowed actions
+        allowed_actions = []
+        if not has_acknowledgement and len(pending_reqs) == 0:
+            allowed_actions.extend(["send_form", "fill_internally", "complete_by_phone"])
+        elif has_acknowledgement and not is_verified:
+            allowed_actions.extend(["verify", "reject"])
+        elif len(pending_reqs) > 0:
+            allowed_actions.append("fill_internally")  # Admin can complete on behalf
+        allowed_actions.append("view_history")
+        
+        return {
+            "key": key,
+            "title": title,
+            "row_type": "form_acknowledgement",
+            
+            "affects_readiness": True,
+            "is_supporting_evidence": False,
+            "blocker_text": blocker_text,
+            
+            "has_acknowledgement": has_acknowledgement,
+            "is_verified": is_verified,
+            "acknowledgement_data": {
+                "id": latest_ack.get("id") if latest_ack else None,
+                "agreement_type": agreement_type,
+                "version_acknowledged": latest_ack.get("version_acknowledged") if latest_ack else None,
+                "completion_mode": latest_ack.get("completion_mode") if latest_ack else None,
+                "completed_at": latest_ack.get("completed_at") if latest_ack else None,
+                "completed_by": latest_ack.get("completed_by") if latest_ack else None,
+                "assisted_by": latest_ack.get("assisted_by") if latest_ack else None,
+                "call_note": latest_ack.get("call_note") if latest_ack else None,
+                "verification_status": latest_ack.get("verification_status") if latest_ack else None,
+                "verified_at": latest_ack.get("verified_at") if latest_ack else None,
+                "verified_by": latest_ack.get("verified_by") if latest_ack else None
+            } if latest_ack else None,
+            
+            "pending_requests": [
+                {
+                    "id": r.get("id"),
+                    "status": r.get("status"),
+                    "sent_at": r.get("sent_at"),
+                    "due_at": r.get("due_at")
+                }
+                for r in pending_reqs
+            ],
+            
+            "counts": {
+                "total_acknowledgements": len(acks),
+                "pending_requests": len(pending_reqs),
+                "history": len(acks)
+            },
+            
+            "status": status,
+            "status_summary": status_summary,
+            
+            "allowed_actions": allowed_actions
+        }
+    
+    # =========================================================================
+    # BUILD DUAL-ROW SECTIONS
+    # =========================================================================
+    
     sections = {
-        "identity_legal": {
-            "title": "Identity & Legal",
-            "requirements": [
-                build_requirement_row("id_document"),
-                build_requirement_row("right_to_work"),
-                build_requirement_row("dbs_certificate")
+        # Right to Work - Evidence + Check
+        "right_to_work": {
+            "title": "Right to Work",
+            "rows": [
+                build_evidence_row(
+                    key="right_to_work_evidence",
+                    title="Right to Work Evidence",
+                    doc_requirement_keys=["right_to_work_documents", "right_to_work"],
+                    paired_check_key="right_to_work_check"
+                ),
+                build_check_row(
+                    key="right_to_work_check",
+                    title="Right to Work Check",
+                    check_data=rtw_check,
+                    check_history=rtw_history,
+                    paired_evidence_key="right_to_work_evidence",
+                    blocker_code="right_to_work_check_missing",
+                    blocker_message="Right to Work Check not recorded"
+                )
             ]
         },
-        "address_verification": {
-            "title": "Address Verification",
-            "requirements": [
-                build_requirement_row("proof_of_address")
-            ],
-            "summary": {
-                "verified_count": len([d for d in docs_by_requirement.get("proof_of_address", []) if d.get("verified")]),
-                "minimum_required": 2,
-                "status_label": f"{len([d for d in docs_by_requirement.get('proof_of_address', []) if d.get('verified')])}/2 verified"
-            }
+        
+        # DBS - Evidence + Check
+        "dbs": {
+            "title": "DBS",
+            "rows": [
+                build_evidence_row(
+                    key="dbs_certificate_evidence",
+                    title="DBS Certificate Evidence",
+                    doc_requirement_keys=["dbs_certificate", "dbs_check"],
+                    paired_check_key="dbs_status_check"
+                ),
+                build_check_row(
+                    key="dbs_status_check",
+                    title="DBS Status Check",
+                    check_data=dbs_check,
+                    check_history=dbs_history,
+                    paired_evidence_key="dbs_certificate_evidence",
+                    blocker_code="dbs_status_check_missing",
+                    blocker_message="DBS Status Check not recorded"
+                )
+            ]
         },
-        "recruitment_integrity": {
-            "title": "Recruitment Integrity",
+        
+        # Identity - Evidence + Verification
+        "identity": {
+            "title": "Identity",
+            "rows": [
+                build_evidence_row(
+                    key="identity_evidence",
+                    title="Identity Evidence",
+                    doc_requirement_keys=["identity_documents", "id_document"],
+                    paired_check_key="identity_verification"
+                ),
+                build_check_row(
+                    key="identity_verification",
+                    title="Identity Verification",
+                    check_data=identity_check,
+                    check_history=[],  # TODO: Add history
+                    paired_evidence_key="identity_evidence",
+                    blocker_code="identity_verification_missing",
+                    blocker_message="Identity Verification not recorded"
+                )
+            ]
+        },
+        
+        # Proof of Address - Evidence + Verification (special count-based)
+        "proof_of_address": {
+            "title": "Proof of Address",
+            "rows": [
+                build_evidence_row(
+                    key="proof_of_address_evidence",
+                    title="Proof of Address Evidence",
+                    doc_requirement_keys=["proof_of_address"],
+                    paired_check_key="address_verification"
+                ),
+                build_address_verification_row()
+            ]
+        },
+        
+        # Agreements - Form-based acknowledgements
+        "agreements": {
+            "title": "Agreements",
+            "rows": [
+                build_agreement_row(
+                    key="contract_acceptance",
+                    title="Contract Acceptance",
+                    agreement_type="contract_acceptance"
+                ),
+                build_agreement_row(
+                    key="handbook_acknowledgement",
+                    title="Employee Handbook Acknowledgement",
+                    agreement_type="handbook_acknowledgement"
+                )
+            ]
+        },
+        
+        # References - Keep existing structure (already has integrity layer)
+        "references": {
+            "title": "References",
             "reference_1": {
                 "declared": ref1.get("declared_referee") if ref1 else None,
                 "response_source": ref1.get("response", {}).get("source") if ref1 else None,
@@ -26207,43 +26602,58 @@ async def get_compliance_file(
                 1 if ref2 and ref2.get("counts_toward_readiness") else 0
             ])
         },
-        "health_forms": {
-            "title": "Health & Required Forms",
-            "requirements": [
-                build_requirement_row("health_declaration"),
-                build_requirement_row("interview_form"),
-                build_requirement_row("hmrc_checklist"),
-                build_requirement_row("personal_details_form")
-            ]
-        },
+        
+        # Training - Keep existing structure
         "training": {
             "title": "Training",
-            "requirements": [
-                build_requirement_row("training")
-            ],
-            # Also include training evaluation summary
             "evaluation": await evaluate_employee_training_status(employee_id, employee.get("role", ""))
         }
     }
     
-    # Calculate overall status
-    all_requirements = []
-    for section in sections.values():
-        if isinstance(section, dict) and "requirements" in section:
-            all_requirements.extend(section["requirements"])
+    # =========================================================================
+    # CALCULATE SUMMARY
+    # =========================================================================
     
-    blocking_count = len([r for r in all_requirements if r.get("blocking")])
-    awaiting_count = len([r for r in all_requirements if r.get("status") == "awaiting_review"])
+    # Count blocking rows
+    blocking_rows = []
+    for section_key, section in sections.items():
+        if "rows" in section:
+            for row in section["rows"]:
+                if row.get("affects_readiness") and row.get("blocker_text"):
+                    blocking_rows.append({
+                        "section": section_key,
+                        "row_key": row.get("key"),
+                        "message": row.get("blocker_text")
+                    })
+    
+    # Count awaiting review rows
+    awaiting_review_rows = []
+    for section_key, section in sections.items():
+        if "rows" in section:
+            for row in section["rows"]:
+                if row.get("status") in ["awaiting_review", "recorded"]:
+                    awaiting_review_rows.append({
+                        "section": section_key,
+                        "row_key": row.get("key"),
+                        "status": row.get("status")
+                    })
     
     return {
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "serializer_version": "dual_row_v1",
+        
         "summary": {
-            "blocking_requirements": blocking_count,
-            "awaiting_review": awaiting_count,
+            "blocking_requirements": len(blocking_rows),
+            "blocking_items": blocking_rows[:5],  # Top 5 blockers
+            "awaiting_review": len(awaiting_review_rows),
             "total_pending_requests": len([r for r in requests if r.get("status") in ["sent", "clicked", "action_started"]])
         },
-        "sections": sections
+        
+        "sections": sections,
+        
+        # Legacy compatibility - will be deprecated
+        "legacy_format": False
     }
 
 

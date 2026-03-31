@@ -13,6 +13,7 @@ import io
 import zipfile
 import base64
 import json
+import csv
 from enum import Enum
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
@@ -5167,6 +5168,100 @@ async def evaluate_employee_training_status(employee_id: str, role: str = '') ->
     }
 
 
+async def get_training_audit_export(employee_id: str, role: str = '') -> dict:
+    """
+    Generate full training audit export for compliance reports.
+    
+    CONSUMES canonical training evaluation - does NOT recalculate.
+    
+    Returns structured data suitable for:
+    - CQC inspection evidence
+    - PDF compliance reports
+    - JSON audit exports
+    - Internal audit review
+    
+    Each item includes verification metadata for evidence traceability.
+    """
+    # Get canonical training evaluation (single source of truth)
+    training_eval = await evaluate_employee_training_status(employee_id, role)
+    
+    # Get raw training records for additional audit metadata
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0}).to_list(100)
+    
+    records_by_req = {}
+    for r in training_records:
+        req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_')
+        records_by_req[req_id] = r
+    
+    # Build audit export items with full verification metadata
+    audit_items = []
+    for item in training_eval.get('items', []):
+        code = item.get('code', '')
+        record = records_by_req.get(code, {})
+        
+        # Get verifier information
+        verifier_name = None
+        verified_at = None
+        if record.get('verified') or record.get('verification_status') == 'verified':
+            verified_at = record.get('verified_at') or record.get('verification_date')
+            verifier_id = record.get('verified_by')
+            if verifier_id:
+                verifier = await db.users.find_one({"id": verifier_id}, {"_id": 0, "name": 1, "email": 1})
+                if verifier:
+                    verifier_name = verifier.get('name') or verifier.get('email')
+        
+        audit_item = {
+            "code": code,
+            "title": item.get('title', code),
+            "required_for_role": True,  # All items from evaluator are required
+            "blocker_for_work": item.get('blocker', False),
+            "status": item.get('status'),
+            "detail": item.get('detail', ''),
+            "completed_at": item.get('completion_date') or record.get('completed_at'),
+            "expires_at": item.get('expires_at'),
+            "days_until_expiry": item.get('days_until_expiry'),
+            "verification_status": record.get('verification_status', 'awaiting_review' if record else None),
+            "verified_by": verifier_name,
+            "verified_at": verified_at,
+            "certificate_document_id": record.get('certificate_document_id') or record.get('evidence_id'),
+            "provider_name": record.get('provider_name'),
+            "notes": record.get('notes')
+        }
+        audit_items.append(audit_item)
+    
+    # Map overall status to audit-friendly labels
+    overall = training_eval.get('overall', 'missing')
+    overall_label_map = {
+        'current': 'All Training Current',
+        'due_soon': 'Training Renewal Due Soon',
+        'overdue': 'Training Expired/Overdue',
+        'missing': 'Required Training Missing'
+    }
+    
+    return {
+        "overall_status": overall,
+        "overall_status_label": overall_label_map.get(overall, overall),
+        "blocker_count": training_eval.get('blockerCount', 0),
+        "warning_count": training_eval.get('warningCount', 0),
+        "is_work_ready_from_training": training_eval.get('blockerCount', 0) == 0,
+        "blocking_reasons": [
+            item.get('detail') for item in audit_items
+            if item.get('blocker_for_work') and item.get('status') in ['missing', 'expired', 'awaiting_review']
+        ],
+        "warning_reasons": [
+            item.get('detail') for item in audit_items
+            if not item.get('blocker_for_work') and item.get('status') in ['missing', 'expired', 'due_soon', 'awaiting_review']
+        ],
+        "items": audit_items,
+        "total_required": len(audit_items),
+        "total_compliant": len([i for i in audit_items if i.get('status') in ['verified', 'completed']]),
+        "evaluated_at": training_eval.get('evaluatedAt')
+    }
+
+
 async def get_or_create_training_record(
     employee_id: str, 
     requirement_id: str, 
@@ -7314,6 +7409,193 @@ async def get_dashboard_training_summary(
     return summary
 
 
+@api_router.get("/audit/employee/{employee_id}/training")
+async def get_employee_training_audit(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get detailed training audit data for a specific employee.
+    
+    This is the canonical training audit export for CQC inspections.
+    Includes verification metadata, blocking reasons, and evidence traceability.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    training_audit = await get_training_audit_export(employee_id, employee.get("role", ""))
+    
+    await log_audit_action(user['user_id'], "view_training_audit", "employee", employee_id, {})
+    
+    return training_audit
+
+
+@api_router.get("/audit/training/summary")
+async def get_training_audit_summary(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get organization-wide training audit summary.
+    
+    Returns aggregate training compliance data for all employees,
+    suitable for CQC compliance reporting and inspection preparation.
+    """
+    employees = await employees_repo.list_employees(
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "employee_code": 1}
+    )
+    
+    summary = {
+        "total_employees": len(employees),
+        "fully_compliant": 0,
+        "with_warnings": 0,
+        "with_blockers": 0,
+        "training_items_verified": 0,
+        "training_items_pending": 0,
+        "training_items_missing": 0,
+        "training_items_expired": 0,
+        "blocked_employees": [],
+        "warning_employees": [],
+        "evaluated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    for emp in employees:
+        training_eval = await evaluate_employee_training_status(emp['id'], emp.get('role', ''))
+        
+        blocker_count = training_eval.get('blockerCount', 0)
+        warning_count = training_eval.get('warningCount', 0)
+        
+        emp_info = {
+            "id": emp['id'],
+            "employee_code": emp.get('employee_code'),
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+        }
+        
+        if blocker_count > 0:
+            summary['with_blockers'] += 1
+            blockers = [i for i in training_eval.get('items', []) if i.get('blocker') and i.get('status') in ['missing', 'expired', 'awaiting_review']]
+            summary['blocked_employees'].append({
+                **emp_info,
+                "blocker_count": blocker_count,
+                "blockers": [{"title": b.get('title'), "status": b.get('status'), "detail": b.get('detail')} for b in blockers]
+            })
+        elif warning_count > 0:
+            summary['with_warnings'] += 1
+            warnings = [i for i in training_eval.get('items', []) if not i.get('blocker') and i.get('status') in ['missing', 'expired', 'due_soon', 'awaiting_review']]
+            summary['warning_employees'].append({
+                **emp_info,
+                "warning_count": warning_count,
+                "warnings": [{"title": w.get('title'), "status": w.get('status'), "detail": w.get('detail')} for w in warnings]
+            })
+        else:
+            summary['fully_compliant'] += 1
+        
+        # Count training items by status
+        for item in training_eval.get('items', []):
+            status = item.get('status')
+            if status == 'verified':
+                summary['training_items_verified'] += 1
+            elif status == 'completed':
+                summary['training_items_verified'] += 1  # Completed without verification still counts
+            elif status == 'awaiting_review':
+                summary['training_items_pending'] += 1
+            elif status == 'missing':
+                summary['training_items_missing'] += 1
+            elif status == 'expired':
+                summary['training_items_expired'] += 1
+            elif status == 'due_soon':
+                summary['training_items_pending'] += 1
+    
+    await log_audit_action(user['user_id'], "view_training_audit_summary", "system", "training", {})
+    
+    return summary
+
+
+@api_router.get("/audit/training/export")
+async def export_training_audit_data(
+    format: str = "json",
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Export complete training audit data for all employees.
+    
+    Suitable for:
+    - CQC inspection evidence packages
+    - Internal audit reports
+    - Compliance documentation
+    
+    Format: 'json' or 'csv'
+    """
+    employees = await employees_repo.list_employees(
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "employee_code": 1, "email": 1}
+    )
+    
+    export_data = []
+    
+    for emp in employees:
+        training_audit = await get_training_audit_export(emp['id'], emp.get('role', ''))
+        
+        emp_export = {
+            "employee_id": emp.get('employee_code', emp['id']),
+            "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "employee_email": emp.get('email'),
+            "role": emp.get('role'),
+            "training_status": training_audit.get('overall_status'),
+            "training_status_label": training_audit.get('overall_status_label'),
+            "is_work_ready_from_training": training_audit.get('is_work_ready_from_training'),
+            "blocker_count": training_audit.get('blocker_count'),
+            "warning_count": training_audit.get('warning_count'),
+            "total_required": training_audit.get('total_required'),
+            "total_compliant": training_audit.get('total_compliant'),
+            "blocking_reasons": training_audit.get('blocking_reasons', []),
+            "items": training_audit.get('items', []),
+            "evaluated_at": training_audit.get('evaluated_at')
+        }
+        export_data.append(emp_export)
+    
+    await log_audit_action(user['user_id'], "export_training_audit", "system", "training", {"format": format, "employee_count": len(employees)})
+    
+    if format == 'csv':
+        # Flatten to CSV-friendly structure
+        output = io.StringIO()
+        fieldnames = [
+            'employee_id', 'employee_name', 'email', 'role', 
+            'training_status', 'is_work_ready', 'blocker_count', 'warning_count',
+            'total_required', 'total_compliant', 'blocking_reasons'
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        
+        for emp in export_data:
+            writer.writerow({
+                'employee_id': emp['employee_id'],
+                'employee_name': emp['employee_name'],
+                'email': emp['employee_email'],
+                'role': emp['role'],
+                'training_status': emp['training_status_label'],
+                'is_work_ready': 'Yes' if emp['is_work_ready_from_training'] else 'No',
+                'blocker_count': emp['blocker_count'],
+                'warning_count': emp['warning_count'],
+                'total_required': emp['total_required'],
+                'total_compliant': emp['total_compliant'],
+                'blocking_reasons': '; '.join(emp['blocking_reasons'])
+            })
+        
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="training_audit_{datetime.now().strftime("%Y%m%d")}.csv"'}
+        )
+    
+    # Default: JSON
+    return {
+        "export_date": datetime.now(timezone.utc).isoformat(),
+        "total_employees": len(export_data),
+        "employees": export_data
+    }
+
+
 # ============================================================================
 # REFERENCE INTEGRITY ENDPOINTS
 # Ensures references match CV OR require documented justification
@@ -9379,6 +9661,9 @@ async def export_compliance_summary(employee_id: str, user: dict = Depends(get_c
         {"_id": 0, "training_name": 1, "completed_at": 1, "expiry_date": 1}
     ).to_list(100)
     
+    # Get training audit (canonical evaluation with verification metadata)
+    training_audit = await get_training_audit_export(employee_id, employee.get("role", ""))
+    
     # Get policy acknowledgements
     policies = await db.policy_assignments.find(
         {"employee_id": employee_id, "status": "acknowledged"},
@@ -9450,6 +9735,7 @@ async def export_compliance_summary(employee_id: str, user: dict = Depends(get_c
             }
             for p in policies
         ],
+        "training_audit": training_audit,
         "export_date": datetime.now(timezone.utc).isoformat(),
         "generated_by": user.get("name", user.get("email"))
     }
@@ -9472,6 +9758,9 @@ async def export_compliance_pdf(employee_id: str, user: dict = Depends(get_curre
         {"employee_id": employee_id},
         {"_id": 0, "training_name": 1, "status": 1, "completed_at": 1, "expiry_date": 1}
     ).to_list(100)
+    
+    # Get canonical training audit (single source of truth)
+    training_audit = await get_training_audit_export(employee_id, employee.get("role", ""))
     
     # Get last audit/review info
     last_audit = await db.audit_logs.find_one(
@@ -9645,50 +9934,96 @@ async def export_compliance_pdf(employee_id: str, user: dict = Depends(get_curre
     elements.append(checklist_table)
     elements.append(Spacer(1, 5*mm))
     
-    # Section 2: Training Summary
-    elements.append(Paragraph("2. Training Summary", styles['SectionHeader']))
+    # Section 2: Supplementary Training (Canonical Audit Data)
+    elements.append(Paragraph("2. Supplementary Training", styles['SectionHeader']))
     
-    completed_training = [t for t in training if t.get('status') == 'completed']
-    pending_training = [t for t in training if t.get('status') != 'completed']
+    # Training Overview Box
+    training_status = training_audit.get('overall_status', 'missing')
+    training_color = '#10B981' if training_status == 'current' else '#F59E0B' if training_status == 'due_soon' else '#EF4444'
+    blocker_count = training_audit.get('blocker_count', 0)
+    warning_count = training_audit.get('warning_count', 0)
+    total_required = training_audit.get('total_required', 0)
+    total_compliant = training_audit.get('total_compliant', 0)
     
-    # Get required training items from compliance
-    required_training = [item for item in compliance['items'] if item['type'] == 'training']
-    missing_training = [item['name'] for item in required_training if item['status'] == 'missing']
+    training_overview = [
+        [
+            Paragraph(f"<font color='{training_color}'><b>{training_audit.get('overall_status_label', 'Unknown')}</b></font>", 
+                     ParagraphStyle('TrainingStatus', fontName='Helvetica-Bold', fontSize=10, alignment=TA_CENTER)),
+        ],
+        [
+            Paragraph(f"Compliant: {total_compliant}/{total_required} | Blockers: {blocker_count} | Warnings: {warning_count}", 
+                     ParagraphStyle('TrainingStats', fontName='Helvetica', fontSize=8, alignment=TA_CENTER, textColor=colors.HexColor('#6B7280'))),
+        ]
+    ]
     
-    if completed_training:
-        training_data = [['Training', 'Completed', 'Expires']]
-        for t in completed_training:
-            completed_date = t.get('completed_at', 'N/A')
-            if completed_date and completed_date != 'N/A':
+    training_overview_table = Table(training_overview, colWidths=[170*mm])
+    training_overview_table.setStyle(TableStyle([
+        ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#E5E7EB')),
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F9FAFB')),
+        ('TOPPADDING', (0, 0), (-1, -1), 3*mm),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3*mm),
+    ]))
+    elements.append(training_overview_table)
+    elements.append(Spacer(1, 3*mm))
+    
+    # Training Items Table
+    training_items = training_audit.get('items', [])
+    if training_items:
+        training_data = [['Training', 'Status', 'Blocker', 'Completed', 'Expires', 'Verified']]
+        for item in training_items:
+            status = item.get('status', 'unknown')
+            status_symbol = '✔' if status == 'verified' else '○' if status == 'completed' else '⏳' if status in ['awaiting_review', 'due_soon'] else '✖'
+            status_text = f"{status_symbol} {status.replace('_', ' ').title()}"
+            
+            blocker_text = 'Yes' if item.get('blocker_for_work') else 'No'
+            
+            completed_date = item.get('completed_at', '-')
+            if completed_date and completed_date != '-':
                 try:
-                    completed_date = datetime.fromisoformat(completed_date.replace('Z', '+00:00')).strftime('%d/%m/%Y')
+                    completed_date = datetime.fromisoformat(str(completed_date).replace('Z', '+00:00')).strftime('%d/%m/%Y')
                 except:
                     pass
-            expiry_date = t.get('expiry_date', 'N/A')
-            if expiry_date and expiry_date != 'N/A':
+            
+            expiry_date = item.get('expires_at', '-')
+            if expiry_date and expiry_date != '-':
                 try:
-                    expiry_date = datetime.fromisoformat(expiry_date.replace('Z', '+00:00')).strftime('%d/%m/%Y')
+                    expiry_date = datetime.fromisoformat(str(expiry_date).replace('Z', '+00:00')).strftime('%d/%m/%Y')
                 except:
                     pass
-            training_data.append([t.get('training_name', 'Unknown'), completed_date, expiry_date])
+            
+            verified_text = item.get('verified_by', '-') if item.get('verified_by') else ('Yes' if status == 'verified' else 'No')
+            
+            training_data.append([
+                item.get('title', 'Unknown')[:30], 
+                status_text, 
+                blocker_text,
+                completed_date,
+                expiry_date,
+                verified_text[:15]
+            ])
         
-        training_table = Table(training_data, colWidths=[85*mm, 40*mm, 40*mm])
+        training_table = Table(training_data, colWidths=[50*mm, 30*mm, 18*mm, 25*mm, 25*mm, 22*mm])
         training_table.setStyle(TableStyle([
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F3F4F6')),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E5E7EB')),
-            ('TOPPADDING', (0, 0), (-1, -1), 2*mm),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+            ('TOPPADDING', (0, 0), (-1, -1), 1.5*mm),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5*mm),
+            ('LEFTPADDING', (0, 0), (-1, -1), 1.5*mm),
         ]))
         elements.append(training_table)
     else:
-        elements.append(Paragraph("No completed training records found.", styles['ComplianceBodyText']))
+        elements.append(Paragraph("No training requirements found for this employee.", styles['ComplianceBodyText']))
     
-    if missing_training:
-        elements.append(Spacer(1, 3*mm))
-        elements.append(Paragraph(f"<b>Missing Training:</b> {', '.join(missing_training)}", styles['ComplianceBodyText']))
+    # Blocking Reasons (if any)
+    blocking_reasons = training_audit.get('blocking_reasons', [])
+    if blocking_reasons:
+        elements.append(Spacer(1, 2*mm))
+        elements.append(Paragraph("<font color='#DC2626'><b>Work Readiness Blocked By Training:</b></font>", styles['ComplianceBodyText']))
+        for reason in blocking_reasons:
+            elements.append(Paragraph(f"• {reason}", styles['SmallText']))
     
     elements.append(Spacer(1, 5*mm))
     

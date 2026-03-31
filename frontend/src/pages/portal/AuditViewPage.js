@@ -4,9 +4,10 @@ import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Progress } from '../../components/ui/progress';
+import { Button } from '../../components/ui/button';
 import { 
   AlertTriangle, Users, FileCheck, GraduationCap, CheckCircle, 
-  Loader2, Clock, Shield, FileX, CalendarClock, ShieldCheck, AlertCircle, ArrowRight
+  Loader2, Clock, Shield, FileX, CalendarClock, ShieldCheck, AlertCircle, ArrowRight, Download
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -17,6 +18,7 @@ export default function AuditViewPage() {
   const [employees, setEmployees] = useState([]);
   const [policies, setPolicies] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState(null);
+  const [trainingAudit, setTrainingAudit] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
   const { token } = useAuth();
@@ -24,16 +26,18 @@ export default function AuditViewPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, empsRes, policiesRes, expiryRes] = await Promise.all([
+        const [statsRes, empsRes, policiesRes, expiryRes, trainingRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/policies`, { headers: { Authorization: `Bearer ${token}` } }),
-          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
+          axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
+          axios.get(`${API}/audit/training/summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
         ]);
         setStats(statsRes.data);
         setEmployees(empsRes.data);
         setPolicies(policiesRes.data);
         setExpiryAlerts(expiryRes.data);
+        setTrainingAudit(trainingRes.data);
         setLastUpdated(new Date());
       } catch (error) {
         console.error('Failed to fetch audit data:', error);
@@ -410,7 +414,129 @@ export default function AuditViewPage() {
         </CardContent>
       </Card>
 
-      {/* SECTION 5: Staff Overview Table */}
+      {/* SECTION 5: Supplementary Training */}
+      <Card className="border-[#E4E8EB] shadow-sm">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="font-heading text-lg flex items-center gap-2">
+              <GraduationCap className="h-5 w-5 text-primary" />
+              Supplementary Training
+            </CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-lg text-xs"
+              onClick={async () => {
+                try {
+                  const response = await axios.get(`${API}/audit/training/export?format=csv`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                    responseType: 'blob'
+                  });
+                  const url = window.URL.createObjectURL(new Blob([response.data]));
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.setAttribute('download', `training_audit_${new Date().toISOString().split('T')[0]}.csv`);
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                } catch (error) {
+                  console.error('Failed to export training data:', error);
+                }
+              }}
+              data-testid="export-training-audit-btn"
+            >
+              <Download className="h-3.5 w-3.5 mr-1.5" />
+              Export CSV
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {trainingAudit ? (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+                {/* Fully Compliant */}
+                <div 
+                  className="p-4 bg-green-50 rounded-xl border border-green-200"
+                  data-testid="audit-training-compliant"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <p className="text-sm text-green-600">Fully Compliant</p>
+                  </div>
+                  <p className="text-3xl font-heading font-bold text-green-700">{trainingAudit.fully_compliant}</p>
+                </div>
+                
+                {/* With Warnings */}
+                <div 
+                  className="p-4 bg-amber-50 rounded-xl border border-amber-200"
+                  data-testid="audit-training-warnings"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertCircle className="h-4 w-4 text-amber-600" />
+                    <p className="text-sm text-amber-600">With Warnings</p>
+                  </div>
+                  <p className="text-3xl font-heading font-bold text-amber-700">{trainingAudit.with_warnings}</p>
+                </div>
+                
+                {/* Blocked by Training */}
+                <div 
+                  className="p-4 bg-red-50 rounded-xl border border-red-200"
+                  data-testid="audit-training-blocked"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    <p className="text-sm text-red-600">Blocked by Training</p>
+                  </div>
+                  <p className="text-3xl font-heading font-bold text-red-700">{trainingAudit.with_blockers}</p>
+                </div>
+                
+                {/* Training Items Summary */}
+                <div 
+                  className="p-4 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]"
+                  data-testid="audit-training-items"
+                >
+                  <p className="text-sm text-text-muted mb-2">Training Items</p>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="text-green-600">✓ {trainingAudit.training_items_verified}</span>
+                    <span className="text-amber-600">⏳ {trainingAudit.training_items_pending}</span>
+                    <span className="text-red-600">✖ {trainingAudit.training_items_missing}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Blocked Employees Detail */}
+              {trainingAudit.blocked_employees && trainingAudit.blocked_employees.length > 0 && (
+                <div className="p-4 bg-red-50 rounded-xl border border-red-200">
+                  <p className="text-sm font-medium text-red-700 mb-3">Staff Blocked by Training Issues:</p>
+                  <div className="space-y-2">
+                    {trainingAudit.blocked_employees.slice(0, 5).map((emp, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-sm">
+                        <span className="text-red-600 font-medium">{emp.name}</span>
+                        <span className="text-red-500">—</span>
+                        <span className="text-red-600">
+                          {emp.blockers?.map(b => b.title).join(', ') || `${emp.blocker_count} blocking item(s)`}
+                        </span>
+                      </div>
+                    ))}
+                    {trainingAudit.blocked_employees.length > 5 && (
+                      <p className="text-xs text-red-500 mt-2">
+                        + {trainingAudit.blocked_employees.length - 5} more blocked employees
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-center py-6 text-text-muted">
+              <GraduationCap className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>Training audit data unavailable</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* SECTION 6: Staff Overview Table */}
       <Card className="border-[#E4E8EB] shadow-sm">
         <CardHeader>
           <CardTitle className="font-heading text-lg">Staff Overview</CardTitle>

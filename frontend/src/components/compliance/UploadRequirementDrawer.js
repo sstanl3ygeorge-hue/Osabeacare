@@ -35,8 +35,19 @@ import {
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 import DocumentActionMenu from './DocumentActionMenu';
+import {
+  getRequirementConfig,
+  getAllowedMoveTargets,
+  isPreviewableFile,
+  normalizeUploadDrawerData,
+  buildDrawerSummary,
+} from './complianceRequirementMap';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
 
 /**
  * UploadRequirementDrawer - Working drawer for upload requirements
@@ -44,8 +55,9 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * Ticket C spec implementation:
  * - Shows Active Files, Request History, Historical Files
  * - Per-file actions via DocumentActionMenu
- * - PoA 2-file minimum banner
+ * - PoA 2-file minimum banner (using valid file count)
  * - Shared drawer for RTW, DBS, Identity, PoA
+ * - Normalized data model for consistent counts
  */
 export default function UploadRequirementDrawer({
   isOpen,
@@ -74,36 +86,17 @@ export default function UploadRequirementDrawer({
   
   const { token } = useAuth();
 
-  // Requirement labels
-  const REQUIREMENT_LABELS = {
-    right_to_work: 'Right to Work',
-    dbs: 'DBS Certificate',
-    identity: 'Identity',
-    proof_of_address: 'Proof of Address'
-  };
+  // Get requirement configuration from central map
+  const requirementConfig = getRequirementConfig(requirementKey);
 
-  // Map requirement key to backend key format
-  const getBackendKey = (key) => {
-    const mapping = {
-      right_to_work: 'right_to_work_evidence',
-      dbs: 'dbs_evidence',
-      identity: 'identity_evidence',
-      proof_of_address: 'proof_of_address_evidence'
-    };
-    return mapping[key] || `${key}_evidence`;
-  };
-
-  // Previewable file types
-  const PREVIEWABLE_TYPES = [
-    'application/pdf',
-    'image/jpeg',
-    'image/png',
-    'image/gif',
-    'image/webp',
-    'image/svg+xml',
-    'text/plain',
-    'text/html'
-  ];
+  // Reset section expansion when drawer opens or requirement changes
+  useEffect(() => {
+    if (isOpen) {
+      setActiveFilesExpanded(true);
+      setRequestHistoryExpanded(false);
+      setHistoricalFilesExpanded(false);
+    }
+  }, [isOpen, requirementKey]);
 
   // Fetch files data when drawer opens
   const fetchFiles = useCallback(async () => {
@@ -111,19 +104,20 @@ export default function UploadRequirementDrawer({
     
     setLoading(true);
     try {
-      const backendKey = getBackendKey(requirementKey);
       const response = await axios.get(
-        `${API}/employees/${employeeId}/requirements/${backendKey}/files`,
+        `${API}/employees/${employeeId}/requirements/${requirementConfig.evidenceEndpointKey}/files`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setFilesData(response.data);
+
+      // Normalize data immediately on fetch
+      setFilesData(normalizeUploadDrawerData(response.data, requirementKey));
     } catch (err) {
       toast.error('Failed to load files');
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, [employeeId, requirementKey, token]);
+  }, [employeeId, requirementKey, token, requirementConfig.evidenceEndpointKey]);
 
   useEffect(() => {
     if (isOpen && employeeId && requirementKey) {
@@ -153,11 +147,8 @@ export default function UploadRequirementDrawer({
     }
 
     const mimeType = file.mime_type || file.content_type || '';
-    const isPreviewable = PREVIEWABLE_TYPES.some(type => 
-      mimeType.startsWith(type.split('/')[0]) || mimeType === type
-    );
-    
-    if (isPreviewable && onPreviewFile) {
+
+    if (isPreviewableFile(file) && onPreviewFile) {
       onPreviewFile({
         file_url: url,
         file_name: file.file_name || file.file_label || 'Document',
@@ -304,16 +295,22 @@ export default function UploadRequirementDrawer({
     }
   };
 
-  // Render file status badge
+  // Render file status badge - less misleading, separates file state from check state
   const renderFileBadge = (file) => {
-    if (file.verified) {
-      return <Badge className="bg-green-100 text-green-700 text-[10px] px-1.5">Verified</Badge>;
+    if (file.status === 'uploaded_in_error' || file.uploaded_in_error_reason) {
+      return <Badge className="bg-red-100 text-red-700 text-[10px] px-1.5">Uploaded in Error</Badge>;
+    }
+    if (file.status === 'superseded' || file.superseded_by) {
+      return <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1.5">Superseded</Badge>;
     }
     if (file.rejected) {
       return <Badge className="bg-red-100 text-red-700 text-[10px] px-1.5">Rejected</Badge>;
     }
     if (file.extraction_status?.status === 'awaiting_review') {
       return <Badge className="bg-purple-100 text-purple-700 text-[10px] px-1.5">Extraction Review</Badge>;
+    }
+    if (file.verified) {
+      return <Badge className="bg-green-100 text-green-700 text-[10px] px-1.5">Verified</Badge>;
     }
     return <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1.5">Awaiting Review</Badge>;
   };
@@ -347,25 +344,19 @@ export default function UploadRequirementDrawer({
     return <Badge className={`${config.bg} ${config.text} text-[10px] px-1.5`}>{config.label}</Badge>;
   };
 
-  // Category options for move action
-  const requirementCategories = [
-    { id: 'right_to_work_documents', label: 'Right to Work' },
-    { id: 'dbs_certificate', label: 'DBS Certificate' },
-    { id: 'identity_documents', label: 'Identity' },
-    { id: 'proof_of_address', label: 'Proof of Address' },
-    { id: 'professional_registration', label: 'Professional Registration' },
-    { id: 'training_certificates', label: 'Training Certificates' },
-    { id: 'other', label: 'Other Documents' }
-  ].filter(cat => !cat.id.includes(requirementKey));
+  // Restricted move-category options based on requirement type (from central map)
+  const requirementCategories = getAllowedMoveTargets(requirementKey);
 
-  // Get PoA required count info
+  // PoA-specific logic using valid file count
   const isPoA = requirementKey === 'proof_of_address';
   const requiredCount = filesData?.multi_file_config?.required_count || (isPoA ? 2 : 1);
-  const activeCount = filesData?.active_file_count || 0;
-  const verifiedCount = filesData?.verified_count || 0;
-  const needsMoreFiles = isPoA && activeCount < requiredCount;
+  const activeCount = filesData?.counts?.active || 0;
+  const verifiedCount = filesData?.counts?.verified || 0;
+  const validPoACount = filesData?.counts?.validPoA || 0;
+  const needsMoreFiles = isPoA && validPoACount < requiredCount;
+  const drawerSummary = buildDrawerSummary(filesData);
 
-  const title = REQUIREMENT_LABELS[requirementKey] || requirementKey;
+  const title = requirementConfig.label;
 
   return (
     <>
@@ -383,22 +374,29 @@ export default function UploadRequirementDrawer({
               </Button>
             </div>
             
-            {/* Summary */}
-            {filesData && (
+            {/* Summary counters from normalized data */}
+            {filesData && filesData.counts && (
               <div className="flex items-center gap-3 mt-2 text-sm text-text-muted">
                 <span className="flex items-center gap-1">
                   <FileText className="h-3.5 w-3.5" />
-                  {activeCount} active
+                  {filesData.counts.active} active
                 </span>
                 <span className="flex items-center gap-1 text-green-600">
                   <CheckCircle className="h-3.5 w-3.5" />
-                  {verifiedCount} verified
+                  {filesData.counts.verified} verified
                 </span>
                 <span className="flex items-center gap-1 text-amber-600">
                   <Clock className="h-3.5 w-3.5" />
-                  {filesData.pending_review_count || 0} pending
+                  {filesData.counts.pendingReview} pending
                 </span>
               </div>
+            )}
+
+            {/* Readable summary */}
+            {filesData && drawerSummary && (
+              <p className="mt-2 text-xs text-text-muted">
+                {drawerSummary}
+              </p>
             )}
             
             {/* Action Buttons */}
@@ -435,37 +433,34 @@ export default function UploadRequirementDrawer({
               </div>
             ) : filesData ? (
               <>
-                {/* PoA Banner - 2 files required */}
+                {/* PoA Banner - uses valid file count, not just active count */}
                 {isPoA && (
                   <div className={`p-3 rounded-lg border ${
-                    verifiedCount >= requiredCount
+                    validPoACount >= requiredCount
                       ? 'bg-green-50 border-green-200'
                       : needsMoreFiles
                         ? 'bg-red-50 border-red-200'
                         : 'bg-amber-50 border-amber-200'
                   }`}>
                     <p className="text-sm font-medium flex items-center gap-2">
-                      {verifiedCount >= requiredCount ? (
+                      {validPoACount >= requiredCount ? (
                         <>
                           <CheckCircle className="h-4 w-4 text-green-600" />
-                          <span className="text-green-700">{verifiedCount}/{requiredCount} documents verified</span>
-                        </>
-                      ) : needsMoreFiles ? (
-                        <>
-                          <AlertTriangle className="h-4 w-4 text-red-600" />
-                          <span className="text-red-700">
-                            {requiredCount - activeCount} more document{requiredCount - activeCount !== 1 ? 's' : ''} required
+                          <span className="text-green-700">
+                            {validPoACount}/{requiredCount} valid documents
                           </span>
                         </>
                       ) : (
                         <>
-                          <Clock className="h-4 w-4 text-amber-600" />
-                          <span className="text-amber-700">{verifiedCount}/{requiredCount} documents verified</span>
+                          <AlertTriangle className="h-4 w-4 text-red-600" />
+                          <span className="text-red-700">
+                            {requiredCount - validPoACount} more valid document{requiredCount - validPoACount !== 1 ? 's' : ''} required
+                          </span>
                         </>
                       )}
                     </p>
                     <p className="text-xs text-text-muted mt-1">
-                      2 documents required for Proof of Address
+                      2 recent documents required for Proof of Address (within 9 months)
                     </p>
                   </div>
                 )}
@@ -478,7 +473,7 @@ export default function UploadRequirementDrawer({
                   >
                     <span className="font-medium text-text-primary flex items-center gap-2">
                       <FileText className="h-4 w-4 text-green-600" />
-                      Active Files ({activeCount})
+                      Active Files ({filesData.counts.active})
                     </span>
                     {activeFilesExpanded ? (
                       <ChevronDown className="h-4 w-4 text-text-muted" />
@@ -534,7 +529,7 @@ export default function UploadRequirementDrawer({
                                 onMarkUploadedInError={() => setActionDialog({ open: true, type: 'uploaded_in_error', file })}
                                 onSupersede={() => setActionDialog({ open: true, type: 'supersede', file })}
                                 onMoveCategory={() => setActionDialog({ open: true, type: 'move_category', file })}
-                                onViewHistory={() => toast.info('File history coming soon')}
+                                onViewHistory={null}
                                 isAuditor={isAuditor}
                                 isProcessing={isSubmitting}
                               />
@@ -554,7 +549,7 @@ export default function UploadRequirementDrawer({
                   >
                     <span className="font-medium text-blue-700 flex items-center gap-2">
                       <Send className="h-4 w-4" />
-                      Request History ({filesData.request_count || 0})
+                      Request History ({filesData.counts.requests})
                     </span>
                     {requestHistoryExpanded ? (
                       <ChevronDown className="h-4 w-4 text-blue-600" />
@@ -565,13 +560,13 @@ export default function UploadRequirementDrawer({
 
                   {requestHistoryExpanded && (
                     <div className="mt-3 space-y-2">
-                      {!filesData.requests || filesData.requests.length === 0 ? (
+                      {filesData.requests?.length === 0 ? (
                         <div className="p-6 bg-gray-50 rounded-lg text-center">
                           <Send className="h-8 w-8 text-gray-300 mx-auto mb-2" />
                           <p className="text-sm text-text-muted">No requests</p>
                         </div>
                       ) : (
-                        filesData.requests.map((req, idx) => (
+                        filesData.requests?.map((req, idx) => (
                           <div 
                             key={req.request_id || idx}
                             className="p-3 bg-white border border-gray-200 rounded-lg"
@@ -585,9 +580,9 @@ export default function UploadRequirementDrawer({
                               {req.is_replacement && (
                                 <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">Replacement</Badge>
                               )}
-                              {req.reminder_count > 0 && (
+                              {(req.reminder_count > 0 || req.resent_count > 0) && (
                                 <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">
-                                  {req.reminder_count} reminder{req.reminder_count !== 1 ? 's' : ''}
+                                  {req.reminder_count || req.resent_count} reminder{(req.reminder_count || req.resent_count) !== 1 ? 's' : ''}
                                 </Badge>
                               )}
                             </div>
@@ -595,6 +590,7 @@ export default function UploadRequirementDrawer({
                               {req.sent_at && <p>Sent: {formatBackendDate(req.sent_at, { format: 'medium' })}</p>}
                               {req.viewed_at && <p>Viewed: {formatBackendDate(req.viewed_at, { format: 'medium' })}</p>}
                               {req.submitted_at && <p>Submitted: {formatBackendDate(req.submitted_at, { format: 'medium' })}</p>}
+                              {req.recipient_email && <p>To: {req.recipient_email}</p>}
                             </div>
                           </div>
                         ))
@@ -611,7 +607,7 @@ export default function UploadRequirementDrawer({
                   >
                     <span className="font-medium text-text-muted flex items-center gap-2">
                       <Archive className="h-4 w-4" />
-                      Historical Files ({filesData.historical_file_count || 0})
+                      Historical Files ({filesData.counts.historical})
                     </span>
                     {historicalFilesExpanded ? (
                       <ChevronDown className="h-4 w-4 text-text-muted" />
@@ -622,13 +618,13 @@ export default function UploadRequirementDrawer({
 
                   {historicalFilesExpanded && (
                     <div className="mt-3 space-y-2">
-                      {!filesData.historical_files || filesData.historical_files.length === 0 ? (
+                      {filesData.historical_files?.length === 0 ? (
                         <div className="p-6 bg-gray-50 rounded-lg text-center">
                           <Archive className="h-8 w-8 text-gray-300 mx-auto mb-2" />
                           <p className="text-sm text-text-muted">No historical files</p>
                         </div>
                       ) : (
-                        filesData.historical_files.map((file) => (
+                        filesData.historical_files?.map((file) => (
                           <div 
                             key={file.file_id}
                             className="p-3 bg-gray-50 border border-gray-100 rounded-lg opacity-80"

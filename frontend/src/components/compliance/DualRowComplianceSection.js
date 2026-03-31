@@ -16,11 +16,9 @@ import UploadRequirementDrawer from './UploadRequirementDrawer';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
+import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-
-// Upload-based requirement keys that should use UploadRequirementCard
-const UPLOAD_REQUIREMENT_KEYS = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
 
 /**
  * DualRowComplianceSection - Displays the dual-row compliance file structure

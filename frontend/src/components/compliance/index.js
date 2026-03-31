@@ -11,3 +11,8 @@ export { default as DualRowComplianceSection } from './DualRowComplianceSection'
 export { default as RecordCheckDialog } from './RecordCheckDialog';
 export { default as CompleteAgreementDialog } from './CompleteAgreementDialog';
 export { default as SendAgreementDialog } from './SendAgreementDialog';
+
+// Phase 4A - High-value cleanup components
+export { default as ComplianceActionBar } from './ComplianceActionBar';
+export { default as WhatsNeededPanel } from './WhatsNeededPanel';
+export { default as TrainingSummaryCard } from './TrainingSummaryCard';

@@ -21,7 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
-import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog, SendAgreementDialog } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog, SendAgreementDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard } from '../../components/compliance';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -874,6 +874,35 @@ export default function EmployeeProfilePage() {
       }
     } catch (error) {
       toast.error('Failed to open PDF for printing');
+    }
+  };
+
+  // Phase 4A - Unified export handler
+  const handleExportComplianceFile = async () => {
+    setIsExporting(true);
+    try {
+      // Default to PDF export
+      const response = await axios.get(`${API}/employees/${employeeId}/export-compliance-pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+      
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      const filename = response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') 
+        || `${employee?.employee_code}_Compliance_File.pdf`;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Compliance file exported');
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to export compliance file');
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -3569,10 +3598,7 @@ export default function EmployeeProfilePage() {
             <CheckCircle className="h-4 w-4 mr-2" />
             Compliance File
           </TabsTrigger>
-          <TabsTrigger value="documents" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <FileText className="h-4 w-4 mr-2" />
-            All Files
-          </TabsTrigger>
+          {/* All Files tab removed - consolidated into Compliance File (Phase 4A) */}
           <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileCheck className="h-4 w-4 mr-2" />
             Policies
@@ -3960,82 +3986,99 @@ export default function EmployeeProfilePage() {
         {/* Compliance File Tab - Primary Requirements & Evidence Management */}
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">
-            <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
-              <div>
-                <CardTitle className="font-heading text-lg">Compliance File</CardTitle>
-                <p className="text-xs text-text-muted mt-1">
-                  Upload evidence, send forms, request documents. Verify each item for audit readiness.
-                </p>
-                {complianceRequirements && (
-                  <p className="text-sm text-text-muted mt-1">
-                    {complianceRequirements.summary.verified} verified · {complianceRequirements.summary.completed - complianceRequirements.summary.verified} awaiting review · {complianceRequirements.summary.missing} required
+            <CardHeader className="pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="font-heading text-lg">Compliance File</CardTitle>
+                  <p className="text-xs text-text-muted mt-1">
+                    Operational workflow for compliance. Upload evidence, verify checks, manage agreements.
                   </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {/* Send Form Button */}
-                {!isAuditor() && employee?.email && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        className="text-xs h-8 border-primary/30 text-primary hover:bg-primary/5"
-                        data-testid="send-form-dropdown"
-                      >
-                        <FileText className="h-3 w-3 mr-1.5" />
-                        Send Form
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      {FORM_OPTIONS.map((form) => (
-                        <DropdownMenuItem 
-                          key={form.value} 
-                          onClick={() => openSendFormDialog(form.value)}
-                          data-testid={`send-form-${form.value}`}
-                        >
-                          <Mail className="h-4 w-4 mr-2" />
-                          {form.label}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-                {/* Request All Missing Items Button */}
-                {!isAuditor() && complianceRequirements?.summary?.missing > 0 && employee?.email && (
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={handleRequestAllMissingItems}
-                    className="text-xs h-8 border-blue-200 text-blue-600 hover:bg-blue-50"
-                    data-testid="request-all-missing"
-                  >
-                    <Send className="h-3 w-3 mr-1.5" />
-                    Request Missing Items
-                  </Button>
-                )}
-                {complianceRequirements?.work_readiness && (
-                <div className={`flex items-center gap-2 text-sm px-3 py-1.5 rounded-lg font-medium ${
-                  complianceRequirements.work_readiness.status === 'fully_compliant' ? 'bg-success/10 text-success' :
-                  complianceRequirements.work_readiness.status === 'work_ready' ? 'bg-success/10 text-success' :
-                  complianceRequirements.work_readiness.status === 'almost_ready' ? 'bg-warning/10 text-warning' :
-                  'bg-error/10 text-error'
-                }`}>
-                  {complianceRequirements.work_readiness.status === 'fully_compliant' ? (
-                    <CheckCircle className="h-4 w-4" />
-                  ) : complianceRequirements.work_readiness.status === 'work_ready' ? (
-                    <Shield className="h-4 w-4" />
-                  ) : (
-                    <AlertTriangle className="h-4 w-4" />
-                  )}
-                  {complianceRequirements.work_readiness.status_label}
                 </div>
-              )}
+                {complianceRequirements?.work_readiness_3tier && (
+                  <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
+                    complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'bg-green-100 text-green-800' :
+                    complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-100 text-amber-800' :
+                    'bg-red-100 text-red-800'
+                  }`}>
+                    {complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? (
+                      <Shield className="h-4 w-4" />
+                    ) : (
+                      <AlertTriangle className="h-4 w-4" />
+                    )}
+                    {complianceRequirements.work_readiness_3tier.label}
+                  </div>
+                )}
               </div>
             </CardHeader>
             <CardContent>
-              {/* START STATUS ALERT PANEL - Using 3-tier work readiness model */}
-              {complianceRequirements?.work_readiness_3tier && (
+              {/* TOP ACTION BAR - Phase 4A */}
+              <ComplianceActionBar
+                onUploadEvidence={() => setUploadDialogOpen(true)}
+                onRequestMissing={handleRequestAllMissingItems}
+                onEnterCheck={(checkType) => {
+                  setRecordCheckType(checkType);
+                  setRecordCheckDialogOpen(true);
+                }}
+                onExport={handleExportComplianceFile}
+                missingCount={complianceRequirements?.summary?.missing || 0}
+                hasEmail={!!employee?.email}
+                isAuditor={isAuditor()}
+                isExporting={isExporting}
+              />
+
+              {/* COMPACT STATUS PANEL - Work readiness from 3-tier engine */}
+              {complianceRequirements?.work_readiness_3tier && complianceRequirements.work_readiness_3tier.status !== 'READY_TO_WORK' && (
+                <div className={`mb-6 p-4 rounded-xl border ${
+                  complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-50 border-amber-200' :
+                  'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
+                      complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-600' : 'text-red-600'
+                    }`} />
+                    <div className="flex-1">
+                      <h4 className={`font-semibold ${
+                        complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-900' : 'text-red-900'
+                      }`}>
+                        {complianceRequirements.work_readiness_3tier.status === 'NOT_READY' 
+                          ? 'Not Ready to Work' 
+                          : 'Ready with Conditions'}
+                      </h4>
+                      <p className={`text-sm mt-1 ${
+                        complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-800' : 'text-red-800'
+                      }`}>
+                        {complianceRequirements.work_readiness_3tier.status === 'NOT_READY' 
+                          ? 'Required items must be resolved before work can be assigned.' 
+                          : 'Can work with conditions. Some items need attention.'}
+                      </p>
+                      
+                      {/* Blocking Reasons - Compact */}
+                      {complianceRequirements.work_readiness_3tier.reasons?.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {complianceRequirements.work_readiness_3tier.reasons.slice(0, 4).map((reason, idx) => (
+                            <span 
+                              key={idx} 
+                              className={`text-xs px-2 py-1 rounded ${
+                                reason.type === 'hard_block' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                              }`}
+                            >
+                              {reason.message}
+                            </span>
+                          ))}
+                          {complianceRequirements.work_readiness_3tier.reasons.length > 4 && (
+                            <span className="text-xs text-gray-500">
+                              +{complianceRequirements.work_readiness_3tier.reasons.length - 4} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* START OLD STATUS ALERT PANEL - Preserved but hidden behind READY_TO_WORK check */}
+              {false && complianceRequirements?.work_readiness_3tier && (
                 <div className={`mb-6 p-4 rounded-xl border ${
                   complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'bg-green-50 border-green-200' :
                   complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-50 border-amber-200' :
@@ -4171,41 +4214,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {/* GLOBAL INSTRUCTION PANEL - CQC Guidance */}
-              <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-xl">
-                <h3 className="font-semibold text-blue-900 mb-2">Complete Required Items First</h3>
-                <p className="text-sm text-blue-800 mb-3">
-                  Items marked with <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs font-medium">Required</span> must be completed and verified before the employee can start work.
-                </p>
-                <div className="text-sm text-blue-700 space-y-1">
-                  <p className="font-medium">Priority guide:</p>
-                  <ul className="space-y-1 ml-2">
-                    <li className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full bg-red-500"></span>
-                      <span><strong>Required to Start Work</strong> — Complete these first</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full bg-orange-500"></span>
-                      <span><strong>Supervised Start / Health</strong> — Required for supervised work</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full bg-blue-500"></span>
-                      <span><strong>Recruitment File</strong> — Pre-employment record</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <span className="inline-block w-3 h-3 rounded-full bg-gray-400"></span>
-                      <span><strong>Complete After Start</strong> — For full compliance</span>
-                    </li>
-                  </ul>
-                </div>
-              </div>
-
-              {/* TAB CLARITY MESSAGE */}
-              <p className="text-xs text-text-muted mb-4 px-1">
-                Use "What's Needed" to complete compliance. Other tabs show records and history.
-              </p>
-
-              {/* COMPLIANCE ALERTS - Expiry Warnings */}
+              {/* COMPLIANCE ALERTS - Expiry Warnings (Compact) */}
               {complianceRequirements?.expiry_alerts?.has_alerts && (
                 <div className={`mb-6 p-4 rounded-xl border ${
                   complianceRequirements.expiry_alerts.expired_count > 0 
@@ -4298,22 +4307,10 @@ export default function EmployeeProfilePage() {
               ) : (
                 <div className="space-y-6">
                   {/* ============================================ */}
-                  {/* DUAL-ROW COMPLIANCE SECTION (Step 11) */}
+                  {/* DUAL-ROW COMPLIANCE SECTION (Phase 4A) */}
                   {/* Separates evidence from employer checks */}
                   {/* ============================================ */}
                   <div className="mb-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-heading text-lg font-semibold text-text-primary flex items-center gap-2">
-                        <Shield className="h-5 w-5 text-primary" />
-                        Compliance File — Dual-Row Model
-                      </h3>
-                      <Badge variant="outline" className="text-xs bg-purple-50 text-purple-600 border-purple-200">
-                        Step 11
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-text-muted mb-4">
-                      Evidence rows show uploaded files (supporting evidence). Check rows show employer verification outcomes (authoritative for readiness).
-                    </p>
                     
                     <DualRowComplianceSection
                       employeeId={employeeId}
@@ -4372,6 +4369,61 @@ export default function EmployeeProfilePage() {
                       }}
                     />
                   </div>
+
+                  {/* TRAINING SUMMARY CARD - Phase 4A */}
+                  {/* Replaces detailed training rows in Compliance File */}
+                  {trainingEvaluation && (
+                    <div className="my-6">
+                      <TrainingSummaryCard
+                        completedCount={trainingEvaluation.items?.filter(i => ['completed', 'verified'].includes(i.status)).length || 0}
+                        totalCount={trainingEvaluation.items?.length || 0}
+                        expiringCount={trainingEvaluation.warningCount || 0}
+                        expiredCount={trainingEvaluation.items?.filter(i => i.status === 'expired').length || 0}
+                        onManageTraining={() => handleTabChange('training')}
+                        isAuditor={isAuditor()}
+                      />
+                    </div>
+                  )}
+
+                  {/* WHAT'S NEEDED PANEL - Phase 4A */}
+                  {/* Clear missing/blocking list with Request All Missing */}
+                  {complianceRequirements?.work_readiness_3tier && (
+                    <WhatsNeededPanel
+                      blockingItems={
+                        (complianceRequirements.work_readiness_3tier.reasons || [])
+                          .filter(r => r.type === 'hard_block')
+                          .map(r => ({ message: r.message, section: r.section, row_key: r.key }))
+                      }
+                      warningItems={
+                        [
+                          // Training warnings
+                          ...(trainingEvaluation?.items?.filter(i => i.status === 'due_soon').map(i => ({ 
+                            message: `${i.title}: Expiring soon`, 
+                            section: 'training',
+                            row_key: 'training'
+                          })) || []),
+                          // Soft blocks from readiness engine
+                          ...(complianceRequirements.work_readiness_3tier.reasons || [])
+                            .filter(r => r.type !== 'hard_block')
+                            .map(r => ({ message: r.message, section: r.section, row_key: r.key }))
+                        ]
+                      }
+                      missingItems={
+                        complianceRequirements.requirements
+                          ?.filter(r => r.status === 'missing' || r.status === 'not_uploaded')
+                          .map(r => ({ message: r.name, name: r.name, row_key: r.key })) || []
+                      }
+                      onRequestAll={handleRequestAllMissingItems}
+                      onNavigateToItem={(item) => {
+                        // Navigate to the relevant section
+                        if (item.section === 'training' || item.row_key?.includes('training')) {
+                          handleTabChange('training');
+                        }
+                      }}
+                      hasEmail={!!employee?.email}
+                      isAuditor={isAuditor()}
+                    />
+                  )}
                   
                   {/* Divider between dual-row and legacy view */}
                   <div className="border-t border-gray-200 my-8 pt-6">

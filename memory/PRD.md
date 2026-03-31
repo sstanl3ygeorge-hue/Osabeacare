@@ -4,8 +4,8 @@
 **Osabea Healthcare Solutions**
 
 
-## Step 11D: File Interaction + Request Lifecycle - Phase D1 (2026-03-31)
-**Status**: D1 COMPLETE ✅ | D2-D4 PENDING
+## Step 11D: File Interaction + Request Lifecycle - Phase D1 & D2 (2026-03-31)
+**Status**: D1 COMPLETE ✅ | D2 COMPLETE ✅ | D3-D4 PENDING
 
 ### Phase D1: Backend Endpoints ✅ (2026-03-31)
 Implemented the backend infrastructure that turns the Compliance File from a status page into an operations page.
@@ -27,22 +27,39 @@ Implemented the backend infrastructure that turns the Compliance File from a sta
    - sent_at, viewed_at, submitted_at, source (manual/scheduled)
 
 4. `POST /api/employees/{id}/requirements/{key}/resend-request` - Resend request
-   - Supersedes previous pending request
-   - Appends to history
-
 5. `POST /api/employees/{id}/requirements/{key}/request-replacement` - Request replacement
-   - Linked to specific file_id if provided
-   - Includes reason for replacement
 
-**Existing Endpoints Enhanced (already existed):**
-- `POST /api/documents/{id}/supersede` - Mark as superseded with status_history
-- `POST /api/documents/{id}/move-category` - Change requirement linkage
-- `POST /api/documents/{id}/mark-uploaded-in-error` - Safe remove from active set
+### Phase D2: RequirementFilesDrawer + DocumentActionMenu ✅ (2026-03-31)
+Implemented frontend per-file interaction components.
 
-**Multi-File Configuration:**
-- proof_of_address: required_count=2, max_active_files=5
-- right_to_work_documents: required_count=1, max_active_files=10
-- identity_documents: required_count=1, max_active_files=10
+**New Components:**
+- `RequirementFilesDrawer.js` - Slide-out drawer showing all files for a requirement
+  - Stats: Active, Verified, Pending counts
+  - Multi-file config indicator (e.g., "1/1 required documents verified")
+  - Active Files section with full metadata
+  - Historical Files section (collapsed by default)
+  - Action dialogs for Mark Uploaded in Error, Supersede, Move Category, Reject
+
+- `DocumentActionMenu.js` - Per-file dropdown action menu
+  - View / Download (always available)
+  - Review Extraction (if extraction pending)
+  - Verify / Reject (if awaiting verification)
+  - Supersede / Replace
+  - Move Category
+  - Mark Uploaded in Error (red, safe remove)
+
+**UI Integration:**
+- "View Files" button added to evidence rows when files exist
+- Clicking View Files opens RequirementFilesDrawer
+- Each file shows metadata: uploaded_at, source, verified_by, expiry_date
+- Extraction status highlighted in purple
+- Request linkage shown if file came from request
+
+**Key Behaviors:**
+- Actions shown only when backend allows them (no client-side guessing)
+- Mark Uploaded in Error moves file to historical, preserves audit
+- Supersede marks old file historical, allows new upload
+- Move Category changes requirement_id, preserves history
 
 ---
 

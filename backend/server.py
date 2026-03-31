@@ -1542,6 +1542,13 @@ async def calculate_work_readiness_3tier(
     """
     Calculate 3-tier work readiness status.
     
+    STEP 11 UPDATE: Readiness now depends on CHECK RECORDS, not just evidence.
+    - RTW → rtw_checks (share code check, passport check)
+    - DBS → dbs_checks (Update Service, certificate review)
+    - Identity → identity_verifications
+    - Address → address_verifications (need 2/2 verified documents)
+    - Agreements → agreement_acknowledgements
+    
     Returns:
         {
             "status": "NOT_READY" | "READY_WITH_CONDITIONS" | "READY_TO_WORK",
@@ -1553,19 +1560,24 @@ async def calculate_work_readiness_3tier(
         A. Recruitment Stage Blocks:
            - person_stage = "applicant" (auto-block)
            - recruitment_approved = false
-        B. Legal/Safety Blocks:
-           - Missing/expired right_to_work_documents or right_to_work_check
-           - Missing/expired dbs_certificate or dbs_check
-           - Missing identity_documents
+        B. Legal/Safety Blocks (CHECK-BASED):
+           - Right to Work Check missing or not verified
+           - DBS Status Check missing or not verified
+           - Identity Verification missing or not verified
         C. Reference Blocks:
            - reference_1 not verified
            - reference_2 not verified
         D. Recruitment File Blocks:
-           - proof_of_address incomplete (need 2)
+           - Address Verification: 0/2 or 1/2 verified
            - health questionnaire not submitted
            - interview record not submitted (for employees)
+        E. Agreement Blocks:
+           - Contract Acceptance not verified
+           - Handbook Acknowledgement not verified
         
     CONDITIONAL (READY_WITH_CONDITIONS) - Can work but needs attention:
+        - RTW Check follow-up due soon
+        - DBS Status Check review due soon
         - Overdue recurring compliance: supervision, competency_assessment, spot_check, training_refresh
         - Competency outcome = needs_improvement or action_required
         - Open/overdue report_followup
@@ -1574,13 +1586,16 @@ async def calculate_work_readiness_3tier(
         - All hard blocks cleared
         - No critical conditional issues
     """
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone, timedelta
     
     hard_block_reasons = []
     conditional_reasons = []
     
-    # Build requirement lookup
+    # Build requirement lookup (for legacy fields)
     req_lookup = {r.get('id'): r for r in requirements}
+    
+    today = datetime.now(timezone.utc).date()
+    warning_window = timedelta(days=30)
     
     # =========================================================================
     # HARD BLOCK A: RECRUITMENT STAGE BLOCKS
@@ -1604,52 +1619,101 @@ async def calculate_work_readiness_3tier(
         })
     
     # =========================================================================
-    # HARD BLOCK B: LEGAL/SAFETY BLOCKS
+    # HARD BLOCK B: LEGAL/SAFETY BLOCKS (CHECK-BASED - Step 11)
     # =========================================================================
     
-    today = datetime.now(timezone.utc).date()
+    # B1. Right to Work Check (authoritative source for RTW readiness)
+    rtw_check = await CheckRecordService.get_current_rtw_check(employee_id)
     
-    legal_safety_reqs = [
-        ("right_to_work_documents", "Right to Work evidence"),
-        ("right_to_work_check", "Right to Work verification"),
-        ("identity_documents", "Identity documents"),
-        ("dbs_certificate", "DBS certificate"),
-        ("dbs_check", "DBS check"),
-    ]
-    
-    for req_id, req_name in legal_safety_reqs:
-        req = req_lookup.get(req_id)
-        if not req:
-            continue
-            
-        has_evidence = req.get('has_evidence', False)
-        is_verified = req.get('verified', False)
-        
-        # Check expiry
-        expiry_date = req.get('expiry_date')
-        is_expired = False
-        if expiry_date:
+    if not rtw_check:
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "right_to_work_check_missing",
+            "message": "Right to Work Check not recorded"
+        })
+    elif rtw_check.get('outcome') != 'verified':
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "right_to_work_check_not_verified",
+            "message": f"Right to Work Check: {rtw_check.get('outcome', 'unknown').replace('_', ' ')}"
+        })
+    else:
+        # Check for follow-up due (warning, not block)
+        follow_up_due = rtw_check.get('follow_up_due_at')
+        if follow_up_due:
             try:
-                exp_date = datetime.fromisoformat(expiry_date.replace('Z', '+00:00')).date() if isinstance(expiry_date, str) else expiry_date
-                is_expired = exp_date < today
+                due_date = datetime.fromisoformat(follow_up_due.replace('Z', '+00:00')).date() if isinstance(follow_up_due, str) else follow_up_due
+                days_until = (due_date - today).days
+                if days_until < 0:
+                    hard_block_reasons.append({
+                        "type": "hard_block",
+                        "code": "right_to_work_follow_up_overdue",
+                        "message": f"RTW follow-up overdue ({abs(days_until)}d)"
+                    })
+                elif days_until <= 30:
+                    conditional_reasons.append({
+                        "type": "conditional",
+                        "code": "right_to_work_follow_up_due_soon",
+                        "message": f"RTW follow-up due in {days_until}d"
+                    })
             except:
                 pass
-        
-        if not has_evidence or not is_verified:
-            hard_block_reasons.append({
-                "type": "hard_block",
-                "code": f"{req_id}_missing",
-                "message": f"{req_name} required"
-            })
-        elif is_expired:
-            hard_block_reasons.append({
-                "type": "hard_block",
-                "code": f"{req_id}_expired",
-                "message": f"{req_name} expired"
-            })
+    
+    # B2. DBS Status Check (authoritative source for DBS readiness)
+    dbs_check = await CheckRecordService.get_current_dbs_check(employee_id)
+    
+    if not dbs_check:
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "dbs_status_check_missing",
+            "message": "DBS Status Check not recorded"
+        })
+    elif dbs_check.get('outcome') != 'verified':
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "dbs_status_check_not_verified",
+            "message": f"DBS Status Check: {dbs_check.get('outcome', 'unknown').replace('_', ' ')}"
+        })
+    else:
+        # Check for review due (this is internal policy, not certificate expiry)
+        review_due = dbs_check.get('review_due_at')
+        if review_due:
+            try:
+                due_date = datetime.fromisoformat(review_due.replace('Z', '+00:00')).date() if isinstance(review_due, str) else review_due
+                days_until = (due_date - today).days
+                if days_until < 0:
+                    conditional_reasons.append({
+                        "type": "conditional",
+                        "code": "dbs_review_overdue",
+                        "message": f"DBS review overdue ({abs(days_until)}d)"
+                    })
+                elif days_until <= 30:
+                    conditional_reasons.append({
+                        "type": "conditional",
+                        "code": "dbs_review_due_soon",
+                        "message": f"DBS review due in {days_until}d"
+                    })
+            except:
+                pass
+    
+    # B3. Identity Verification (authoritative source for identity readiness)
+    identity_check = await CheckRecordService.get_current_identity_verification(employee_id)
+    
+    if not identity_check:
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "identity_verification_missing",
+            "message": "Identity Verification not recorded"
+        })
+    elif identity_check.get('outcome') != 'verified':
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "identity_verification_not_verified",
+            "message": f"Identity Verification: {identity_check.get('outcome', 'unknown').replace('_', ' ')}"
+        })
     
     # =========================================================================
-    # HARD BLOCK C: REFERENCE BLOCKS
+    # HARD BLOCK C: REFERENCE BLOCKS (unchanged - uses existing reference system)
     # =========================================================================
     
     ref1 = req_lookup.get('reference_1')
@@ -1675,19 +1739,25 @@ async def calculate_work_readiness_3tier(
     # HARD BLOCK D: RECRUITMENT FILE BLOCKS
     # =========================================================================
     
-    # Proof of address - need 2 verified
-    poa = req_lookup.get('proof_of_address')
-    if poa:
-        poa_count = poa.get('document_count', 0)
-        poa_verified = poa.get('verified', False)
-        if poa_count < 2 or not poa_verified:
-            hard_block_reasons.append({
-                "type": "hard_block",
-                "code": "proof_of_address_incomplete",
-                "message": f"Proof of address ({poa_count}/2 required)"
-            })
+    # D1. Address Verification (CHECK-BASED - Step 11)
+    # Requires 2/2 verified address documents
+    address_check = await CheckRecordService.get_current_address_verification(employee_id)
     
-    # Health questionnaire - for staff (not applicants, they may not have it yet)
+    if not address_check:
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "address_verification_missing",
+            "message": "Address Verification: 0/2 verified"
+        })
+    elif not address_check.get('meets_requirement', False):
+        verified_count = address_check.get('verified_count', 0)
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "address_verification_incomplete",
+            "message": f"Address Verification: {verified_count}/2 verified"
+        })
+    
+    # D2. Health questionnaire - for staff (not applicants, they may not have it yet)
     if person_stage == 'employee':
         health_req = req_lookup.get('staff_health_questionnaire')
         if health_req and not health_req.get('has_evidence'):
@@ -1697,7 +1767,7 @@ async def calculate_work_readiness_3tier(
                 "message": "Health questionnaire required"
             })
     
-    # Interview record - for staff
+    # D3. Interview record - for staff
     if person_stage == 'employee':
         interview_req = req_lookup.get('interview_record')
         if interview_req and not interview_req.get('has_evidence'):
@@ -1705,6 +1775,54 @@ async def calculate_work_readiness_3tier(
                 "type": "hard_block",
                 "code": "interview_record_missing",
                 "message": "Interview record required"
+            })
+    
+    # =========================================================================
+    # HARD BLOCK E: AGREEMENT BLOCKS (Step 11 - Agreements as Forms)
+    # =========================================================================
+    
+    agreements = await AgreementAcknowledgementService.get_employee_agreements(employee_id)
+    
+    # Check contract acceptance
+    contract_acks = [a for a in agreements.get('acknowledgements', []) 
+                    if a.get('agreement_type') == 'contract_acceptance']
+    contract_verified = any(a.get('verification_status') == 'verified' for a in contract_acks)
+    
+    if not contract_verified:
+        if contract_acks:
+            latest = contract_acks[0]  # Already sorted by created_at desc
+            status = latest.get('verification_status', 'unknown')
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "contract_acceptance_not_verified",
+                "message": f"Contract Acceptance: {status.replace('_', ' ')}"
+            })
+        else:
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "contract_acceptance_missing",
+                "message": "Contract Acceptance required"
+            })
+    
+    # Check handbook acknowledgement
+    handbook_acks = [a for a in agreements.get('acknowledgements', [])
+                    if a.get('agreement_type') == 'handbook_acknowledgement']
+    handbook_verified = any(a.get('verification_status') == 'verified' for a in handbook_acks)
+    
+    if not handbook_verified:
+        if handbook_acks:
+            latest = handbook_acks[0]
+            status = latest.get('verification_status', 'unknown')
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "handbook_acknowledgement_not_verified",
+                "message": f"Handbook Acknowledgement: {status.replace('_', ' ')}"
+            })
+        else:
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "handbook_acknowledgement_missing",
+                "message": "Handbook Acknowledgement required"
             })
     
     # =========================================================================
@@ -22318,6 +22436,968 @@ class ReferenceEvidenceSource(str, Enum):
     LEGACY_IMPORT = "legacy_import"  # Pre-existing data
 
 
+# ==================== DUAL-ROW CHECK SERVICES (Step 11) ====================
+# Services for recording employer/admin verification checks.
+# These checks are the authoritative source for readiness calculations.
+# Evidence rows support checks but don't replace them.
+
+class CheckRecordService:
+    """
+    Service for managing employer verification check records.
+    
+    Collections:
+    - rtw_checks: Right to Work verification checks
+    - dbs_checks: DBS Update Service / certificate checks  
+    - identity_verifications: Identity document verifications
+    - address_verifications: Proof of address verification status
+    
+    All check records include full audit trail.
+    """
+    
+    @staticmethod
+    async def record_rtw_check(
+        employee_id: str,
+        data: dict,
+        recorded_by: str
+    ) -> dict:
+        """
+        Record a Right to Work check.
+        
+        This is the authoritative record for RTW readiness.
+        Evidence documents support this but don't replace it.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        check_id = f"rtw_chk_{uuid.uuid4().hex[:12]}"
+        
+        # Get the previous current check (if any) and mark as superseded
+        previous = await db.rtw_checks.find_one({
+            "employee_id": employee_id,
+            "is_current": True
+        })
+        if previous:
+            await db.rtw_checks.update_one(
+                {"id": previous["id"]},
+                {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
+            )
+        
+        check_record = {
+            "id": check_id,
+            "employee_id": employee_id,
+            "check_type": "right_to_work",
+            "method": data.get("method"),  # share_code_online_check, manual_passport_check, etc.
+            "checked_at": data.get("checked_at"),
+            "checked_by": recorded_by,
+            "outcome": data.get("outcome", "awaiting_review"),  # verified, failed, follow_up_required
+            "source_status_type": data.get("source_status_type"),  # digital_status, passport_endorsement, etc.
+            "follow_up_due_at": data.get("follow_up_due_at"),
+            "evidence_document_id": data.get("evidence_document_id"),
+            "notes": data.get("notes"),
+            "is_current": True,
+            "created_at": now,
+            "created_by": recorded_by,
+            "record_version": 1
+        }
+        
+        await db.rtw_checks.insert_one(check_record)
+        
+        # Log audit
+        await log_audit_action(recorded_by, "record_rtw_check", "rtw_checks", check_id, {
+            "employee_id": employee_id,
+            "method": data.get("method"),
+            "outcome": data.get("outcome")
+        })
+        
+        check_record.pop("_id", None)
+        return check_record
+    
+    @staticmethod
+    async def get_current_rtw_check(employee_id: str) -> Optional[dict]:
+        """Get the current RTW check for an employee."""
+        check = await db.rtw_checks.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        return check
+    
+    @staticmethod
+    async def get_rtw_check_history(employee_id: str, limit: int = 10) -> List[dict]:
+        """Get RTW check history for an employee."""
+        checks = await db.rtw_checks.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).sort("created_at", -1).limit(limit).to_list(limit)
+        return checks
+    
+    @staticmethod
+    async def record_dbs_check(
+        employee_id: str,
+        data: dict,
+        recorded_by: str
+    ) -> dict:
+        """
+        Record a DBS status check.
+        
+        Important: DBS certificates don't have a statutory expiry date.
+        The "review_due_at" is your INTERNAL POLICY date, not certificate expiry.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        check_id = f"dbs_chk_{uuid.uuid4().hex[:12]}"
+        
+        # Supersede previous current check
+        previous = await db.dbs_checks.find_one({
+            "employee_id": employee_id,
+            "is_current": True
+        })
+        if previous:
+            await db.dbs_checks.update_one(
+                {"id": previous["id"]},
+                {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
+            )
+        
+        check_record = {
+            "id": check_id,
+            "employee_id": employee_id,
+            "check_type": "dbs_status",
+            "method": data.get("method"),  # update_service_check, manual_certificate_review
+            "checked_at": data.get("checked_at"),
+            "checked_by": recorded_by,
+            "outcome": data.get("outcome", "awaiting_review"),
+            "review_due_at": data.get("review_due_at"),  # Internal policy date, NOT expiry
+            "certificate_number": data.get("certificate_number"),
+            "evidence_document_id": data.get("evidence_document_id"),
+            "notes": data.get("notes"),
+            "is_current": True,
+            "created_at": now,
+            "created_by": recorded_by,
+            "record_version": 1
+        }
+        
+        await db.dbs_checks.insert_one(check_record)
+        
+        await log_audit_action(recorded_by, "record_dbs_check", "dbs_checks", check_id, {
+            "employee_id": employee_id,
+            "method": data.get("method"),
+            "outcome": data.get("outcome")
+        })
+        
+        check_record.pop("_id", None)
+        return check_record
+    
+    @staticmethod
+    async def get_current_dbs_check(employee_id: str) -> Optional[dict]:
+        """Get the current DBS check for an employee."""
+        check = await db.dbs_checks.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        return check
+    
+    @staticmethod
+    async def get_dbs_check_history(employee_id: str, limit: int = 10) -> List[dict]:
+        """Get DBS check history for an employee."""
+        checks = await db.dbs_checks.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).sort("created_at", -1).limit(limit).to_list(limit)
+        return checks
+    
+    @staticmethod
+    async def record_identity_verification(
+        employee_id: str,
+        data: dict,
+        recorded_by: str
+    ) -> dict:
+        """Record an identity verification check."""
+        now = datetime.now(timezone.utc).isoformat()
+        check_id = f"id_ver_{uuid.uuid4().hex[:12]}"
+        
+        # Supersede previous current
+        previous = await db.identity_verifications.find_one({
+            "employee_id": employee_id,
+            "is_current": True
+        })
+        if previous:
+            await db.identity_verifications.update_one(
+                {"id": previous["id"]},
+                {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
+            )
+        
+        check_record = {
+            "id": check_id,
+            "employee_id": employee_id,
+            "check_type": "identity_verification",
+            "method": data.get("method"),  # manual_id_verification, digital_id_check
+            "checked_at": data.get("checked_at"),
+            "checked_by": recorded_by,
+            "outcome": data.get("outcome", "awaiting_review"),
+            "evidence_document_ids": data.get("evidence_document_ids", []),
+            "notes": data.get("notes"),
+            "is_current": True,
+            "created_at": now,
+            "created_by": recorded_by,
+            "record_version": 1
+        }
+        
+        await db.identity_verifications.insert_one(check_record)
+        
+        await log_audit_action(recorded_by, "record_identity_verification", "identity_verifications", check_id, {
+            "employee_id": employee_id,
+            "method": data.get("method"),
+            "outcome": data.get("outcome")
+        })
+        
+        check_record.pop("_id", None)
+        return check_record
+    
+    @staticmethod
+    async def get_current_identity_verification(employee_id: str) -> Optional[dict]:
+        """Get current identity verification for an employee."""
+        check = await db.identity_verifications.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        return check
+    
+    @staticmethod
+    async def record_address_verification(
+        employee_id: str,
+        data: dict,
+        recorded_by: str
+    ) -> dict:
+        """
+        Record address verification status.
+        
+        Tracks verified document count (need 2/2 for compliance).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        check_id = f"addr_ver_{uuid.uuid4().hex[:12]}"
+        
+        # Get current verified count
+        verified_doc_ids = data.get("verified_document_ids", [])
+        verified_count = len(verified_doc_ids)
+        
+        # Supersede previous current
+        previous = await db.address_verifications.find_one({
+            "employee_id": employee_id,
+            "is_current": True
+        })
+        if previous:
+            await db.address_verifications.update_one(
+                {"id": previous["id"]},
+                {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
+            )
+        
+        check_record = {
+            "id": check_id,
+            "employee_id": employee_id,
+            "check_type": "address_verification",
+            "verified_document_ids": verified_doc_ids,
+            "verified_count": verified_count,
+            "minimum_required": 2,
+            "meets_requirement": verified_count >= 2,
+            "verified_at": data.get("verified_at"),
+            "verified_by": recorded_by,
+            "recency_policy_passed": data.get("recency_policy_passed", True),
+            "notes": data.get("notes"),
+            "is_current": True,
+            "created_at": now,
+            "created_by": recorded_by,
+            "record_version": 1
+        }
+        
+        await db.address_verifications.insert_one(check_record)
+        
+        await log_audit_action(recorded_by, "record_address_verification", "address_verifications", check_id, {
+            "employee_id": employee_id,
+            "verified_count": verified_count,
+            "meets_requirement": verified_count >= 2
+        })
+        
+        check_record.pop("_id", None)
+        return check_record
+    
+    @staticmethod
+    async def get_current_address_verification(employee_id: str) -> Optional[dict]:
+        """Get current address verification for an employee."""
+        check = await db.address_verifications.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        return check
+
+
+class AgreementVersionService:
+    """
+    Service for managing agreement document versions.
+    
+    Agreements (Contract, Handbook) have real version labels, not just timestamps.
+    """
+    
+    @staticmethod
+    async def create_version(
+        document_type: str,  # "contract" or "handbook"
+        version_label: str,  # e.g., "Contract-v3", "Handbook-2026.04"
+        created_by: str,
+        effective_from: Optional[str] = None
+    ) -> dict:
+        """Create a new agreement version."""
+        now = datetime.now(timezone.utc).isoformat()
+        version_id = f"agr_ver_{uuid.uuid4().hex[:12]}"
+        
+        version = {
+            "id": version_id,
+            "document_type": document_type,
+            "version_label": version_label,
+            "published_at": now,
+            "effective_from": effective_from or now,
+            "is_active": True,
+            "created_by": created_by,
+            "created_at": now
+        }
+        
+        await db.agreement_versions.insert_one(version)
+        version.pop("_id", None)
+        return version
+    
+    @staticmethod
+    async def get_active_version(document_type: str) -> Optional[dict]:
+        """Get the currently active version for an agreement type."""
+        return await db.agreement_versions.find_one(
+            {"document_type": document_type, "is_active": True},
+            {"_id": 0}
+        )
+    
+    @staticmethod
+    async def list_versions(document_type: str) -> List[dict]:
+        """List all versions for an agreement type."""
+        versions = await db.agreement_versions.find(
+            {"document_type": document_type},
+            {"_id": 0}
+        ).sort("published_at", -1).to_list(50)
+        return versions
+
+
+class AgreementAcknowledgementService:
+    """
+    Service for managing agreement acknowledgements.
+    
+    Agreements are forms, not document uploads:
+    - Send by secure link
+    - Fill internally (admin on behalf)
+    - Complete by phone (assisted mode)
+    """
+    
+    @staticmethod
+    async def send_agreement_form(
+        employee_id: str,
+        agreement_type: str,  # contract_acceptance, handbook_acknowledgement
+        version_label: str,
+        sent_by: str,
+        custom_message: Optional[str] = None,
+        due_days: int = 14
+    ) -> dict:
+        """Send an agreement form to employee via secure link."""
+        now = datetime.now(timezone.utc)
+        request_id = f"agr_req_{uuid.uuid4().hex[:12]}"
+        token = secrets.token_urlsafe(32)
+        
+        due_at = (now + timedelta(days=due_days)).isoformat()
+        
+        request = {
+            "id": request_id,
+            "employee_id": employee_id,
+            "agreement_type": agreement_type,
+            "version_label": version_label,
+            "token": token,
+            "status": "sent",
+            "custom_message": custom_message,
+            "due_at": due_at,
+            "sent_at": now.isoformat(),
+            "sent_by": sent_by,
+            "created_at": now.isoformat()
+        }
+        
+        await db.agreement_requests.insert_one(request)
+        
+        # TODO: Send email via EmailRequestService
+        
+        await log_audit_action(sent_by, "send_agreement_form", "agreement_requests", request_id, {
+            "employee_id": employee_id,
+            "agreement_type": agreement_type,
+            "version_label": version_label
+        })
+        
+        request.pop("_id", None)
+        return request
+    
+    @staticmethod
+    async def complete_agreement(
+        employee_id: str,
+        data: dict,
+        completed_by: str,
+        assisted_by: Optional[str] = None
+    ) -> dict:
+        """
+        Record an agreement acknowledgement.
+        
+        completion_mode determines how it was completed:
+        - self_completed: Employee filled via link
+        - admin_assisted: Admin filled on employee's behalf
+        - phone_assisted: Admin recorded during phone call
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        ack_id = f"agr_ack_{uuid.uuid4().hex[:12]}"
+        
+        acknowledgement = {
+            "id": ack_id,
+            "employee_id": employee_id,
+            "agreement_type": data.get("agreement_type"),
+            "completion_mode": data.get("completion_mode"),
+            "completed_at": now,
+            "completed_by": completed_by,
+            "assisted_by": assisted_by,
+            "version_acknowledged": data.get("version_acknowledged"),
+            "call_note": data.get("call_note"),  # For phone-assisted mode
+            "signed_document_id": data.get("signed_document_id"),  # Optional supporting evidence
+            "verification_status": "awaiting_review",
+            "created_at": now,
+            "created_by": completed_by
+        }
+        
+        await db.agreement_acknowledgements.insert_one(acknowledgement)
+        
+        # Mark any pending request as completed
+        await db.agreement_requests.update_many(
+            {
+                "employee_id": employee_id,
+                "agreement_type": data.get("agreement_type"),
+                "status": "sent"
+            },
+            {"$set": {"status": "completed", "completed_at": now}}
+        )
+        
+        await log_audit_action(completed_by, "complete_agreement", "agreement_acknowledgements", ack_id, {
+            "employee_id": employee_id,
+            "agreement_type": data.get("agreement_type"),
+            "completion_mode": data.get("completion_mode"),
+            "version_acknowledged": data.get("version_acknowledged")
+        })
+        
+        acknowledgement.pop("_id", None)
+        return acknowledgement
+    
+    @staticmethod
+    async def verify_agreement(
+        acknowledgement_id: str,
+        verified_by: str,
+        notes: Optional[str] = None
+    ) -> Optional[dict]:
+        """Verify an agreement acknowledgement."""
+        now = datetime.now(timezone.utc).isoformat()
+        
+        result = await db.agreement_acknowledgements.find_one_and_update(
+            {"id": acknowledgement_id},
+            {
+                "$set": {
+                    "verification_status": "verified",
+                    "verified_at": now,
+                    "verified_by": verified_by,
+                    "verification_notes": notes
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            await log_audit_action(verified_by, "verify_agreement", "agreement_acknowledgements", acknowledgement_id, {
+                "status": "verified"
+            })
+            result.pop("_id", None)
+        
+        return result
+    
+    @staticmethod
+    async def reject_agreement(
+        acknowledgement_id: str,
+        rejected_by: str,
+        reason: str
+    ) -> Optional[dict]:
+        """Reject an agreement acknowledgement."""
+        now = datetime.now(timezone.utc).isoformat()
+        
+        result = await db.agreement_acknowledgements.find_one_and_update(
+            {"id": acknowledgement_id},
+            {
+                "$set": {
+                    "verification_status": "rejected",
+                    "rejected_at": now,
+                    "rejected_by": rejected_by,
+                    "rejection_reason": reason
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            await log_audit_action(rejected_by, "reject_agreement", "agreement_acknowledgements", acknowledgement_id, {
+                "status": "rejected",
+                "reason": reason
+            })
+            result.pop("_id", None)
+        
+        return result
+    
+    @staticmethod
+    async def get_employee_agreements(employee_id: str) -> dict:
+        """Get all agreement acknowledgements for an employee."""
+        acknowledgements = await db.agreement_acknowledgements.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).sort("created_at", -1).to_list(50)
+        
+        # Get pending requests
+        pending_requests = await db.agreement_requests.find(
+            {"employee_id": employee_id, "status": "sent"},
+            {"_id": 0}
+        ).to_list(10)
+        
+        return {
+            "acknowledgements": acknowledgements,
+            "pending_requests": pending_requests
+        }
+
+
+class DocumentCorrectionService:
+    """
+    Service for document correction actions.
+    
+    All corrections are audit-trailed and preserve history.
+    """
+    
+    @staticmethod
+    async def mark_uploaded_in_error(
+        document_id: str,
+        reason: str,
+        marked_by: str,
+        notes: Optional[str] = None
+    ) -> Optional[dict]:
+        """
+        Mark a document as uploaded in error.
+        
+        The document remains in history but is excluded from active counts.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        doc = await db.employee_documents.find_one({"id": document_id})
+        if not doc:
+            return None
+        
+        # Record correction in history
+        correction = {
+            "action": "uploaded_in_error",
+            "reason": reason,
+            "notes": notes,
+            "previous_status": doc.get("status"),
+            "changed_by": marked_by,
+            "changed_at": now
+        }
+        
+        result = await db.employee_documents.find_one_and_update(
+            {"id": document_id},
+            {
+                "$set": {
+                    "status": DocumentStatus.UPLOADED_IN_ERROR.value,
+                    "correction_info": correction,
+                    "updated_at": now
+                },
+                "$push": {
+                    "correction_history": correction
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            await log_audit_action(marked_by, "mark_uploaded_in_error", "employee_documents", document_id, {
+                "reason": reason,
+                "previous_status": doc.get("status")
+            })
+            result.pop("_id", None)
+        
+        return result
+    
+    @staticmethod
+    async def supersede_document(
+        document_id: str,
+        superseded_by_id: str,
+        reason: str,
+        marked_by: str,
+        notes: Optional[str] = None
+    ) -> Optional[dict]:
+        """
+        Mark a document as superseded by another document.
+        
+        Use when a newer version replaces an older one.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        doc = await db.employee_documents.find_one({"id": document_id})
+        if not doc:
+            return None
+        
+        correction = {
+            "action": "superseded",
+            "superseded_by": superseded_by_id,
+            "reason": reason,
+            "notes": notes,
+            "previous_status": doc.get("status"),
+            "changed_by": marked_by,
+            "changed_at": now
+        }
+        
+        result = await db.employee_documents.find_one_and_update(
+            {"id": document_id},
+            {
+                "$set": {
+                    "status": DocumentStatus.SUPERSEDED.value,
+                    "superseded_by": superseded_by_id,
+                    "superseded_at": now,
+                    "correction_info": correction,
+                    "updated_at": now
+                },
+                "$push": {
+                    "correction_history": correction
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            await log_audit_action(marked_by, "supersede_document", "employee_documents", document_id, {
+                "superseded_by": superseded_by_id,
+                "reason": reason
+            })
+            result.pop("_id", None)
+        
+        return result
+
+
+class DualRowMigrationService:
+    """
+    Service for migrating existing data to dual-row model.
+    
+    Migration policy (conservative):
+    - Keep existing evidence files as they are
+    - Create derived check records ONLY where data is strong enough
+    - Otherwise mark as "not_recorded" or "awaiting_review"
+    - DO NOT silently manufacture a verified check from just an uploaded document
+    
+    Auto-create migrated check record only if ALL present:
+    - Existing item is already marked verified
+    - verified_by exists
+    - verified_at exists
+    - The existing row clearly represents an admin/employer check outcome
+    
+    All migrated records include:
+    - created_source: 'migration'
+    - migration_basis: description of what triggered migration
+    - migrated_at: timestamp
+    """
+    
+    @staticmethod
+    async def migrate_employee_checks(
+        employee_id: str,
+        migrated_by: str,
+        dry_run: bool = False
+    ) -> dict:
+        """
+        Migrate an employee's compliance data to dual-row model.
+        
+        Returns summary of what was/would be migrated.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        results = {
+            "employee_id": employee_id,
+            "migrated_at": now,
+            "dry_run": dry_run,
+            "rtw_check": None,
+            "dbs_check": None,
+            "identity_check": None,
+            "address_verification": None,
+            "skipped": [],
+            "errors": []
+        }
+        
+        # Get existing documents
+        documents = await db.employee_documents.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).to_list(200)
+        
+        # Group by requirement
+        docs_by_req = {}
+        for doc in documents:
+            req_id = doc.get("requirement_id")
+            if req_id not in docs_by_req:
+                docs_by_req[req_id] = []
+            docs_by_req[req_id].append(doc)
+        
+        # =====================================================================
+        # RTW Migration
+        # =====================================================================
+        rtw_docs = docs_by_req.get("right_to_work_documents", []) + docs_by_req.get("right_to_work_check", [])
+        # Find the strongest verified RTW record
+        rtw_verified = [d for d in rtw_docs if d.get("verified") and d.get("verified_by") and d.get("verified_at")]
+        
+        if rtw_verified:
+            # Use the most recent verified RTW document to create a check record
+            best_rtw = max(rtw_verified, key=lambda x: x.get("verified_at", ""))
+            
+            # Check if this looks like a check outcome (not just evidence)
+            doc_type = best_rtw.get("document_type", "").lower()
+            is_check_document = any(t in doc_type for t in ["rtw_check", "share_code_check", "check"])
+            
+            if is_check_document:
+                # This is clearly a check outcome document
+                check_data = {
+                    "method": "manual_passport_check",  # Default, can be updated
+                    "checked_at": best_rtw.get("verified_at"),
+                    "outcome": CheckOutcome.VERIFIED.value,
+                    "evidence_document_id": best_rtw.get("id"),
+                    "notes": f"Migrated from verified document: {best_rtw.get('file_name')}",
+                    "created_source": "migration",
+                    "migration_basis": f"Document {best_rtw.get('id')} was verified by {best_rtw.get('verified_by')} on {best_rtw.get('verified_at')}",
+                    "migrated_at": now
+                }
+                
+                if not dry_run:
+                    check = await CheckRecordService.record_rtw_check(
+                        employee_id, check_data, migrated_by
+                    )
+                    # Mark as migrated
+                    await db.rtw_checks.update_one(
+                        {"id": check["id"]},
+                        {"$set": {
+                            "created_source": "migration",
+                            "migration_basis": check_data["migration_basis"],
+                            "migrated_at": now
+                        }}
+                    )
+                    results["rtw_check"] = {"status": "migrated", "check_id": check["id"]}
+                else:
+                    results["rtw_check"] = {"status": "would_migrate", "basis": check_data["migration_basis"]}
+            else:
+                # This is just evidence, not a check - don't create a verified check
+                results["rtw_check"] = {"status": "skipped", "reason": "Verified evidence file but not a check document - check record not created"}
+                results["skipped"].append("rtw: evidence only, no check record created")
+        else:
+            results["rtw_check"] = {"status": "not_recorded", "reason": "No verified RTW documents found"}
+        
+        # =====================================================================
+        # DBS Migration
+        # =====================================================================
+        dbs_docs = docs_by_req.get("dbs_certificate", []) + docs_by_req.get("dbs_check", [])
+        dbs_verified = [d for d in dbs_docs if d.get("verified") and d.get("verified_by") and d.get("verified_at")]
+        
+        if dbs_verified:
+            best_dbs = max(dbs_verified, key=lambda x: x.get("verified_at", ""))
+            doc_type = best_dbs.get("document_type", "").lower()
+            is_check_document = any(t in doc_type for t in ["dbs_check", "update_service", "check"])
+            
+            if is_check_document:
+                check_data = {
+                    "method": "update_service_check",
+                    "checked_at": best_dbs.get("verified_at"),
+                    "outcome": CheckOutcome.VERIFIED.value,
+                    "evidence_document_id": best_dbs.get("id"),
+                    "notes": f"Migrated from verified document: {best_dbs.get('file_name')}",
+                    "created_source": "migration",
+                    "migration_basis": f"Document {best_dbs.get('id')} was verified by {best_dbs.get('verified_by')} on {best_dbs.get('verified_at')}",
+                    "migrated_at": now
+                }
+                
+                if not dry_run:
+                    check = await CheckRecordService.record_dbs_check(
+                        employee_id, check_data, migrated_by
+                    )
+                    await db.dbs_checks.update_one(
+                        {"id": check["id"]},
+                        {"$set": {
+                            "created_source": "migration",
+                            "migration_basis": check_data["migration_basis"],
+                            "migrated_at": now
+                        }}
+                    )
+                    results["dbs_check"] = {"status": "migrated", "check_id": check["id"]}
+                else:
+                    results["dbs_check"] = {"status": "would_migrate", "basis": check_data["migration_basis"]}
+            else:
+                results["dbs_check"] = {"status": "skipped", "reason": "Verified certificate but not a check document"}
+                results["skipped"].append("dbs: certificate only, no check record created")
+        else:
+            results["dbs_check"] = {"status": "not_recorded", "reason": "No verified DBS documents found"}
+        
+        # =====================================================================
+        # Identity Migration
+        # =====================================================================
+        id_docs = docs_by_req.get("identity_documents", [])
+        id_verified = [d for d in id_docs if d.get("verified") and d.get("verified_by") and d.get("verified_at")]
+        
+        if id_verified:
+            best_id = max(id_verified, key=lambda x: x.get("verified_at", ""))
+            
+            # Identity evidence with verification = we can create a check record
+            check_data = {
+                "method": "manual_id_verification",
+                "checked_at": best_id.get("verified_at"),
+                "outcome": CheckOutcome.VERIFIED.value,
+                "evidence_document_ids": [d.get("id") for d in id_verified],
+                "notes": f"Migrated from {len(id_verified)} verified identity document(s)",
+                "created_source": "migration",
+                "migration_basis": f"Identity documents verified by {best_id.get('verified_by')}",
+                "migrated_at": now
+            }
+            
+            if not dry_run:
+                check = await CheckRecordService.record_identity_verification(
+                    employee_id, check_data, migrated_by
+                )
+                await db.identity_verifications.update_one(
+                    {"id": check["id"]},
+                    {"$set": {
+                        "created_source": "migration",
+                        "migration_basis": check_data["migration_basis"],
+                        "migrated_at": now
+                    }}
+                )
+                results["identity_check"] = {"status": "migrated", "check_id": check["id"]}
+            else:
+                results["identity_check"] = {"status": "would_migrate", "basis": check_data["migration_basis"]}
+        else:
+            results["identity_check"] = {"status": "not_recorded", "reason": "No verified identity documents found"}
+        
+        # =====================================================================
+        # Address Verification Migration
+        # =====================================================================
+        poa_docs = docs_by_req.get("proof_of_address", [])
+        poa_verified = [d for d in poa_docs if d.get("verified") and d.get("verified_by")]
+        
+        if poa_verified:
+            verified_count = len(poa_verified)
+            check_data = {
+                "verified_document_ids": [d.get("id") for d in poa_verified],
+                "verified_at": max(d.get("verified_at", "") for d in poa_verified),
+                "notes": f"Migrated: {verified_count}/2 verified address documents"
+            }
+            
+            if not dry_run:
+                check = await CheckRecordService.record_address_verification(
+                    employee_id, check_data, migrated_by
+                )
+                await db.address_verifications.update_one(
+                    {"id": check["id"]},
+                    {"$set": {
+                        "created_source": "migration",
+                        "migration_basis": f"{verified_count} verified address documents found",
+                        "migrated_at": now
+                    }}
+                )
+                results["address_verification"] = {
+                    "status": "migrated",
+                    "check_id": check["id"],
+                    "verified_count": verified_count,
+                    "meets_requirement": verified_count >= 2
+                }
+            else:
+                results["address_verification"] = {
+                    "status": "would_migrate",
+                    "verified_count": verified_count,
+                    "meets_requirement": verified_count >= 2
+                }
+        else:
+            results["address_verification"] = {"status": "not_recorded", "reason": "No verified address documents found"}
+        
+        # Log the migration
+        if not dry_run:
+            await log_audit_action(migrated_by, "dual_row_migration", "employees", employee_id, {
+                "rtw_status": results["rtw_check"].get("status"),
+                "dbs_status": results["dbs_check"].get("status"),
+                "identity_status": results["identity_check"].get("status"),
+                "address_status": results["address_verification"].get("status"),
+                "skipped_count": len(results["skipped"])
+            })
+        
+        return results
+    
+    @staticmethod
+    async def run_batch_migration(
+        employee_ids: Optional[List[str]] = None,
+        migrated_by: str = "system_migration",
+        dry_run: bool = True,
+        limit: int = 100
+    ) -> dict:
+        """
+        Run batch migration for multiple employees.
+        
+        If employee_ids is None, migrates all employees without existing check records.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        if employee_ids is None:
+            # Find employees without any check records
+            existing_rtw = await db.rtw_checks.distinct("employee_id")
+            existing_dbs = await db.dbs_checks.distinct("employee_id")
+            existing_identity = await db.identity_verifications.distinct("employee_id")
+            
+            all_with_checks = set(existing_rtw) | set(existing_dbs) | set(existing_identity)
+            
+            # Get all employees
+            all_employees = await db.employees.find({}, {"id": 1}).to_list(10000)
+            employee_ids = [e["id"] for e in all_employees if e["id"] not in all_with_checks][:limit]
+        
+        results = {
+            "started_at": now,
+            "dry_run": dry_run,
+            "total_employees": len(employee_ids),
+            "migrated": 0,
+            "skipped": 0,
+            "errors": 0,
+            "details": []
+        }
+        
+        for emp_id in employee_ids:
+            try:
+                emp_result = await DualRowMigrationService.migrate_employee_checks(
+                    employee_id=emp_id,
+                    migrated_by=migrated_by,
+                    dry_run=dry_run
+                )
+                
+                if any(s.get("status") == "migrated" or s.get("status") == "would_migrate" 
+                       for s in [emp_result["rtw_check"], emp_result["dbs_check"], 
+                                emp_result["identity_check"], emp_result["address_verification"]] if s):
+                    results["migrated"] += 1
+                else:
+                    results["skipped"] += 1
+                
+                results["details"].append({
+                    "employee_id": emp_id,
+                    "status": "processed",
+                    "result": emp_result
+                })
+            except Exception as e:
+                results["errors"] += 1
+                results["details"].append({
+                    "employee_id": emp_id,
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        results["completed_at"] = datetime.now(timezone.utc).isoformat()
+        
+        return results
+
+
 class ReferenceIdentityConfidence(str, Enum):
     """Confidence levels for referee identity matching."""
     MATCH = "match"
@@ -23521,9 +24601,327 @@ class DocumentStatus(str, Enum):
     MISFILED = "misfiled"
 
 
+# ==================== DUAL-ROW EVIDENCE/CHECK MODEL (Step 11) ====================
+# Separates evidence files from employer/admin verification checks.
+#
+# Key principle:
+#   Evidence row = uploaded/supporting files (passport, certificate, etc.)
+#   Check row = employer/admin verification outcome (share code check, update service, etc.)
+#
+# This prevents false greens where uploaded evidence looks like verified checks.
+#
+# Row Types:
+#   - EVIDENCE: Right to Work Evidence, DBS Certificate Evidence, Identity Evidence, etc.
+#   - CHECK: Right to Work Check, DBS Status Check, Identity Verification, Address Verification
+#   - AGREEMENT: Contract Acceptance, Handbook Acknowledgement (form-based, not document-upload)
+# ==================================================================================
+
+class RowType(str, Enum):
+    """Compliance row types for dual-row model."""
+    EVIDENCE = "evidence"
+    CHECK = "check"
+    AGREEMENT = "agreement"
+
+class CheckMethod(str, Enum):
+    """Methods for employer verification checks."""
+    # RTW Methods
+    SHARE_CODE_ONLINE_CHECK = "share_code_online_check"
+    MANUAL_PASSPORT_CHECK = "manual_passport_check"
+    IDSP_CHECK = "idsp_check"
+    ECS_CHECK = "ecs_check"
+    # DBS Methods
+    UPDATE_SERVICE_CHECK = "update_service_check"
+    MANUAL_CERTIFICATE_REVIEW = "manual_certificate_review"
+    # Identity Methods
+    MANUAL_ID_VERIFICATION = "manual_id_verification"
+    DIGITAL_ID_CHECK = "digital_id_check"
+
+class CheckOutcome(str, Enum):
+    """Outcomes for employer verification checks."""
+    VERIFIED = "verified"
+    FAILED = "failed"
+    FOLLOW_UP_REQUIRED = "follow_up_required"
+    AWAITING_REVIEW = "awaiting_review"
+    NOT_RECORDED = "not_recorded"
+
+class SourceStatusType(str, Enum):
+    """Source status types for RTW checks."""
+    DIGITAL_STATUS = "digital_status"
+    PASSPORT_ENDORSEMENT = "passport_endorsement"
+    IRISH_PASSPORT = "irish_passport"
+    SETTLED_STATUS = "settled_status"
+    PRE_SETTLED_STATUS = "pre_settled_status"
+    OTHER = "other"
+
+class AgreementType(str, Enum):
+    """Types of agreement acknowledgements."""
+    CONTRACT_ACCEPTANCE = "contract_acceptance"
+    HANDBOOK_ACKNOWLEDGEMENT = "handbook_acknowledgement"
+
+class AgreementCompletionMode(str, Enum):
+    """How an agreement was completed."""
+    SELF_COMPLETED = "self_completed"
+    ADMIN_ASSISTED = "admin_assisted"
+    PHONE_ASSISTED = "phone_assisted"
+
+class AgreementVerificationStatus(str, Enum):
+    """Verification status for agreements."""
+    AWAITING_REVIEW = "awaiting_review"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+
+
+# Pydantic models for check records
+
+class RTWCheckInput(BaseModel):
+    """Input for recording a Right to Work check."""
+    method: str  # CheckMethod value
+    checked_at: str
+    outcome: str  # CheckOutcome value
+    source_status_type: Optional[str] = None
+    follow_up_due_at: Optional[str] = None
+    evidence_document_id: Optional[str] = None
+    notes: Optional[str] = None
+
+class DBSCheckInput(BaseModel):
+    """Input for recording a DBS status check."""
+    method: str  # CheckMethod value
+    checked_at: str
+    outcome: str  # CheckOutcome value
+    review_due_at: Optional[str] = None
+    certificate_number: Optional[str] = None
+    evidence_document_id: Optional[str] = None
+    notes: Optional[str] = None
+
+class IdentityCheckInput(BaseModel):
+    """Input for recording an identity verification."""
+    method: str  # CheckMethod value
+    checked_at: str
+    outcome: str  # CheckOutcome value
+    evidence_document_ids: Optional[List[str]] = None
+    notes: Optional[str] = None
+
+class AddressVerificationInput(BaseModel):
+    """Input for recording address verification."""
+    verified_document_ids: List[str]
+    verified_at: str
+    notes: Optional[str] = None
+
+class AgreementSendInput(BaseModel):
+    """Input for sending an agreement form."""
+    agreement_type: str  # AgreementType value
+    version_label: str  # e.g., "Contract-v3"
+    custom_message: Optional[str] = None
+    due_days: int = 14
+
+class AgreementCompleteInput(BaseModel):
+    """Input for completing an agreement."""
+    agreement_type: str
+    completion_mode: str  # AgreementCompletionMode value
+    version_acknowledged: str
+    call_note: Optional[str] = None  # For phone-assisted mode
+    signed_document_id: Optional[str] = None  # Optional supporting evidence
+
+class DocumentCorrectionInput(BaseModel):
+    """Input for document correction actions."""
+    reason: str
+    notes: Optional[str] = None
+
+
+# Active file limit configuration
+ACTIVE_FILE_LIMITS = {
+    "soft_warning": 6,
+    "strong_warning": 10,
+    "hard_block": 10,  # Only for single-purpose rows
+    # Rows exempt from hard block
+    "exempt_from_hard_block": [
+        "right_to_work_evidence",
+        "identity_evidence", 
+        "proof_of_address_evidence",
+        "training_certificate_evidence",
+        "dbs_certificate_evidence"
+    ]
+}
+
+
 class RequirementConfig:
-    """Configuration for compliance requirements."""
+    """Configuration for compliance requirements - Dual-Row Model (Step 11)."""
     
+    # ==================== DUAL-ROW CONFIGURATIONS ====================
+    # Each evidence type has a corresponding check type
+    DUAL_ROW_CONFIGS = {
+        # Right to Work
+        "right_to_work_evidence": {
+            "key": "right_to_work_evidence",
+            "title": "Right to Work Evidence",
+            "row_type": "evidence",
+            "paired_check_key": "right_to_work_check",
+            "multi_file": True,
+            "min_required": 0,  # Evidence alone doesn't satisfy requirement
+            "max_active": None,
+            "soft_warning_at": 6,
+            "strong_warning_at": 10,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": False,  # Verification is on the check row
+            "document_types": ["visa", "brp", "share_code", "passport", "settled_status"],
+            "description": "Passport, visa, BRP, share code evidence - supporting evidence only"
+        },
+        "right_to_work_check": {
+            "key": "right_to_work_check",
+            "title": "Right to Work Check",
+            "row_type": "check",
+            "paired_evidence_key": "right_to_work_evidence",
+            "multi_file": False,
+            "min_required": 1,  # This is what satisfies readiness
+            "max_active": 1,
+            "allow_admin_upload": False,
+            "allow_request": False,
+            "allow_extraction": False,
+            "allow_record_check": True,
+            "allow_update_check": True,
+            "allow_verification": True,
+            "check_methods": ["share_code_online_check", "manual_passport_check", "idsp_check", "ecs_check"],
+            "description": "Employer RTW verification - online share code check or manual check"
+        },
+        
+        # DBS
+        "dbs_certificate_evidence": {
+            "key": "dbs_certificate_evidence",
+            "title": "DBS Certificate Evidence",
+            "row_type": "evidence",
+            "paired_check_key": "dbs_status_check",
+            "multi_file": True,
+            "min_required": 0,
+            "max_active": None,
+            "soft_warning_at": 6,
+            "strong_warning_at": 10,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": False,
+            "document_types": ["dbs", "dbs_certificate"],
+            "description": "Uploaded DBS certificate - supporting evidence only"
+        },
+        "dbs_status_check": {
+            "key": "dbs_status_check",
+            "title": "DBS Status Check",
+            "row_type": "check",
+            "paired_evidence_key": "dbs_certificate_evidence",
+            "multi_file": False,
+            "min_required": 1,
+            "max_active": 1,
+            "allow_admin_upload": False,
+            "allow_request": False,
+            "allow_extraction": False,
+            "allow_record_check": True,
+            "allow_update_check": True,
+            "allow_verification": True,
+            "check_methods": ["update_service_check", "manual_certificate_review"],
+            "description": "DBS Update Service check or certificate review - this determines readiness",
+            "use_review_due_not_expiry": True  # Important: label as "Review Due" not "Expires"
+        },
+        
+        # Identity
+        "identity_evidence": {
+            "key": "identity_evidence",
+            "title": "Identity Evidence",
+            "row_type": "evidence",
+            "paired_check_key": "identity_verification",
+            "multi_file": True,
+            "min_required": 0,
+            "max_active": None,
+            "soft_warning_at": 6,
+            "strong_warning_at": 10,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": False,
+            "document_types": ["passport", "driving_licence", "national_id"],
+            "description": "Passport, driving licence, photo ID - supporting evidence"
+        },
+        "identity_verification": {
+            "key": "identity_verification",
+            "title": "Identity Verification",
+            "row_type": "check",
+            "paired_evidence_key": "identity_evidence",
+            "multi_file": False,
+            "min_required": 1,
+            "max_active": 1,
+            "allow_admin_upload": False,
+            "allow_request": False,
+            "allow_extraction": False,
+            "allow_record_check": True,
+            "allow_update_check": True,
+            "allow_verification": True,
+            "check_methods": ["manual_id_verification", "digital_id_check"],
+            "description": "Admin verification of identity documents"
+        },
+        
+        # Proof of Address
+        "proof_of_address_evidence": {
+            "key": "proof_of_address_evidence",
+            "title": "Proof of Address Evidence",
+            "row_type": "evidence",
+            "paired_check_key": "address_verification",
+            "multi_file": True,
+            "min_required": 2,  # Need 2 evidence files
+            "max_active": None,
+            "soft_warning_at": 6,
+            "strong_warning_at": 10,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": True,  # Individual files can be verified
+            "document_types": ["utility_bill", "bank_statement", "council_tax", "tenancy_agreement"],
+            "description": "2 separate documents required: utility bill, bank statement, etc.",
+            "freshness_required_days": 90
+        },
+        "address_verification": {
+            "key": "address_verification",
+            "title": "Address Verification",
+            "row_type": "check",
+            "paired_evidence_key": "proof_of_address_evidence",
+            "multi_file": False,
+            "min_required": 2,  # Need 2 verified evidence files
+            "max_active": 1,
+            "allow_admin_upload": False,
+            "allow_request": False,
+            "allow_extraction": False,
+            "allow_record_check": True,
+            "allow_verification": True,
+            "description": "Verification status: 0/2, 1/2, or 2/2 verified"
+        }
+    }
+    
+    # ==================== AGREEMENT CONFIGURATIONS ====================
+    AGREEMENT_CONFIGS = {
+        "contract_acceptance": {
+            "key": "contract_acceptance",
+            "title": "Contract Acceptance",
+            "row_type": "agreement",
+            "agreement_type": "contract_acceptance",
+            "allow_send_form": True,
+            "allow_fill_internally": True,
+            "allow_complete_by_phone": True,
+            "allow_verification": True,
+            "description": "Employee acknowledgement of employment contract"
+        },
+        "handbook_acknowledgement": {
+            "key": "handbook_acknowledgement",
+            "title": "Employee Handbook Acknowledgement",
+            "row_type": "agreement",
+            "agreement_type": "handbook_acknowledgement",
+            "allow_send_form": True,
+            "allow_fill_internally": True,
+            "allow_complete_by_phone": True,
+            "allow_verification": True,
+            "description": "Employee acknowledgement of company handbook"
+        }
+    }
+    
+    # ==================== LEGACY CONFIGS (backward compatibility) ====================
     CONFIGS = {
         "proof_of_address": {
             "key": "proof_of_address",
@@ -23610,6 +25008,11 @@ class RequirementConfig:
     
     @classmethod
     def get(cls, key: str) -> dict:
+        """Get config by key, checking dual-row first, then agreements, then legacy."""
+        if key in cls.DUAL_ROW_CONFIGS:
+            return cls.DUAL_ROW_CONFIGS[key]
+        if key in cls.AGREEMENT_CONFIGS:
+            return cls.AGREEMENT_CONFIGS[key]
         return cls.CONFIGS.get(key, {
             "key": key,
             "title": key.replace("_", " ").title(),
@@ -23620,6 +25023,24 @@ class RequirementConfig:
             "allow_extraction": False,
             "allow_verification": True
         })
+    
+    @classmethod
+    def get_dual_row_config(cls, key: str) -> Optional[dict]:
+        """Get dual-row config only."""
+        return cls.DUAL_ROW_CONFIGS.get(key)
+    
+    @classmethod
+    def get_agreement_config(cls, key: str) -> Optional[dict]:
+        """Get agreement config only."""
+        return cls.AGREEMENT_CONFIGS.get(key)
+    
+    @classmethod
+    def get_paired_key(cls, key: str) -> Optional[str]:
+        """Get the paired evidence/check key for a dual-row config."""
+        config = cls.DUAL_ROW_CONFIGS.get(key)
+        if not config:
+            return None
+        return config.get("paired_check_key") or config.get("paired_evidence_key")
 
 
 @api_router.get("/training/matrix")
@@ -24212,6 +25633,367 @@ async def get_document_library(
         "documents": result,
         "total": len(result)
     }
+
+
+# ==================== DUAL-ROW CHECK ENDPOINTS (Step 11) ====================
+# Endpoints for recording employer/admin verification checks.
+# These are the authoritative records for readiness calculations.
+
+@api_router.post("/employees/{employee_id}/right-to-work/check")
+async def record_rtw_check(
+    employee_id: str,
+    data: RTWCheckInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record a Right to Work check.
+    
+    This is the authoritative record for RTW readiness.
+    Evidence documents (passport, visa, BRP) support this but don't replace it.
+    
+    Methods:
+    - share_code_online_check: Online Home Office check using share code
+    - manual_passport_check: Manual verification of passport/visa
+    - idsp_check: Identity Service Provider check
+    - ecs_check: Employer Checking Service
+    
+    Example payload:
+    {
+        "method": "share_code_online_check",
+        "checked_at": "2026-03-31",
+        "outcome": "verified",
+        "source_status_type": "digital_status",
+        "follow_up_due_at": "2027-03-31",
+        "evidence_document_id": "doc_123",
+        "notes": "Online Home Office check completed using share code."
+    }
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await CheckRecordService.record_rtw_check(
+        employee_id=employee_id,
+        data=data.model_dump(),
+        recorded_by=user['user_id']
+    )
+    
+    return result
+
+
+@api_router.get("/employees/{employee_id}/right-to-work/check")
+async def get_rtw_check(
+    employee_id: str,
+    include_history: bool = False,
+    user: dict = Depends(get_current_user)
+):
+    """Get the current RTW check for an employee."""
+    current = await CheckRecordService.get_current_rtw_check(employee_id)
+    
+    if include_history:
+        history = await CheckRecordService.get_rtw_check_history(employee_id)
+        return {
+            "current": current,
+            "history": history
+        }
+    
+    return {"current": current}
+
+
+@api_router.post("/employees/{employee_id}/dbs/check")
+async def record_dbs_check(
+    employee_id: str,
+    data: DBSCheckInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record a DBS status check.
+    
+    Important: DBS certificates do NOT have a statutory expiry date.
+    The "review_due_at" is your INTERNAL POLICY date, not certificate expiry.
+    
+    Methods:
+    - update_service_check: DBS Update Service online check
+    - manual_certificate_review: Manual review of certificate
+    
+    Example payload:
+    {
+        "method": "update_service_check",
+        "checked_at": "2026-03-31",
+        "outcome": "verified",
+        "review_due_at": "2027-03-31",
+        "certificate_number": "123456789012",
+        "evidence_document_id": "doc_456",
+        "notes": "Update Service status check - no changes to disclose."
+    }
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await CheckRecordService.record_dbs_check(
+        employee_id=employee_id,
+        data=data.model_dump(),
+        recorded_by=user['user_id']
+    )
+    
+    return result
+
+
+@api_router.get("/employees/{employee_id}/dbs/check")
+async def get_dbs_check(
+    employee_id: str,
+    include_history: bool = False,
+    user: dict = Depends(get_current_user)
+):
+    """Get the current DBS check for an employee."""
+    current = await CheckRecordService.get_current_dbs_check(employee_id)
+    
+    if include_history:
+        history = await CheckRecordService.get_dbs_check_history(employee_id)
+        return {
+            "current": current,
+            "history": history
+        }
+    
+    return {"current": current}
+
+
+@api_router.post("/employees/{employee_id}/identity/check")
+async def record_identity_check(
+    employee_id: str,
+    data: IdentityCheckInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record an identity verification check.
+    
+    Methods:
+    - manual_id_verification: Manual verification of ID documents
+    - digital_id_check: Digital identity verification service
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await CheckRecordService.record_identity_verification(
+        employee_id=employee_id,
+        data=data.model_dump(),
+        recorded_by=user['user_id']
+    )
+    
+    return result
+
+
+@api_router.get("/employees/{employee_id}/identity/check")
+async def get_identity_check(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get the current identity verification for an employee."""
+    current = await CheckRecordService.get_current_identity_verification(employee_id)
+    return {"current": current}
+
+
+@api_router.post("/employees/{employee_id}/address/verify")
+async def record_address_verification(
+    employee_id: str,
+    data: AddressVerificationInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record address verification status.
+    
+    Requires 2 verified documents to meet the minimum requirement.
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await CheckRecordService.record_address_verification(
+        employee_id=employee_id,
+        data=data.model_dump(),
+        recorded_by=user['user_id']
+    )
+    
+    return result
+
+
+@api_router.get("/employees/{employee_id}/address/verification")
+async def get_address_verification(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get the current address verification status for an employee."""
+    current = await CheckRecordService.get_current_address_verification(employee_id)
+    return {"current": current}
+
+
+# ==================== AGREEMENT ENDPOINTS (Step 11) ====================
+
+@api_router.post("/employees/{employee_id}/agreements/send")
+async def send_agreement_form(
+    employee_id: str,
+    data: AgreementSendInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send an agreement form to employee via secure link.
+    
+    Agreement types:
+    - contract_acceptance: Employment contract acknowledgement
+    - handbook_acknowledgement: Company handbook acknowledgement
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await AgreementAcknowledgementService.send_agreement_form(
+        employee_id=employee_id,
+        agreement_type=data.agreement_type,
+        version_label=data.version_label,
+        sent_by=user['user_id'],
+        custom_message=data.custom_message,
+        due_days=data.due_days
+    )
+    
+    return result
+
+
+@api_router.post("/employees/{employee_id}/agreements/complete")
+async def complete_agreement(
+    employee_id: str,
+    data: AgreementCompleteInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Complete an agreement acknowledgement.
+    
+    Completion modes:
+    - self_completed: Employee filled via secure link
+    - admin_assisted: Admin filled on employee's behalf
+    - phone_assisted: Admin recorded during phone call (include call_note)
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    assisted_by = user['user_id'] if data.completion_mode in ['admin_assisted', 'phone_assisted'] else None
+    completed_by = employee_id if data.completion_mode == 'self_completed' else user['user_id']
+    
+    result = await AgreementAcknowledgementService.complete_agreement(
+        employee_id=employee_id,
+        data=data.model_dump(),
+        completed_by=completed_by,
+        assisted_by=assisted_by
+    )
+    
+    return result
+
+
+@api_router.get("/employees/{employee_id}/agreements")
+async def get_employee_agreements(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get all agreement acknowledgements and pending requests for an employee."""
+    return await AgreementAcknowledgementService.get_employee_agreements(employee_id)
+
+
+@api_router.post("/employees/{employee_id}/agreements/{acknowledgement_id}/verify")
+async def verify_agreement_acknowledgement(
+    employee_id: str,
+    acknowledgement_id: str,
+    notes: Optional[str] = Body(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Verify an agreement acknowledgement."""
+    result = await AgreementAcknowledgementService.verify_agreement(
+        acknowledgement_id=acknowledgement_id,
+        verified_by=user['user_id'],
+        notes=notes
+    )
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    
+    return result
+
+
+@api_router.post("/employees/{employee_id}/agreements/{acknowledgement_id}/reject")
+async def reject_agreement_acknowledgement(
+    employee_id: str,
+    acknowledgement_id: str,
+    reason: str = Body(..., embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Reject an agreement acknowledgement."""
+    result = await AgreementAcknowledgementService.reject_agreement(
+        acknowledgement_id=acknowledgement_id,
+        rejected_by=user['user_id'],
+        reason=reason
+    )
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    
+    return result
+
+
+
+# ==================== DUAL-ROW MIGRATION ENDPOINTS (Step 11) ====================
+
+@api_router.post("/admin/dual-row-migration/employee/{employee_id}")
+async def migrate_employee_to_dual_row(
+    employee_id: str,
+    dry_run: bool = Query(True, description="If true, only preview what would be migrated"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Migrate a single employee's compliance data to dual-row model.
+    
+    Migration policy (conservative):
+    - Keeps existing evidence files as they are
+    - Creates derived check records ONLY where data is strong enough
+    - Does NOT silently manufacture verified checks from just uploaded evidence
+    
+    Set dry_run=false to actually perform the migration.
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await DualRowMigrationService.migrate_employee_checks(
+        employee_id=employee_id,
+        migrated_by=user['user_id'],
+        dry_run=dry_run
+    )
+    
+    return result
+
+
+@api_router.post("/admin/dual-row-migration/batch")
+async def run_batch_dual_row_migration(
+    employee_ids: Optional[List[str]] = Body(None, description="Specific employee IDs to migrate, or null for auto-detect"),
+    dry_run: bool = Query(True, description="If true, only preview what would be migrated"),
+    limit: int = Query(100, description="Maximum employees to process"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Run batch migration for multiple employees.
+    
+    If employee_ids is null, migrates employees without existing check records.
+    Always use dry_run=true first to preview changes.
+    """
+    result = await DualRowMigrationService.run_batch_migration(
+        employee_ids=employee_ids,
+        migrated_by=user['user_id'],
+        dry_run=dry_run,
+        limit=limit
+    )
+    
+    return result
 
 
 @api_router.get("/employees/{employee_id}/compliance-file")

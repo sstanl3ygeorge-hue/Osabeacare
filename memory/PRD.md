@@ -4,6 +4,102 @@
 **Osabea Healthcare Solutions**
 
 
+## Step 11: Dual-Row Evidence/Check Model - Phase 1 & 2 Backend (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Phase 1: Backend Data Model & Services ✅
+Implemented the backend data model, services, and endpoints for the dual-row evidence/check model.
+
+### Phase 2: Readiness Engine Rewiring ✅
+Updated `calculate_work_readiness_3tier` to use CHECK RECORDS as the authoritative source:
+- RTW readiness → `rtw_checks` (share code check, passport check)
+- DBS readiness → `dbs_checks` (Update Service, certificate review)
+- Identity readiness → `identity_verifications`
+- Address readiness → `address_verifications` (need 2/2 verified)
+- Agreements readiness → `agreement_acknowledgements` (contract + handbook)
+
+### Key Principle
+- **Evidence row** = uploaded/supporting files (passport, certificate, etc.)
+- **Check row** = employer/admin verification outcome (authoritative for readiness)
+
+This prevents false greens where uploaded evidence looks like verified checks.
+
+### Data Model Changes
+
+#### New Enums
+- `RowType`: evidence, check, agreement
+- `CheckMethod`: share_code_online_check, manual_passport_check, update_service_check, etc.
+- `CheckOutcome`: verified, failed, follow_up_required, awaiting_review, not_recorded
+- `SourceStatusType`: digital_status, passport_endorsement, settled_status, etc.
+- `AgreementType`: contract_acceptance, handbook_acknowledgement
+- `AgreementCompletionMode`: self_completed, admin_assisted, phone_assisted
+
+#### New Collections
+- `rtw_checks` - Right to Work verification checks
+- `dbs_checks` - DBS Update Service / certificate checks
+- `identity_verifications` - Identity document verifications
+- `address_verifications` - Proof of address verification status
+- `agreement_versions` - Version tracking for contracts/handbooks
+- `agreement_acknowledgements` - Employee acknowledgements
+- `agreement_requests` - Pending agreement form requests
+
+#### RequirementConfig Updated
+- `DUAL_ROW_CONFIGS` - Evidence/Check pairs for RTW, DBS, Identity, Address
+- `AGREEMENT_CONFIGS` - Contract and Handbook as forms, not documents
+
+### New Services
+1. `CheckRecordService` - RTW, DBS, Identity, Address checks
+2. `AgreementVersionService` - Version management for agreements
+3. `AgreementAcknowledgementService` - Send/complete/verify agreements
+4. `DocumentCorrectionService` - mark-uploaded-in-error, supersede
+5. `DualRowMigrationService` - Conservative data migration
+
+### New Endpoints
+```
+POST /api/employees/{id}/right-to-work/check
+GET  /api/employees/{id}/right-to-work/check
+POST /api/employees/{id}/dbs/check
+GET  /api/employees/{id}/dbs/check
+POST /api/employees/{id}/identity/check
+GET  /api/employees/{id}/identity/check
+POST /api/employees/{id}/address/verify
+GET  /api/employees/{id}/address/verification
+POST /api/employees/{id}/agreements/send
+POST /api/employees/{id}/agreements/complete
+GET  /api/employees/{id}/agreements
+POST /api/employees/{id}/agreements/{id}/verify
+POST /api/employees/{id}/agreements/{id}/reject
+POST /api/admin/dual-row-migration/employee/{id}
+POST /api/admin/dual-row-migration/batch
+```
+
+### Migration Policy (Conservative)
+- Keep existing evidence files as they are
+- Create derived check records ONLY where data is strong enough:
+  - Item already marked verified
+  - verified_by exists
+  - verified_at exists
+  - Row clearly represents a check outcome, not just evidence
+- Otherwise: mark as "not_recorded" or "awaiting_review"
+- All migrated records include: `created_source`, `migration_basis`, `migrated_at`
+
+### Active File Limits
+- Soft warning at 6 active files
+- Strong warning at 10 active files
+- No hard block initially for evidence rows
+- Exempt from hard block: RTW Evidence, Identity Evidence, PoA Evidence, Training Evidence
+
+### Test Results
+- RTW Check endpoint: ✅
+- DBS Check endpoint: ✅
+- Identity Check endpoint: ✅
+- Agreement Send endpoint: ✅
+- Agreement Complete endpoint: ✅
+- Migration dry-run: ✅
+
+---
+
+
 ## Automatic Training Renewal Reminders (2026-03-31)
 **Status**: COMPLETE ✅
 

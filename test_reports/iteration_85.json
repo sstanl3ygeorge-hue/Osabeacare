@@ -1,0 +1,102 @@
+{
+  "summary": "Step 11 Dual-Row Evidence/Check Model - All 31 backend tests passed (100%). The implementation correctly separates evidence files from employer verification checks. RTW, DBS, Identity, and Address check endpoints work correctly. Agreement endpoints (send, complete, verify, reject) work correctly. Dual-row migration (dry-run and actual) works correctly. Readiness calculation now uses check records as the authoritative source.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_dual_row_model.py",
+    "/app/test_reports/pytest/dual_row_model_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Implementation correctly follows dual-row model: evidence files are separate from employer verification checks",
+    "CheckRecordService properly handles supersession of previous checks (is_current flag)",
+    "Address verification correctly requires 2 documents (meets_requirement field)",
+    "Readiness calculation (calculate_work_readiness_3tier) correctly uses check records as authoritative source",
+    "Agreement flow supports multiple completion modes: self_completed, admin_assisted, phone_assisted"
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_dual_row_model.py"
+  ],
+  "success_rate": {
+    "backend": "100% (31/31 tests passed)",
+    "frontend": "N/A (backend only testing requested)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Test created RTW checks, DBS checks, Identity checks, Address verifications, and Agreement acknowledgements for employee d88335f6-1b18-435a-8086-28af4a583f77",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Step 11 Dual-Row Model fully tested. New collections: rtw_checks, dbs_checks, identity_verifications, address_verifications, agreement_acknowledgements, agreement_requests, agreement_versions. Key endpoints: POST/GET /api/employees/{id}/right-to-work/check, POST/GET /api/employees/{id}/dbs/check, POST/GET /api/employees/{id}/identity/check, POST/GET /api/employees/{id}/address/verify, POST /api/employees/{id}/agreements/send, POST /api/employees/{id}/agreements/complete, GET /api/employees/{id}/agreements, POST /api/employees/{id}/agreements/{id}/verify, POST /api/admin/dual-row-migration/employee/{id}. Readiness calculation uses check records (not just evidence) as authoritative source.",
+  "features_tested": {
+    "rtw_check_endpoints": {
+      "status": "PASS",
+      "details": "POST creates check with rtw_chk_ prefix, GET returns current check, history supported, supersession works"
+    },
+    "dbs_check_endpoints": {
+      "status": "PASS",
+      "details": "POST creates check with dbs_chk_ prefix, supports update_service_check and manual_certificate_review methods"
+    },
+    "identity_check_endpoints": {
+      "status": "PASS",
+      "details": "POST creates check with id_ver_ prefix, supports multiple evidence_document_ids"
+    },
+    "address_verification_endpoints": {
+      "status": "PASS",
+      "details": "POST creates verification with addr_ver_ prefix, correctly calculates meets_requirement (2 docs needed)"
+    },
+    "agreement_send": {
+      "status": "PASS",
+      "details": "Creates agreement request with agr_req_ prefix, generates secure token, sets due date"
+    },
+    "agreement_complete": {
+      "status": "PASS",
+      "details": "Creates acknowledgement with agr_ack_ prefix, supports admin_assisted and phone_assisted modes"
+    },
+    "agreement_verify_reject": {
+      "status": "PASS",
+      "details": "Verify sets verification_status=verified, Reject sets verification_status=rejected with reason"
+    },
+    "dual_row_migration_dry_run": {
+      "status": "PASS",
+      "details": "Returns preview of what would be migrated without making changes"
+    },
+    "dual_row_migration_actual": {
+      "status": "PASS",
+      "details": "Creates check records from verified evidence documents"
+    },
+    "readiness_uses_check_records": {
+      "status": "PASS",
+      "details": "calculate_work_readiness_3tier uses CheckRecordService to get RTW, DBS, Identity, Address checks"
+    },
+    "error_handling": {
+      "status": "PASS",
+      "details": "All endpoints return 404 for non-existent employees"
+    }
+  },
+  "api_verification": {
+    "POST /api/employees/{id}/right-to-work/check": "200 OK - Creates RTW check record",
+    "GET /api/employees/{id}/right-to-work/check": "200 OK - Returns current check and optional history",
+    "POST /api/employees/{id}/dbs/check": "200 OK - Creates DBS check record",
+    "GET /api/employees/{id}/dbs/check": "200 OK - Returns current check and optional history",
+    "POST /api/employees/{id}/identity/check": "200 OK - Creates identity verification record",
+    "GET /api/employees/{id}/identity/check": "200 OK - Returns current identity verification",
+    "POST /api/employees/{id}/address/verify": "200 OK - Creates address verification record",
+    "GET /api/employees/{id}/address/verification": "200 OK - Returns current address verification",
+    "POST /api/employees/{id}/agreements/send": "200 OK - Sends agreement form request",
+    "POST /api/employees/{id}/agreements/complete": "200 OK - Completes agreement acknowledgement",
+    "GET /api/employees/{id}/agreements": "200 OK - Returns acknowledgements and pending requests",
+    "POST /api/employees/{id}/agreements/{ack_id}/verify": "200 OK - Verifies acknowledgement",
+    "POST /api/employees/{id}/agreements/{ack_id}/reject": "200 OK - Rejects acknowledgement",
+    "POST /api/admin/dual-row-migration/employee/{id}?dry_run=true": "200 OK - Dry-run migration preview",
+    "POST /api/admin/dual-row-migration/employee/{id}?dry_run=false": "200 OK - Actual migration",
+    "POST /api/admin/dual-row-migration/batch": "200 OK - Batch migration"
+  }
+}

@@ -12,6 +12,7 @@ import CheckRow from './CheckRow';
 import AgreementRow from './AgreementRow';
 import ReferenceRow from './ReferenceRow';
 import UploadRequirementCard from './UploadRequirementCard';
+import UploadRequirementDrawer from './UploadRequirementDrawer';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
@@ -64,11 +65,17 @@ export default function DualRowComplianceSection({
     references: true  // Added for references
   });
   
-  // Phase D2: Files drawer state
+  // Phase D2: Files drawer state (for legacy rows)
   const [filesDrawer, setFilesDrawer] = useState({
     open: false,
     requirementKey: null,
     requirementTitle: ''
+  });
+  
+  // Ticket C: Shared upload drawer state for RTW, DBS, Identity, PoA
+  const [uploadDrawer, setUploadDrawer] = useState({
+    isOpen: false,
+    requirementKey: null
   });
   
   // Phase D3: History drawer state
@@ -80,7 +87,16 @@ export default function DualRowComplianceSection({
   
   const { token } = useAuth();
   
-  // Open files drawer for a requirement
+  // Open upload drawer for upload-type requirements
+  const openUploadDrawer = (requirementKey) => {
+    setUploadDrawer({ isOpen: true, requirementKey });
+  };
+  
+  const closeUploadDrawer = () => {
+    setUploadDrawer({ isOpen: false, requirementKey: null });
+  };
+  
+  // Open files drawer for a requirement (legacy)
   const handleViewFiles = (requirementKey, requirementTitle) => {
     setFilesDrawer({
       open: true,
@@ -225,7 +241,7 @@ export default function DualRowComplianceSection({
           surface={surface}
           isOpen={isExpanded}
           onToggle={() => toggleSection(sectionKey)}
-          onOpenDrawer={() => handleViewFiles(`${sectionKey}_evidence`, section.title)}
+          onOpenDrawer={() => openUploadDrawer(sectionKey)}
           onUpload={() => onUpload && onUpload(`${sectionKey}_evidence`)}
           onRequest={() => onRequest && onRequest(`${sectionKey}_evidence`, section.title)}
           onResend={() => onRequest && onRequest(`${sectionKey}_evidence`, section.title)}
@@ -479,7 +495,21 @@ export default function DualRowComplianceSection({
         Serializer: {complianceFile.serializer_version}
       </div>
       
-      {/* Phase D2: Files Drawer */}
+      {/* Ticket C: Shared Upload Drawer for RTW, DBS, Identity, PoA */}
+      <UploadRequirementDrawer
+        isOpen={uploadDrawer.isOpen}
+        onClose={closeUploadDrawer}
+        employeeId={employeeId}
+        requirementKey={uploadDrawer.requirementKey}
+        onUploadFile={(key) => onUpload && onUpload(`${key}_evidence`)}
+        onSendRequest={(key) => onRequest && onRequest(`${key}_evidence`, UPLOAD_REQUIREMENT_KEYS.includes(key) ? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : key)}
+        onPreviewFile={onPreviewFile}
+        onExtractReview={onExtractReview}
+        onRefresh={handleRefresh}
+        isAuditor={isAuditor}
+      />
+      
+      {/* Phase D2: Files Drawer (for legacy rows) */}
       <RequirementFilesDrawer
         open={filesDrawer.open}
         onClose={() => setFilesDrawer({ open: false, requirementKey: null, requirementTitle: '' })}

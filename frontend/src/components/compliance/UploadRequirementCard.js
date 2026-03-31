@@ -68,8 +68,8 @@ export default function UploadRequirementCard({
       testId={`upload-requirement-${key}`}
       actions={
         <RequirementActionBar
-          viewLabel="View Files"
-          canView={hasFiles}
+          viewLabel={hasFiles ? "View Files" : "Manage"}
+          canView={true}
           onView={onOpenDrawer}
           canUpload={!isAuditor}
           onUpload={onUpload}

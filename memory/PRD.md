@@ -4,6 +4,54 @@
 **Osabea Healthcare Solutions**
 
 
+## Universal Document Extraction - Phase 2: DBS, RTW, ID (2026-03-31)
+**Status**: COMPLETE ✅
+
+### Overview
+Extended the Universal Document Extraction pipeline to DBS certificates, Right to Work documents, and ID documents. Same assistive-only pattern as Phase 1 (training certificates) - extraction creates draft for admin review, admin approves to update canonical records.
+
+### Supported Document Types
+1. **DBS Certificates** - Extracts: holder_name, certificate_number, issue_date, disclosure_type, expiry_date
+2. **Right to Work** - Extracts: holder_name, document_type, document_subtype, document_number, nationality, issue_date, expiry_date, permission_end_date, issuer
+3. **ID Documents** - Extracts: holder_name, document_type, document_number, date_of_birth, issue_date, expiry_date, issuing_authority, nationality
+
+### Frontend Integration
+- **Extract Document Data** dropdown option added for DBS, RTW, ID requirements
+- DocumentExtractionReview modal opens with field-by-field review
+- Confidence scores displayed for each extracted field
+- Admins can approve, edit and approve, or reject extractions
+
+### Extractable Requirements
+- `dbs_certificate`, `dbs_check`
+- `right_to_work_documents`, `right_to_work_check`
+- `id_document`, `passport`, `driving_licence`
+- `proof_of_address`, `proof_of_address_1`, `proof_of_address_2`
+
+### Review Workflow
+1. Admin clicks "Extract Document Data" from document dropdown
+2. GPT-5.2 Vision analyzes document image
+3. Extracted fields displayed with confidence scores
+4. Admin reviews and approves/edits/rejects
+5. Approved fields update canonical `employee_documents` record
+
+### Endpoints Used
+- `POST /api/documents/{id}/extract` - Trigger extraction
+- `GET /api/documents/{id}/extraction` - Get extraction result
+- `POST /api/documents/{id}/extraction/review` - Submit review decision
+
+### Test Results
+- Backend: 100% (19/19 tests passed)
+- Frontend: 100% (All Phase 2 features verified)
+- Test report: `/app/test_reports/iteration_79.json`
+
+### Actual Extraction Verified
+- DBS: certificate_number: "001840746777"
+- RTW: holder_name: "ALONGE OLAKUNLE MOSES"
+- ID (Passport): holder_name: "ALONGE MR OLAKUNLE MOSES"
+
+---
+
+
 ## Compliance File Consolidation + Training Matrix Repair - Step 8 (2026-03-31)
 **Status**: COMPLETE ✅
 

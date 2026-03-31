@@ -66,6 +66,205 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+
+# ==================== EMPLOYEES REPOSITORY ====================
+# Scoped data access layer - enforces applicant/employee separation
+
+# Forward declarations for scope filters (defined below after constants)
+_APPLICANT_STATUSES = None
+_EMPLOYEE_STATUSES = None
+
+def _init_scope_constants():
+    """Initialize scope constants after they're defined"""
+    global _APPLICANT_STATUSES, _EMPLOYEE_STATUSES
+    _APPLICANT_STATUSES = ["new", "screening", "interview", "compliance_review"]
+    _EMPLOYEE_STATUSES = ["onboarding", "active", "inactive"]
+
+# Initialize immediately with hardcoded values (same as APPLICANT_STATUSES/EMPLOYEE_STATUSES)
+_init_scope_constants()
+
+
+def _is_applicant_status(status: str) -> bool:
+    return status in _APPLICANT_STATUSES
+
+def _is_employee_status(status: str) -> bool:
+    return status in _EMPLOYEE_STATUSES
+
+def _applicant_scope_filter(existing_filter: dict = None) -> dict:
+    base = {"status": {"$in": _APPLICANT_STATUSES}}
+    if existing_filter:
+        return {**existing_filter, **base}
+    return base
+
+def _employee_scope_filter(existing_filter: dict = None) -> dict:
+    base = {"status": {"$in": _EMPLOYEE_STATUSES}}
+    if existing_filter:
+        return {**existing_filter, **base}
+    return base
+
+
+class EmployeesRepository:
+    """
+    Central repository for scoped employee/applicant queries.
+    
+    RULES:
+    - Staff/Employee views MUST use employee-scoped methods
+    - Recruitment views MUST use applicant-scoped methods
+    - Raw db.employees queries are BANNED for UI-serving endpoints
+    - Profile lookups validate scope and return 404 for wrong scope
+    """
+    
+    @staticmethod
+    async def list_employees(
+        filter_dict: dict = None,
+        projection: dict = None,
+        sort: list = None,
+        limit: int = 1000,
+        skip: int = 0
+    ) -> list:
+        """List employees only (onboarding, active, inactive)"""
+        query = _employee_scope_filter(filter_dict or {})
+        proj = projection or {"_id": 0}
+        cursor = db.employees.find(query, proj)
+        if sort:
+            cursor = cursor.sort(sort)
+        if skip:
+            cursor = cursor.skip(skip)
+        if limit:
+            cursor = cursor.limit(limit)
+        return await cursor.to_list(limit or 1000)
+    
+    @staticmethod
+    async def list_applicants(
+        filter_dict: dict = None,
+        projection: dict = None,
+        sort: list = None,
+        limit: int = 1000,
+        skip: int = 0
+    ) -> list:
+        """List applicants only (new, screening, interview, compliance_review)"""
+        query = _applicant_scope_filter(filter_dict or {})
+        proj = projection or {"_id": 0}
+        cursor = db.employees.find(query, proj)
+        if sort:
+            cursor = cursor.sort(sort)
+        if skip:
+            cursor = cursor.skip(skip)
+        if limit:
+            cursor = cursor.limit(limit)
+        return await cursor.to_list(limit or 1000)
+    
+    @staticmethod
+    async def count_employees(filter_dict: dict = None) -> int:
+        """Count employees only"""
+        query = _employee_scope_filter(filter_dict or {})
+        return await db.employees.count_documents(query)
+    
+    @staticmethod
+    async def count_applicants(filter_dict: dict = None) -> int:
+        """Count applicants only"""
+        query = _applicant_scope_filter(filter_dict or {})
+        return await db.employees.count_documents(query)
+    
+    @staticmethod
+    async def get_employee_by_id(employee_id: str, projection: dict = None):
+        """
+        Get employee by ID - validates employee scope.
+        Returns None if not found OR if record is applicant-status.
+        """
+        proj = projection or {"_id": 0}
+        record = await db.employees.find_one({"id": employee_id}, proj)
+        if not record:
+            return None
+        if not _is_employee_status(record.get("status", "")):
+            return None  # Record exists but is applicant, not employee
+        return record
+    
+    @staticmethod
+    async def get_applicant_by_id(applicant_id: str, projection: dict = None):
+        """
+        Get applicant by ID - validates applicant scope.
+        Returns None if not found OR if record is employee-status.
+        """
+        proj = projection or {"_id": 0}
+        record = await db.employees.find_one({"id": applicant_id}, proj)
+        if not record:
+            return None
+        if not _is_applicant_status(record.get("status", "")):
+            return None  # Record exists but is employee, not applicant
+        return record
+    
+    @staticmethod
+    async def get_by_id_any_scope(record_id: str, projection: dict = None):
+        """
+        Get record by ID regardless of scope.
+        Use ONLY for internal operations that need to work across scopes.
+        NOT for UI-serving endpoints.
+        """
+        proj = projection or {"_id": 0}
+        return await db.employees.find_one({"id": record_id}, proj)
+    
+    @staticmethod
+    async def aggregate_employees(pipeline: list) -> list:
+        """Run aggregation on employee-scoped records only"""
+        scoped_pipeline = [{"$match": _employee_scope_filter()}] + pipeline
+        return await db.employees.aggregate(scoped_pipeline).to_list(None)
+    
+    @staticmethod
+    async def aggregate_applicants(pipeline: list) -> list:
+        """Run aggregation on applicant-scoped records only"""
+        scoped_pipeline = [{"$match": _applicant_scope_filter()}] + pipeline
+        return await db.employees.aggregate(scoped_pipeline).to_list(None)
+    
+    @staticmethod
+    async def search_employees(
+        query_text: str,
+        limit: int = 20,
+        additional_filter: dict = None
+    ) -> list:
+        """Search employees by name/email - employee scope only"""
+        import re as regex_module
+        pattern = regex_module.compile(regex_module.escape(query_text), regex_module.IGNORECASE)
+        search_filter = {
+            "$or": [
+                {"first_name": pattern},
+                {"last_name": pattern},
+                {"email": pattern},
+                {"employee_code": pattern}
+            ]
+        }
+        if additional_filter:
+            search_filter = {**search_filter, **additional_filter}
+        query = _employee_scope_filter(search_filter)
+        return await db.employees.find(query, {"_id": 0}).limit(limit).to_list(limit)
+    
+    @staticmethod
+    async def search_applicants(
+        query_text: str,
+        limit: int = 20,
+        additional_filter: dict = None
+    ) -> list:
+        """Search applicants by name/email - applicant scope only"""
+        import re as regex_module
+        pattern = regex_module.compile(regex_module.escape(query_text), regex_module.IGNORECASE)
+        search_filter = {
+            "$or": [
+                {"first_name": pattern},
+                {"last_name": pattern},
+                {"email": pattern},
+                {"applicant_reference": pattern}
+            ]
+        }
+        if additional_filter:
+            search_filter = {**search_filter, **additional_filter}
+        query = _applicant_scope_filter(search_filter)
+        return await db.employees.find(query, {"_id": 0}).limit(limit).to_list(limit)
+
+
+# Singleton instance
+employees_repo = EmployeesRepository()
+
+
 # Initialize EmailService with database reference
 EmailService.set_db(db)
 
@@ -186,6 +385,128 @@ def get_person_stage(status: str) -> str:
     else:
         # Unknown status defaults to applicant (safer - can't work without approval)
         return PersonStage.APPLICANT
+
+
+# ==================== SCOPED REPOSITORY LAYER ====================
+# Change Set 1: Global Applicant/Employee Separation
+# All UI-serving queries MUST go through this repository to enforce scope boundaries
+
+def is_applicant_status(status: str) -> bool:
+    """Check if status belongs to applicant domain"""
+    return status in APPLICANT_STATUSES
+
+def is_employee_status(status: str) -> bool:
+    """Check if status belongs to employee domain"""
+    return status in EMPLOYEE_STATUSES
+
+def applicant_scope_filter(existing_filter: dict = None) -> dict:
+    """Return MongoDB filter for applicant-only queries"""
+    base = {"status": {"$in": APPLICANT_STATUSES}}
+    if existing_filter:
+        return {**existing_filter, **base}
+    return base
+
+def employee_scope_filter(existing_filter: dict = None) -> dict:
+    """Return MongoDB filter for employee-only queries"""
+    base = {"status": {"$in": EMPLOYEE_STATUSES}}
+    if existing_filter:
+        return {**existing_filter, **base}
+    return base
+
+
+class ScopeValidationError(HTTPException):
+    """Raised when accessing a record outside its valid scope"""
+    def __init__(self, detail: str = "Record not found in this scope"):
+        super().__init__(status_code=404, detail=detail)
+
+
+# ==================== INTERNAL HELPERS ====================
+# Internal functions for use by endpoints - not exposed as API
+
+async def get_compliance_requirements_for_employee(employee_id: str, role: str = '') -> List[dict]:
+    """
+    Internal helper to get compliance requirements for an employee.
+    This replicates the logic from the API endpoint but without auth requirements.
+    Used by: readiness calculation, dashboard summary, etc.
+    """
+    # Get mandatory items for this employee's role
+    mandatory_items = get_mandatory_items_for_role(role)
+    
+    # Get all ACTIVE documents for this employee (exclude superseded/inactive)
+    all_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "$or": [
+            {"active": {"$exists": False}},
+            {"active": True}
+        ],
+        "status": {"$ne": "superseded"}
+    }, {"_id": 0}).to_list(500)
+    
+    # Get all forms for this employee
+    all_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
+    
+    # Get training records
+    raw_training = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0}).to_list(100)
+    
+    requirements = []
+    
+    for item in mandatory_items:
+        req_id = item['id']
+        req_type = item.get('type', 'document')
+        
+        # Skip archived requirements
+        if item.get('archived', False):
+            continue
+        
+        # Build requirement result
+        result = {
+            "id": req_id,
+            "name": item.get('name', req_id),
+            "type": req_type,
+            "category": item.get('category', ''),
+            "priority": item.get('priority', 'secondary'),
+            "status": "not_started",
+            "has_evidence": False,
+            "verified": False,
+            "document_count": 0,
+            "expiry_date": None
+        }
+        
+        # Check documents for this requirement
+        matching_docs = [d for d in all_docs if d.get('requirement_id') == req_id or d.get('document_type') == req_id]
+        
+        if matching_docs:
+            active_count = sum(1 for d in matching_docs if d.get('file_url') or d.get('evidence_files'))
+            result["document_count"] = active_count
+            
+            if active_count > 0:
+                result["status"] = "complete"
+                result["has_evidence"] = True
+                result["verified"] = all(d.get('verified') or d.get('status') == 'approved' for d in matching_docs if d.get('file_url'))
+                
+                # Check expiry
+                for doc in matching_docs:
+                    if doc.get('expiry_date'):
+                        result["expiry_date"] = doc['expiry_date']
+                        break
+        
+        # Check forms for this requirement
+        if req_type == 'form':
+            matching_forms = [f for f in all_forms if f.get('form_type') == req_id]
+            if matching_forms:
+                form = matching_forms[0]
+                if form.get('status') in ['submitted', 'signed_off', 'completed']:
+                    result["status"] = "complete"
+                    result["has_evidence"] = bool(form.get('pdf_url'))
+                    result["verified"] = form.get('status') == 'signed_off'
+        
+        requirements.append(result)
+    
+    return requirements
+
 
 class DocumentStatus:
     NOT_STARTED = "not_started"
@@ -1161,13 +1482,40 @@ def calculate_work_readiness(requirements: List[dict], role: str) -> dict:
 
 
 # ============================================================================
-# 3-TIER WORK READINESS ENFORCEMENT
+# 3-TIER WORK READINESS ENFORCEMENT (SINGLE SOURCE OF TRUTH)
 # ============================================================================
+# Change Set 2: Single Readiness Calculation
+# All views MUST read from this same calculation - profile, dashboard, lists, exports
+#
 # Statuses:
 #   - NOT_READY: Hard blocks - cannot work until resolved
 #   - READY_WITH_CONDITIONS: Can work but has warnings that need attention
 #   - READY_TO_WORK: Fully compliant for active work
 # ============================================================================
+
+# Stable reason codes for audit/export
+READINESS_REASON_CODES = {
+    "applicant_stage": "Applicant - not yet recruited",
+    "recruitment_not_approved": "Recruitment not approved",
+    "right_to_work_documents_missing": "Right to Work evidence required",
+    "right_to_work_documents_expired": "Right to Work expired",
+    "right_to_work_check_missing": "Right to Work verification required",
+    "right_to_work_check_expired": "Right to Work verification expired",
+    "identity_documents_missing": "Identity documents required",
+    "identity_documents_expired": "Identity documents expired",
+    "dbs_certificate_missing": "DBS certificate required",
+    "dbs_certificate_expired": "DBS certificate expired",
+    "dbs_check_missing": "DBS check required",
+    "dbs_check_expired": "DBS check expired",
+    "reference_1_incomplete": "Reference 1 required",
+    "reference_2_incomplete": "Reference 2 required",
+    "references_below_minimum": "Verified references below minimum (2)",
+    "proof_of_address_below_minimum": "Proof of address below minimum (2)",
+    "health_form_missing": "Health questionnaire required",
+    "health_form_unverified": "Health questionnaire awaiting review",
+    "interview_form_missing": "Interview record required",
+    "interview_form_unverified": "Interview record awaiting review",
+}
 
 HARD_BLOCK_REQUIREMENTS = {
     # Legal requirements - missing/expired = NOT_READY
@@ -5988,6 +6336,14 @@ async def get_dbs_register(
 
 @api_router.get("/employees/{employee_id}", response_model=EmployeeResponse)
 async def get_employee(employee_id: str, user: dict = Depends(get_current_user)):
+    """
+    Get employee/applicant by ID.
+    
+    NOTE: This endpoint returns records from any scope for backward compatibility.
+    For strict scope enforcement, use:
+    - GET /staff/employees/{id} for employee-only access
+    - GET /recruitment/applicants/{id} for applicant-only access
+    """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -6002,6 +6358,46 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     )
     
     return EmployeeResponse(**employee)
+
+
+@api_router.get("/staff/employees/{employee_id}", response_model=EmployeeResponse)
+async def get_staff_employee_by_id(employee_id: str, user: dict = Depends(get_current_user)):
+    """
+    Get employee by ID - EMPLOYEE SCOPE ONLY.
+    Returns 404 if the record is an applicant (not yet recruited).
+    
+    Use this endpoint for staff-facing pages to ensure applicants don't leak into staff views.
+    """
+    employee = await employees_repo.get_employee_by_id(employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee['completion_percentage'] = await calculate_completion_percentage(employee_id)
+    employee['person_stage'] = PersonStage.EMPLOYEE
+    employee['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(
+        employee_id, employee, employee.get('role', '')
+    )
+    
+    return EmployeeResponse(**employee)
+
+
+@api_router.get("/recruitment/applicants/{applicant_id}")
+async def get_applicant_by_id(applicant_id: str, user: dict = Depends(get_current_user)):
+    """
+    Get applicant by ID - APPLICANT SCOPE ONLY.
+    Returns 404 if the record is an employee (already recruited).
+    
+    Use this endpoint for recruitment-facing pages to ensure employees don't appear in applicant views.
+    """
+    applicant = await employees_repo.get_applicant_by_id(applicant_id)
+    if not applicant:
+        raise HTTPException(status_code=404, detail="Applicant not found")
+    
+    applicant['completion_percentage'] = await calculate_completion_percentage(applicant_id)
+    applicant['person_stage'] = PersonStage.APPLICANT
+    # No work_readiness for applicants - they can't work yet
+    
+    return applicant
 
 @api_router.put("/employees/{employee_id}", response_model=EmployeeResponse)
 async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict = Depends(require_manager_or_admin)):
@@ -6151,6 +6547,189 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
             "training": deleted_training.deleted_count
         }
     }
+
+
+# ============================================================================
+# AUTHORITATIVE READINESS ENDPOINTS (Change Set 2)
+# Single source of truth - all views must read from these endpoints
+# ============================================================================
+
+@api_router.get("/employees/{employee_id}/readiness")
+async def get_employee_readiness(employee_id: str, user: dict = Depends(get_current_user)):
+    """
+    Get authoritative readiness calculation for an employee.
+    
+    This is the SINGLE SOURCE OF TRUTH for readiness.
+    All UI components (dashboard, profile, list badges, exports) must use this same calculation.
+    
+    Returns:
+        - ready: boolean - whether employee can work
+        - status: "NOT_READY" | "READY_WITH_CONDITIONS" | "READY_TO_WORK"
+        - blockedReasons: Array of reasons with stable codes
+        - checks: Detailed check status for each requirement category
+        - calculatedAt: ISO timestamp
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get requirements
+    role = employee.get('role', '')
+    requirements = await get_compliance_requirements_for_employee(employee_id, role)
+    
+    # Calculate 3-tier readiness (authoritative calculation)
+    readiness = await calculate_work_readiness_3tier(employee_id, requirements, employee, role)
+    
+    # Build detailed checks
+    req_lookup = {r.get('id'): r for r in requirements}
+    
+    # Reference check details
+    ref1 = req_lookup.get('reference_1', {})
+    ref2 = req_lookup.get('reference_2', {})
+    ref1_verified = ref1.get('has_evidence') and ref1.get('verified')
+    ref2_verified = ref2.get('has_evidence') and ref2.get('verified')
+    
+    # Proof of address check
+    poa = req_lookup.get('proof_of_address', {})
+    poa_count = poa.get('document_count', 0)
+    poa_verified = poa.get('verified', False)
+    
+    # RTW check
+    rtw = req_lookup.get('right_to_work_documents', {}) or req_lookup.get('right_to_work_check', {})
+    rtw_has = rtw.get('has_evidence', False)
+    rtw_expired = False
+    if rtw.get('expiry_date'):
+        try:
+            exp_date = datetime.fromisoformat(rtw['expiry_date'].replace('Z', '+00:00')).date()
+            rtw_expired = exp_date < datetime.now(timezone.utc).date()
+        except:
+            pass
+    
+    # DBS check
+    dbs = req_lookup.get('dbs_certificate', {}) or req_lookup.get('dbs_check', {})
+    dbs_has = dbs.get('has_evidence', False)
+    dbs_expired = False
+    if dbs.get('expiry_date'):
+        try:
+            exp_date = datetime.fromisoformat(dbs['expiry_date'].replace('Z', '+00:00')).date()
+            dbs_expired = exp_date < datetime.now(timezone.utc).date()
+        except:
+            pass
+    
+    # ID check
+    id_doc = req_lookup.get('identity_documents', {})
+    id_has = id_doc.get('has_evidence', False)
+    id_expired = False
+    if id_doc.get('expiry_date'):
+        try:
+            exp_date = datetime.fromisoformat(id_doc['expiry_date'].replace('Z', '+00:00')).date()
+            id_expired = exp_date < datetime.now(timezone.utc).date()
+        except:
+            pass
+    
+    # Health form check
+    health = req_lookup.get('health_questionnaire', {})
+    health_submitted = health.get('has_evidence', False)
+    health_verified = health.get('verified', False)
+    
+    # Interview form check
+    interview = req_lookup.get('interview_record', {}) or req_lookup.get('interview_form', {})
+    interview_submitted = interview.get('has_evidence', False)
+    interview_verified = interview.get('verified', False)
+    
+    return {
+        "ready": readiness.get('status') == 'READY_TO_WORK',
+        "status": readiness.get('status'),
+        "label": readiness.get('label'),
+        "color": readiness.get('color'),
+        "blockedReasons": readiness.get('reasons', []),
+        "checks": {
+            "recruitmentApproved": employee.get('recruitment_approved', False),
+            "referencesVerified": {
+                "required": 2,
+                "verified": (1 if ref1_verified else 0) + (1 if ref2_verified else 0),
+                "passed": ref1_verified and ref2_verified
+            },
+            "proofOfAddress": {
+                "required": 2,
+                "verified": poa_count if poa_verified else 0,
+                "passed": poa_count >= 2 and poa_verified
+            },
+            "rightToWork": {
+                "passed": rtw_has and rtw.get('verified', False) and not rtw_expired,
+                "missing": not rtw_has,
+                "expired": rtw_expired
+            },
+            "dbs": {
+                "passed": dbs_has and dbs.get('verified', False) and not dbs_expired,
+                "missing": not dbs_has,
+                "expired": dbs_expired
+            },
+            "id": {
+                "passed": id_has and id_doc.get('verified', False) and not id_expired,
+                "missing": not id_has,
+                "expired": id_expired
+            },
+            "healthForm": {
+                "passed": health_submitted and health_verified,
+                "submitted": health_submitted,
+                "verified": health_verified
+            },
+            "interviewForm": {
+                "passed": interview_submitted and interview_verified,
+                "submitted": interview_submitted,
+                "verified": interview_verified
+            }
+        },
+        "calculatedAt": datetime.now(timezone.utc).isoformat(),
+        "source_of_truth": "authoritative_readiness_calculation"
+    }
+
+
+@api_router.get("/employees/readiness-summary")
+async def get_employees_readiness_summary(
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get readiness summary for all employees (employee-scope only).
+    
+    Returns counts by readiness status for dashboard widgets.
+    """
+    # Get all employees (not applicants)
+    employees = await employees_repo.list_employees(
+        filter_dict={"status": status} if status else None,
+        projection={"_id": 0, "id": 1, "status": 1, "role": 1, "recruitment_approved": 1}
+    )
+    
+    summary = {
+        "total_employees": len(employees),
+        "ready_to_work": 0,
+        "ready_with_conditions": 0,
+        "not_ready": 0,
+        "by_blocking_reason": {}
+    }
+    
+    for emp in employees:
+        requirements = await get_compliance_requirements_for_employee(emp['id'], emp.get('role', ''))
+        readiness = await calculate_work_readiness_3tier(emp['id'], requirements, emp, emp.get('role', ''))
+        
+        status_key = readiness.get('status', 'NOT_READY')
+        if status_key == 'READY_TO_WORK':
+            summary['ready_to_work'] += 1
+        elif status_key == 'READY_WITH_CONDITIONS':
+            summary['ready_with_conditions'] += 1
+        else:
+            summary['not_ready'] += 1
+            
+            # Track blocking reasons
+            for reason in readiness.get('reasons', []):
+                code = reason.get('code', 'unknown')
+                if code not in summary['by_blocking_reason']:
+                    summary['by_blocking_reason'][code] = 0
+                summary['by_blocking_reason'][code] += 1
+    
+    return summary
 
 
 # ============================================================================

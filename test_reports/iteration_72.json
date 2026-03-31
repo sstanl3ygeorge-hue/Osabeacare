@@ -1,0 +1,78 @@
+{
+  "summary": "NHS-Level Compliance Hardening (Change Sets 1-2) testing completed. All 16 backend tests passed. Frontend UI verified - scoped endpoints correctly separate applicants from employees, dashboard shows employee-only counts, 3-tier readiness working correctly.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_scoped_endpoints.py",
+    "/app/test_reports/pytest/scoped_endpoints_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_scoped_endpoints.py"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 tests passed)",
+    "frontend": "100% (All scoped UI elements verified)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "No new seed data created. Used existing test IDs: Employee d88335f6-1b18-435a-8086-28af4a583f77 (onboarding), Applicant 8f351317-8623-4df5-8788-c6a3ce5364cf (new)",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "NHS-Level Compliance Hardening Change Sets 1-2 fully implemented and tested. Key features verified: (1) GET /staff/employees returns only employee-status records (onboarding, active, inactive), (2) GET /recruitment/applicants returns only applicant-status records (new, screening, interview, compliance_review), (3) GET /staff/employees/{id} returns 404 for applicant IDs, (4) GET /recruitment/applicants/{id} returns 404 for employee IDs, (5) GET /employees/{id}/readiness returns authoritative readiness with stable reason codes, (6) Dashboard shows 'Total Employees: 2' (excludes 9 applicants), (7) Workforce Readiness section shows correct 3-tier counts (Ready: 0, Supervised: 0, Not Ready: 2), (8) Employees page shows 2 staff members with 'Staff' badge, (9) Recruitment page shows 9 applicants with 'Applicant' badge, (10) Employee profile shows work readiness status with reason codes like 'Recruitment not approved'.",
+  "features_tested": {
+    "scoped_list_endpoints": {
+      "status": "PASS",
+      "details": "GET /staff/employees returns only employee-status records, GET /recruitment/applicants returns only applicant-status records"
+    },
+    "scoped_profile_endpoints": {
+      "status": "PASS",
+      "details": "GET /staff/employees/{id} returns 404 for applicant IDs, GET /recruitment/applicants/{id} returns 404 for employee IDs"
+    },
+    "authoritative_readiness_endpoint": {
+      "status": "PASS",
+      "details": "GET /employees/{id}/readiness returns status, label, blockedReasons with stable codes, checks object, calculatedAt, source_of_truth"
+    },
+    "dashboard_employee_count": {
+      "status": "PASS",
+      "details": "Dashboard shows 'Total Employees: 2' (excludes 9 applicants)"
+    },
+    "workforce_readiness_3tier": {
+      "status": "PASS",
+      "details": "Workforce Readiness section shows Ready to Work: 0, Supervised Start: 0, Not Ready: 2"
+    },
+    "scope_helpers": {
+      "status": "PASS",
+      "details": "is_applicant_status and is_employee_status work correctly via API behavior"
+    },
+    "employees_page_ui": {
+      "status": "PASS",
+      "details": "Shows 2 staff members with 'Staff' badge, 'Recruited' label, work status reasons"
+    },
+    "recruitment_page_ui": {
+      "status": "PASS",
+      "details": "Shows 9 applicants with 'Applicant' badge, pipeline stages (New: 9, Screening: 0, Interview: 0, Compliance Review: 0)"
+    },
+    "employee_profile_readiness": {
+      "status": "PASS",
+      "details": "Profile shows 'Not Ready to Work' with reasons: 'Recruitment not approved', 'Proof of address (0/2 required)'"
+    }
+  },
+  "verification_summary": {
+    "total_employees": 2,
+    "total_applicants": 9,
+    "employee_statuses_verified": ["onboarding", "active", "inactive"],
+    "applicant_statuses_verified": ["new", "screening", "interview", "compliance_review"],
+    "readiness_reason_codes_verified": ["recruitment_not_approved", "proof_of_address_below_minimum"],
+    "3tier_statuses_verified": ["NOT_READY", "READY_WITH_CONDITIONS", "READY_TO_WORK"]
+  }
+}

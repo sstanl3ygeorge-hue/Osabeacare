@@ -28,12 +28,16 @@ export default function DashboardPage() {
       try {
         const [statsRes, employeesRes, expiryRes, recurringRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-          axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+          // Use staff/employees endpoint for employee-only data (excludes applicants)
+          axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
           axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
         ]);
         setStats(statsRes.data);
-        setEmployees(employeesRes.data);
+        // Ensure we only have employee-status records (staff, not applicants)
+        const staffOnly = (employeesRes.data?.employees || employeesRes.data || [])
+          .filter(e => ['onboarding', 'active', 'inactive'].includes(e.status));
+        setEmployees(staffOnly);
         setExpiryAlerts(expiryRes.data);
         setRecurringCompliance(recurringRes.data);
       } catch (error) {
@@ -53,19 +57,16 @@ export default function DashboardPage() {
     );
   }
 
-  // Calculate workforce readiness counts
+  // Calculate workforce readiness counts using 3-tier system (authoritative)
   const readyToWork = employees.filter(e => 
-    e.work_readiness?.status === 'work_ready' || e.work_readiness?.status === 'fully_compliant'
+    e.work_readiness_3tier?.status === 'READY_TO_WORK'
   ).length;
   const supervisedStart = employees.filter(e => 
-    e.work_readiness?.status === 'almost_ready' || e.work_readiness?.status === 'supervised_start'
+    e.work_readiness_3tier?.status === 'READY_WITH_CONDITIONS'
   ).length;
   const notReady = employees.filter(e => 
-    !e.work_readiness || 
-    (e.work_readiness?.status !== 'work_ready' && 
-     e.work_readiness?.status !== 'fully_compliant' && 
-     e.work_readiness?.status !== 'almost_ready' &&
-     e.work_readiness?.status !== 'supervised_start')
+    e.work_readiness_3tier?.status === 'NOT_READY' ||
+    !e.work_readiness_3tier
   ).length;
 
   // Calculate onboarding stats

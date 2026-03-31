@@ -72,6 +72,78 @@ export default function RequirementFilesDrawer({
   
   const { token } = useAuth();
 
+  // Previewable file types (can be displayed in browser)
+  const PREVIEWABLE_TYPES = [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
+    'text/plain',
+    'text/html'
+  ];
+
+  // Handle file view - opens preview or falls back to download
+  const handleViewFile = (file) => {
+    if (!file) {
+      toast.error('File data not available');
+      return;
+    }
+    
+    if (!file.file_url || !file.file_available) {
+      toast.error('File URL not available. The file may have been moved or deleted.');
+      return;
+    }
+
+    // Check if file type is previewable
+    const mimeType = file.mime_type || file.content_type || '';
+    const isPreviewable = PREVIEWABLE_TYPES.some(type => mimeType.startsWith(type.split('/')[0]) || mimeType === type);
+    
+    if (isPreviewable && onPreviewFile) {
+      // Use the preview modal - pass full file object for consistency
+      onPreviewFile({
+        file_url: file.file_url,
+        file_name: file.file_name || file.file_label || 'Document',
+        mime_type: mimeType,
+        file_id: file.file_id
+      });
+    } else {
+      // Fallback to download/open in new tab
+      try {
+        window.open(file.file_url, '_blank');
+        if (!isPreviewable) {
+          toast.info(`Opening ${file.file_name || 'file'} for download (preview not supported for this file type)`);
+        }
+      } catch (err) {
+        toast.error('Failed to open file. Please try downloading instead.');
+        console.error('File open error:', err);
+      }
+    }
+  };
+
+  // Handle file download
+  const handleDownloadFile = (file) => {
+    if (!file || !file.file_url) {
+      toast.error('File URL not available');
+      return;
+    }
+    
+    try {
+      // Create a temporary link to trigger download
+      const link = document.createElement('a');
+      link.href = file.file_url;
+      link.download = file.file_name || file.file_label || 'document';
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      // Fallback to window.open
+      window.open(file.file_url, '_blank');
+    }
+  };
+
   // Fetch files data when drawer opens
   useEffect(() => {
     if (open && employeeId && requirementKey) {
@@ -438,8 +510,8 @@ export default function RequirementFilesDrawer({
                           {/* Actions Menu */}
                           <DocumentActionMenu
                             file={file}
-                            onView={() => onPreviewFile && onPreviewFile(file.file_url, file.file_name)}
-                            onDownload={() => window.open(file.file_url, '_blank')}
+                            onView={() => handleViewFile(file)}
+                            onDownload={() => handleDownloadFile(file)}
                             onVerify={() => handleVerify(file.file_id)}
                             onReject={() => setActionDialog({ open: true, type: 'reject', file })}
                             onExtractReview={() => onExtractReview && onExtractReview(file.file_id)}
@@ -518,8 +590,9 @@ export default function RequirementFilesDrawer({
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => onPreviewFile && onPreviewFile(file.file_url, file.file_name)}
+                              onClick={() => handleViewFile(file)}
                               className="h-8 w-8 p-0"
+                              data-testid={`view-historical-file-${file.file_id}`}
                             >
                               <Eye className="h-4 w-4" />
                             </Button>

@@ -12184,6 +12184,9 @@ async def get_requirement_files(
             "file_name": doc.get('original_filename', 'document'),
             "file_url": doc.get('file_url'),
             "file_label": doc.get('document_label'),
+            "mime_type": doc.get('content_type') or doc.get('mime_type'),  # For preview support detection
+            "content_type": doc.get('content_type') or doc.get('mime_type'),
+            "file_available": bool(doc.get('file_url')),  # Availability status
             "status": file_status,
             "source_type": doc.get('source_type', 'manual_upload'),
             "uploaded_by": doc.get('uploaded_by_name') or doc.get('uploaded_by'),
@@ -26972,6 +26975,9 @@ async def get_compliance_file(
                 {
                     "id": d.get("id"),
                     "file_name": d.get("file_name") or d.get("original_filename"),
+                    "file_url": d.get("file_url"),  # Phase D4.1: Add file URL for direct preview
+                    "content_type": d.get("content_type") or d.get("mime_type"),  # For preview support detection
+                    "file_available": bool(d.get("file_url")),  # Availability status
                     "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
                     "status": d.get("status", "uploaded"),
                     "verified": d.get("verified", False),

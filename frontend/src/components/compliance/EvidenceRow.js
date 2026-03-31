@@ -283,8 +283,15 @@ export default function EvidenceRow({
                       size="sm"
                       variant="ghost"
                       className="h-7 w-7 p-0"
-                      onClick={() => onPreviewFile && onPreviewFile(doc)}
+                      onClick={() => {
+                        if (!doc.file_url && !doc.file_available) {
+                          toast.error('File URL not available');
+                          return;
+                        }
+                        if (onPreviewFile) onPreviewFile(doc);
+                      }}
                       title="View file"
+                      data-testid={`preview-file-${doc.id}`}
                     >
                       <Eye className="h-4 w-4" />
                     </Button>

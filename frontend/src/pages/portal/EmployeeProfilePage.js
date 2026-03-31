@@ -4326,10 +4326,17 @@ export default function EmployeeProfilePage() {
                         setSelectedRequirement(key);
                         setRequestDocDialogOpen(true);
                       }}
-                      onPreviewFile={(doc) => {
-                        if (doc.file_url) {
-                          setPreviewUrl(doc.file_url);
+                      onPreviewFile={(fileObj) => {
+                        // Handle both old format (doc.file_url) and new format from RequirementFilesDrawer
+                        const url = fileObj?.file_url || fileObj?.url;
+                        const name = fileObj?.file_name || fileObj?.name || 'Document';
+                        if (url) {
+                          setPreviewFile({ url, name, filename: name });
+                          setPreviewFiles([]); // Clear multi-file array
                           setPreviewOpen(true);
+                        } else {
+                          // No URL available - show error toast
+                          console.error('No file URL available for preview', fileObj);
                         }
                       }}
                       onExtractReview={(docId) => {

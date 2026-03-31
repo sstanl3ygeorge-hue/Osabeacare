@@ -22776,6 +22776,974 @@ async def request_missing_compliance_items(
     return results
 
 
+# ==================== TRAINING MATRIX + COMPLIANCE FILE CONSOLIDATION ====================
+# Step 8: Single operational workflow with canonical training truth
+#
+# Key principles:
+# - Training Matrix uses canonical training_records ONLY (not extraction drafts)
+# - Compliance File is the single operational page
+# - All Files becomes Evidence Library (no workflow duplication)
+# - Multi-file requirements supported with proper counts
+# - Correction-safe document lifecycle
+
+class DocumentStatus(str, Enum):
+    """Document lifecycle statuses."""
+    UPLOADED = "uploaded"
+    REQUESTED = "requested"
+    SUBMITTED = "submitted"
+    AWAITING_EXTRACTION_REVIEW = "awaiting_extraction_review"
+    AWAITING_VERIFICATION = "awaiting_verification"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+    UPLOADED_IN_ERROR = "uploaded_in_error"
+    MISFILED = "misfiled"
+
+
+class RequirementConfig:
+    """Configuration for compliance requirements."""
+    
+    CONFIGS = {
+        "proof_of_address": {
+            "key": "proof_of_address",
+            "title": "Proof of Address",
+            "multi_file": True,
+            "min_required": 2,
+            "max_active": None,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": True,
+            "freshness_required_days": 90
+        },
+        "id_document": {
+            "key": "id_document",
+            "title": "ID Document",
+            "multi_file": True,
+            "min_required": 1,
+            "max_active": None,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": True
+        },
+        "right_to_work": {
+            "key": "right_to_work",
+            "title": "Right to Work",
+            "multi_file": True,
+            "min_required": 1,
+            "max_active": 1,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": True
+        },
+        "dbs_certificate": {
+            "key": "dbs_certificate",
+            "title": "DBS Certificate",
+            "multi_file": True,
+            "min_required": 1,
+            "max_active": 1,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": True
+        },
+        "reference_1": {
+            "key": "reference_1",
+            "title": "Reference 1",
+            "multi_file": True,
+            "min_required": 1,
+            "max_active": None,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": False,
+            "allow_verification": True,
+            "requires_independent_response": True
+        },
+        "reference_2": {
+            "key": "reference_2",
+            "title": "Reference 2",
+            "multi_file": True,
+            "min_required": 1,
+            "max_active": None,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": False,
+            "allow_verification": True,
+            "requires_independent_response": True
+        },
+        "training": {
+            "key": "training",
+            "title": "Training Certificate",
+            "multi_file": True,
+            "min_required": None,
+            "max_active": None,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": True,
+            "allow_verification": True,
+            "per_code_tracking": True
+        }
+    }
+    
+    @classmethod
+    def get(cls, key: str) -> dict:
+        return cls.CONFIGS.get(key, {
+            "key": key,
+            "title": key.replace("_", " ").title(),
+            "multi_file": False,
+            "min_required": 1,
+            "allow_admin_upload": True,
+            "allow_request": True,
+            "allow_extraction": False,
+            "allow_verification": True
+        })
+
+
+@api_router.get("/training/matrix")
+async def get_training_matrix(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get Training Matrix data using CANONICAL training_records ONLY.
+    
+    Does NOT use:
+    - Uploaded certificate presence alone
+    - Extraction draft values before approval
+    - Ad hoc client-side expiry reconstruction
+    
+    Includes separate counts for:
+    - Completed/Verified
+    - Needs Renewal (due soon)
+    - Expired
+    - Awaiting Review (pending extraction or verification)
+    """
+    now = datetime.now(timezone.utc)
+    
+    # Get all training types from MANDATORY_ITEMS
+    training_types = MANDATORY_ITEMS.get("training", [])
+    nurse_training = [t for t in MANDATORY_ITEMS.get("nurse_specific", []) if t.get("type") == "training"]
+    all_training_types = training_types + nurse_training
+    
+    training_columns = [{"id": t["id"], "name": t.get("training_name", t["name"])} for t in all_training_types]
+    
+    # Get active employees
+    employees = await EmployeesRepository.list_employees(
+        filter_dict={"status": {"$in": ["active", "onboarding"]}},
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "role": 1}
+    )
+    
+    # Summary counters
+    summary = {
+        "total_employees": len(employees),
+        "total_training_types": len(training_columns),
+        "completed": 0,
+        "verified": 0,
+        "needs_renewal": 0,
+        "expired": 0,
+        "missing": 0,
+        "awaiting_extraction_review": 0,
+        "awaiting_verification": 0
+    }
+    
+    # Get pending extraction reviews for training certificates
+    pending_extractions = await db.document_extractions.find({
+        "document_type": "training_certificate",
+        "review_status": "awaiting_review"
+    }, {"_id": 0, "employee_id": 1}).to_list(500)
+    
+    pending_extraction_by_employee = {}
+    for ext in pending_extractions:
+        emp_id = ext.get("employee_id")
+        if emp_id:
+            pending_extraction_by_employee[emp_id] = pending_extraction_by_employee.get(emp_id, 0) + 1
+    
+    # Build matrix rows
+    rows = []
+    for emp in employees:
+        emp_id = emp["id"]
+        
+        # Get canonical training records ONLY
+        training_records = await db.training_records.find(
+            {"employee_id": emp_id, "record_status": {"$nin": ["deleted", "superseded"]}},
+            {"_id": 0}
+        ).to_list(100)
+        
+        # Create lookup
+        training_lookup = {}
+        for record in training_records:
+            key = record.get("requirement_id") or record.get("training_name", "").lower().replace(" ", "_")
+            # Keep most recent/best record
+            if key not in training_lookup or (record.get("verified") and not training_lookup[key].get("verified")):
+                training_lookup[key] = record
+        
+        row = {
+            "employee_id": emp_id,
+            "employee_code": emp.get("employee_code", ""),
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "role": emp.get("role", ""),
+            "pending_extraction_count": pending_extraction_by_employee.get(emp_id, 0),
+            "training": {}
+        }
+        
+        for col in training_columns:
+            training_id = col["id"]
+            training_name = col["name"]
+            
+            # Find matching record
+            record = training_lookup.get(training_id)
+            if not record:
+                for key, rec in training_lookup.items():
+                    if rec.get("training_name", "").lower() == training_name.lower():
+                        record = rec
+                        break
+            
+            if record:
+                # Compute status from canonical record
+                expiry_date = record.get("expiry_date")
+                completion_date = record.get("completed_at") or record.get("completion_date")
+                verified = record.get("verification_status") == "verified" or record.get("verified")
+                
+                status = "completed"
+                days_until_expiry = None
+                
+                if expiry_date:
+                    try:
+                        if isinstance(expiry_date, str):
+                            exp = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                        else:
+                            exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
+                        
+                        days_until_expiry = (exp - now).days
+                        
+                        if days_until_expiry < 0:
+                            status = "expired"
+                            summary["expired"] += 1
+                        elif days_until_expiry <= 30:
+                            status = "needs_renewal"
+                            summary["needs_renewal"] += 1
+                        else:
+                            if verified:
+                                summary["verified"] += 1
+                            else:
+                                summary["completed"] += 1
+                    except:
+                        if verified:
+                            summary["verified"] += 1
+                        else:
+                            summary["completed"] += 1
+                else:
+                    if verified:
+                        summary["verified"] += 1
+                    else:
+                        summary["completed"] += 1
+                
+                # Check if awaiting verification
+                if record.get("verification_status") == "awaiting_review":
+                    summary["awaiting_verification"] += 1
+                
+                row["training"][training_id] = {
+                    "status": status,
+                    "verified": verified,
+                    "completion_date": completion_date,
+                    "expiry_date": expiry_date,
+                    "days_until_expiry": days_until_expiry,
+                    "verification_status": record.get("verification_status"),
+                    "provider": record.get("provider_name")
+                }
+            else:
+                summary["missing"] += 1
+                row["training"][training_id] = {
+                    "status": "missing",
+                    "verified": False,
+                    "completion_date": None,
+                    "expiry_date": None
+                }
+        
+        # Add pending extraction count to summary
+        if row["pending_extraction_count"] > 0:
+            summary["awaiting_extraction_review"] += row["pending_extraction_count"]
+        
+        rows.append(row)
+    
+    return {
+        "summary": summary,
+        "columns": training_columns,
+        "rows": rows
+    }
+
+
+@api_router.get("/training/matrix/summary")
+async def get_training_matrix_summary(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get Training Matrix summary cards only (for dashboard).
+    """
+    now = datetime.now(timezone.utc)
+    
+    summary = {
+        "completed": 0,
+        "verified": 0,
+        "needs_renewal": 0,
+        "expired": 0,
+        "awaiting_review": 0,
+        "awaiting_extraction_review": 0
+    }
+    
+    # Count from canonical training_records
+    training_records = await db.training_records.find(
+        {"record_status": {"$nin": ["deleted", "superseded"]}},
+        {"_id": 0, "expiry_date": 1, "verification_status": 1, "verified": 1}
+    ).to_list(5000)
+    
+    for record in training_records:
+        verified = record.get("verification_status") == "verified" or record.get("verified")
+        expiry_date = record.get("expiry_date")
+        
+        if record.get("verification_status") == "awaiting_review":
+            summary["awaiting_review"] += 1
+            continue
+        
+        if expiry_date:
+            try:
+                if isinstance(expiry_date, str):
+                    exp = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                else:
+                    exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
+                
+                days = (exp - now).days
+                if days < 0:
+                    summary["expired"] += 1
+                elif days <= 30:
+                    summary["needs_renewal"] += 1
+                elif verified:
+                    summary["verified"] += 1
+                else:
+                    summary["completed"] += 1
+            except:
+                if verified:
+                    summary["verified"] += 1
+                else:
+                    summary["completed"] += 1
+        else:
+            if verified:
+                summary["verified"] += 1
+            else:
+                summary["completed"] += 1
+    
+    # Count pending extractions
+    pending_count = await db.document_extractions.count_documents({
+        "document_type": "training_certificate",
+        "review_status": "awaiting_review"
+    })
+    summary["awaiting_extraction_review"] = pending_count
+    
+    return summary
+
+
+# ==================== DOCUMENT CORRECTION ENDPOINTS ====================
+
+@api_router.post("/documents/{document_id}/mark-uploaded-in-error")
+async def mark_document_uploaded_in_error(
+    document_id: str,
+    reason: str = Body(..., embed=True, min_length=10),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Mark a document as uploaded in error.
+    
+    Does NOT delete the document - preserves for audit trail.
+    Document will not count toward requirements.
+    """
+    doc = await db.employee_documents.find_one({"id": document_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    update = {
+        "status": DocumentStatus.UPLOADED_IN_ERROR.value,
+        "marked_in_error": True,
+        "marked_in_error_at": now,
+        "marked_in_error_by": user['user_id'],
+        "marked_in_error_reason": reason,
+        "verified": False  # Remove verification
+    }
+    
+    await db.employee_documents.update_one(
+        {"id": document_id},
+        {
+            "$set": update,
+            "$push": {
+                "status_history": {
+                    "status": DocumentStatus.UPLOADED_IN_ERROR.value,
+                    "changed_at": now,
+                    "changed_by": user['user_id'],
+                    "reason": reason
+                }
+            }
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "mark_uploaded_in_error", "document", document_id, {
+        "reason": reason,
+        "employee_id": doc.get("employee_id")
+    })
+    
+    return {"status": "success", "message": "Document marked as uploaded in error"}
+
+
+@api_router.post("/documents/{document_id}/supersede")
+async def supersede_document(
+    document_id: str,
+    replacement_document_id: Optional[str] = Body(None, embed=True),
+    reason: str = Body("Replaced by newer document", embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Mark a document as superseded by a newer version.
+    
+    Preserves original document for audit trail.
+    """
+    doc = await db.employee_documents.find_one({"id": document_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    update = {
+        "status": DocumentStatus.SUPERSEDED.value,
+        "superseded": True,
+        "superseded_at": now,
+        "superseded_by": user['user_id'],
+        "superseded_reason": reason,
+        "replacement_document_id": replacement_document_id
+    }
+    
+    await db.employee_documents.update_one(
+        {"id": document_id},
+        {
+            "$set": update,
+            "$push": {
+                "status_history": {
+                    "status": DocumentStatus.SUPERSEDED.value,
+                    "changed_at": now,
+                    "changed_by": user['user_id'],
+                    "reason": reason,
+                    "replacement_id": replacement_document_id
+                }
+            }
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "supersede_document", "document", document_id, {
+        "reason": reason,
+        "replacement_id": replacement_document_id
+    })
+    
+    return {"status": "success", "message": "Document marked as superseded"}
+
+
+@api_router.post("/documents/{document_id}/move-category")
+async def move_document_category(
+    document_id: str,
+    new_requirement_id: str = Body(..., embed=True),
+    reason: str = Body(..., embed=True, min_length=5),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Move a document to a different requirement category.
+    
+    Used when a document was filed under the wrong category.
+    """
+    doc = await db.employee_documents.find_one({"id": document_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    old_requirement_id = doc.get("requirement_id")
+    
+    await db.employee_documents.update_one(
+        {"id": document_id},
+        {
+            "$set": {
+                "requirement_id": new_requirement_id,
+                "category_moved_at": now,
+                "category_moved_by": user['user_id'],
+                "category_moved_reason": reason,
+                "previous_requirement_id": old_requirement_id
+            },
+            "$push": {
+                "status_history": {
+                    "action": "category_moved",
+                    "from_requirement": old_requirement_id,
+                    "to_requirement": new_requirement_id,
+                    "changed_at": now,
+                    "changed_by": user['user_id'],
+                    "reason": reason
+                }
+            }
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "move_document_category", "document", document_id, {
+        "from": old_requirement_id,
+        "to": new_requirement_id,
+        "reason": reason
+    })
+    
+    return {"status": "success", "message": f"Document moved from {old_requirement_id} to {new_requirement_id}"}
+
+
+@api_router.post("/documents/{document_id}/reopen-review")
+async def reopen_document_review(
+    document_id: str,
+    reason: str = Body(..., embed=True, min_length=10),
+    user: dict = Depends(require_admin)
+):
+    """
+    Reopen a document for review (undo verification/rejection).
+    
+    Requires documented reason for audit trail.
+    """
+    doc = await db.employee_documents.find_one({"id": document_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    previous_status = doc.get("status") or ("verified" if doc.get("verified") else "uploaded")
+    
+    await db.employee_documents.update_one(
+        {"id": document_id},
+        {
+            "$set": {
+                "status": DocumentStatus.AWAITING_VERIFICATION.value,
+                "verified": False,
+                "rejected": False,
+                "reopened_at": now,
+                "reopened_by": user['user_id'],
+                "reopened_reason": reason,
+                "previous_status": previous_status
+            },
+            "$push": {
+                "status_history": {
+                    "action": "reopened_for_review",
+                    "previous_status": previous_status,
+                    "changed_at": now,
+                    "changed_by": user['user_id'],
+                    "reason": reason
+                }
+            }
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "reopen_document_review", "document", document_id, {
+        "previous_status": previous_status,
+        "reason": reason
+    })
+    
+    return {"status": "success", "message": "Document reopened for review"}
+
+
+@api_router.get("/documents/{document_id}/history")
+async def get_document_history(
+    document_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get complete history of a document including all status changes.
+    """
+    doc = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get extraction history if any
+    extraction = await db.document_extractions.find_one(
+        {"document_id": document_id},
+        {"_id": 0}
+    )
+    
+    # Get request history
+    requests = await db.email_requests.find(
+        {"requirement_id": doc.get("requirement_id"), "person_id": doc.get("employee_id")},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(10)
+    
+    return {
+        "document": {
+            "id": doc.get("id"),
+            "file_name": doc.get("file_name") or doc.get("original_filename"),
+            "requirement_id": doc.get("requirement_id"),
+            "uploaded_at": doc.get("uploaded_at") or doc.get("created_at"),
+            "uploaded_by": doc.get("uploaded_by"),
+            "current_status": doc.get("status", "uploaded"),
+            "verified": doc.get("verified", False),
+            "verified_at": doc.get("verified_at"),
+            "verified_by": doc.get("verified_by")
+        },
+        "status_history": doc.get("status_history", []),
+        "extraction": {
+            "status": extraction.get("extraction_status") if extraction else None,
+            "review_status": extraction.get("review_status") if extraction else None,
+            "extracted_at": extraction.get("extracted_at") if extraction else None,
+            "reviewed_at": extraction.get("reviewed_at") if extraction else None
+        } if extraction else None,
+        "related_requests": [
+            {
+                "id": r.get("id"),
+                "type": r.get("request_type"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+                "created_source": r.get("created_source", "manual")
+            }
+            for r in requests
+        ]
+    }
+
+
+@api_router.get("/document-library")
+async def get_document_library(
+    employee_id: Optional[str] = None,
+    category: Optional[str] = None,
+    verification_status: Optional[str] = None,
+    extraction_status: Optional[str] = None,
+    uploaded_after: Optional[str] = None,
+    limit: int = 100,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Evidence Library endpoint - searchable document repository.
+    
+    Unlike Compliance File, this is a flat list with filters.
+    NO requirement workflow duplication.
+    """
+    query = {}
+    
+    if employee_id:
+        query["employee_id"] = employee_id
+    
+    if category:
+        query["$or"] = [
+            {"requirement_id": {"$regex": category, "$options": "i"}},
+            {"category": {"$regex": category, "$options": "i"}}
+        ]
+    
+    if verification_status:
+        if verification_status == "verified":
+            query["verified"] = True
+        elif verification_status == "pending":
+            query["verified"] = False
+            query["status"] = {"$nin": [DocumentStatus.REJECTED.value, DocumentStatus.UPLOADED_IN_ERROR.value, DocumentStatus.SUPERSEDED.value]}
+        elif verification_status == "rejected":
+            query["status"] = DocumentStatus.REJECTED.value
+    
+    if uploaded_after:
+        query["$or"] = query.get("$or", []) + [
+            {"uploaded_at": {"$gte": uploaded_after}},
+            {"created_at": {"$gte": uploaded_after}}
+        ]
+    
+    documents = await db.employee_documents.find(query, {"_id": 0}).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Enrich with employee names and extraction status
+    emp_ids = list(set(d.get("employee_id") for d in documents if d.get("employee_id")))
+    employees = {}
+    if emp_ids:
+        emp_list = await EmployeesRepository.list_employees(
+            filter_dict={"id": {"$in": emp_ids}},
+            projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1}
+        )
+        employees = {e["id"]: f"{e.get('first_name', '')} {e.get('last_name', '')}".strip() for e in emp_list}
+    
+    # Get extraction statuses
+    doc_ids = [d["id"] for d in documents]
+    extractions = {}
+    if doc_ids:
+        ext_list = await db.document_extractions.find(
+            {"document_id": {"$in": doc_ids}},
+            {"_id": 0, "document_id": 1, "extraction_status": 1, "review_status": 1}
+        ).to_list(len(doc_ids))
+        extractions = {e["document_id"]: e for e in ext_list}
+    
+    result = []
+    for doc in documents:
+        ext = extractions.get(doc["id"], {})
+        result.append({
+            "id": doc.get("id"),
+            "employee_id": doc.get("employee_id"),
+            "employee_name": employees.get(doc.get("employee_id"), "Unknown"),
+            "file_name": doc.get("file_name") or doc.get("original_filename"),
+            "file_url": doc.get("file_url"),
+            "requirement_id": doc.get("requirement_id"),
+            "category": doc.get("category"),
+            "uploaded_at": doc.get("uploaded_at") or doc.get("created_at"),
+            "uploaded_by": doc.get("uploaded_by"),
+            "verified": doc.get("verified", False),
+            "verified_at": doc.get("verified_at"),
+            "status": doc.get("status", "uploaded"),
+            "extraction_status": ext.get("extraction_status"),
+            "extraction_review_status": ext.get("review_status")
+        })
+    
+    return {
+        "documents": result,
+        "total": len(result)
+    }
+
+
+@api_router.get("/employees/{employee_id}/compliance-file")
+async def get_compliance_file(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Compliance File - Single operational workflow page.
+    
+    Shows for each requirement:
+    - Status summary (not just file count)
+    - Verified count, pending count, requested count
+    - Missing items
+    - Extraction review status
+    - Verification actions needed
+    - Request history
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get all documents for employee
+    documents = await db.employee_documents.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).to_list(200)
+    
+    # Get extraction statuses
+    doc_ids = [d["id"] for d in documents]
+    extractions = {}
+    if doc_ids:
+        ext_list = await db.document_extractions.find(
+            {"document_id": {"$in": doc_ids}},
+            {"_id": 0}
+        ).to_list(len(doc_ids))
+        extractions = {e["document_id"]: e for e in ext_list}
+    
+    # Get pending requests
+    requests = await db.email_requests.find(
+        {"person_id": employee_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    request_by_requirement = {}
+    for req in requests:
+        req_id = req.get("requirement_id")
+        if req_id not in request_by_requirement:
+            request_by_requirement[req_id] = []
+        request_by_requirement[req_id].append(req)
+    
+    # Get reference integrity
+    ref1 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
+    ref2 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
+    
+    # Get compliance requirements for status
+    compliance = await get_compliance_requirements(employee_id, user)
+    req_list = compliance.get("requirements", [])
+    req_lookup = {r.get("id"): r for r in req_list}
+    
+    # Group documents by requirement
+    docs_by_requirement = {}
+    for doc in documents:
+        req_id = doc.get("requirement_id")
+        if req_id not in docs_by_requirement:
+            docs_by_requirement[req_id] = []
+        docs_by_requirement[req_id].append(doc)
+    
+    # Build requirement rows
+    def build_requirement_row(req_key: str, config: dict = None) -> dict:
+        config = config or RequirementConfig.get(req_key)
+        req_info = req_lookup.get(req_key, {})
+        docs = docs_by_requirement.get(req_key, [])
+        reqs = request_by_requirement.get(req_key, [])
+        
+        # Filter out superseded/error documents for counts
+        active_docs = [d for d in docs if d.get("status") not in [
+            DocumentStatus.SUPERSEDED.value, 
+            DocumentStatus.UPLOADED_IN_ERROR.value,
+            DocumentStatus.MISFILED.value
+        ]]
+        
+        verified_count = len([d for d in active_docs if d.get("verified")])
+        awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") != DocumentStatus.REJECTED.value])
+        rejected_count = len([d for d in active_docs if d.get("status") == DocumentStatus.REJECTED.value])
+        
+        # Check extraction status
+        awaiting_extraction = 0
+        for doc in active_docs:
+            ext = extractions.get(doc["id"])
+            if ext and ext.get("review_status") == "awaiting_review":
+                awaiting_extraction += 1
+        
+        # Pending requests
+        pending_requests = [r for r in reqs if r.get("status") in ["sent", "clicked", "action_started"]]
+        
+        # Build status summary
+        min_required = config.get("min_required", 1)
+        status_parts = []
+        
+        if min_required and verified_count >= min_required:
+            status = "complete"
+            status_parts.append(f"{verified_count}/{min_required} verified")
+        elif min_required and verified_count > 0:
+            status = "partial"
+            status_parts.append(f"{verified_count}/{min_required} verified")
+        elif awaiting_verification > 0 or awaiting_extraction > 0:
+            status = "awaiting_review"
+            if awaiting_extraction > 0:
+                status_parts.append(f"{awaiting_extraction} awaiting extraction review")
+            if awaiting_verification > 0:
+                status_parts.append(f"{awaiting_verification} awaiting verification")
+        elif len(pending_requests) > 0:
+            status = "requested"
+            status_parts.append(f"Requested on {pending_requests[0].get('created_at', '')[:10]}")
+        else:
+            status = "missing"
+            status_parts.append("Missing")
+        
+        return {
+            "key": req_key,
+            "title": config.get("title", req_key.replace("_", " ").title()),
+            "config": config,
+            "status": status,
+            "status_summary": "; ".join(status_parts),
+            "counts": {
+                "total_files": len(docs),
+                "active_files": len(active_docs),
+                "verified": verified_count,
+                "awaiting_verification": awaiting_verification,
+                "awaiting_extraction": awaiting_extraction,
+                "rejected": rejected_count,
+                "superseded": len([d for d in docs if d.get("status") == DocumentStatus.SUPERSEDED.value])
+            },
+            "min_required": min_required,
+            "meets_requirement": min_required is None or verified_count >= min_required,
+            "blocking": min_required and verified_count < min_required,
+            "documents": [
+                {
+                    "id": d.get("id"),
+                    "file_name": d.get("file_name") or d.get("original_filename"),
+                    "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                    "status": d.get("status", "uploaded"),
+                    "verified": d.get("verified", False),
+                    "verified_at": d.get("verified_at"),
+                    "extraction": extractions.get(d["id"])
+                }
+                for d in docs
+            ],
+            "pending_requests": [
+                {
+                    "id": r.get("id"),
+                    "status": r.get("status"),
+                    "created_at": r.get("created_at"),
+                    "viewed_at": next((e.get("timestamp") for e in r.get("events", []) if e.get("type") == "clicked"), None)
+                }
+                for r in pending_requests
+            ],
+            "actions": {
+                "can_request": config.get("allow_request", True),
+                "can_upload": config.get("allow_admin_upload", True),
+                "can_add_file": config.get("multi_file", False) and len(active_docs) > 0,
+                "needs_extraction_review": awaiting_extraction > 0,
+                "needs_verification": awaiting_verification > 0 and awaiting_extraction == 0
+            }
+        }
+    
+    # Build sections
+    sections = {
+        "identity_legal": {
+            "title": "Identity & Legal",
+            "requirements": [
+                build_requirement_row("id_document"),
+                build_requirement_row("right_to_work"),
+                build_requirement_row("dbs_certificate")
+            ]
+        },
+        "address_verification": {
+            "title": "Address Verification",
+            "requirements": [
+                build_requirement_row("proof_of_address")
+            ],
+            "summary": {
+                "verified_count": len([d for d in docs_by_requirement.get("proof_of_address", []) if d.get("verified")]),
+                "minimum_required": 2,
+                "status_label": f"{len([d for d in docs_by_requirement.get('proof_of_address', []) if d.get('verified')])}/2 verified"
+            }
+        },
+        "recruitment_integrity": {
+            "title": "Recruitment Integrity",
+            "reference_1": {
+                "declared": ref1.get("declared_referee") if ref1 else None,
+                "response_source": ref1.get("response", {}).get("source") if ref1 else None,
+                "identity_confidence": ref1.get("comparison", {}).get("identity_confidence") if ref1 else None,
+                "verification_status": ref1.get("verification", {}).get("status") if ref1 else "not_started",
+                "counts_toward_readiness": ref1.get("counts_toward_readiness", False) if ref1 else False,
+                "blocked": ref1.get("blocked_by_integrity", False) if ref1 else False,
+                "lifecycle": ref1.get("lifecycle_status") if ref1 else None
+            },
+            "reference_2": {
+                "declared": ref2.get("declared_referee") if ref2 else None,
+                "response_source": ref2.get("response", {}).get("source") if ref2 else None,
+                "identity_confidence": ref2.get("comparison", {}).get("identity_confidence") if ref2 else None,
+                "verification_status": ref2.get("verification", {}).get("status") if ref2 else "not_started",
+                "counts_toward_readiness": ref2.get("counts_toward_readiness", False) if ref2 else False,
+                "blocked": ref2.get("blocked_by_integrity", False) if ref2 else False,
+                "lifecycle": ref2.get("lifecycle_status") if ref2 else None
+            },
+            "valid_count": sum([
+                1 if ref1 and ref1.get("counts_toward_readiness") else 0,
+                1 if ref2 and ref2.get("counts_toward_readiness") else 0
+            ])
+        },
+        "health_forms": {
+            "title": "Health & Required Forms",
+            "requirements": [
+                build_requirement_row("health_declaration"),
+                build_requirement_row("interview_form"),
+                build_requirement_row("hmrc_checklist"),
+                build_requirement_row("personal_details_form")
+            ]
+        },
+        "training": {
+            "title": "Training",
+            "requirements": [
+                build_requirement_row("training")
+            ],
+            # Also include training evaluation summary
+            "evaluation": await evaluate_employee_training_status(employee_id, employee.get("role", ""))
+        }
+    }
+    
+    # Calculate overall status
+    all_requirements = []
+    for section in sections.values():
+        if isinstance(section, dict) and "requirements" in section:
+            all_requirements.extend(section["requirements"])
+    
+    blocking_count = len([r for r in all_requirements if r.get("blocking")])
+    awaiting_count = len([r for r in all_requirements if r.get("status") == "awaiting_review"])
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "summary": {
+            "blocking_requirements": blocking_count,
+            "awaiting_review": awaiting_count,
+            "total_pending_requests": len([r for r in requests if r.get("status") in ["sent", "clicked", "action_started"]])
+        },
+        "sections": sections
+    }
+
+
 # ==================== CV EMPLOYMENT HISTORY EXTRACTION ====================
 # Phase 2: CV Extraction (Assist Only) - GPT-based extraction
 

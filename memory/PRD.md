@@ -5,7 +5,7 @@
 
 
 ## Compliance File Stabilisation - STEP A (2026-03-31)
-**Status**: References Restoration COMPLETE ✅ | Request Flow VERIFIED ✅ | Files Drawer VERIFIED ✅
+**Status**: COMPLETE ✅
 
 ### STEP A.1: References Restoration ✅ (2026-03-31)
 Restored references as proper requirement cards in the Compliance File.
@@ -34,6 +34,26 @@ Restored references as proper requirement cards in the Compliance File.
 - ✅ Readiness only counts verified references
 
 **Testing:** 13/13 tests passed (iteration_95.json). 100% success rate.
+
+### STEP A.2-A.4: Verification Complete ✅ (2026-03-31)
+Verified all P0 functional workflows are working.
+
+**Request Flow (A.2):**
+- ✅ All requestable evidence rows show inline lifecycle states
+- ✅ Requested badge with timestamp visible
+- ✅ Resend and Request Replacement quick actions available
+- ✅ Multi-file status shown (e.g., "2 active, 1 pending review")
+
+**Files Drawer (A.3):**
+- ✅ View Files button opens RequirementFilesDrawer for all evidence rows
+- ✅ Stats shown (Active, Verified, Pending counts)
+- ✅ Active Files and Historical Files sections
+- ✅ Per-file metadata: uploaded by, source, expiry, extraction status, verification status
+
+**Per-file Actions (A.4):**
+- ✅ View, Download, Supersede/Replace, Move Category, Mark Uploaded in Error
+- ✅ Multi-file rows (DBS with 2 files) can manage each file independently
+- ✅ Safe file correction (no destructive delete, audit preserved)
 
 ---
 

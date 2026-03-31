@@ -11,6 +11,7 @@ import ContactPage from "./pages/public/ContactPage";
 import ApplyPage from "./pages/public/ApplyPage";
 import FormCompletionPage from "./pages/public/FormCompletionPage";
 import RefereeCompletionPage from "./pages/public/RefereeCompletionPage";
+import TrainingUploadPage from "./pages/public/TrainingUploadPage";
 
 // Auth Pages
 import LoginPage from "./pages/auth/LoginPage";
@@ -66,6 +67,9 @@ function AppRouter() {
       
       {/* Public Referee Reference Completion Route (No Auth Required) */}
       <Route path="/referee/complete/:token" element={<RefereeCompletionPage />} />
+      
+      {/* Public Training Certificate Upload Route (No Auth Required) */}
+      <Route path="/training/upload/:token" element={<TrainingUploadPage />} />
       
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />

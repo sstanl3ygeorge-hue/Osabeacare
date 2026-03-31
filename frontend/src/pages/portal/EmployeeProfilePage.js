@@ -19,6 +19,8 @@ import ComplianceOverview from '../../components/portal/ComplianceOverview';
 import DocumentPreviewModal from '../../components/portal/DocumentPreviewModal';
 import RecurringComplianceSection from '../../components/portal/RecurringComplianceSection';
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
+import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
+import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -271,6 +273,12 @@ export default function EmployeeProfilePage() {
   const [loadingNameMismatch, setLoadingNameMismatch] = useState(false);
   const [nameMismatchExpanded, setNameMismatchExpanded] = useState(false);
   
+  // Training Intake Wizard State (Step 10)
+  const [trainingIntakeOpen, setTrainingIntakeOpen] = useState(false);
+  const [trainingRequestOpen, setTrainingRequestOpen] = useState(false);
+  const [proposedTrainingItems, setProposedTrainingItems] = useState([]);
+  const [loadingProposedItems, setLoadingProposedItems] = useState(false);
+  
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
   const fetchRecruitmentStatus = async () => {
     if (!employeeId) return;
@@ -316,6 +324,22 @@ export default function EmployeeProfilePage() {
       console.error('Failed to fetch name mismatch:', err);
     } finally {
       setLoadingNameMismatch(false);
+    }
+  };
+  
+  // Fetch proposed training items (Step 10)
+  const fetchProposedTrainingItems = async () => {
+    if (!employeeId) return;
+    setLoadingProposedItems(true);
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/training/proposed-items`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setProposedTrainingItems(response.data.proposed_items || []);
+    } catch (err) {
+      console.error('Failed to fetch proposed training items:', err);
+    } finally {
+      setLoadingProposedItems(false);
     }
   };
   
@@ -691,6 +715,7 @@ export default function EmployeeProfilePage() {
     fetchEmploymentMismatch();
     fetchNameMismatch();
     fetchTrainingEvaluation();
+    fetchProposedTrainingItems();
   }, [employeeId, token]);
 
   // Fetch profile photo when employee has one
@@ -5993,8 +6018,55 @@ export default function EmployeeProfilePage() {
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardContent className="p-6">
               <div className="mb-4 pb-4 border-b border-[#E4E8EB]">
-                <h3 className="font-heading text-lg font-semibold text-text-primary">Training & Certifications</h3>
-                <p className="text-sm text-text-muted">Track completion status, expiry dates, and renewal status. Verified training counts toward work readiness.</p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-heading text-lg font-semibold text-text-primary">Training & Certifications</h3>
+                    <p className="text-sm text-text-muted">Track completion status, expiry dates, and renewal status. Verified training counts toward work readiness.</p>
+                  </div>
+                  
+                  {/* Training Tab Action Buttons */}
+                  {!isAuditor() && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Review Pending Badge */}
+                      {proposedTrainingItems.length > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-xl border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
+                          onClick={() => setTrainingIntakeOpen(true)}
+                          data-testid="review-pending-training-btn"
+                        >
+                          <Clock className="h-4 w-4 mr-1.5" />
+                          {proposedTrainingItems.length} Pending Review
+                        </Button>
+                      )}
+                      
+                      {/* Upload & Scan Certificate */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl"
+                        onClick={() => setTrainingIntakeOpen(true)}
+                        data-testid="upload-training-cert-btn"
+                      >
+                        <Upload className="h-4 w-4 mr-1.5" />
+                        Upload & Scan
+                      </Button>
+                      
+                      {/* Request Training Certificates */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-xl"
+                        onClick={() => setTrainingRequestOpen(true)}
+                        data-testid="request-training-btn"
+                      >
+                        <Mail className="h-4 w-4 mr-1.5" />
+                        Request Certs
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
               {training.length === 0 ? (
                 <div className="text-center py-12 text-text-muted">
@@ -7627,6 +7699,34 @@ export default function EmployeeProfilePage() {
           documentContext={docExtractionContext}
         />
       )}
+
+      {/* Training Intake Wizard (Step 10) */}
+      <TrainingIntakeWizard
+        employeeId={employeeId}
+        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        open={trainingIntakeOpen}
+        onClose={() => setTrainingIntakeOpen(false)}
+        onComplete={() => {
+          setTrainingIntakeOpen(false);
+          fetchData();
+          fetchCompliance();
+          fetchProposedTrainingItems();
+          fetchTrainingEvaluation();
+        }}
+      />
+
+      {/* Training Request Dialog (Step 10) */}
+      <TrainingRequestDialog
+        employeeId={employeeId}
+        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        employeeEmail={employee?.email}
+        open={trainingRequestOpen}
+        onClose={() => setTrainingRequestOpen(false)}
+        onComplete={() => {
+          setTrainingRequestOpen(false);
+          toast.success('Training certificate request sent');
+        }}
+      />
 
       {/* Requirement History Dialog */}
       <Dialog open={requirementHistoryOpen} onOpenChange={setRequirementHistoryOpen}>

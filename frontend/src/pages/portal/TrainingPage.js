@@ -691,15 +691,19 @@ export default function TrainingPage() {
                           </div>
                         </td>
                         <td className="p-4">
-                          {/* UI INTEGRITY: Status must include verification state */}
+                          {/* UI INTEGRITY: Status must include verification state and intake workflow states */}
                           <span className={`px-2 py-1 rounded-lg text-xs font-medium ${
                             record.status === 'completed' && record.verified ? 'bg-green-100 text-green-700' :
                             record.status === 'completed' ? 'bg-blue-100 text-blue-700' :
+                            record.status === 'awaiting_extraction_review' ? 'bg-purple-100 text-purple-700' :
+                            record.status === 'awaiting_evidence' || record.status === 'evidence_requested' ? 'bg-amber-100 text-amber-700' :
                             record.status === 'in_progress' ? 'bg-amber-100 text-amber-700' :
                             'bg-gray-100 text-gray-700'
                           }`}>
                             {record.status === 'completed' && record.verified ? 'Completed & Verified' :
                              record.status === 'completed' ? 'Completed (Awaiting Verification)' :
+                             record.status === 'awaiting_extraction_review' ? 'Awaiting Extraction Review' :
+                             record.status === 'awaiting_evidence' || record.status === 'evidence_requested' ? 'Evidence Requested' :
                              record.status === 'in_progress' ? 'In Progress' :
                              'Not Started'}
                           </span>

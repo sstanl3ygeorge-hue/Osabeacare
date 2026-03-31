@@ -8947,6 +8947,36 @@ async def get_employee_extractions(
     return {"extractions": extractions}
 
 
+# NOTE: This endpoint MUST be defined BEFORE /extractions/{extraction_id} to avoid route conflict
+@api_router.get("/extractions/pending-review")
+async def get_pending_extraction_reviews_profile(
+    limit: int = 50,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Get list of profile extractions awaiting admin review.
+    (For document extractions, use /api/document-extractions/pending-review)
+    """
+    extractions = await db.profile_extractions.find(
+        {"status": "pending_review"},
+        {"_id": 0}
+    ).sort("extracted_at", -1).limit(limit).to_list(limit)
+    
+    # Enrich with employee info
+    for ext in extractions:
+        emp = await db.employees.find_one(
+            {"id": ext.get("employee_id")},
+            {"_id": 0, "first_name": 1, "last_name": 1}
+        )
+        if emp:
+            ext["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+    
+    return {
+        "extractions": extractions,
+        "total": len(extractions)
+    }
+
+
 @api_router.get("/extractions/{extraction_id}")
 async def get_extraction(extraction_id: str, user: dict = Depends(get_current_user)):
     """Get a specific extraction result"""
@@ -20819,6 +20849,1200 @@ async def upload_application_cv(file: UploadFile = File(...)):
         "file_id": doc_id,
         "file_name": file.filename,
         "message": "CV uploaded successfully. Include this file_id in your application."
+    }
+
+
+# ==================== UNIVERSAL DOCUMENT EXTRACTION PIPELINE ====================
+# Phase 1: Training Certificates → Phase 2: DBS, RTW, ID → Phase 3: Proof of Address
+# 
+# Core Rules:
+# - Extraction = assistive draft only
+# - Verified structured record = source of truth
+# - Extraction never directly marks document verified or employee ready
+# - All extracted values require admin review before entering authoritative fields
+
+class DocumentExtractionType(str, Enum):
+    TRAINING_CERTIFICATE = "training_certificate"
+    DBS = "dbs"
+    RIGHT_TO_WORK = "right_to_work"
+    ID = "id"
+    PROOF_OF_ADDRESS = "proof_of_address"
+    OTHER = "other"
+
+
+class ExtractionStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NEEDS_REVIEW = "needs_review"
+
+
+class ReviewStatus(str, Enum):
+    AWAITING_REVIEW = "awaiting_review"
+    APPROVED = "approved"
+    EDITED = "edited"
+    REJECTED = "rejected"
+
+
+class ExtractionSourceType(str, Enum):
+    EXPLICIT = "explicit"
+    INFERRED_POLICY = "inferred_policy"
+    DERIVED_TEXT = "derived_text"
+    NOT_FOUND = "not_found"
+
+
+class ExtractionIssueSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    BLOCKER = "blocker"
+
+
+# Training renewal policies (internal policy mapping)
+TRAINING_RENEWAL_POLICIES = {
+    "moving_and_handling": {"months": 12, "title_keywords": ["moving", "handling", "manual handling"]},
+    "medication": {"months": 12, "title_keywords": ["medication", "medicine", "administration"]},
+    "safeguarding_adults": {"months": 36, "title_keywords": ["safeguarding adult"]},
+    "safeguarding_children": {"months": 36, "title_keywords": ["safeguarding child", "child protection"]},
+    "infection_control": {"months": 12, "title_keywords": ["infection", "control", "ppe"]},
+    "fire_safety": {"months": 12, "title_keywords": ["fire safety", "fire awareness"]},
+    "first_aid": {"months": 36, "title_keywords": ["first aid"]},
+    "food_hygiene": {"months": 36, "title_keywords": ["food hygiene", "food safety"]},
+    "health_and_safety": {"months": 12, "title_keywords": ["health and safety", "h&s"]},
+    "mental_capacity": {"months": 12, "title_keywords": ["mental capacity", "mca"]},
+    "cpr_bls": {"months": 12, "title_keywords": ["cpr", "bls", "basic life support"]},
+}
+
+
+class DocumentExtractionService:
+    """
+    Universal extraction framework for all document types.
+    
+    Principles:
+    - Extraction is ASSISTIVE only - never auto-verifies
+    - All extracted values require admin review
+    - Canonical structured records remain source of truth
+    - Extraction record provides audit trail
+    """
+    
+    EXTRACTOR_VERSION = "1.0.0"
+    
+    @staticmethod
+    async def run_extraction(document_id: str, force_rerun: bool = False) -> dict:
+        """
+        Main entry point for document extraction.
+        
+        Args:
+            document_id: ID of the uploaded document
+            force_rerun: If True, re-runs extraction even if one exists
+            
+        Returns:
+            Extraction record
+        """
+        # Check for existing extraction
+        existing = await db.document_extractions.find_one(
+            {"document_id": document_id},
+            {"_id": 0}
+        )
+        if existing and not force_rerun:
+            if existing.get("extraction_status") in ["completed", "needs_review"]:
+                return existing
+        
+        # Get document
+        document = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Get employee for name matching
+        employee = await db.employees.find_one(
+            {"id": document.get("employee_id")},
+            {"_id": 0, "id": 1, "first_name": 1, "last_name": 1}
+        )
+        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else ""
+        
+        # Create extraction record
+        extraction_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        
+        extraction = {
+            "id": extraction_id,
+            "document_id": document_id,
+            "employee_id": document.get("employee_id"),
+            "document_type": DocumentExtractionService._classify_document_type(document),
+            "extraction_status": ExtractionStatus.PENDING.value,
+            "extractor_version": DocumentExtractionService.EXTRACTOR_VERSION,
+            "extracted_fields": {},
+            "field_metadata": {},
+            "issues": [],
+            "raw_text_excerpt": None,
+            "extracted_at": now,
+            "review_status": ReviewStatus.AWAITING_REVIEW.value,
+            "reviewed_by": None,
+            "reviewed_at": None,
+            "approved_field_values": None
+        }
+        
+        try:
+            # Download document
+            file_url = document.get("file_url")
+            if not file_url:
+                extraction["extraction_status"] = ExtractionStatus.FAILED.value
+                extraction["issues"].append({
+                    "code": "no_file_url",
+                    "detail": "Document file URL not found",
+                    "severity": ExtractionIssueSeverity.BLOCKER.value
+                })
+                await DocumentExtractionService._save_extraction(extraction)
+                return extraction
+            
+            # Get API key
+            api_key = os.environ.get('EMERGENT_LLM_KEY')
+            if not api_key:
+                extraction["extraction_status"] = ExtractionStatus.FAILED.value
+                extraction["issues"].append({
+                    "code": "no_api_key",
+                    "detail": "LLM API key not configured",
+                    "severity": ExtractionIssueSeverity.BLOCKER.value
+                })
+                await DocumentExtractionService._save_extraction(extraction)
+                return extraction
+            
+            # Get file content using internal object storage
+            file_path = document.get("file_url")
+            if not file_path:
+                extraction["extraction_status"] = ExtractionStatus.FAILED.value
+                extraction["issues"].append({
+                    "code": "no_file_url",
+                    "detail": "Document file URL not found",
+                    "severity": ExtractionIssueSeverity.BLOCKER.value
+                })
+                await DocumentExtractionService._save_extraction(extraction)
+                return extraction
+            
+            try:
+                file_content, content_type = get_object(file_path)
+            except Exception as e:
+                extraction["extraction_status"] = ExtractionStatus.FAILED.value
+                extraction["issues"].append({
+                    "code": "download_failed",
+                    "detail": f"Failed to retrieve document from storage: {str(e)}",
+                    "severity": ExtractionIssueSeverity.BLOCKER.value
+                })
+                await DocumentExtractionService._save_extraction(extraction)
+                return extraction
+            
+            # Determine file type from content_type or filename
+            file_ext = ".pdf"
+            if content_type:
+                if "jpeg" in content_type or "jpg" in content_type:
+                    file_ext = ".jpg"
+                elif "png" in content_type:
+                    file_ext = ".png"
+                elif "webp" in content_type:
+                    file_ext = ".webp"
+            original_filename = document.get("original_filename", "").lower()
+            if original_filename.endswith(".pdf"):
+                file_ext = ".pdf"
+            elif any(original_filename.endswith(ext) for ext in [".jpg", ".jpeg"]):
+                file_ext = ".jpg"
+            elif original_filename.endswith(".png"):
+                file_ext = ".png"
+            
+            # Convert to images for vision processing
+            images_to_process = await DocumentExtractionService._convert_to_images(
+                file_content, 
+                file_ext
+            )
+            
+            if not images_to_process:
+                extraction["extraction_status"] = ExtractionStatus.FAILED.value
+                extraction["issues"].append({
+                    "code": "conversion_failed",
+                    "detail": "Could not convert document to images for processing",
+                    "severity": ExtractionIssueSeverity.BLOCKER.value
+                })
+                await DocumentExtractionService._save_extraction(extraction)
+                return extraction
+            
+            # Run document-type-specific extraction
+            doc_type = extraction["document_type"]
+            
+            if doc_type == DocumentExtractionType.TRAINING_CERTIFICATE.value:
+                result = await DocumentExtractionService._extract_training_certificate(
+                    images_to_process, api_key, employee_name
+                )
+            elif doc_type == DocumentExtractionType.DBS.value:
+                result = await DocumentExtractionService._extract_dbs(
+                    images_to_process, api_key, employee_name
+                )
+            elif doc_type == DocumentExtractionType.RIGHT_TO_WORK.value:
+                result = await DocumentExtractionService._extract_rtw(
+                    images_to_process, api_key, employee_name
+                )
+            elif doc_type == DocumentExtractionType.ID.value:
+                result = await DocumentExtractionService._extract_id(
+                    images_to_process, api_key, employee_name
+                )
+            elif doc_type == DocumentExtractionType.PROOF_OF_ADDRESS.value:
+                result = await DocumentExtractionService._extract_proof_of_address(
+                    images_to_process, api_key, employee_name
+                )
+            else:
+                result = await DocumentExtractionService._extract_generic(
+                    images_to_process, api_key, employee_name
+                )
+            
+            # Update extraction with results
+            extraction["extracted_fields"] = result.get("fields", {})
+            extraction["field_metadata"] = result.get("metadata", {})
+            extraction["issues"].extend(result.get("issues", []))
+            extraction["raw_text_excerpt"] = result.get("raw_text_excerpt")
+            
+            # Check for name mismatch
+            extracted_name = result.get("fields", {}).get("holder_name", "")
+            if extracted_name and employee_name:
+                name_match = DocumentExtractionService._check_name_match(extracted_name, employee_name)
+                if not name_match:
+                    extraction["issues"].append({
+                        "code": "holder_name_mismatch",
+                        "detail": f"Document holder '{extracted_name}' differs from employee '{employee_name}'",
+                        "severity": ExtractionIssueSeverity.WARNING.value
+                    })
+            
+            # Determine extraction status
+            blocker_issues = [i for i in extraction["issues"] if i.get("severity") == "blocker"]
+            if blocker_issues:
+                extraction["extraction_status"] = ExtractionStatus.NEEDS_REVIEW.value
+            else:
+                extraction["extraction_status"] = ExtractionStatus.COMPLETED.value
+            
+            await DocumentExtractionService._save_extraction(extraction)
+            return extraction
+            
+        except Exception as e:
+            logger.error(f"Document extraction failed for {document_id}: {e}")
+            extraction["extraction_status"] = ExtractionStatus.FAILED.value
+            extraction["issues"].append({
+                "code": "extraction_error",
+                "detail": str(e),
+                "severity": ExtractionIssueSeverity.BLOCKER.value
+            })
+            await DocumentExtractionService._save_extraction(extraction)
+            return extraction
+    
+    @staticmethod
+    async def _save_extraction(extraction: dict):
+        """Save or update extraction record."""
+        await db.document_extractions.update_one(
+            {"document_id": extraction["document_id"]},
+            {"$set": extraction},
+            upsert=True
+        )
+    
+    @staticmethod
+    def _classify_document_type(document: dict) -> str:
+        """Classify document type based on metadata."""
+        doc_type = document.get("document_type_id", "").lower()
+        doc_type_name = document.get("document_type_name", "").lower()
+        doc_name = document.get("file_name", "").lower()
+        original_name = document.get("original_filename", "").lower()
+        category = document.get("category", "").lower()
+        req_id = document.get("requirement_id", "").lower()
+        
+        all_text = f"{doc_type} {doc_type_name} {doc_name} {original_name} {category} {req_id}"
+        
+        # Training certificates
+        if any(kw in all_text for kw in ["training", "certificate", "course", "accreditation"]):
+            if "dbs" not in all_text:  # Avoid misclassifying DBS certificates
+                return DocumentExtractionType.TRAINING_CERTIFICATE.value
+        
+        # DBS
+        if "dbs" in all_text or "disclosure" in all_text or "barring" in all_text:
+            return DocumentExtractionType.DBS.value
+        
+        # Right to Work
+        if any(kw in all_text for kw in ["rtw", "right_to_work", "right to work", "visa", "brp", "residence", "permit", "share_code", "share code"]):
+            return DocumentExtractionType.RIGHT_TO_WORK.value
+        
+        # ID
+        if any(kw in all_text for kw in ["passport", "driving", "license", "licence", "id_document", "identity", "national_id"]):
+            return DocumentExtractionType.ID.value
+        
+        # Proof of address
+        if any(kw in all_text for kw in ["address", "utility", "bill", "statement", "council_tax", "proof_of_address"]):
+            return DocumentExtractionType.PROOF_OF_ADDRESS.value
+        
+        return DocumentExtractionType.OTHER.value
+    
+    @staticmethod
+    async def _convert_to_images(file_content: bytes, file_type: str) -> List[str]:
+        """Convert document to base64 images for vision processing."""
+        images = []
+        file_ext = file_type.lower().replace(".", "")
+        
+        if file_ext == "pdf":
+            import fitz
+            try:
+                pdf_doc = fitz.open(stream=file_content, filetype="pdf")
+                for page_num in range(min(pdf_doc.page_count, 3)):  # Max 3 pages
+                    page = pdf_doc[page_num]
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                    img_bytes = pix.tobytes("png")
+                    img_base64 = base64.b64encode(img_bytes).decode()
+                    images.append(img_base64)
+                pdf_doc.close()
+            except Exception as e:
+                logger.error(f"PDF conversion failed: {e}")
+        elif file_ext in ["png", "jpg", "jpeg", "webp"]:
+            img_base64 = base64.b64encode(file_content).decode()
+            images.append(img_base64)
+        else:
+            # Try as binary
+            img_base64 = base64.b64encode(file_content).decode()
+            images.append(img_base64)
+        
+        return images
+    
+    @staticmethod
+    def _check_name_match(extracted: str, expected: str) -> bool:
+        """Check if extracted name reasonably matches employee name."""
+        if not extracted or not expected:
+            return True  # Can't check
+        
+        ext_parts = set(extracted.lower().split())
+        exp_parts = set(expected.lower().split())
+        
+        # Check if at least one name part matches
+        common = ext_parts.intersection(exp_parts)
+        return len(common) >= 1
+    
+    @staticmethod
+    async def _extract_training_certificate(
+        images: List[str], 
+        api_key: str, 
+        employee_name: str
+    ) -> dict:
+        """Extract training certificate fields using GPT Vision."""
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-training-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing training certificates.
+
+Extract the following fields from the training certificate:
+- holder_name: Name of the certificate holder
+- training_title: Title/name of the training course
+- provider_name: Training provider/organization
+- completion_date: Date training was completed (format: YYYY-MM-DD)
+- expiry_date: Expiry date if explicitly stated (format: YYYY-MM-DD), null if not found
+- duration_text: Duration of training (e.g., "3 hours", "1 day")
+- reference_number: Certificate/reference number if present
+- accreditation: Any accreditation body mentioned
+
+IMPORTANT:
+- Return dates in YYYY-MM-DD format
+- If a field is not found, set it to null
+- If expiry is not explicitly stated, do NOT guess it - leave null
+- Set confidence for each field (0.0-1.0)
+
+Return JSON only:
+{
+  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "training_title": {"value": "string or null", "confidence": 0.0-1.0},
+  "provider_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "completion_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "duration_text": {"value": "string or null", "confidence": 0.0-1.0},
+  "reference_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "accreditation": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Extract all fields from this training certificate. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                # Parse JSON response
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence,
+                                "raw_evidence": None
+                            }
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse extraction JSON: {e}")
+                    issues.append({
+                        "code": "parse_error",
+                        "detail": "Could not parse extraction results",
+                        "severity": "warning"
+                    })
+            
+            # Check for low confidence
+            for field_name, meta in metadata.items():
+                if meta.get("confidence", 0) < 0.5 and fields.get(field_name):
+                    issues.append({
+                        "code": "low_confidence_extraction",
+                        "detail": f"Low confidence ({meta.get('confidence'):.0%}) for {field_name}",
+                        "severity": "info"
+                    })
+            
+            # Try to infer expiry from internal policy if not explicit
+            if not fields.get("expiry_date") and fields.get("completion_date"):
+                training_title = fields.get("training_title", "").lower()
+                for code, policy in TRAINING_RENEWAL_POLICIES.items():
+                    if any(kw in training_title for kw in policy.get("title_keywords", [])):
+                        try:
+                            completion = datetime.fromisoformat(fields["completion_date"])
+                            inferred_expiry = completion + timedelta(days=policy["months"] * 30)
+                            fields["expiry_date"] = inferred_expiry.strftime("%Y-%m-%d")
+                            fields["inferred_training_code"] = code
+                            metadata["expiry_date"] = {
+                                "source_type": "inferred_policy",
+                                "confidence": 0.9,
+                                "raw_evidence": f"Internal {policy['months']}-month renewal policy for {code}"
+                            }
+                            issues.append({
+                                "code": "expiry_inferred_from_policy",
+                                "detail": f"Expiry date inferred from internal {policy['months']}-month policy",
+                                "severity": "info"
+                            })
+                            break
+                        except:
+                            pass
+            
+            # Check for missing critical fields
+            if not fields.get("completion_date"):
+                issues.append({
+                    "code": "missing_completion_date",
+                    "detail": "Completion date not found on certificate",
+                    "severity": "warning"
+                })
+            
+            if not fields.get("training_title"):
+                issues.append({
+                    "code": "training_title_unclear",
+                    "detail": "Training title could not be determined",
+                    "severity": "warning"
+                })
+            
+        except Exception as e:
+            logger.error(f"Training certificate extraction error: {e}")
+            issues.append({
+                "code": "extraction_error",
+                "detail": str(e),
+                "severity": "blocker"
+            })
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def _extract_dbs(images: List[str], api_key: str, employee_name: str) -> dict:
+        """Extract DBS certificate fields."""
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-dbs-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) certificates.
+
+Extract the following fields:
+- holder_name: Name of the certificate holder
+- certificate_number: DBS certificate number (12-digit number)
+- issue_date: Date of issue (format: YYYY-MM-DD)
+- disclosure_type: Type (Basic, Standard, Enhanced, Enhanced with Barred Lists)
+- expiry_date: ONLY if explicitly printed on certificate (usually DBS certificates don't have expiry)
+
+IMPORTANT:
+- DBS certificates typically do NOT have an expiry date printed
+- Do NOT invent an expiry date if not explicitly shown
+- Return dates in YYYY-MM-DD format
+
+Return JSON only:
+{
+  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "certificate_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "disclosure_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Extract all fields from this DBS certificate. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError as e:
+                    issues.append({"code": "parse_error", "detail": str(e), "severity": "warning"})
+            
+            # DBS-specific validation
+            if fields.get("certificate_number"):
+                cert_num = fields["certificate_number"]
+                if not re.match(r'^\d{12}$', str(cert_num).replace(" ", "")):
+                    issues.append({
+                        "code": "invalid_certificate_number",
+                        "detail": "Certificate number should be 12 digits",
+                        "severity": "warning"
+                    })
+            
+            # Note about policy-based renewal
+            if not fields.get("expiry_date") and fields.get("issue_date"):
+                issues.append({
+                    "code": "no_explicit_expiry",
+                    "detail": "DBS certificates don't expire, but your organization may have a renewal policy",
+                    "severity": "info"
+                })
+        
+        except Exception as e:
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def _extract_rtw(images: List[str], api_key: str, employee_name: str) -> dict:
+        """Extract Right to Work document fields."""
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-rtw-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing Right to Work documents (passports, visas, BRP cards, share codes).
+
+Extract the following fields:
+- holder_name: Name on document
+- document_type: Type (Passport, Visa, BRP, Share Code Letter, etc.)
+- document_subtype: Subtype if applicable
+- document_number: Document/passport number
+- nationality: Nationality if shown
+- issue_date: Issue date (format: YYYY-MM-DD)
+- expiry_date: Expiry date (format: YYYY-MM-DD)
+- permission_end_date: Work permission end date if different from expiry
+- issuer: Issuing authority/country
+
+Return JSON only:
+{
+  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_subtype": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "nationality": {"value": "string or null", "confidence": 0.0-1.0},
+  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "permission_end_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "issuer": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Extract all fields from this Right to Work document. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError:
+                    issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
+            
+            # RTW-specific validation
+            if not fields.get("expiry_date") and not fields.get("permission_end_date"):
+                issues.append({
+                    "code": "missing_expiry_date",
+                    "detail": "No expiry or permission end date found - may indicate indefinite right to work",
+                    "severity": "info"
+                })
+        
+        except Exception as e:
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def _extract_id(images: List[str], api_key: str, employee_name: str) -> dict:
+        """Extract ID document fields (passport, driving license, etc.)."""
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-id-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing ID documents (passports, driving licenses, national ID cards).
+
+Extract the following fields:
+- holder_name: Full name on document
+- document_type: Type (Passport, Driving Licence, National ID, etc.)
+- document_number: Document number
+- date_of_birth: Date of birth (format: YYYY-MM-DD)
+- issue_date: Issue date (format: YYYY-MM-DD)
+- expiry_date: Expiry date (format: YYYY-MM-DD)
+- issuing_authority: Issuing authority/country
+- nationality: Nationality if shown
+
+Return JSON only:
+{
+  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "date_of_birth": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "issuing_authority": {"value": "string or null", "confidence": 0.0-1.0},
+  "nationality": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Extract all fields from this ID document. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError:
+                    issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
+        
+        except Exception as e:
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def _extract_proof_of_address(images: List[str], api_key: str, employee_name: str) -> dict:
+        """Extract Proof of Address document fields."""
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-poa-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing Proof of Address documents (utility bills, bank statements, council tax).
+
+Extract the following fields:
+- holder_name: Name on document
+- address_text: Full address shown
+- document_type: Type (Utility Bill, Bank Statement, Council Tax Bill, etc.)
+- document_date: Statement/bill date (format: YYYY-MM-DD)
+- issuer: Company/organization issuing document (e.g., "British Gas", "Barclays")
+- account_number: Partial account number if visible
+
+IMPORTANT:
+- Proof of address documents don't have expiry dates - extract the document_date instead
+- Document_date is used to check freshness (typically must be within 3 months)
+- Do NOT invent an expiry_date
+
+Return JSON only:
+{
+  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "address_text": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "issuer": {"value": "string or null", "confidence": 0.0-1.0},
+  "account_number": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Extract all fields from this Proof of Address document. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError:
+                    issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
+            
+            # Check freshness
+            if fields.get("document_date"):
+                try:
+                    doc_date = datetime.fromisoformat(fields["document_date"])
+                    days_old = (datetime.now(timezone.utc).replace(tzinfo=None) - doc_date.replace(tzinfo=None)).days
+                    fields["days_old"] = days_old
+                    fields["meets_recency_requirement"] = days_old <= 90
+                    
+                    if days_old > 90:
+                        issues.append({
+                            "code": "proof_of_address_out_of_date",
+                            "detail": f"Document is {days_old} days old (>90 days)",
+                            "severity": "warning"
+                        })
+                except:
+                    pass
+        
+        except Exception as e:
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def _extract_generic(images: List[str], api_key: str, employee_name: str) -> dict:
+        """Generic extraction for unclassified documents."""
+        fields = {}
+        metadata = {}
+        issues = [{"code": "document_type_unclear", "detail": "Document type could not be determined", "severity": "warning"}]
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-generic-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist. Analyze this document and extract any relevant fields.
+
+Extract whatever fields you can identify:
+- holder_name: Name on document
+- document_title: What type of document this appears to be
+- issue_date: Any issue/creation date
+- expiry_date: Any expiry date if explicitly shown
+- reference_number: Any reference/ID number
+- issuer_name: Issuing organization
+
+Return JSON only."""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Analyze this document and extract whatever fields you can identify. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.3)
+                            else:
+                                value = field_data
+                                confidence = 0.3
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "derived_text" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except:
+                    pass
+        
+        except Exception as e:
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def review_extraction(
+        extraction_id: str,
+        action: str,
+        approved_field_values: Optional[dict],
+        review_note: Optional[str],
+        reviewer_id: str
+    ) -> dict:
+        """
+        Process admin review of extraction.
+        
+        Actions:
+        - approve: Accept extracted values as-is
+        - edit_and_approve: Accept with modifications
+        - reject: Do not apply to canonical records
+        """
+        extraction = await db.document_extractions.find_one(
+            {"id": extraction_id},
+            {"_id": 0}
+        )
+        if not extraction:
+            raise HTTPException(status_code=404, detail="Extraction not found")
+        
+        now = datetime.now(timezone.utc).isoformat()
+        
+        if action == "approve":
+            # Use extracted values directly
+            final_values = extraction.get("extracted_fields", {})
+            extraction["review_status"] = ReviewStatus.APPROVED.value
+            extraction["approved_field_values"] = final_values
+        
+        elif action == "edit_and_approve":
+            # Use admin-provided values
+            if not approved_field_values:
+                raise HTTPException(status_code=400, detail="approved_field_values required for edit_and_approve")
+            extraction["review_status"] = ReviewStatus.EDITED.value
+            extraction["approved_field_values"] = approved_field_values
+            final_values = approved_field_values
+        
+        elif action == "reject":
+            extraction["review_status"] = ReviewStatus.REJECTED.value
+            extraction["approved_field_values"] = None
+            final_values = None
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
+        
+        extraction["reviewed_by"] = reviewer_id
+        extraction["reviewed_at"] = now
+        if review_note:
+            extraction["review_note"] = review_note
+        
+        # Save extraction update
+        await db.document_extractions.update_one(
+            {"id": extraction_id},
+            {"$set": extraction}
+        )
+        
+        # If approved, update canonical records based on document type
+        if action in ["approve", "edit_and_approve"] and final_values:
+            doc_type = extraction.get("document_type")
+            document_id = extraction.get("document_id")
+            employee_id = extraction.get("employee_id")
+            
+            # Update document with extracted metadata
+            doc_update = {
+                "extraction_reviewed": True,
+                "extraction_reviewed_at": now,
+                "extraction_reviewed_by": reviewer_id
+            }
+            
+            # Add specific fields based on document type
+            if doc_type == DocumentExtractionType.TRAINING_CERTIFICATE.value:
+                # Create or update training record draft
+                if final_values.get("completion_date"):
+                    training_data = {
+                        "training_name": final_values.get("training_title", "Untitled Training"),
+                        "requirement_id": final_values.get("inferred_training_code"),
+                        "provider_name": final_values.get("provider_name"),
+                        "completed_at": final_values.get("completion_date"),
+                        "expiry_date": final_values.get("expiry_date"),
+                        "reference_number": final_values.get("reference_number"),
+                        "duration_text": final_values.get("duration_text"),
+                        "evidence_document_id": document_id,
+                        "verification_status": "awaiting_review",
+                        "extraction_source": {
+                            "extraction_id": extraction_id,
+                            "expiry_source_type": extraction.get("field_metadata", {}).get("expiry_date", {}).get("source_type", "explicit"),
+                            "confidence": extraction.get("field_metadata", {}).get("completion_date", {}).get("confidence"),
+                            "reviewed_by": reviewer_id,
+                            "reviewed_at": now
+                        }
+                    }
+                    
+                    # Create or update training record
+                    existing_training = await db.training_records.find_one({
+                        "employee_id": employee_id,
+                        "evidence_document_id": document_id
+                    })
+                    
+                    if existing_training:
+                        await db.training_records.update_one(
+                            {"id": existing_training["id"]},
+                            {"$set": training_data}
+                        )
+                    else:
+                        training_data["id"] = str(uuid.uuid4())
+                        training_data["employee_id"] = employee_id
+                        training_data["record_status"] = "active"
+                        training_data["created_at"] = now
+                        await db.training_records.insert_one(training_data)
+            
+            elif doc_type == DocumentExtractionType.DBS.value:
+                # Update DBS fields on document
+                if final_values.get("certificate_number"):
+                    doc_update["dbs_certificate_number"] = final_values["certificate_number"]
+                if final_values.get("issue_date"):
+                    doc_update["issue_date"] = final_values["issue_date"]
+                if final_values.get("disclosure_type"):
+                    doc_update["disclosure_type"] = final_values["disclosure_type"]
+                if final_values.get("expiry_date"):
+                    doc_update["expiry_date"] = final_values["expiry_date"]
+                    doc_update["expiry_date_metadata"] = {
+                        "value": final_values["expiry_date"],
+                        "source_type": extraction.get("field_metadata", {}).get("expiry_date", {}).get("source_type", "explicit"),
+                        "source_document_id": document_id,
+                        "confidence": extraction.get("field_metadata", {}).get("expiry_date", {}).get("confidence"),
+                        "approved_by": reviewer_id,
+                        "approved_at": now
+                    }
+            
+            elif doc_type in [DocumentExtractionType.RIGHT_TO_WORK.value, DocumentExtractionType.ID.value]:
+                if final_values.get("document_number"):
+                    doc_update["document_number"] = final_values["document_number"]
+                if final_values.get("issue_date"):
+                    doc_update["issue_date"] = final_values["issue_date"]
+                if final_values.get("expiry_date"):
+                    doc_update["expiry_date"] = final_values["expiry_date"]
+                    doc_update["expiry_date_metadata"] = {
+                        "value": final_values["expiry_date"],
+                        "source_type": extraction.get("field_metadata", {}).get("expiry_date", {}).get("source_type", "explicit"),
+                        "source_document_id": document_id,
+                        "confidence": extraction.get("field_metadata", {}).get("expiry_date", {}).get("confidence"),
+                        "approved_by": reviewer_id,
+                        "approved_at": now
+                    }
+                if final_values.get("permission_end_date"):
+                    doc_update["permission_end_date"] = final_values["permission_end_date"]
+            
+            elif doc_type == DocumentExtractionType.PROOF_OF_ADDRESS.value:
+                if final_values.get("address_text"):
+                    doc_update["address_text"] = final_values["address_text"]
+                if final_values.get("document_date"):
+                    doc_update["document_date"] = final_values["document_date"]
+                    doc_update["meets_recency_requirement"] = final_values.get("meets_recency_requirement", False)
+            
+            # Update document record
+            await db.employee_documents.update_one(
+                {"id": document_id},
+                {"$set": doc_update}
+            )
+            
+            # Log audit
+            await log_audit_action(reviewer_id, "extraction_review", "document", document_id, {
+                "action": action,
+                "document_type": doc_type,
+                "extraction_id": extraction_id,
+                "approved_fields": list(final_values.keys()) if final_values else []
+            })
+        
+        extraction.pop("_id", None)
+        return extraction
+
+
+# ==================== DOCUMENT EXTRACTION ENDPOINTS ====================
+
+@api_router.post("/documents/{document_id}/extract")
+async def trigger_document_extraction(
+    document_id: str,
+    force: bool = False,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Trigger extraction for an uploaded document.
+    
+    Extraction creates a DRAFT record with suggested values.
+    Admin review is required before values become authoritative.
+    """
+    result = await DocumentExtractionService.run_extraction(document_id, force_rerun=force)
+    
+    await log_audit_action(user['user_id'], "trigger_extraction", "document", document_id, {
+        "extraction_status": result.get("extraction_status"),
+        "document_type": result.get("document_type")
+    })
+    
+    return result
+
+
+@api_router.get("/documents/{document_id}/extraction")
+async def get_document_extraction(
+    document_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get extraction record for a document.
+    """
+    extraction = await db.document_extractions.find_one(
+        {"document_id": document_id},
+        {"_id": 0}
+    )
+    if not extraction:
+        return {"status": "not_extracted", "document_id": document_id}
+    
+    return extraction
+
+
+@api_router.post("/documents/{document_id}/extraction/review")
+async def review_document_extraction(
+    document_id: str,
+    action: str = Body(..., embed=False, description="approve, edit_and_approve, or reject"),
+    approved_field_values: Optional[dict] = Body(None),
+    review_note: Optional[str] = Body(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Review and approve/reject extraction results.
+    
+    Actions:
+    - approve: Accept extracted values as-is, populate canonical records
+    - edit_and_approve: Modify values before committing to canonical records
+    - reject: Do not apply to canonical records (extraction kept for audit)
+    
+    Note: Approval does NOT auto-verify documents - verification remains separate.
+    """
+    # Find extraction
+    extraction = await db.document_extractions.find_one(
+        {"document_id": document_id},
+        {"_id": 0}
+    )
+    if not extraction:
+        raise HTTPException(status_code=404, detail="No extraction found for this document")
+    
+    result = await DocumentExtractionService.review_extraction(
+        extraction_id=extraction["id"],
+        action=action,
+        approved_field_values=approved_field_values,
+        review_note=review_note,
+        reviewer_id=user['user_id']
+    )
+    
+    return result
+
+
+@api_router.post("/documents/{document_id}/extraction/retry")
+async def retry_document_extraction(
+    document_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Retry extraction for a failed document.
+    """
+    result = await DocumentExtractionService.run_extraction(document_id, force_rerun=True)
+    
+    await log_audit_action(user['user_id'], "retry_extraction", "document", document_id, {
+        "extraction_status": result.get("extraction_status")
+    })
+    
+    return result
+
+
+@api_router.get("/document-extractions/pending-review")
+async def get_pending_document_extraction_reviews(
+    limit: int = 50,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Get list of document extractions awaiting admin review.
+    This is for document-level extractions (RTW, DBS, Training Certificates, etc.)
+    """
+    extractions = await db.document_extractions.find(
+        {"review_status": ReviewStatus.AWAITING_REVIEW.value},
+        {"_id": 0}
+    ).sort("extracted_at", -1).limit(limit).to_list(limit)
+    
+    # Enrich with document and employee info
+    for ext in extractions:
+        doc = await db.employee_documents.find_one(
+            {"id": ext.get("document_id")},
+            {"_id": 0, "file_name": 1, "file_url": 1}
+        )
+        if doc:
+            ext["document_file_name"] = doc.get("file_name")
+            ext["document_file_url"] = doc.get("file_url")
+        
+        emp = await db.employees.find_one(
+            {"id": ext.get("employee_id")},
+            {"_id": 0, "first_name": 1, "last_name": 1}
+        )
+        if emp:
+            ext["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+    
+    return {
+        "extractions": extractions,
+        "total": len(extractions)
     }
 
 

@@ -1,0 +1,114 @@
+{
+  "summary": "Step 6 Universal Document Extraction and Review Pipeline testing completed. All 28 backend tests passed. Fixed route conflict bug where /extractions/pending-review was being caught by /extractions/{extraction_id}. Document extraction endpoints working correctly: trigger extraction, get extraction, review (approve/edit_and_approve/reject), retry, and pending-review list.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_document_extraction_pipeline.py",
+    "/app/test_reports/pytest/document_extraction_pipeline_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/server.py",
+    "/app/backend/tests/test_document_extraction_pipeline.py"
+  ],
+  "success_rate": {
+    "backend": "100% (28/28 tests passed)",
+    "frontend": "Not tested (backend-only testing requested)"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Used existing RTW document (add610d7-8819-4182-a03e-b76aa0978ea0) and employee (d88335f6-1b18-435a-8086-28af4a583f77) for testing",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Step 6 Document Extraction Pipeline fully tested. Key features verified: (1) POST /api/documents/{id}/extract triggers GPT Vision extraction, (2) GET /api/documents/{id}/extraction returns extraction record or 'not_extracted' status, (3) POST /api/documents/{id}/extraction/review with actions approve/edit_and_approve/reject, (4) POST /api/documents/{id}/extraction/retry re-runs extraction with force=true, (5) GET /api/document-extractions/pending-review lists document extractions awaiting review, (6) GET /api/extractions/pending-review lists profile extractions awaiting review, (7) Document type classification works (RTW, DBS, Training, ID, Proof of Address), (8) Extraction never auto-verifies documents, (9) Approved extractions include provenance metadata (reviewed_by, reviewed_at, approved_field_values). BUG FIXED: Route conflict where /extractions/pending-review was being caught by /extractions/{extraction_id} - moved specific route before parameterized route and created separate /api/document-extractions/pending-review endpoint for document extractions.",
+  "features_tested": {
+    "trigger_extraction": {
+      "status": "PASS",
+      "details": "POST /api/documents/{id}/extract triggers GPT Vision extraction"
+    },
+    "get_extraction": {
+      "status": "PASS",
+      "details": "GET /api/documents/{id}/extraction returns extraction record or 'not_extracted'"
+    },
+    "review_approve": {
+      "status": "PASS",
+      "details": "POST /api/documents/{id}/extraction/review with action='approve' works"
+    },
+    "review_edit_and_approve": {
+      "status": "PASS",
+      "details": "POST /api/documents/{id}/extraction/review with action='edit_and_approve' requires approved_field_values"
+    },
+    "review_reject": {
+      "status": "PASS",
+      "details": "POST /api/documents/{id}/extraction/review with action='reject' does not update canonical records"
+    },
+    "retry_extraction": {
+      "status": "PASS",
+      "details": "POST /api/documents/{id}/extraction/retry re-runs extraction with force=true"
+    },
+    "document_pending_review": {
+      "status": "PASS",
+      "details": "GET /api/document-extractions/pending-review lists document extractions awaiting review"
+    },
+    "profile_pending_review": {
+      "status": "PASS",
+      "details": "GET /api/extractions/pending-review lists profile extractions awaiting review"
+    },
+    "document_type_classification": {
+      "status": "PASS",
+      "details": "RTW document correctly classified as 'right_to_work'"
+    },
+    "extraction_never_auto_verifies": {
+      "status": "PASS",
+      "details": "Extraction does not change document verification_status"
+    },
+    "provenance_metadata": {
+      "status": "PASS",
+      "details": "Approved extractions include reviewed_by, reviewed_at, approved_field_values"
+    },
+    "field_metadata": {
+      "status": "PASS",
+      "details": "Extraction includes field_metadata with source_type and confidence"
+    },
+    "extraction_status_values": {
+      "status": "PASS",
+      "details": "extraction_status is one of: pending, completed, needs_review, failed"
+    },
+    "review_status_values": {
+      "status": "PASS",
+      "details": "review_status is one of: awaiting_review, approved, edited, rejected"
+    },
+    "issues_severity": {
+      "status": "PASS",
+      "details": "Issues have valid severity: info, warning, blocker"
+    }
+  },
+  "bug_fixed": {
+    "description": "Route conflict: /extractions/pending-review was being caught by /extractions/{extraction_id}",
+    "root_cause": "In FastAPI, routes are matched in order. The parameterized route /extractions/{extraction_id} was defined before /extractions/pending-review, so 'pending-review' was being treated as an extraction_id",
+    "fix_applied": "Moved /extractions/pending-review route to be defined BEFORE /extractions/{extraction_id}. Also created separate /api/document-extractions/pending-review endpoint for document extractions to avoid confusion with profile extractions",
+    "files_modified": ["/app/backend/server.py"]
+  },
+  "verification_summary": {
+    "total_backend_tests": 28,
+    "backend_tests_passed": 28,
+    "api_endpoints_tested": [
+      "POST /api/documents/{id}/extract",
+      "GET /api/documents/{id}/extraction",
+      "POST /api/documents/{id}/extraction/review",
+      "POST /api/documents/{id}/extraction/retry",
+      "GET /api/document-extractions/pending-review",
+      "GET /api/extractions/pending-review",
+      "GET /api/employee-documents"
+    ]
+  }
+}

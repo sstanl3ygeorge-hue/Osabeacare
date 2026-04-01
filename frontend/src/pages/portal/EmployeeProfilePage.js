@@ -21,7 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
-import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog, SendAgreementDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog, SendAgreementDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -4025,6 +4025,20 @@ export default function EmployeeProfilePage() {
                 isAuditor={isAuditor()}
                 isExporting={isExporting}
               />
+
+              {/* APPLICANT STAGE BANNER - Show when person is still in recruitment pipeline */}
+              {employee?.person_stage === 'applicant' && (
+                <ApplicantStageBanner
+                  employeeName={`${employee.first_name} ${employee.last_name}`}
+                  status={employee.status}
+                  canApprove={!isAuditor()}
+                  onApprove={() => {
+                    // Navigate to recruitment tab where approval action exists
+                    setActiveTab('recruitment');
+                    toast.info('Review all requirements below, then use "Approve Recruitment" action.');
+                  }}
+                />
+              )}
 
               {/* COMPACT STATUS PANEL - Work readiness from 3-tier engine */}
               {complianceRequirements?.work_readiness_3tier && complianceRequirements.work_readiness_3tier.status !== 'READY_TO_WORK' && (

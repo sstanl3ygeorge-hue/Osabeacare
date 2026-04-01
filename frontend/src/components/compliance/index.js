@@ -37,3 +37,7 @@ export { default as DocumentActionMenu } from './DocumentActionMenu';
 // Phase D3 - Request lifecycle & history components
 export { default as RequirementHistoryDrawer } from './RequirementHistoryDrawer';
 export { default as RequestStatusBadge, RequestStatusInline } from './RequestStatusBadge';
+
+// Stage Identity Components (Applicant vs Employee)
+export { default as StageIdentityBadge, STAGE_CONFIGS } from './StageIdentityBadge';
+export { default as ApplicantStageBanner } from './ApplicantStageBanner';

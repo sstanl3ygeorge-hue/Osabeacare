@@ -12,6 +12,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { toast } from 'sonner';
 import { Search, Users, UserPlus, Filter, Loader2, ChevronRight, CheckCircle, Clock, FileText, User, ArrowRight } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
+import { StageIdentityBadge } from '../../components/compliance';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -242,9 +243,10 @@ export default function RecruitmentPage() {
                   
                   <div className="flex items-center gap-2">
                     {/* Stage Badge */}
-                    <Badge variant="outline" className="bg-blue-50 text-blue-600 border-blue-200 text-[10px]">
-                      Applicant
-                    </Badge>
+                    <StageIdentityBadge 
+                      stageIdentity={applicant.person_stage || applicant.stage_identity || 'applicant'} 
+                      size="sm" 
+                    />
                     
                     {applicant.recruitment_approved ? (
                       <Badge className="bg-green-100 text-green-800">

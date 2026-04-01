@@ -15,6 +15,7 @@ import { Search, UserPlus, Filter, Loader2, MoreHorizontal, Edit, Archive, Trash
 import { Checkbox } from '../../components/ui/checkbox';
 import { Textarea } from '../../components/ui/textarea';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
+import { StageIdentityBadge } from '../../components/compliance';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -750,9 +751,11 @@ export default function EmployeesPage() {
                           <div>
                             <div className="flex items-center gap-2">
                               <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
-                              <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200 text-[9px] px-1.5 py-0">
-                                Staff
-                              </Badge>
+                              <StageIdentityBadge 
+                                stageIdentity={emp.person_stage || emp.stage_identity || 'employee'} 
+                                size="sm" 
+                                showIcon={false} 
+                              />
                             </div>
                             <p className="text-sm text-text-muted">{emp.employee_code}</p>
                           </div>

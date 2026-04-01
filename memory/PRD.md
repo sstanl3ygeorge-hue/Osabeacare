@@ -3,6 +3,54 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Proof of Address Freshness Automation (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented NHS-level PoA policy enforcement with automatic freshness validation. Documents must be within 12 months and minimum 2 valid documents are required.
+
+### New Files
+- `/app/backend/poa_freshness_engine.py` - Core freshness evaluation logic
+
+### Backend Endpoints
+- `GET /api/employees/{id}/poa-freshness` - Returns freshness evaluation
+- `POST /api/employees/{id}/poa-freshness/override` - Admin manual override
+
+### Extraction Logic Summary
+1. Document uploaded → extraction prompt extracts `document_date`
+2. Freshness engine calculates `days_old`, `months_old`
+3. States determined:
+   - `valid`: Document dated within 12 months (365 days)
+   - `expired`: Document dated older than 12 months
+   - `date_unclear`: Date could not be extracted → manual review required
+   - `manual_override`: Admin approved despite issues
+
+### UI Summary
+- Compliance file API includes `freshness` object in `address_verification` row
+- Frontend surfaceNormalizers.js shows freshness-aware summaries: "1/2 valid • 1 expired"
+- Blocker text: "Address: need X more valid document(s)"
+- Status shows: valid/expired/review_needed/not_recorded
+
+### Blocker Logic Summary
+| Condition | Blocker Text |
+|-----------|--------------|
+| No docs | "No valid proof of address documents" |
+| 0-1 valid | "Address: need X more valid document(s)" |
+| Docs expired | "X document(s) expired (older than 12 months)" |
+| Date unclear | "X document(s) need date verification" |
+| 2+ valid & verified | No blocker (complete) |
+
+### Work Readiness Integration
+- Approval engine checks `freshness.is_complete` for PoA requirement
+- Both freshness (2+ valid docs within 12 months) AND verification required
+
+### Testing
+- Backend: 100% (19/19 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_109.json`
+
+---
+
 ## Training Scan → Training Matrix (2026-04-01)
 **Status**: COMPLETE ✅
 

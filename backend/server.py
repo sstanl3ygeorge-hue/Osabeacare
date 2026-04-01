@@ -58,6 +58,15 @@ from pdf2image import convert_from_bytes
 import pdfplumber  # Primary method for typed PDF extraction
 from role_normalization import normalize_role
 from stageGates import StageGateService
+from stage_identity import (
+    get_stage_identity, 
+    is_applicant, 
+    is_employee, 
+    enrich_person_with_stage_identity,
+    build_stage_filter,
+    APPLICANT_STATUSES as STAGE_APPLICANT_STATUSES,
+    EMPLOYEE_STATUSES as STAGE_EMPLOYEE_STATUSES
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -6551,6 +6560,8 @@ async def get_employees(
         emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
         # Derive person_stage from status (SINGLE SOURCE OF TRUTH)
         emp['person_stage'] = get_person_stage(emp.get('status', EmployeeStatus.NEW))
+        # Add stage identity fields
+        enrich_person_with_stage_identity(emp)
     
     return [EmployeeResponse(**emp) for emp in employees]
 

@@ -3,6 +3,62 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Reference Lifecycle Controls Enhancement (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Extended reference lifecycle with new admin controls for reset, change referee, and response source tracking.
+
+### New Backend Endpoints
+
+**POST /api/references/{id}/{ref_num}/reset**
+- Clears response, verification status, request history
+- Preserves declared referee details
+- Requires 10+ character reason
+- Logs audit trail with previous state
+
+**POST /api/references/{id}/{ref_num}/change-referee**
+- Updates referee details (name, job_title, company, email, phone, relationship)
+- Stores change history (old vs new referee)
+- Requires 10+ character reason
+- Can be done even after verification for corrections
+
+**POST /api/references/{id}/{ref_num}/set-response-source**
+- Sets response source: external_submission, manual_entry, test_data
+- Helps distinguish real vs fake/test data
+
+### Updated Normalized Response
+- Added `response.source` field
+- Added `declared_referee.change_history` array
+- Added `reset_info` object (was_reset, reset_at, reset_by, reset_reason)
+- Added `review` action for unverified responses
+- Added `reset_reference` and `change_referee` to allowed_actions
+
+### Frontend Updates
+
+**Response Source Indicator**
+- Shows in Submitted Response section
+- External Submission (green): "Submitted by referee via secure form"
+- Manual Entry (blue): "Entered manually by admin"
+- Test Data (amber): "Test/placeholder data - should be replaced"
+
+**New Action Buttons**
+- Reset Reference (gray): Opens form requiring 10+ char reason
+- Change Referee Details (blue): Pre-fills with current values, requires reason
+
+### UI Rules Implemented
+- Verified references allow reset/change (for corrections)
+- View Response only shown if real response exists
+- If response exists but unverified → show "Review"
+- If verified → show "Verified + actions"
+
+### Testing
+- 24/24 backend tests passed (100%)
+- All frontend components verified
+- Test file: `/app/backend/tests/test_reference_lifecycle_controls.py`
+
+---
+
 ## Ticket F: Remove Fake States (2026-04-01)
 **Status**: COMPLETE ✅
 

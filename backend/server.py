@@ -73,6 +73,12 @@ from agreement_templates import (
     get_template_summary,
     AGREEMENT_TEMPLATES
 )
+from approval_engine import (
+    evaluate_recruitment_approval,
+    execute_recruitment_approval,
+    ROLE_APPROVAL_REQUIREMENTS,
+    get_requirement_label
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27867,6 +27873,326 @@ async def run_batch_dual_row_migration(
     )
     
     return result
+
+
+# =============================================================================
+# RECRUITMENT APPROVAL ENGINE ENDPOINTS
+# =============================================================================
+
+@api_router.get("/employees/{employee_id}/recruitment-approval-check")
+async def check_recruitment_approval(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Preview recruitment approval readiness.
+    
+    Returns:
+    - can_approve: whether applicant can be approved now
+    - blockers: list of requirements blocking approval
+    - warnings: non-blocking issues
+    - verified_count / required_count: progress tracking
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get compliance file sections
+    compliance_file = await get_compliance_file_data(employee_id, employee)
+    sections = compliance_file.get("sections", {})
+    
+    # Evaluate approval readiness
+    evaluation = evaluate_recruitment_approval(employee, sections)
+    
+    return evaluation
+
+
+@api_router.post("/employees/{employee_id}/approve-recruitment")
+async def approve_recruitment(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Approve an applicant for recruitment.
+    
+    Requirements:
+    - All role-specific blocking requirements must be verified
+    - Employee must not already be approved
+    
+    On success:
+    - Sets recruitment_approved = true
+    - Sets status = onboarding
+    - Assigns employee_code if missing
+    - Writes audit log
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Check if already approved
+    if employee.get("recruitment_approved"):
+        raise HTTPException(status_code=400, detail="Already approved for recruitment")
+    
+    # Get compliance file sections
+    compliance_file = await get_compliance_file_data(employee_id, employee)
+    sections = compliance_file.get("sections", {})
+    
+    # Get approver info
+    approver = await db.users.find_one({"id": user['user_id']})
+    approver_name = approver.get("name", user['user_id']) if approver else user['user_id']
+    
+    # Execute approval
+    result = await execute_recruitment_approval(
+        person=employee,
+        compliance_sections=sections,
+        approver_id=user['user_id'],
+        approver_name=approver_name,
+        db=db,
+        generate_employee_code_func=generate_employee_code
+    )
+    
+    if not result["success"]:
+        # Return 400 with blocker details
+        raise HTTPException(
+            status_code=400, 
+            detail={
+                "message": result["error"],
+                "blockers": result["evaluation"]["blockers"],
+                "verified_count": result["evaluation"]["verified_count"],
+                "required_count": result["evaluation"]["required_count"]
+            }
+        )
+    
+    return {
+        "status": "success",
+        "message": "Recruitment approved successfully",
+        "employee": result["employee"],
+        "employee_code": result["employee_code"],
+        "evaluation": result["evaluation"]
+    }
+
+
+async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
+    """
+    Internal helper to get compliance file data for approval evaluation.
+    This mirrors the compliance-file endpoint logic but returns raw data.
+    """
+    # This is a simplified version - we'll call the actual compliance file generation
+    # For now, we construct the sections dict needed for approval evaluation
+    
+    # Get all documents for this employee
+    docs = await db.employee_documents.find(
+        {"employee_id": employee_id}
+    ).to_list(length=500)
+    
+    # Get form submissions (excluding superseded/deleted)
+    form_submissions = await db.form_submissions.find(
+        {"employee_id": employee_id, "status": {"$nin": ["superseded", "deleted"]}}
+    ).sort("created_at", -1).to_list(length=100)
+    
+    # Index form submissions by requirement_id
+    form_submissions_by_req = {}
+    for sub in form_submissions:
+        req_id = sub.get("requirement_id", "")
+        if req_id and req_id not in form_submissions_by_req:
+            form_submissions_by_req[req_id] = sub
+    
+    # Get agreement submissions
+    agreement_submissions = await db.agreement_submissions.find(
+        {"employee_id": employee_id}
+    ).sort("completed_at", -1).to_list(length=50)
+    
+    # Index by template
+    agreements_by_template = {}
+    for sub in agreement_submissions:
+        tid = sub.get("template_id", "")
+        if tid and tid not in agreements_by_template:
+            agreements_by_template[tid] = sub
+    
+    # Get references data
+    refs = await db.references.find_one({"employee_id": employee_id})
+    
+    # Build simplified sections for approval evaluation
+    sections = {}
+    
+    # ---- Right to Work ----
+    rtw_docs = [d for d in docs if d.get("requirement_id") == "right_to_work_documents" and d.get("status") != "superseded"]
+    rtw_verified = any(d.get("verified") for d in rtw_docs)
+    sections["right_to_work"] = {
+        "title": "Right to Work",
+        "rows": [{
+            "key": "right_to_work",
+            "row_type": "evidence",
+            "status": "verified" if rtw_verified else ("awaiting_review" if rtw_docs else "not_completed"),
+            "is_verified": rtw_verified
+        }]
+    }
+    
+    # ---- Identity ----
+    id_docs = [d for d in docs if d.get("requirement_id") == "identity_documents" and d.get("status") != "superseded"]
+    id_verified = any(d.get("verified") for d in id_docs)
+    sections["identity"] = {
+        "title": "Identity",
+        "rows": [{
+            "key": "identity",
+            "row_type": "evidence",
+            "status": "verified" if id_verified else ("awaiting_review" if id_docs else "not_completed"),
+            "is_verified": id_verified
+        }]
+    }
+    
+    # ---- Proof of Address ----
+    poa_docs = [d for d in docs if d.get("requirement_id") == "proof_of_address" and d.get("status") != "superseded"]
+    poa_verified = any(d.get("verified") for d in poa_docs)
+    sections["proof_of_address"] = {
+        "title": "Proof of Address",
+        "rows": [{
+            "key": "proof_of_address",
+            "row_type": "evidence",
+            "status": "verified" if poa_verified else ("awaiting_review" if poa_docs else "not_completed"),
+            "is_verified": poa_verified
+        }]
+    }
+    
+    # ---- DBS ----
+    dbs_docs = [d for d in docs if d.get("requirement_id") == "dbs_certificate" and d.get("status") != "superseded"]
+    dbs_verified = any(d.get("verified") for d in dbs_docs)
+    sections["dbs"] = {
+        "title": "DBS",
+        "rows": [{
+            "key": "dbs",
+            "row_type": "evidence",
+            "status": "verified" if dbs_verified else ("awaiting_review" if dbs_docs else "not_completed"),
+            "is_verified": dbs_verified
+        }]
+    }
+    
+    # ---- References ----
+    ref_rows = []
+    for ref_num in [1, 2]:
+        ref_key = f"reference_{ref_num}"
+        ref_data = refs.get(f"ref{ref_num}", {}) if refs else {}
+        
+        # Determine reference status
+        is_verified = ref_data.get("verification_status") == "verified"
+        has_response = bool(ref_data.get("response"))
+        is_sent = bool(ref_data.get("request", {}).get("sent_at"))
+        is_declared = bool(ref_data.get("declared", {}).get("name"))
+        
+        if is_verified:
+            status = "verified"
+        elif has_response:
+            status = "response_received"
+        elif is_sent:
+            status = "sent"
+        elif is_declared:
+            status = "declared"
+        else:
+            status = "not_declared"
+        
+        ref_rows.append({
+            "key": ref_key,
+            "row_type": "reference",
+            "status": status,
+            "is_verified": is_verified
+        })
+    
+    sections["references"] = {
+        "title": "References",
+        "rows": ref_rows
+    }
+    
+    # ---- Form Requirements ----
+    form_requirements = [
+        ("interview_record", "Interview Record"),
+        ("recruitment_checklist", "Recruitment Compliance Checklist"),
+        ("staff_health_questionnaire", "Staff Health Questionnaire"),
+        ("staff_personal_info", "Staff Personal Information"),
+        ("induction", "Induction & Competency Assessment"),
+        ("equal_opportunities", "Equal Opportunities Monitoring"),
+        ("hmrc_starter_checklist", "HMRC Starter Checklist"),
+    ]
+    
+    form_rows = []
+    for req_key, req_label in form_requirements:
+        sub = form_submissions_by_req.get(req_key)
+        
+        if sub:
+            status_val = sub.get("status", "")
+            is_verified = status_val in ["verified", "signed_off"] or sub.get("verified", False)
+            is_rejected = status_val == "rejected"
+            
+            if is_verified:
+                status = "verified"
+            elif is_rejected:
+                status = "rejected"
+            elif status_val == "submitted":
+                status = "awaiting_review"
+            else:
+                status = "recorded"
+        else:
+            status = "not_completed"
+            is_verified = False
+            is_rejected = False
+        
+        form_rows.append({
+            "key": req_key,
+            "row_type": "form",
+            "status": status,
+            "is_verified": is_verified,
+            "is_rejected": is_rejected
+        })
+    
+    sections["forms"] = {
+        "title": "Forms",
+        "rows": form_rows
+    }
+    
+    # ---- NMC Registration (for nurses) ----
+    nmc_docs = [d for d in docs if d.get("requirement_id") == "nmc_registration" and d.get("status") != "superseded"]
+    nmc_verified = any(d.get("verified") for d in nmc_docs)
+    sections["nmc"] = {
+        "title": "NMC Registration",
+        "rows": [{
+            "key": "nmc_registration",
+            "row_type": "evidence",
+            "status": "verified" if nmc_verified else ("awaiting_review" if nmc_docs else "not_completed"),
+            "is_verified": nmc_verified
+        }]
+    }
+    
+    # ---- Agreements ----
+    agreement_rows = []
+    agreement_configs = [
+        ("contract_acceptance", "ZERO_HOUR_CONTRACT_V1"),
+        ("handbook_acknowledgement", "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1"),
+    ]
+    
+    for agr_key, template_id in agreement_configs:
+        sub = agreements_by_template.get(template_id)
+        
+        if sub:
+            is_verified = sub.get("verification_status") == "verified"
+            status = "verified" if is_verified else "awaiting_review"
+        else:
+            status = "not_completed"
+            is_verified = False
+        
+        agreement_rows.append({
+            "key": agr_key,
+            "row_type": "form_acknowledgement",
+            "status": status,
+            "is_verified": is_verified
+        })
+    
+    sections["agreements"] = {
+        "title": "Agreements",
+        "rows": agreement_rows
+    }
+    
+    return {"sections": sections}
 
 
 @api_router.get("/employees/{employee_id}/compliance-file")

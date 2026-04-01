@@ -22,6 +22,7 @@ import DocumentExtractionReview from '../../components/documents/DocumentExtract
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
+import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -3582,6 +3583,37 @@ export default function EmployeeProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      {/* RECRUITMENT APPROVAL PANEL - Show for applicants before tabs */}
+      {employee?.person_stage === 'applicant' && !employee?.recruitment_approved && (
+        <div className="mb-6">
+          <RecruitmentApprovalPanel
+            employeeId={employee.id}
+            employeeName={`${employee.first_name} ${employee.last_name}`}
+            role={employee.role}
+            stageIdentity={employee.person_stage}
+            onApprovalSuccess={(result) => {
+              // Refresh employee data
+              toast.success(`${employee.first_name} ${employee.last_name} has been approved for recruitment!`);
+              // Update local state
+              setEmployee(prev => ({
+                ...prev,
+                recruitment_approved: true,
+                status: 'onboarding',
+                employee_code: result.employee_code,
+                person_stage: 'employee'
+              }));
+              // Navigate to employee view
+              navigate(`/portal/employees/${employee.id}`);
+            }}
+            onNavigateToRequirement={(requirementKey, section) => {
+              // Navigate to compliance tab
+              setActiveTab('checklist');
+              toast.info(`Navigate to: ${requirementKey.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase())}`);
+            }}
+          />
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">

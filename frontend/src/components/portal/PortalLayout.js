@@ -54,6 +54,7 @@ export default function PortalLayout() {
       {filteredNavigation.map((item) => {
         const isActive = location.pathname === item.href || 
           (item.href === '/portal/employees' && location.pathname.startsWith('/portal/employees/')) ||
+          (item.href === '/portal/recruitment' && location.pathname.startsWith('/portal/recruitment/')) ||
           (item.href === '/portal/service-users' && location.pathname.startsWith('/portal/service-users/'));
         return (
           <Link

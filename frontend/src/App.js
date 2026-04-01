@@ -86,6 +86,7 @@ function AppRouter() {
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
         <Route path="recruitment" element={<RecruitmentPipelinePage />} />
+        <Route path="recruitment/:employeeId" element={<EmployeeProfilePage />} />
         {/* Documents route removed - all document management is now per-employee in Employee Profile → Documents tab */}
         {/* <Route path="documents" element={<DocumentsPage />} /> */}
         {/* Policies route removed - policy management consolidated in Compliance Centre */}

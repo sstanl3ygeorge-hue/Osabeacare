@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -73,7 +73,11 @@ const statusColors = {
 export default function EmployeeProfilePage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Route context detection - determines if viewing from recruitment or employee context
+  const isRecruitmentView = location.pathname.startsWith('/portal/recruitment/');
   
   // Initialize active tab from URL for navigation state persistence
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
@@ -1965,7 +1969,7 @@ export default function EmployeeProfilePage() {
       });
       toast.success('Employee archived successfully');
       setArchiveDialogOpen(false);
-      navigate('/portal/employees');
+      navigate(isRecruitmentView ? '/portal/recruitment' : '/portal/employees');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to archive employee');
     }
@@ -1990,7 +1994,7 @@ export default function EmployeeProfilePage() {
       });
       toast.success('Employee permanently deleted');
       setDeleteDialogOpen(false);
-      navigate('/portal/employees');
+      navigate(isRecruitmentView ? '/portal/recruitment' : '/portal/employees');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to delete employee');
     }
@@ -2539,9 +2543,9 @@ export default function EmployeeProfilePage() {
   if (!employee) {
     return (
       <div className="text-center py-12">
-        <p className="text-text-muted">Employee not found</p>
-        <Link to="/portal/employees">
-          <Button className="mt-4">Back to Employees</Button>
+        <p className="text-text-muted">{isRecruitmentView ? 'Applicant' : 'Employee'} not found</p>
+        <Link to={isRecruitmentView ? '/portal/recruitment' : '/portal/employees'}>
+          <Button className="mt-4">{isRecruitmentView ? 'Back to Recruitment Pipeline' : 'Back to Staff'}</Button>
         </Link>
       </div>
     );
@@ -2556,14 +2560,14 @@ export default function EmployeeProfilePage() {
 
   return (
     <div className="space-y-6" data-testid="employee-profile">
-      {/* Back Link - Uses browser history to preserve filter/tab state */}
+      {/* Back Link - Returns to correct section based on route context */}
       <button 
-        onClick={() => navigate(-1)} 
+        onClick={() => navigate(isRecruitmentView ? '/portal/recruitment' : '/portal/employees')} 
         className="inline-flex items-center gap-2 text-text-muted hover:text-primary transition-colors"
         data-testid="back-link"
       >
         <ArrowLeft className="h-4 w-4" />
-        Back
+        {isRecruitmentView ? 'Back to Recruitment Pipeline' : 'Back to Staff'}
       </button>
 
       {/* Header Card */}
@@ -4031,7 +4035,7 @@ export default function EmployeeProfilePage() {
                 <ApplicantStageBanner
                   employeeName={`${employee.first_name} ${employee.last_name}`}
                   status={employee.status}
-                  canApprove={!isAuditor()}
+                  canApprove={isRecruitmentView && !isAuditor()}
                   onApprove={() => {
                     // Navigate to recruitment tab where approval action exists
                     setActiveTab('recruitment');

@@ -222,7 +222,7 @@ export default function RecruitmentPage() {
                     />
                     <div>
                       <Link
-                        to={`/portal/employees/${applicant.id}`}
+                        to={`/portal/recruitment/${applicant.id}`}
                         className="font-medium text-text-primary hover:text-brand-primary"
                       >
                         {applicant.first_name} {applicant.last_name}
@@ -275,7 +275,7 @@ export default function RecruitmentPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => navigate(`/portal/employees/${applicant.id}`)}
+                      onClick={() => navigate(`/portal/recruitment/${applicant.id}`)}
                     >
                       <ChevronRight className="w-4 h-4" />
                     </Button>

@@ -183,8 +183,17 @@ export function normalizeUploadRequirementSurface({
   checks = [],
   freshness = null  // PoA freshness data
 }) {
-  const activeFiles = files.filter(f => f.status === 'active' || (!f.status && !f.superseded_at && !f.error_at));
-  const historicalFiles = files.filter(f => f.status !== 'active' && (f.superseded_at || f.error_at || f.status === 'superseded' || f.status === 'uploaded_in_error'));
+  // FIX: Include "uploaded" status as active - backend uses "uploaded" for active files
+  const activeFiles = files.filter(f => 
+    f.status === 'active' || 
+    f.status === 'uploaded' || 
+    (!f.status && !f.superseded_at && !f.error_at)
+  );
+  const historicalFiles = files.filter(f => 
+    f.status !== 'active' && 
+    f.status !== 'uploaded' && 
+    (f.superseded_at || f.error_at || f.status === 'superseded' || f.status === 'uploaded_in_error')
+  );
   
   // Sort requests by date descending
   const sortedRequests = [...requests].sort((a, b) => 

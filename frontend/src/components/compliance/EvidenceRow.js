@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { 
   Upload, FileText, RefreshCw, CheckCircle, XCircle, Eye, Clock, 
   AlertTriangle, ChevronDown, ChevronUp, MoreHorizontal, History,
-  FileSearch, Trash2, Archive, Send
+  FileSearch, Trash2, Archive, Send, Download
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -282,6 +282,43 @@ export default function EvidenceRow({
                       data-testid={`preview-file-${doc.id}`}
                     >
                       <Eye className="h-4 w-4" />
+                    </Button>
+                    
+                    {/* Download */}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0"
+                      onClick={async () => {
+                        let downloadUrl = doc.download_url || doc.file_url?.replace('/file', '/download');
+                        if (!downloadUrl) {
+                          toast.error('Download URL not available');
+                          return;
+                        }
+                        try {
+                          // FIX: Handle relative API URLs - API already ends with /api
+                          if (downloadUrl.startsWith('/api/')) {
+                            downloadUrl = `${API}${downloadUrl.substring(4)}`;
+                          }
+                          const response = await axios.get(downloadUrl, {
+                            headers: { Authorization: `Bearer ${token}` },
+                            responseType: 'blob'
+                          });
+                          const blob = new Blob([response.data]);
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = doc.file_name || doc.original_filename || 'document';
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        } catch (err) {
+                          toast.error('Download failed');
+                        }
+                      }}
+                      title="Download file"
+                      data-testid={`download-file-${doc.id}`}
+                    >
+                      <Download className="h-4 w-4" />
                     </Button>
                     
                     {/* Extraction Review */}

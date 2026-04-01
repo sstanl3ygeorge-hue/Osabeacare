@@ -12344,7 +12344,9 @@ async def get_requirement_files(
         file_data = {
             "file_id": doc['id'],
             "file_name": doc.get('original_filename', 'document'),
-            "file_url": doc.get('file_url'),
+            # FIX: Return API endpoint URL, not storage path
+            "file_url": f"/api/employee-documents/{doc['id']}/file",
+            "download_url": f"/api/employee-documents/{doc['id']}/download",
             "file_label": doc.get('document_label'),
             "mime_type": doc.get('content_type') or doc.get('mime_type'),  # For preview support detection
             "content_type": doc.get('content_type') or doc.get('mime_type'),
@@ -13461,7 +13463,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                         file_expiry = ef.get('expiry_date') or doc_expiry_date
                         evidence_files.append({
                             "file_id": ef.get('file_id', doc['id']),
-                            "file_url": ef.get('file_url'),
+                            # FIX: Return API endpoint URL for viewing
+                            "file_url": f"/api/employee-documents/{ef.get('file_id', doc['id'])}/file",
+                            "download_url": f"/api/employee-documents/{ef.get('file_id', doc['id'])}/download",
                             "original_filename": ef.get('original_filename', 'document'),
                             "uploaded_at": ef.get('uploaded_at'),
                             "uploaded_by_name": ef.get('uploaded_by_name'),
@@ -13477,7 +13481,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                 elif doc.get('file_url'):
                     evidence_files.append({
                         "file_id": doc['id'],
-                        "file_url": doc['file_url'],
+                        # FIX: Return API endpoint URL for viewing
+                        "file_url": f"/api/employee-documents/{doc['id']}/file",
+                        "download_url": f"/api/employee-documents/{doc['id']}/download",
                         "original_filename": doc.get('original_filename', 'document'),
                         "uploaded_at": doc.get('uploaded_at'),
                         "uploaded_by_name": doc.get('uploaded_by_name'),
@@ -13531,7 +13537,9 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     if linked_form.get('pdf_url'):
                         evidence_files.append({
                             "file_id": linked_form['id'],
-                            "file_url": linked_form['pdf_url'],
+                            # FIX: Return API endpoint URL for viewing form PDFs
+                            "file_url": f"/api/generated-forms/{linked_form['id']}/pdf/file",
+                            "download_url": f"/api/generated-forms/{linked_form['id']}/pdf/download",
                             "original_filename": f"{linked_form.get('template_name', 'Form')}.pdf",
                             "uploaded_at": linked_form.get('completed_at') or linked_form.get('updated_at'),
                             "source_type": "form_submission",
@@ -29359,7 +29367,9 @@ async def get_compliance_file(
                 {
                     "id": d.get("id"),
                     "file_name": d.get("file_name") or d.get("original_filename"),
-                    "file_url": d.get("file_url"),  # Phase D4.1: Add file URL for direct preview
+                    # FIX: Return API endpoint URL, not storage path
+                    "file_url": f"/api/employee-documents/{d.get('id')}/file" if d.get("id") else None,
+                    "download_url": f"/api/employee-documents/{d.get('id')}/download" if d.get("id") else None,
                     "content_type": d.get("content_type") or d.get("mime_type"),  # For preview support detection
                     "file_available": bool(d.get("file_url")),  # Availability status
                     "uploaded_at": d.get("uploaded_at") or d.get("created_at"),

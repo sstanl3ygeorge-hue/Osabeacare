@@ -139,11 +139,18 @@ export default function UploadRequirementDrawer({
     }
     
     // Priority: openUrl > file_url > downloadUrl > download by ID
-    const url = file.openUrl || file.file_url || file.downloadUrl;
+    let url = file.openUrl || file.file_url || file.downloadUrl;
     
     if (!url && !file.file_available) {
       toast.error('File URL not available. The file may have been moved or deleted.');
       return;
+    }
+
+    // FIX: Construct absolute URL for API paths
+    // API variable already ends with /api, so we need to strip /api from the path
+    if (url && url.startsWith('/api/')) {
+      // Remove /api prefix from path since API already includes it
+      url = `${API}${url.substring(4)}`; // "/api/foo" -> API + "/foo"
     }
 
     const mimeType = file.mime_type || file.content_type || '';
@@ -164,11 +171,17 @@ export default function UploadRequirementDrawer({
 
   // Handle file download
   const handleDownloadFile = (file) => {
-    const url = file.downloadUrl || file.file_url;
+    let url = file.downloadUrl || file.download_url || file.file_url;
     
     if (!url) {
       toast.error('Download URL not available');
       return;
+    }
+    
+    // FIX: Construct absolute URL for API paths
+    // API variable already ends with /api, so we need to strip /api from the path
+    if (url.startsWith('/api/')) {
+      url = `${API}${url.substring(4)}`; // "/api/foo" -> API + "/foo"
     }
     
     try {

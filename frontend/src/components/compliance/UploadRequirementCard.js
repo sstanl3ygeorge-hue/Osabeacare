@@ -87,7 +87,7 @@ export default function UploadRequirementCard({
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium text-text-primary flex items-center gap-2">
               <FileText className="h-4 w-4 text-gray-400" />
-              Evidence Files
+              Evidence
             </h4>
             <div className="flex items-center gap-2">
               {counters.active > 0 && (
@@ -218,7 +218,7 @@ export default function UploadRequirementCard({
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium text-text-primary flex items-center gap-2">
               <Shield className="h-4 w-4 text-gray-400" />
-              Verification Check
+              Verification
             </h4>
             {!isAuditor && (
               <RequirementActionBar

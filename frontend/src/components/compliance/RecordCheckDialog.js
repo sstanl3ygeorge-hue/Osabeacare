@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -8,7 +8,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
-import { Loader2, Shield, Calendar, FileText } from 'lucide-react';
+import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -27,6 +27,9 @@ const CHECK_METHODS = {
   identity_verification: [
     { value: 'manual_id_verification', label: 'Manual ID Verification', description: 'Manual verification of ID documents' },
     { value: 'digital_id_check', label: 'Digital ID Check', description: 'Digital identity verification service' }
+  ],
+  address_verification: [
+    { value: 'manual_document_check', label: 'Manual Document Check', description: 'Manual verification of address documents' }
   ]
 };
 
@@ -45,13 +48,24 @@ const SOURCE_STATUS_TYPES = [
   { value: 'other', label: 'Other' }
 ];
 
+// Map check types to requirement IDs for proof file storage
+const CHECK_TYPE_TO_REQUIREMENT = {
+  right_to_work_check: 'right_to_work_check',
+  dbs_status_check: 'dbs_status_check',
+  identity_verification: 'identity_verification',
+  address_verification: 'address_verification'
+};
+
 /**
  * RecordCheckDialog - Dialog for recording employer verification checks
+ * 
+ * COMPLIANCE-CRITICAL: Requires proof file upload before check can be saved.
  * 
  * Supports:
  * - Right to Work Check
  * - DBS Status Check
  * - Identity Verification
+ * - Address Verification
  */
 export default function RecordCheckDialog({
   open,
@@ -61,6 +75,7 @@ export default function RecordCheckDialog({
   onComplete
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [formData, setFormData] = useState({
     method: '',
     checked_at: new Date().toISOString().split('T')[0],
@@ -71,6 +86,12 @@ export default function RecordCheckDialog({
     certificate_number: '',
     notes: ''
   });
+  
+  // Proof file state - COMPLIANCE CRITICAL
+  const [proofFile, setProofFile] = useState(null);
+  const [uploadedProofId, setUploadedProofId] = useState(null);
+  const [uploadedProofName, setUploadedProofName] = useState(null);
+  const fileInputRef = useRef(null);
   
   const { token } = useAuth();
 
@@ -83,6 +104,7 @@ export default function RecordCheckDialog({
       case 'right_to_work_check': return 'Record Right to Work Check';
       case 'dbs_status_check': return 'Record DBS Status Check';
       case 'identity_verification': return 'Record Identity Verification';
+      case 'address_verification': return 'Record Address Verification';
       default: return 'Record Check';
     }
   };
@@ -93,7 +115,76 @@ export default function RecordCheckDialog({
       case 'right_to_work_check': return `${API}/employees/${employeeId}/right-to-work/check`;
       case 'dbs_status_check': return `${API}/employees/${employeeId}/dbs/check`;
       case 'identity_verification': return `${API}/employees/${employeeId}/identity/check`;
+      case 'address_verification': return `${API}/employees/${employeeId}/address/check`;
       default: return null;
+    }
+  };
+
+  // Handle proof file selection
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Invalid file type. Please upload PDF, JPG, or PNG.');
+      return;
+    }
+
+    // Validate file size (10MB max)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File too large. Maximum size is 10MB.');
+      return;
+    }
+
+    setProofFile(file);
+  };
+
+  // Upload proof file to employee_documents
+  const uploadProofFile = async () => {
+    if (!proofFile) return null;
+
+    setIsUploading(true);
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append('file', proofFile);
+      formDataUpload.append('requirement_id', CHECK_TYPE_TO_REQUIREMENT[checkType] || checkType);
+      formDataUpload.append('document_type', 'verification_proof');
+      formDataUpload.append('document_label', `${getTitle()} - Proof`);
+
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/documents/upload`,
+        formDataUpload,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+
+      const docId = response.data?.document_id || response.data?.id;
+      setUploadedProofId(docId);
+      setUploadedProofName(proofFile.name);
+      toast.success('Proof file uploaded successfully');
+      return docId;
+    } catch (err) {
+      console.error('Failed to upload proof file:', err);
+      toast.error(err.response?.data?.detail || 'Failed to upload proof file');
+      return null;
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Remove uploaded proof
+  const handleRemoveProof = () => {
+    setProofFile(null);
+    setUploadedProofId(null);
+    setUploadedProofName(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -104,19 +195,37 @@ export default function RecordCheckDialog({
       return;
     }
 
+    // Validation
     if (!formData.method) {
       toast.error('Please select a check method');
       return;
     }
 
+    // COMPLIANCE-CRITICAL: Require proof file
+    if (!proofFile && !uploadedProofId) {
+      toast.error('Upload proof of check before saving. This is required for compliance.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      // Build payload based on check type
+      // Upload proof file first if not already uploaded
+      let proofDocId = uploadedProofId;
+      if (proofFile && !uploadedProofId) {
+        proofDocId = await uploadProofFile();
+        if (!proofDocId) {
+          setIsSubmitting(false);
+          return; // Upload failed, abort
+        }
+      }
+
+      // Build payload with evidence_document_id linking
       const payload = {
         method: formData.method,
         checked_at: formData.checked_at,
         outcome: formData.outcome,
-        notes: formData.notes || null
+        notes: formData.notes || null,
+        evidence_document_id: proofDocId // CRITICAL: Link check to proof file
       };
 
       // Add type-specific fields
@@ -134,7 +243,7 @@ export default function RecordCheckDialog({
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      toast.success('Check recorded successfully');
+      toast.success('Verification check recorded with proof');
       if (onComplete) onComplete();
       handleClose();
     } catch (err) {
@@ -155,23 +264,87 @@ export default function RecordCheckDialog({
       certificate_number: '',
       notes: ''
     });
+    setProofFile(null);
+    setUploadedProofId(null);
+    setUploadedProofName(null);
     if (onClose) onClose();
   };
 
+  const hasProof = proofFile || uploadedProofId;
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-white sm:max-w-lg">
+      <DialogContent className="bg-white sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
             {getTitle()}
           </DialogTitle>
           <DialogDescription>
-            Record the employer verification check outcome. This is the authoritative record for compliance readiness.
+            Record the employer verification check with proof. Both the check record and proof file are required for compliance.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* COMPLIANCE ALERT */}
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-amber-800">
+                <p className="font-medium">Compliance Requirement</p>
+                <p className="text-xs mt-0.5">Upload proof of the check (e.g., Home Office screenshot, DBS Update Service result) before saving.</p>
+              </div>
+            </div>
+          </div>
+
+          {/* PROOF FILE UPLOAD - MANDATORY */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-1">
+              Proof of Check *
+              {hasProof && <CheckCircle className="h-4 w-4 text-green-600" />}
+            </Label>
+            
+            {!hasProof ? (
+              <div 
+                className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-primary cursor-pointer transition-colors"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+                <p className="text-sm text-gray-600">Click to upload proof file</p>
+                <p className="text-xs text-gray-400 mt-1">PDF, JPG, PNG (max 10MB)</p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={handleFileSelect}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-green-600" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">
+                      {uploadedProofName || proofFile?.name}
+                    </p>
+                    <p className="text-xs text-green-600">
+                      {uploadedProofId ? 'Uploaded' : 'Ready to upload'}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRemoveProof}
+                  className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+          </div>
+
           {/* Method */}
           <div className="space-y-2">
             <Label>Check Method *</Label>
@@ -277,7 +450,7 @@ export default function RecordCheckDialog({
             </div>
           )}
 
-          {/* DBS-specific: Review Due (NOT expiry) */}
+          {/* DBS-specific: Review Due */}
           {checkType === 'dbs_status_check' && (
             <div className="space-y-2">
               <Label>Review Due Date</Label>
@@ -311,13 +484,14 @@ export default function RecordCheckDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !formData.method}
+            disabled={isSubmitting || isUploading || !formData.method || !hasProof}
             className="bg-primary hover:bg-primary-hover text-white rounded-xl"
+            data-testid="record-check-submit"
           >
-            {isSubmitting ? (
+            {isSubmitting || isUploading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Saving...
+                {isUploading ? 'Uploading...' : 'Saving...'}
               </>
             ) : (
               <>

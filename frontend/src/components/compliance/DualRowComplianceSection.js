@@ -373,6 +373,7 @@ export default function DualRowComplianceSection({
                     onRefresh={handleRefresh}
                     onRecordCheck={onRecordCheck}
                     onViewHistory={handleViewHistory}
+                    onPreviewFile={onPreviewFile}
                     isAuditor={isAuditor}
                   />
                 );

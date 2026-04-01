@@ -12946,20 +12946,26 @@ async def request_document_replacement(
 # ===========================================================================
 
 
+class VerifyRequirementInput(BaseModel):
+    """Input for verifying a requirement"""
+    notes: Optional[str] = None
+
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify")
 async def verify_requirement(
     employee_id: str,
     requirement_id: str,
+    body: Optional[VerifyRequirementInput] = None,
     user: dict = Depends(require_manager_or_admin)
 ):
     """
     Verify a requirement. REQUIRES evidence to exist.
     Cannot verify empty requirements.
     
-    LEGAL DOCUMENT RESTRICTION:
+    COMPLIANCE-CRITICAL:
+    - For dual-row requirements (RTW, DBS, Identity, PoA), requires a check record with proof
     - Sensitive/legal documents require ADMIN+ to verify
-    - Branch managers cannot final-verify: RTW, DBS, Identity, Proof of Address
     """
+    verification_notes = body.notes if body else None
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -12996,6 +13002,45 @@ async def verify_requirement(
             detail="Cannot verify requirement without evidence. Please upload evidence first."
         )
     
+    # COMPLIANCE-CRITICAL: For dual-row requirements (RTW, DBS, Identity, PoA),
+    # require a check record with proof before allowing verification
+    dual_row_requirements = {
+        "right_to_work_documents": "rtw_checks",
+        "right_to_work_check": "rtw_checks",
+        "dbs_certificate": "dbs_checks",
+        "dbs_status_check": "dbs_checks",
+        "identity_documents": "identity_verifications",
+        "identity_verification": "identity_verifications",
+        "proof_of_address": "address_verifications"
+    }
+    
+    if requirement_id in dual_row_requirements:
+        check_collection = dual_row_requirements[requirement_id]
+        check_record = await db[check_collection].find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        
+        if not check_record:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot verify without a recorded check. Please record a {requirement['name']} check first."
+            )
+        
+        # Check if the check record has proof linked
+        if not check_record.get("evidence_document_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="The check record has no proof file attached. Please update the check with proof documentation."
+            )
+        
+        # Check if the check outcome is verified
+        if check_record.get("outcome") != "verified":
+            raise HTTPException(
+                status_code=400,
+                detail=f"The check outcome is '{check_record.get('outcome', 'unknown')}'. Only verified checks can be finalized."
+            )
+    
     if evidence.verified:
         return {"success": True, "message": "Requirement already verified", "verified": True}
     
@@ -13012,6 +13057,7 @@ async def verify_requirement(
                 "verified": True,
                 "verified_by": verified_by_name,
                 "verified_at": now,
+                "verification_notes": verification_notes,
                 "updated_at": now
             }}
         )
@@ -13031,6 +13077,7 @@ async def verify_requirement(
                 "verified_by": user['user_id'],
                 "verified_by_name": verified_by_name,
                 "verified_at": now,
+                "verification_notes": verification_notes,
                 "updated_at": now
             }}
         )
@@ -29491,7 +29538,21 @@ async def get_compliance_file(
                 "checked_at": check_data.get("checked_at") if has_check else None,
                 "checked_by": check_data.get("checked_by") if has_check else None,
                 "notes": check_data.get("notes") if has_check else None,
-                "evidence_document_id": check_data.get("evidence_document_id") if has_check else None
+                "evidence_document_id": check_data.get("evidence_document_id") if has_check else None,
+                # COMPLIANCE-CRITICAL: Include evidence document details for proof display
+                "evidence_document": next(
+                    (
+                        {
+                            "id": d.get("id"),
+                            "filename": d.get("original_filename") or d.get("file_name"),
+                            "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                            "content_type": d.get("content_type") or d.get("mime_type")
+                        }
+                        for d in documents 
+                        if d.get("id") == check_data.get("evidence_document_id")
+                    ),
+                    None
+                ) if has_check and check_data.get("evidence_document_id") else None
             } if has_check else None,
             
             # Follow-up / Review due info

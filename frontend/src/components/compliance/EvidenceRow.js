@@ -246,7 +246,7 @@ export default function EvidenceRow({
           {documents_preview.length > 0 ? (
             <div className="space-y-2">
               <h5 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-2">
-                Active Files ({counts.active_files})
+                Evidence ({counts.active_files})
               </h5>
               
               {documents_preview.map((doc, idx) => (

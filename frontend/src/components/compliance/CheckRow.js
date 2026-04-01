@@ -6,7 +6,8 @@ import { Badge } from '../ui/badge';
 import { toast } from 'sonner';
 import { 
   Shield, CheckCircle, XCircle, Clock, AlertTriangle, 
-  ChevronDown, ChevronUp, History, Edit, RefreshCw
+  ChevronDown, ChevronUp, History, Edit, RefreshCw, 
+  FileText, Eye, Download
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -29,6 +30,7 @@ export default function CheckRow({
   onRefresh,
   onRecordCheck,
   onViewHistory,
+  onPreviewFile,
   isAuditor = false
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -239,6 +241,93 @@ export default function CheckRow({
               </div>
             )}
           </div>
+          
+          {/* PROOF FILE SECTION - COMPLIANCE CRITICAL */}
+          {check_data.evidence_document_id && check_data.evidence_document && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <p className="text-xs text-text-muted uppercase tracking-wide mb-2">Proof of Check</p>
+              <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                    <FileText className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-green-800">
+                      {check_data.evidence_document.filename || 'Check Proof'}
+                    </p>
+                    <p className="text-xs text-green-600">
+                      Uploaded {formatBackendDate(check_data.evidence_document.uploaded_at, { format: 'medium' })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  {/* View */}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-100"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onPreviewFile) {
+                        onPreviewFile({
+                          file_url: `/api/employee-documents/${check_data.evidence_document_id}/file`,
+                          file_name: check_data.evidence_document.filename || 'Check Proof'
+                        });
+                      }
+                    }}
+                    title="View proof"
+                    data-testid={`view-proof-${key}`}
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  
+                  {/* Download */}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-100"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        const url = `${API}/employee-documents/${check_data.evidence_document_id}/download`;
+                        const response = await axios.get(url, {
+                          headers: { Authorization: `Bearer ${token}` },
+                          responseType: 'blob'
+                        });
+                        const blob = new Blob([response.data]);
+                        const link = document.createElement('a');
+                        link.href = URL.createObjectURL(blob);
+                        link.download = check_data.evidence_document.filename || 'check_proof';
+                        link.click();
+                        URL.revokeObjectURL(link.href);
+                      } catch (err) {
+                        toast.error('Download failed');
+                      }
+                    }}
+                    title="Download proof"
+                    data-testid={`download-proof-${key}`}
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* Warning if no proof linked (legacy checks) */}
+          {check_data.id && !check_data.evidence_document_id && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">No proof file linked</p>
+                  <p className="text-xs text-amber-600">
+                    Update this check to add proof documentation for compliance.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Notes */}
           {check_data.notes && (

@@ -1,0 +1,95 @@
+{
+  "summary": "Ticket D Part 2: Agreement Templates UI testing complete. All backend APIs working correctly. Frontend AgreementFormDrawer properly displays submission data in view mode with VERIFIED badge, completion date, mode, and all form fields populated from form_data.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_agreement_templates.py",
+    "/app/test_reports/pytest/agreement_templates_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_agreement_templates.py"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123",
+    "test_employee_with_submission": "d88335f6-1b18-435a-8086-28af4a583f77 (Olakunle Alonge)",
+    "test_employee_without_submission": "ccfcbdbb-feda-4043-a8b2-2f1f9da88bdf (Lawrence Egbeni)"
+  },
+  "seed_data_creation": "None - used existing test data",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Agreement Templates UI is fully functional. The AgreementFormDrawer component correctly handles both create and view modes. In view mode, it fetches submission data via GET /api/agreement-submissions/{id} and populates all form fields from form_data. The VERIFIED badge shows completion date and mode.",
+  "features_tested": {
+    "agreement_templates_listing": {
+      "status": "PASS",
+      "details": "GET /api/agreement-templates returns both ZERO_HOUR_CONTRACT_V1 and EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1"
+    },
+    "agreement_row_view_button": {
+      "status": "PASS",
+      "details": "View button appears on verified agreements and opens AgreementFormDrawer in view mode"
+    },
+    "agreement_drawer_submission_data": {
+      "status": "PASS",
+      "details": "Drawer displays employee_name, employee_role, all ack_* checkboxes, signature_name from form_data"
+    },
+    "agreement_drawer_verified_badge": {
+      "status": "PASS",
+      "details": "VERIFIED badge shown with completion date (2026-04-01) and mode (admin assisted)"
+    },
+    "export_pdf_button": {
+      "status": "PASS",
+      "details": "Export PDF button present and opens PDF export in new window"
+    },
+    "create_agreement_flow": {
+      "status": "PASS",
+      "details": "Complete button on not-started agreements opens drawer in create mode with pre-filled employee data"
+    },
+    "completion_mode_selector": {
+      "status": "PASS",
+      "details": "Three completion modes available: Self Completion, Admin Assisted, Phone Assisted"
+    },
+    "submit_button": {
+      "status": "PASS",
+      "details": "Submit Agreement button present in create mode"
+    }
+  },
+  "data_testids_verified": {
+    "agreement-form-drawer": "FOUND",
+    "agreement-row-handbook_acknowledgement": "FOUND",
+    "agreement-row-contract_acceptance": "FOUND",
+    "view-submission-handbook_acknowledgement": "FOUND",
+    "view-submission-contract_acceptance": "FOUND",
+    "open-form-handbook_acknowledgement": "FOUND (on employee without submission)",
+    "export-pdf-btn": "FOUND",
+    "submit-agreement-btn": "FOUND",
+    "field-employee_name": "FOUND",
+    "field-employee_role": "FOUND",
+    "field-ack_received": "FOUND",
+    "field-ack_read": "FOUND",
+    "field-ack_policies": "FOUND",
+    "field-ack_updates": "FOUND",
+    "field-ack_ask_questions": "FOUND",
+    "field-ack_compliance": "FOUND",
+    "field-signature_name": "FOUND"
+  },
+  "backend_endpoints_tested": {
+    "GET /api/agreement-templates": "PASS - Returns both templates",
+    "GET /api/agreement-templates/{id}": "PASS - Returns full template with sections",
+    "GET /api/employees/{id}/compliance-file": "PASS - Includes submission_data in agreement rows",
+    "GET /api/agreement-submissions/{id}": "PASS - Returns submission with form_data and template",
+    "GET /api/agreement-submissions/{id}/pdf": "PASS - Returns HTML content for PDF export",
+    "GET /api/employees/{id}/agreement-submissions": "PASS - Returns list of submissions"
+  }
+}

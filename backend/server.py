@@ -27886,6 +27886,18 @@ async def get_compliance_file(
     # Get agreements
     agreements = await AgreementAcknowledgementService.get_employee_agreements(employee_id)
     
+    # Get new-style agreement submissions
+    agreement_submissions_list = await db.agreement_submissions.find(
+        {"employee_id": employee_id}
+    ).sort("completed_at", -1).to_list(length=100)
+    
+    # Index submissions by template_id for quick lookup
+    submissions_by_template = {}
+    for sub in agreement_submissions_list:
+        tid = sub.get("template_id", "")
+        if tid not in submissions_by_template:
+            submissions_by_template[tid] = sub
+    
     # Get reference integrity
     ref1 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
     ref2 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
@@ -28363,31 +28375,59 @@ async def get_compliance_file(
     # =========================================================================
     # HELPER: Build Agreement Row
     # =========================================================================
+    # Map agreement_type to template_id for new submissions
+    AGREEMENT_TYPE_TO_TEMPLATE = {
+        "contract_acceptance": "ZERO_HOUR_CONTRACT_V1",
+        "handbook_acknowledgement": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1"
+    }
+    
     def build_agreement_row(
         key: str,
         title: str,
         agreement_type: str
     ) -> dict:
         """Build an agreement row (form acknowledgement)."""
-        # Find acknowledgements for this type
+        # Find acknowledgements for this type (old format)
         acks = [a for a in agreements.get("acknowledgements", []) 
                 if a.get("agreement_type") == agreement_type]
         pending_reqs = [r for r in agreements.get("pending_requests", [])
                        if r.get("agreement_type") == agreement_type]
         
-        has_acknowledgement = len(acks) > 0
-        latest_ack = acks[0] if has_acknowledgement else None  # Already sorted desc
-        is_verified = has_acknowledgement and latest_ack.get("verification_status") == "verified"
+        # Find new-style submission for this type
+        template_id = AGREEMENT_TYPE_TO_TEMPLATE.get(agreement_type)
+        submission = submissions_by_template.get(template_id) if template_id else None
         
-        # Status summary
-        if is_verified:
-            version = latest_ack.get("version_acknowledged", "")
-            completed_at = latest_ack.get("completed_at", "")[:10]
-            mode = latest_ack.get("completion_mode", "").replace("_", " ").title()
+        has_acknowledgement = len(acks) > 0 or submission is not None
+        latest_ack = acks[0] if len(acks) > 0 else None  # Already sorted desc
+        
+        # Determine verification status (prefer new submission over old ack)
+        if submission:
+            is_verified = submission.get("verification_status") == "verified"
+        else:
+            is_verified = has_acknowledgement and latest_ack and latest_ack.get("verification_status") == "verified"
+        
+        # Status summary - prefer new submission data over old ack
+        if submission and is_verified:
+            version = submission.get("template_version", "")
+            completed_at = (submission.get("completed_at", "") or "")[:10] if submission.get("completed_at") else ""
+            mode = (submission.get("completion_mode", "") or "").replace("_", " ").title()
             status_summary = f"Verified • {version} • {mode} on {completed_at}"
             status = "verified"
-        elif has_acknowledgement:
-            verification_status = latest_ack.get("verification_status", "unknown").replace("_", " ").title()
+        elif submission and submission.get("verification_status") == "awaiting_review":
+            status_summary = "Awaiting Review"
+            status = "awaiting_review"
+        elif submission:
+            vs = (submission.get("verification_status", "unknown") or "unknown").replace("_", " ").title()
+            status_summary = vs
+            status = "recorded"
+        elif is_verified and latest_ack:
+            version = latest_ack.get("version_acknowledged", "")
+            completed_at = (latest_ack.get("completed_at", "") or "")[:10] if latest_ack.get("completed_at") else ""
+            mode = (latest_ack.get("completion_mode", "") or "").replace("_", " ").title()
+            status_summary = f"Verified • {version} • {mode} on {completed_at}"
+            status = "verified"
+        elif has_acknowledgement and latest_ack:
+            verification_status = (latest_ack.get("verification_status", "unknown") or "unknown").replace("_", " ").title()
             status_summary = verification_status
             status = "awaiting_review" if latest_ack.get("verification_status") == "awaiting_review" else "recorded"
         elif len(pending_reqs) > 0:
@@ -28433,8 +28473,29 @@ async def get_compliance_file(
                 "call_note": latest_ack.get("call_note") if latest_ack else None,
                 "verification_status": latest_ack.get("verification_status") if latest_ack else None,
                 "verified_at": latest_ack.get("verified_at") if latest_ack else None,
-                "verified_by": latest_ack.get("verified_by") if latest_ack else None
-            } if latest_ack else None,
+                "verified_by": latest_ack.get("verified_by") if latest_ack else None,
+                # Link to new-style submission if available
+                "submission_id": str(submission.get("_id")) if submission else None
+            } if latest_ack or submission else None,
+            
+            # New-style template submission data
+            "submission_data": {
+                "id": submission.get("id"),
+                "template_id": submission.get("template_id"),
+                "template_name": submission.get("template_name"),
+                "template_version": submission.get("template_version"),
+                "form_data": submission.get("form_data"),
+                "completion_mode": submission.get("completion_mode"),
+                "completed_at": submission.get("completed_at"),
+                "completed_by": submission.get("completed_by"),
+                "admin_note": submission.get("admin_note"),
+                "signature_name": submission.get("signature_name"),
+                "signature_date": submission.get("signature_date"),
+                "verification_status": submission.get("verification_status"),
+                "verified_at": submission.get("verified_at"),
+                "verified_by": submission.get("verified_by"),
+                "rejection_reason": submission.get("rejection_reason")
+            } if submission else None,
             
             "pending_requests": [
                 {

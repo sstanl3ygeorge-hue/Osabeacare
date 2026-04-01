@@ -4,10 +4,10 @@
 **Osabea Healthcare Solutions**
 
 ## Ticket D: Agreement Templates System (2026-04-01)
-**Status**: COMPLETE ✅
+**Status**: COMPLETE ✅ (Backend + Frontend UI Wiring)
 
 ### Overview
-Implemented real template-driven agreement workflows replacing fake completion modals. Created two production templates based on uploaded documents.
+Implemented real template-driven agreement workflows replacing fake completion modals. Created two production templates based on uploaded documents. Frontend UI fully wired with AgreementFormDrawer for both create and view modes.
 
 ### Templates Created
 
@@ -47,11 +47,46 @@ Implemented real template-driven agreement workflows replacing fake completion m
 - **GET /api/agreement-submissions/{id}/pdf** - Export as printable HTML/PDF
 
 ### Frontend Component
-- `/app/frontend/src/components/compliance/AgreementFormDrawer.js`
+- `/app/frontend/src/components/compliance/AgreementFormDrawer.js` - Multi-section form drawer
+  - Dynamic form generation from template structure
+  - Multi-section layout with collapsible panels (Employee Details, Pay & Hours, Legal Terms, Declaration)
+  - Read-only legal text sections with markdown rendering
+  - Declaration with checkboxes and signature
+  - Completion mode selection (self, admin_assisted, phone_assisted)
+  - PDF export functionality via print window
+  - View mode: Fetches and displays existing submission data with VERIFIED badge
+  - Create mode: Pre-fills employee data, validates required fields, submits to backend
+
+- `/app/frontend/src/components/compliance/AgreementRow.js` - Agreement row component
+  - Shows lifecycle status (not_sent, sent, in_progress, submitted, verified, rejected)
+  - View button opens AgreementFormDrawer in view mode
+  - Complete button opens AgreementFormDrawer in create mode
+  - Verify/Reject buttons for awaiting review status
+  - Export PDF button for completed agreements
+  - Completion mode badge (Self-completed, Admin-assisted, Phone-assisted)
+
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js` - Parent wiring
+  - `agreementDrawer` state for drawer open/close
+  - `onOpenForm` callback for create mode
+  - `onViewSubmission` callback for view mode
+  - Passes submission ID to AgreementFormDrawer
 
 ### Data Storage
-- `agreement_submissions` collection - Real structured submissions
+- `agreement_submissions` collection - Real structured submissions with form_data, completion_mode, verification_status
 - `agreement_acknowledgements` collection - Legacy compatibility records
+
+### Backend Update (2026-04-01)
+- Updated `build_agreement_row()` function in server.py to include `submission_data` in compliance file response
+- Added `AGREEMENT_TYPE_TO_TEMPLATE` mapping: contract_acceptance → ZERO_HOUR_CONTRACT_V1, handbook_acknowledgement → EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1
+- Fetches new-style submissions from `agreement_submissions` collection
+- `submission_data` includes: id, template_id, template_name, form_data, completion_mode, verified_at, etc.
+- Frontend AgreementRow now correctly accesses submission_data.id for View button
+
+### Testing (2026-04-01)
+- Backend: 100% (13/13 tests passed)
+- Frontend: 100% (All features verified)
+- Test report: `/app/test_reports/iteration_102.json`
+- All data-testids verified: agreement-form-drawer, agreement-row-*, view-submission-*, export-pdf-btn, submit-agreement-btn, field-*
 
 ### Completion Modes
 1. `self` - Employee completed independently

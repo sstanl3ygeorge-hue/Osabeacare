@@ -460,7 +460,7 @@ export default function UploadRequirementDrawer({
                       )}
                     </p>
                     <p className="text-xs text-text-muted mt-1">
-                      2 recent documents required for Proof of Address (within 9 months)
+                      2 recent documents required for Proof of Address (within 12 months)
                     </p>
                   </div>
                 )}

@@ -50,7 +50,7 @@ export const REQUIREMENT_MAP = {
     allowedMoveTargets: ['identity_documents', 'other'],
     requiredCount: 2,
     multiFile: true,
-    validityMonths: 9, // PoA docs must be within 9 months
+    validityMonths: 12, // Updated from 9 to 12 per role pack policy
   },
 };
 
@@ -166,7 +166,7 @@ export function isHistoricalFile(file) {
 }
 
 /**
- * Check if a PoA file has a valid date (within 9 months)
+ * Check if a PoA file has a valid date (within 12 months)
  */
 export function hasValidPoADate(file) {
   if (!file?.document_date && !file?.uploaded_at) return false;
@@ -179,7 +179,7 @@ export function hasValidPoADate(file) {
     (now.getFullYear() - docDate.getFullYear()) * 12 +
     (now.getMonth() - docDate.getMonth());
 
-  return diffMonths <= 9;
+  return diffMonths <= 12; // 12 months validity per role pack policy
 }
 
 /**

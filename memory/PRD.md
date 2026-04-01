@@ -184,6 +184,94 @@ Implemented shared `UploadRequirementDrawer` for all upload requirements.
 
 **Testing:** 10/10 tests passed (iteration_98.json). 100% frontend success rate.
 
+### Ticket C.1: Drawer Code Review Fixes ✅ (2026-03-31)
+Applied 12 fixes from code review:
+
+1. **Central REQUIREMENT_MAP** (`complianceRequirementMap.js`) - Single source of truth for keys
+2. **Normalized data model** - `normalizeUploadDrawerData()` with counts object
+3. **Section expansion reset** - Resets on drawer open/key change
+4. **Readable summary** - "1 active • no requests • 2 pending review"
+5. **PoA valid-file logic** - Uses 12-month freshness check (updated from 9)
+6. **Restricted move targets** - Context-aware category options
+7. **isPreviewableFile helper** - Checks MIME + extension
+8. **Removed fake file history action** - `onViewHistory={null}`
+9. **Less misleading badges** - File status vs check status separated
+10. **Null safety** - `getRequirementConfig` handles null keys
+11. **Normalized counts in UI** - Uses `filesData.counts.*` everywhere
+12. **Auditor capability props** - Ready for role-based restrictions
+
+---
+
+## ARCHITECTURE: Role Packs & Stage Gates ✅ (2026-03-31)
+
+### Role Pack System
+Created role-based requirement configuration for controlled compliance.
+
+**Backend Files:**
+- `/app/backend/rolePacks.py` - Role packs, requirement types, metadata, expiry rules
+- `/app/backend/stageGates.py` - Stage gate validation service
+
+**Frontend Files:**
+- `/app/frontend/src/config/rolePacks.js` - Frontend mirror of role packs
+
+### Role Packs Defined
+
+| Role | Key Requirements | Policies |
+|------|------------------|----------|
+| Healthcare Assistant | RTW, ID, PoA, DBS, Training, Induction | DBS before approval, 2 refs |
+| Nurse | + NMC Registration, Clinical Competency | NMC required |
+| Care Assistant | Same as HCA | Same |
+| Senior Care Assistant | Same as HCA | Same |
+| Support Worker | Same as HCA | Same |
+
+### Requirement Types
+
+| Type | Requirements |
+|------|--------------|
+| document | right_to_work, identity, proof_of_address, dbs, training_scan |
+| reference | reference_1, reference_2 |
+| form | application_form, equal_opportunities, induction, clinical_competency |
+| registration | nmc_registration |
+| system | cv |
+
+### Stage Gates
+
+**Recruitment Approval Gate (compliance_review → onboarding):**
+- ✅ Right to Work verified
+- ✅ Identity verified
+- ✅ Proof of Address: 2 valid files (within 12 months)
+- ✅ DBS verified
+- ✅ 2 references verified
+- ✅ NMC verified (nurse only)
+
+### Full Recruitment Flow
+
+```
+1. Application → CV, form, equal_opp, refs, declarations
+2. Screening → Admin review
+3. Interview → Role-specific template
+4. Compliance Start → Request documents, send refs
+5. Compliance Verification → All verified
+6. Recruitment Approval → recruitment_approved = true
+7. Agreements → Contract, handbook
+8. Induction → Form + competency (nurse)
+9. Active → Deployable
+```
+
+### Key Functions
+
+**Backend (`stageGates.py`):**
+- `can_approve_recruitment(employee_id)` → (bool, blockers[])
+- `is_valid_poa(employee_id, validity_months=12)` → bool
+- `has_verified_references(employee_id, min=2)` → bool
+- `generate_requirements_for_employee(employee_id, role)` → requirements[]
+
+**Frontend (`rolePacks.js`):**
+- `getRolePack(role)` → pack object
+- `getRoleRequirements(role)` → requirement keys[]
+- `getBlockingRequirements(role)` → blocking keys[]
+- `roleRequiresNMC(role)` → bool
+
 ---
 
 ### Backend Improvements

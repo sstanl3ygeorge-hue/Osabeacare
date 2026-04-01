@@ -67,6 +67,12 @@ from stage_identity import (
     APPLICANT_STATUSES as STAGE_APPLICANT_STATUSES,
     EMPLOYEE_STATUSES as STAGE_EMPLOYEE_STATUSES
 )
+from agreement_templates import (
+    get_template,
+    get_all_templates,
+    get_template_summary,
+    AGREEMENT_TEMPLATES
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -23654,7 +23660,301 @@ class AgreementAcknowledgementService:
         }
 
 
-class DocumentCorrectionService:
+class AgreementSubmissionService:
+    """
+    Service for template-based agreement submissions.
+    
+    Handles:
+    - Real structured form submissions based on templates
+    - Multiple completion modes (self, admin_assisted, phone_assisted)
+    - PDF export of completed submissions
+    - Verification/rejection workflow
+    """
+    
+    @staticmethod
+    async def create_submission(
+        employee_id: str,
+        template_id: str,
+        form_data: dict,
+        completion_mode: str,  # self, admin_assisted, phone_assisted
+        completed_by: str,
+        admin_note: Optional[str] = None
+    ) -> dict:
+        """
+        Create a new agreement submission from a template.
+        """
+        from agreement_templates import get_template
+        
+        template = get_template(template_id)
+        if not template:
+            raise ValueError(f"Template {template_id} not found")
+        
+        # Validate completion_mode
+        valid_modes = ["self", "admin_assisted", "phone_assisted"]
+        if completion_mode not in valid_modes:
+            raise ValueError(f"completion_mode must be one of: {', '.join(valid_modes)}")
+        
+        # Require note for assisted modes
+        if completion_mode != "self" and not admin_note:
+            raise ValueError("admin_note is required for assisted completion modes")
+        
+        now = datetime.now(timezone.utc).isoformat()
+        submission_id = f"agr_sub_{uuid.uuid4().hex[:12]}"
+        
+        submission = {
+            "id": submission_id,
+            "employee_id": employee_id,
+            "template_id": template_id,
+            "template_name": template.get("template_name"),
+            "template_version": template.get("version"),
+            "company_name": template.get("company_name"),
+            "form_data": form_data,  # All field values submitted
+            "completion_mode": completion_mode,
+            "completed_by": completed_by,
+            "completed_at": now,
+            "admin_note": admin_note,
+            # Declaration data
+            "signature_name": form_data.get("signature_name"),
+            "signature_date": form_data.get("signature_date"),
+            # Verification workflow
+            "verification_status": "awaiting_review",
+            "verified_at": None,
+            "verified_by": None,
+            "rejected_at": None,
+            "rejected_by": None,
+            "rejection_reason": None,
+            # Metadata
+            "created_at": now,
+            "updated_at": now,
+        }
+        
+        await db.agreement_submissions.insert_one(submission)
+        
+        # Also create legacy acknowledgement record for backward compatibility
+        agreement_type_map = {
+            "ZERO_HOUR_CONTRACT_V1": "contract_acceptance",
+            "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1": "handbook_acknowledgement",
+        }
+        agreement_type = agreement_type_map.get(template_id)
+        
+        if agreement_type:
+            legacy_ack = {
+                "id": f"agr_ack_{uuid.uuid4().hex[:12]}",
+                "employee_id": employee_id,
+                "agreement_type": agreement_type,
+                "completion_mode": completion_mode,
+                "completed_at": now,
+                "completed_by": completed_by,
+                "assisted_by": completed_by if completion_mode != "self" else None,
+                "version_acknowledged": template.get("version"),
+                "call_note": admin_note if completion_mode == "phone_assisted" else None,
+                "submission_id": submission_id,  # Link to new submission
+                "verification_status": "awaiting_review",
+                "created_at": now,
+                "created_by": completed_by
+            }
+            await db.agreement_acknowledgements.insert_one(legacy_ack)
+        
+        await log_audit_action(completed_by, "create_agreement_submission", "agreement_submissions", submission_id, {
+            "employee_id": employee_id,
+            "template_id": template_id,
+            "completion_mode": completion_mode
+        })
+        
+        submission.pop("_id", None)
+        return submission
+    
+    @staticmethod
+    async def get_submission(submission_id: str) -> Optional[dict]:
+        """Get a submission by ID."""
+        submission = await db.agreement_submissions.find_one(
+            {"id": submission_id},
+            {"_id": 0}
+        )
+        return submission
+    
+    @staticmethod
+    async def get_employee_submissions(employee_id: str) -> List[dict]:
+        """Get all submissions for an employee."""
+        submissions = await db.agreement_submissions.find(
+            {"employee_id": employee_id},
+            {"_id": 0}
+        ).sort("created_at", -1).to_list(50)
+        return submissions
+    
+    @staticmethod
+    async def verify_submission(
+        submission_id: str,
+        verified_by: str,
+        notes: Optional[str] = None
+    ) -> Optional[dict]:
+        """Verify an agreement submission."""
+        now = datetime.now(timezone.utc).isoformat()
+        
+        result = await db.agreement_submissions.find_one_and_update(
+            {"id": submission_id},
+            {
+                "$set": {
+                    "verification_status": "verified",
+                    "verified_at": now,
+                    "verified_by": verified_by,
+                    "verification_notes": notes,
+                    "updated_at": now
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            # Also update legacy acknowledgement
+            await db.agreement_acknowledgements.update_many(
+                {"submission_id": submission_id},
+                {
+                    "$set": {
+                        "verification_status": "verified",
+                        "verified_at": now,
+                        "verified_by": verified_by,
+                        "verification_notes": notes
+                    }
+                }
+            )
+            
+            await log_audit_action(verified_by, "verify_agreement_submission", "agreement_submissions", submission_id, {
+                "status": "verified"
+            })
+            result.pop("_id", None)
+        
+        return result
+    
+    @staticmethod
+    async def reject_submission(
+        submission_id: str,
+        rejected_by: str,
+        reason: str
+    ) -> Optional[dict]:
+        """Reject an agreement submission."""
+        now = datetime.now(timezone.utc).isoformat()
+        
+        result = await db.agreement_submissions.find_one_and_update(
+            {"id": submission_id},
+            {
+                "$set": {
+                    "verification_status": "rejected",
+                    "rejected_at": now,
+                    "rejected_by": rejected_by,
+                    "rejection_reason": reason,
+                    "updated_at": now
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            # Also update legacy acknowledgement
+            await db.agreement_acknowledgements.update_many(
+                {"submission_id": submission_id},
+                {
+                    "$set": {
+                        "verification_status": "rejected",
+                        "rejected_at": now,
+                        "rejected_by": rejected_by,
+                        "rejection_reason": reason
+                    }
+                }
+            )
+            
+            await log_audit_action(rejected_by, "reject_agreement_submission", "agreement_submissions", submission_id, {
+                "status": "rejected",
+                "reason": reason
+            })
+            result.pop("_id", None)
+        
+        return result
+    
+    @staticmethod
+    def generate_pdf_content(submission: dict, template: dict) -> str:
+        """
+        Generate PDF-ready HTML content from a submission.
+        
+        Returns HTML that can be converted to PDF using a PDF library.
+        """
+        form_data = submission.get("form_data", {})
+        
+        # Replace placeholders in legal text
+        def replace_placeholders(text: str, data: dict) -> str:
+            for key, value in data.items():
+                placeholder = f"{{{{{key}}}}}"
+                if value:
+                    text = text.replace(placeholder, str(value))
+            return text
+        
+        html_sections = []
+        
+        # Header
+        html_sections.append(f"""
+        <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="font-size: 24px; margin-bottom: 10px;">{template.get('template_name')}</h1>
+            <p style="font-size: 14px; color: #666;">{template.get('company_name')}</p>
+            <p style="font-size: 12px; color: #999;">Version {template.get('version')} | Completed: {submission.get('completed_at', '')[:10]}</p>
+        </div>
+        """)
+        
+        # Form data sections
+        for section in template.get("sections", []):
+            section_html = f"<h2 style='font-size: 18px; margin-top: 30px; border-bottom: 1px solid #ccc;'>{section.get('title')}</h2>"
+            
+            if section.get("read_only") and section.get("key") in template.get("legal_text_sections", {}):
+                # Legal text section
+                legal_text = template["legal_text_sections"][section["key"]]
+                legal_text = replace_placeholders(legal_text, form_data)
+                section_html += f"<div style='font-size: 12px; line-height: 1.6;'>{legal_text}</div>"
+            else:
+                # Form fields
+                for field in section.get("fields", []):
+                    value = form_data.get(field["key"], "")
+                    if field.get("field_type") == "checkbox":
+                        value = "✓ Yes" if value else "☐ No"
+                    section_html += f"""
+                    <div style='margin: 10px 0;'>
+                        <strong>{field.get('label')}:</strong> {value or '-'}
+                    </div>
+                    """
+            
+            html_sections.append(section_html)
+        
+        # Signature section
+        html_sections.append(f"""
+        <div style="margin-top: 50px; border-top: 2px solid #333; padding-top: 20px;">
+            <h3>Declaration</h3>
+            <p><strong>Signed by:</strong> {form_data.get('signature_name', '')}</p>
+            <p><strong>Date:</strong> {form_data.get('signature_date', '')}</p>
+            <p><strong>Completion Mode:</strong> {submission.get('completion_mode', '').replace('_', ' ').title()}</p>
+            {f"<p><strong>Admin Note:</strong> {submission.get('admin_note')}</p>" if submission.get('admin_note') else ""}
+        </div>
+        """)
+        
+        # Verification status
+        if submission.get("verification_status") == "verified":
+            html_sections.append(f"""
+            <div style="margin-top: 30px; padding: 15px; background: #e8f5e9; border: 1px solid #4caf50;">
+                <strong>VERIFIED</strong> on {submission.get('verified_at', '')[:10]} by {submission.get('verified_by', '')}
+            </div>
+            """)
+        
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }}
+                h1, h2, h3 {{ color: #333; }}
+            </style>
+        </head>
+        <body>
+            {''.join(html_sections)}
+        </body>
+        </html>
+        """
     """
     Service for document correction actions.
     
@@ -27289,6 +27589,176 @@ async def reject_agreement_acknowledgement(
         raise HTTPException(status_code=404, detail="Acknowledgement not found")
     
     return result
+
+
+# ==================== AGREEMENT TEMPLATE ENDPOINTS (Ticket D) ====================
+
+@api_router.get("/agreement-templates")
+async def list_agreement_templates(
+    user: dict = Depends(get_current_user)
+):
+    """Get all available agreement templates."""
+    from agreement_templates import get_all_templates, get_template_summary
+    
+    templates = get_all_templates()
+    summaries = []
+    for template_id in templates:
+        summary = get_template_summary(template_id)
+        if summary:
+            summaries.append(summary)
+    
+    return {"templates": summaries}
+
+
+@api_router.get("/agreement-templates/{template_id}")
+async def get_agreement_template(
+    template_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get a specific agreement template with full content."""
+    from agreement_templates import get_template
+    
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    return template
+
+
+@api_router.post("/employees/{employee_id}/agreement-submissions")
+async def create_agreement_submission(
+    employee_id: str,
+    template_id: str = Body(...),
+    form_data: dict = Body(...),
+    completion_mode: str = Body(...),  # self, admin_assisted, phone_assisted
+    admin_note: Optional[str] = Body(None),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Create a new agreement submission from a template.
+    
+    completion_mode:
+    - self: Employee completed on their own
+    - admin_assisted: Admin filled on employee's behalf
+    - phone_assisted: Admin recorded during phone call (requires admin_note)
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        submission = await AgreementSubmissionService.create_submission(
+            employee_id=employee_id,
+            template_id=template_id,
+            form_data=form_data,
+            completion_mode=completion_mode,
+            completed_by=user['user_id'],
+            admin_note=admin_note
+        )
+        return submission
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/employees/{employee_id}/agreement-submissions")
+async def get_employee_agreement_submissions(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get all agreement submissions for an employee."""
+    submissions = await AgreementSubmissionService.get_employee_submissions(employee_id)
+    return {"submissions": submissions}
+
+
+@api_router.get("/agreement-submissions/{submission_id}")
+async def get_agreement_submission(
+    submission_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get a specific agreement submission."""
+    submission = await AgreementSubmissionService.get_submission(submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    # Also get the template for rendering
+    from agreement_templates import get_template
+    template = get_template(submission.get("template_id"))
+    
+    return {
+        "submission": submission,
+        "template": template
+    }
+
+
+@api_router.post("/agreement-submissions/{submission_id}/verify")
+async def verify_agreement_submission(
+    submission_id: str,
+    notes: Optional[str] = Body(None, embed=True),
+    user: dict = Depends(require_admin)
+):
+    """Verify an agreement submission."""
+    result = await AgreementSubmissionService.verify_submission(
+        submission_id=submission_id,
+        verified_by=user['user_id'],
+        notes=notes
+    )
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    return result
+
+
+@api_router.post("/agreement-submissions/{submission_id}/reject")
+async def reject_agreement_submission(
+    submission_id: str,
+    reason: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """Reject an agreement submission."""
+    if not reason or len(reason.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Rejection reason must be at least 10 characters")
+    
+    result = await AgreementSubmissionService.reject_submission(
+        submission_id=submission_id,
+        rejected_by=user['user_id'],
+        reason=reason.strip()
+    )
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    return result
+
+
+@api_router.get("/agreement-submissions/{submission_id}/pdf")
+async def export_agreement_submission_pdf(
+    submission_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Export an agreement submission as PDF.
+    
+    Returns HTML that can be rendered to PDF on the client side,
+    or can be processed by a PDF generation service.
+    """
+    submission = await AgreementSubmissionService.get_submission(submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    from agreement_templates import get_template
+    template = get_template(submission.get("template_id"))
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    html_content = AgreementSubmissionService.generate_pdf_content(submission, template)
+    
+    return {
+        "submission_id": submission_id,
+        "html_content": html_content,
+        "filename": f"{template.get('template_id')}_{submission.get('employee_id')}_{submission.get('completed_at', '')[:10]}.pdf"
+    }
 
 
 

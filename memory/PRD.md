@@ -3,6 +3,63 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Ticket D: Agreement Templates System (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented real template-driven agreement workflows replacing fake completion modals. Created two production templates based on uploaded documents.
+
+### Templates Created
+
+**ZERO_HOUR_CONTRACT_V1**
+- Source: 908623 SMT Zero Hour.docx
+- Company: Osabea Healthcare Solutions Ltd (replaced iCubeDALPro/iCareServicesGroup)
+- Address: Unit 12, Harrods Road, Harlow, CM19 5BJ
+- Sections:
+  1. Employee Details (name, job_title, start_date, continuous_service_date)
+  2. Pay & Hours (hourly_rate, sleep_in_rate, payment_method)
+  3. Legal Terms (read-only contract text with placeholders)
+  4. Holiday & Leave (read-only entitlements)
+  5. Declaration (3 checkboxes + signature + date)
+
+**EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1**
+- Source: Osabea Employee Handbook.pdf
+- Handbook: October 2024 edition, Review Date: 10/03/2027
+- Sections:
+  1. Handbook Details (title, version, review date - read-only)
+  2. Employee Details (name, role)
+  3. Handbook Contents Overview (read-only table of contents)
+  4. Acknowledgement Statements (6 required checkboxes)
+  5. Declaration & Signature (typed name + date)
+
+### Backend Files
+- `/app/backend/agreement_templates.py` - Template definitions with sections, fields, legal text
+- `/app/backend/server.py` - Added `AgreementSubmissionService` class
+
+### Backend Endpoints
+- **GET /api/agreement-templates** - List all templates (metadata only)
+- **GET /api/agreement-templates/{template_id}** - Get full template with sections/fields
+- **POST /api/employees/{id}/agreement-submissions** - Create submission
+- **GET /api/employees/{id}/agreement-submissions** - List employee's submissions
+- **GET /api/agreement-submissions/{id}** - Get submission with template
+- **POST /api/agreement-submissions/{id}/verify** - Verify submission
+- **POST /api/agreement-submissions/{id}/reject** - Reject submission (requires reason)
+- **GET /api/agreement-submissions/{id}/pdf** - Export as printable HTML/PDF
+
+### Frontend Component
+- `/app/frontend/src/components/compliance/AgreementFormDrawer.js`
+
+### Data Storage
+- `agreement_submissions` collection - Real structured submissions
+- `agreement_acknowledgements` collection - Legacy compatibility records
+
+### Completion Modes
+1. `self` - Employee completed independently
+2. `admin_assisted` - Admin filled on behalf (requires note)
+3. `phone_assisted` - Recorded during call (requires note)
+
+---
+
 ## Reference Lifecycle Controls Enhancement (2026-04-01)
 **Status**: COMPLETE ✅
 

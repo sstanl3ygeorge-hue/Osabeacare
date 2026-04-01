@@ -44,3 +44,6 @@ export { default as ApplicantStageBanner } from './ApplicantStageBanner';
 
 // Reference Response Drawer (Ticket E)
 export { default as ReferenceResponseDrawer } from './ReferenceResponseDrawer';
+
+// Agreement Form Drawer (Ticket D)
+export { default as AgreementFormDrawer } from './AgreementFormDrawer';

@@ -1,202 +1,105 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# IDE and editors
-.idea/
-.vscode/
-
-# Dependencies
-node_modules/
-/node_modules
-/.pnp
-.pnp.js
-.yarn/install-state.gz
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
-
-# Testing
-/coverage
-
-# Next.js
-/.next/
-/out/
-next-env.d.ts
-*.tsbuildinfo
-
-# Production builds
-/build
+# ==========================================
+# Python / FastAPI Backend
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
 dist/
-dist
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+*.log
+.mypy_cache/
+.ruff_cache/
 
-# Environment files (comprehensive coverage)
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
 
-*token.json*
-*credentials.json*
-
-# Logs and debug files
+# ==========================================
+# Node / React Frontend
+# ==========================================
+node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-dump.rdb
 
-# System files
+# Build outputs
+frontend/build/
+frontend/dist/
+.next/
+out/
+
+# ==========================================
+# Environment & Secrets (CRITICAL)
+# ==========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+backend/.env
+frontend/.env
+
+# ==========================================
+# IDE & Editor
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
-*.pem
+Thumbs.db
 
-# Python
-__pycache__/
-*pyc*
-venv/
-.venv/
+# ==========================================
+# Migration Reports (generated)
+# ==========================================
+migration/reports/*.log
+migration/reports/*.json
 
-# Development tools
-chainlit.md
-.chainlit
-.ipynb_checkpoints/
-.ac
+# ==========================================
+# Test Reports (generated)
+# ==========================================
+test_reports/
+*.test.log
 
-# Deployment
-.vercel
-
-# Data and databases
-agenthub/agents/youtube/db
-
-# Archive files and large assets
-**/*.zip
-**/*.tar.gz
-**/*.tar
-**/*.tgz
-*.pack
-*.deb
-*.dylib
-
-# Build caches
+# ==========================================
+# Misc
+# ==========================================
+*.bak
+*.tmp
+*.temp
 .cache/
+*.pid
+*.seed
+*.pid.lock
 
-memory/test_credentials.md
-
-# Mobile development
-android-sdk/frontend/node_modules/.cache/default-development/7.pack
-frontend/node_modules/.cache/default-development/7.pack
-frontend/node_modules/.cache/default-development/8.pack
-frontend/node_modules/.cache/default-development/10.pack
-frontend/node_modules/.cache/default-development/4.pack
-frontend/node_modules/.cache/default-development/1.pack
-frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/6.pack
-frontend/node_modules/.cache/default-development/5.pack
-frontend/node_modules/.cache/default-development/11.pack
-frontend/node_modules/.cache/default-development/16.pack
-frontend/node_modules/.cache/default-development/18.pack
-frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/17.pack
-frontend/node_modules/.cache/default-development/3.pack
-frontend/node_modules/.cache/default-development/12.pack
-frontend/node_modules/.cache/default-development/13.pack
-frontend/node_modules/.cache/default-development/19.pack
-frontend/node_modules/.cache/default-development/22.pack
-frontend/node_modules/.cache/default-development/26.pack
-frontend/node_modules/.cache/default-development/28.pack
-frontend/node_modules/.cache/default-development/34.pack
-frontend/node_modules/.cache/default-development/35.pack
-frontend/node_modules/.cache/default-development/41.pack
-frontend/node_modules/.cache/default-development/44.pack
-frontend/node_modules/.cache/default-development/47.pack
-frontend/node_modules/.cache/default-development/48.pack
-frontend/node_modules/.cache/default-development/52.pack
-frontend/node_modules/.cache/default-development/55.pack
-frontend/node_modules/.cache/default-development/50.pack
-frontend/node_modules/.cache/default-development/60.pack
-frontend/node_modules/.cache/default-development/61.pack
-frontend/node_modules/.cache/default-development/56.pack
-frontend/node_modules/.cache/default-development/69.pack
-frontend/node_modules/.cache/default-development/72.pack
-frontend/node_modules/.cache/default-development/74.pack
-frontend/node_modules/.cache/default-development/75.pack
-frontend/node_modules/.cache/default-development/77.pack
-frontend/node_modules/.cache/default-development/83.pack
-frontend/node_modules/.cache/default-development/84.pack
-frontend/node_modules/.cache/default-development/86.pack
-frontend/node_modules/.cache/default-development/88.pack
-frontend/node_modules/.cache/default-development/91.pack
-frontend/node_modules/.cache/default-development/95.pack
-frontend/node_modules/.cache/default-development/97.pack
-frontend/node_modules/.cache/default-development/98.pack
-frontend/node_modules/.cache/default-development/101.pack
-frontend/node_modules/.cache/default-development/102.pack
-frontend/node_modules/.cache/default-development/105.pack
-frontend/node_modules/.cache/default-development/109.pack
-frontend/node_modules/.cache/default-development/110.pack
-frontend/node_modules/.cache/default-development/116.pack
-frontend/node_modules/.cache/default-development/117.pack
-frontend/node_modules/.cache/default-development/119.pack
-frontend/node_modules/.cache/default-development/124.pack
-frontend/node_modules/.cache/default-development/54.pack
-frontend/node_modules/.cache/default-development/127.pack
-frontend/node_modules/.cache/default-development/129.pack
-frontend/node_modules/.cache/default-development/132.pack
-frontend/node_modules/.cache/default-development/134.pack
-frontend/node_modules/.cache/default-development/37.pack
-frontend/node_modules/.cache/default-development/140.pack
-frontend/node_modules/.cache/default-development/147.pack
-frontend/node_modules/.cache/default-development/148.pack
-frontend/node_modules/.cache/default-development/149.pack
-frontend/node_modules/.cache/default-development/114.pack
-frontend/node_modules/.cache/default-development/151.pack
-frontend/node_modules/.cache/default-development/154.pack
-frontend/node_modules/.cache/default-development/153.pack
-frontend/node_modules/.cache/default-development/153.pack
-frontend/node_modules/.cache/default-development/158.pack
-frontend/node_modules/.cache/default-development/160.pack
-frontend/node_modules/.cache/default-development/164.pack
-frontend/node_modules/.cache/default-development/169.pack
-frontend/node_modules/.cache/default-development/171.pack
-frontend/node_modules/.cache/default-development/173.pack
-frontend/node_modules/.cache/default-development/174.pack
-frontend/node_modules/.cache/default-development/172.pack
-frontend/node_modules/.cache/default-development/185.pack
-frontend/node_modules/.cache/default-development/187.pack
-frontend/node_modules/.cache/default-development/73.pack
-frontend/node_modules/.cache/default-development/192.pack
-frontend/node_modules/.cache/default-development/194.pack
-frontend/node_modules/.cache/default-development/183.pack
-frontend/node_modules/.cache/default-development/208.pack
-frontend/node_modules/.cache/default-development/213.pack
-frontend/node_modules/.cache/default-development/215.pack
-frontend/node_modules/.cache/default-development/217.pack
-frontend/node_modules/.cache/default-development/205.pack
-frontend/node_modules/.cache/default-development/220.pack
-frontend/node_modules/.cache/default-development/224.pack
-frontend/node_modules/.cache/default-development/232.pack
-frontend/node_modules/.cache/default-development/234.pack
-frontend/node_modules/.cache/default-development/233.pack
-frontend/node_modules/.cache/default-development/236.pack
-frontend/node_modules/.cache/default-development/238.pack
-frontend/node_modules/.cache/default-development/237.pack
-frontend/node_modules/.cache/default-development/240.pack
-frontend/node_modules/.cache/default-development/246.pack
-frontend/node_modules/.cache/default-development/250.pack
-frontend/node_modules/.cache/default-development/255.pack
-frontend/node_modules/.cache/default-development/265.pack
-frontend/node_modules/.cache/default-development/267.pack
-frontend/node_modules/.cache/default-development/225.pack
-frontend/node_modules/.cache/default-development/227.pack
-frontend/node_modules/.cache/default-development/272.pack
-frontend/node_modules/.cache/default-development/273.pack
-frontend/node_modules/.cache/default-development/277.pack
-frontend/node_modules/.cache/default-development/280.pack
-frontend/node_modules/.cache/default-development/281.pack
-frontend/node_modules/.cache/default-development/276.pack
-frontend/node_modules/.cache/default-development/279.pack
-frontend/node_modules/.cache/default-development/288.pack
-frontend/node_modules/.cache/default-development/284.pack
-frontend/node_modules/.cache/default-development/292.pack
-frontend/node_modules/.cache/default-development/295.pack
+# Keep .gitkeep files
+!.gitkeep
 frontend/node_modules/.cache/default-development/293.pack
-frontend/node_modules/.cache/default-development/9.pack
-frontend/node_modules/.cache/default-development/14.pack
-frontend/node_modules/.cache/default-development/24.pack
 frontend/node_modules/.cache/default-development/25.pack

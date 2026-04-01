@@ -3,6 +3,57 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Form Actions Wiring + Send/Verify/Reject (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Wired FormRequirementRow actions to form drawers, implemented send flow for employee_sendable forms, and added verify/reject actions with rejection reason support.
+
+### New Components Created
+- `/app/frontend/src/components/compliance/FormSubmissionDrawer.js` - Universal drawer for form-type requirements
+  - Modes: create, view, edit
+  - Dynamic form field rendering based on template
+  - Collapsible sections
+  - Completion mode selector (admin_assisted, phone_assisted, self)
+  - Verify/Reject buttons for awaiting review submissions
+  - Export PDF functionality
+  
+- `/app/frontend/src/components/compliance/RejectFormDialog.js` - Rejection dialog with reason input
+
+### Backend Endpoints
+- `POST /api/form-submissions/{id}/verify` - Sets status to verified with verifier and timestamp
+- `POST /api/form-submissions/{id}/reject` - Sets status to rejected with reason, reviewer, timestamp
+- `POST /api/employees/{id}/send-form?form_type={type}` - Sends form request email to employee
+
+### FormSubmissionResponse Model Updated
+Added rejection fields:
+- `rejected_by`, `rejected_by_name`, `rejected_at`, `rejection_reason`
+
+### Form Delivery Modes
+| Form | Delivery Mode | Send Button | Admin Fill |
+|------|--------------|-------------|------------|
+| Staff Health Questionnaire | employee_sendable | ✅ | ✅ |
+| HMRC Starter Checklist | employee_sendable | ✅ | ✅ |
+| Equal Opportunities | employee_sendable | ✅ | ✅ |
+| Staff Personal Info | employee_sendable | ✅ | ✅ |
+| Interview Record | admin_only | ❌ | ✅ |
+| Recruitment Checklist | admin_only | ❌ | ✅ |
+| Induction | admin_only | ❌ | ✅ |
+
+### Status Display
+- **Verified** - Green badge with checkmark
+- **Rejected** - Red badge with rejection reason in red box
+- **Awaiting Review** - Amber badge with Verify/Reject buttons
+- **Draft** - Blue badge
+- **Not Started** - Gray badge
+
+### Testing
+- Backend: 100% (14/14 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_104.json`
+
+---
+
 ## Compliance Stabilization - Requirement Capability Map (2026-04-01)
 **Status**: COMPLETE ✅
 

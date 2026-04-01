@@ -92,6 +92,58 @@ Clear distinction between supporting evidence and authoritative checks.
 ## Compliance File Audit Pass (2026-03-31)
 **Status**: COMPLETE ✅
 
+## Stage Identity UI - Applicant vs Employee (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented visual separation between Applicants and Employees using Stage Identity badges, filtering, and banners throughout the portal.
+
+### Components Created
+
+**StageIdentityBadge.js**
+- Reusable badge component showing "Applicant" (blue) or "Staff" (green)
+- Size variants: sm, md, lg
+- Optional icon display
+- Uses data-testid: `stage-badge-applicant`, `stage-badge-employee`
+
+**ApplicantStageBanner.js**
+- Prominent banner for compliance page when viewing applicants
+- Shows recruitment stage status (Application Received, Under Screening, etc.)
+- Lists 5 requirements before recruitment approval:
+  - Right to Work verified
+  - Identity verified
+  - DBS check verified
+  - 2 references verified
+  - Proof of address (2 documents) verified
+- "Approve for Recruitment" button (navigates to Recruitment tab)
+- Uses data-testid: `applicant-stage-banner`, `approve-recruitment-btn`
+
+### Integration Points
+
+1. **EmployeesPage.js (Staff page)**
+   - StageIdentityBadge shows "Staff" for each employee in the list
+   - Uses `person_stage || stage_identity || 'employee'` fallback
+
+2. **RecruitmentPage.js (Recruitment Pipeline)**
+   - StageIdentityBadge shows "Applicant" for each applicant
+   - Uses `person_stage || stage_identity || 'applicant'` fallback
+
+3. **EmployeeProfilePage.js (Compliance File tab)**
+   - ApplicantStageBanner displays when `employee.person_stage === 'applicant'`
+   - Shown between ComplianceActionBar and status panel
+
+### Backend Data Used
+- `person_stage`: "applicant" or "employee" (returned by `/employees` and `/recruitment/applicants` endpoints)
+- `stage_identity`: Same value, provided by `stage_identity.py` helper
+- `is_applicant`, `is_employee`: Boolean flags
+
+### Testing
+- 8/8 frontend tests passed (iteration_99.json)
+- 100% success rate
+- All data-testids verified
+
+---
+
 ## STEP 11E+ Compliance Page Functionalization (2026-03-31)
 **Status**: Pass 1 IN PROGRESS
 

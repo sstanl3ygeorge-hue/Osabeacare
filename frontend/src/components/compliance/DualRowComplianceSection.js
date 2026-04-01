@@ -16,6 +16,7 @@ import UploadRequirementDrawer from './UploadRequirementDrawer';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 import ReferenceResponseDrawer from './ReferenceResponseDrawer';
+import AgreementFormDrawer from './AgreementFormDrawer';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
 
@@ -38,14 +39,12 @@ export default function DualRowComplianceSection({
   employeeId,
   employeeEmail,
   employeeName,
+  employeeData,  // Full employee data for pre-filling forms
   onUpload,
   onRequest,
   onPreviewFile,
   onExtractReview,
   onRecordCheck,
-  onSendAgreement,
-  onFillAgreement,
-  onCompleteByPhone,
   isAuditor = false,
   onRefresh
 }) {
@@ -87,6 +86,16 @@ export default function DualRowComplianceSection({
   const [referenceDrawer, setReferenceDrawer] = useState({
     open: false,
     referenceNum: null
+  });
+  
+  // Ticket D: Agreement form drawer state
+  const [agreementDrawer, setAgreementDrawer] = useState({
+    isOpen: false,
+    templateId: null,
+    mode: 'create', // 'create' or 'view'
+    submissionId: null,
+    agreementKey: null,
+    agreementTitle: null
   });
   
   const { token } = useAuth();
@@ -331,10 +340,28 @@ export default function DualRowComplianceSection({
                     row={row}
                     employeeId={employeeId}
                     employeeEmail={employeeEmail}
+                    employeeData={employeeData}
                     onRefresh={handleRefresh}
-                    onSendForm={onSendAgreement}
-                    onFillInternally={onFillAgreement}
-                    onCompleteByPhone={onCompleteByPhone}
+                    onOpenForm={(agreementKey, title, templateId, mode) => {
+                      setAgreementDrawer({
+                        isOpen: true,
+                        templateId,
+                        mode: 'create',
+                        submissionId: null,
+                        agreementKey,
+                        agreementTitle: title
+                      });
+                    }}
+                    onViewSubmission={(agreementKey, title, templateId, submissionId) => {
+                      setAgreementDrawer({
+                        isOpen: true,
+                        templateId,
+                        mode: 'view',
+                        submissionId,
+                        agreementKey,
+                        agreementTitle: title
+                      });
+                    }}
                     onViewHistory={handleViewHistory}
                     isAuditor={isAuditor}
                   />
@@ -545,6 +572,21 @@ export default function DualRowComplianceSection({
         referenceNum={referenceDrawer.referenceNum}
         onRefresh={handleRefresh}
         isAuditor={isAuditor}
+      />
+      
+      {/* Ticket D: Agreement Form Drawer */}
+      <AgreementFormDrawer
+        isOpen={agreementDrawer.isOpen}
+        onClose={() => setAgreementDrawer({ 
+          isOpen: false, templateId: null, mode: 'create', 
+          submissionId: null, agreementKey: null, agreementTitle: null 
+        })}
+        employeeId={employeeId}
+        templateId={agreementDrawer.templateId}
+        employeeData={employeeData}
+        onSubmitSuccess={handleRefresh}
+        mode={agreementDrawer.mode}
+        existingSubmission={agreementDrawer.submissionId ? { id: agreementDrawer.submissionId } : null}
       />
     </div>
   );

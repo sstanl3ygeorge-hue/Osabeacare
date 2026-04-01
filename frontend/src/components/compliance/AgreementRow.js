@@ -1,3 +1,24 @@
+/**
+ * AgreementRow.js - Refactored for template-based submissions
+ * 
+ * Agreements are real template-driven forms, not simple status toggles:
+ * - Zero Hour Contract (ZERO_HOUR_CONTRACT_V1)
+ * - Employee Handbook Acknowledgement (EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1)
+ * 
+ * Real lifecycle states:
+ * - not_sent: No action taken
+ * - sent: Request sent to employee
+ * - in_progress: Employee has viewed but not completed
+ * - submitted: Form submitted, awaiting review
+ * - verified: Admin verified the submission
+ * - rejected: Admin rejected the submission
+ * 
+ * Completion modes:
+ * - self: Employee completed independently
+ * - admin_assisted: Admin filled on employee's behalf
+ * - phone_assisted: Admin recorded during phone call
+ */
+
 import { useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -6,34 +27,27 @@ import { Badge } from '../ui/badge';
 import { toast } from 'sonner';
 import { 
   FileSignature, CheckCircle, XCircle, Clock, AlertTriangle, 
-  ChevronDown, ChevronUp, Mail, Phone, Edit, History
+  ChevronDown, ChevronUp, Mail, Phone, Edit, History, Eye,
+  Download, Send, Loader2, FileText, User, UserCheck
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-/**
- * AgreementRow - Renders an agreement acknowledgement row
- * 
- * Agreements are forms, not documents:
- * - Contract Acceptance
- * - Employee Handbook Acknowledgement
- * 
- * Completion modes:
- * - self_completed: Employee filled via secure link
- * - admin_assisted: Admin filled on employee's behalf
- * - phone_assisted: Admin recorded during phone call
- */
+// Map agreement keys to template IDs
+const AGREEMENT_TEMPLATE_MAP = {
+  'contract_acceptance': 'ZERO_HOUR_CONTRACT_V1',
+  'handbook_acknowledgement': 'EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1',
+};
+
 export default function AgreementRow({
   row,
   employeeId,
   employeeEmail,
+  employeeData,
   onRefresh,
-  onSendForm,
-  onFillInternally,
-  onCompleteByPhone,
-  onVerify,
-  onReject,
+  onOpenForm,      // Opens AgreementFormDrawer in create mode
+  onViewSubmission, // Opens AgreementFormDrawer in view mode
   onViewHistory,
   isAuditor = false
 }) {
@@ -50,62 +64,88 @@ export default function AgreementRow({
     is_verified,
     acknowledgement_data,
     pending_requests = [],
+    submission_data,  // New: Real template submission
     counts = {},
     allowed_actions = [],
     blocker_text
   } = row;
 
-  // Status colors
-  const getStatusColor = () => {
-    if (is_verified) return 'bg-green-100 text-green-700';
-    if (has_acknowledgement) return 'bg-amber-100 text-amber-700';
-    if (pending_requests.length > 0) return 'bg-blue-100 text-blue-700';
-    return 'bg-red-100 text-red-700';
+  // Get template ID for this agreement
+  const templateId = AGREEMENT_TEMPLATE_MAP[key];
+
+  // Determine lifecycle status
+  const getLifecycleStatus = () => {
+    if (is_verified) return 'verified';
+    if (acknowledgement_data?.verification_status === 'rejected') return 'rejected';
+    if (has_acknowledgement || submission_data) return 'submitted';
+    if (pending_requests.length > 0) return 'sent';
+    return 'not_sent';
   };
 
-  // Background color for the row
-  const getRowBgColor = () => {
-    if (is_verified) return 'bg-green-50/30';
-    if (has_acknowledgement) return 'bg-amber-50/30';
-    if (pending_requests.length > 0) return 'bg-blue-50/30';
-    return 'bg-red-50/30';
+  const lifecycleStatus = getLifecycleStatus();
+
+  // Status colors and icons
+  const getStatusConfig = () => {
+    switch (lifecycleStatus) {
+      case 'verified':
+        return { color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700', icon: CheckCircle, label: 'Verified' };
+      case 'rejected':
+        return { color: 'red', bgColor: 'bg-red-100', textColor: 'text-red-700', icon: XCircle, label: 'Rejected' };
+      case 'submitted':
+        return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: Clock, label: 'Awaiting Review' };
+      case 'sent':
+        return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Mail, label: 'Sent' };
+      case 'in_progress':
+        return { color: 'purple', bgColor: 'bg-purple-100', textColor: 'text-purple-700', icon: Edit, label: 'In Progress' };
+      default:
+        return { color: 'gray', bgColor: 'bg-gray-100', textColor: 'text-gray-700', icon: FileSignature, label: 'Not Started' };
+    }
   };
+
+  const statusConfig = getStatusConfig();
+  const StatusIcon = statusConfig.icon;
 
   // Completion mode display
   const getCompletionModeDisplay = (mode) => {
     const modes = {
-      'self_completed': 'Self-completed',
-      'admin_assisted': 'Admin-assisted',
-      'phone_assisted': 'Phone-assisted'
+      'self': { label: 'Self-completed', icon: User },
+      'self_completed': { label: 'Self-completed', icon: User },
+      'admin_assisted': { label: 'Admin-assisted', icon: UserCheck },
+      'phone_assisted': { label: 'Phone-assisted', icon: Phone },
     };
-    return modes[mode] || mode?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+    return modes[mode] || { label: mode?.replace(/_/g, ' ') || 'Unknown', icon: User };
   };
 
-  // Verification status display
-  const getVerificationStatusDisplay = (status) => {
-    const statuses = {
-      'awaiting_review': 'Awaiting Review',
-      'verified': 'Verified',
-      'rejected': 'Rejected'
-    };
-    return statuses[status] || status?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
-  };
-
-  // Handle verify
+  // Handle verify submission
   const handleVerify = async () => {
-    if (!acknowledgement_data?.id) return;
+    const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
+    if (!submissionId) {
+      // Fallback to legacy verify
+      if (acknowledgement_data?.id) {
+        setIsProcessing(true);
+        try {
+          await axios.post(
+            `${API}/employees/${employeeId}/agreements/${acknowledgement_data.id}/verify`,
+            '"Verified by admin"',
+            { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+          );
+          toast.success('Agreement verified');
+          if (onRefresh) onRefresh();
+        } catch (err) {
+          toast.error(err.response?.data?.detail || 'Failed to verify');
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+      return;
+    }
     
     setIsProcessing(true);
     try {
       await axios.post(
-        `${API}/employees/${employeeId}/agreements/${acknowledgement_data.id}/verify`,
-        '"Verified by admin"',
-        {
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
+        `${API}/agreement-submissions/${submissionId}/verify`,
+        { notes: 'Verified by admin' },
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success('Agreement verified');
       if (onRefresh) onRefresh();
@@ -116,19 +156,42 @@ export default function AgreementRow({
     }
   };
 
-  // Handle reject
+  // Handle reject submission
   const handleReject = async () => {
-    const reason = prompt('Enter rejection reason:');
-    if (!reason) return;
+    const reason = prompt('Enter rejection reason (min 10 characters):');
+    if (!reason || reason.length < 10) {
+      if (reason) toast.error('Rejection reason must be at least 10 characters');
+      return;
+    }
+    
+    const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
+    if (!submissionId) {
+      // Fallback to legacy reject
+      if (acknowledgement_data?.id) {
+        setIsProcessing(true);
+        try {
+          await axios.post(
+            `${API}/employees/${employeeId}/agreements/${acknowledgement_data.id}/reject`,
+            { reason },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          toast.success('Agreement rejected');
+          if (onRefresh) onRefresh();
+        } catch (err) {
+          toast.error(err.response?.data?.detail || 'Failed to reject');
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+      return;
+    }
     
     setIsProcessing(true);
     try {
       await axios.post(
-        `${API}/employees/${employeeId}/agreements/${acknowledgement_data.id}/reject`,
+        `${API}/agreement-submissions/${submissionId}/reject`,
         { reason },
-        {
-          headers: { Authorization: `Bearer ${token}` }
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success('Agreement rejected');
       if (onRefresh) onRefresh();
@@ -139,13 +202,44 @@ export default function AgreementRow({
     }
   };
 
+  // Handle PDF export
+  const handleExportPDF = async () => {
+    const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
+    if (!submissionId) {
+      toast.error('No submission to export');
+      return;
+    }
+    
+    try {
+      const response = await axios.get(
+        `${API}/agreement-submissions/${submissionId}/pdf`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      // Open HTML content in new window for printing
+      const printWindow = window.open('', '_blank');
+      printWindow.document.write(response.data.html_content);
+      printWindow.document.close();
+      printWindow.print();
+    } catch (err) {
+      toast.error('Failed to export PDF');
+    }
+  };
+
+  // Get completion mode data
+  const completionMode = submission_data?.completion_mode || acknowledgement_data?.completion_mode;
+  const modeConfig = completionMode ? getCompletionModeDisplay(completionMode) : null;
+  const ModeIcon = modeConfig?.icon;
+
   return (
     <div 
       className={`border rounded-xl overflow-hidden ${
-        is_verified ? 'border-green-200' : 
-        has_acknowledgement ? 'border-amber-200' : 
-        pending_requests.length > 0 ? 'border-blue-200' : 'border-red-200'
-      } ${getRowBgColor()}`}
+        lifecycleStatus === 'verified' ? 'border-green-200 bg-green-50/30' : 
+        lifecycleStatus === 'rejected' ? 'border-red-200 bg-red-50/30' :
+        lifecycleStatus === 'submitted' ? 'border-amber-200 bg-amber-50/30' : 
+        lifecycleStatus === 'sent' ? 'border-blue-200 bg-blue-50/30' : 
+        'border-gray-200 bg-gray-50/30'
+      }`}
       data-testid={`agreement-row-${key}`}
     >
       {/* Row Header */}
@@ -155,20 +249,8 @@ export default function AgreementRow({
       >
         <div className="flex items-center gap-3 flex-1 min-w-0">
           {/* Icon */}
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-            is_verified ? 'bg-green-100' : 
-            has_acknowledgement ? 'bg-amber-100' : 
-            pending_requests.length > 0 ? 'bg-blue-100' : 'bg-red-100'
-          }`}>
-            {is_verified ? (
-              <CheckCircle className="h-5 w-5 text-green-600" />
-            ) : has_acknowledgement ? (
-              <Clock className="h-5 w-5 text-amber-600" />
-            ) : pending_requests.length > 0 ? (
-              <Mail className="h-5 w-5 text-blue-600" />
-            ) : (
-              <FileSignature className="h-5 w-5 text-red-600" />
-            )}
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${statusConfig.bgColor}`}>
+            <StatusIcon className={`h-5 w-5 ${statusConfig.textColor}`} />
           </div>
           
           {/* Title and Summary */}
@@ -184,14 +266,20 @@ export default function AgreementRow({
                 </Badge>
               )}
             </div>
-            <p className="text-sm text-text-muted truncate">{status_summary}</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <p className="text-sm text-text-muted truncate">{status_summary}</p>
+              {modeConfig && (
+                <Badge className="text-[9px] bg-gray-100 text-gray-600 border-gray-200">
+                  <ModeIcon className="h-2.5 w-2.5 mr-0.5" />
+                  {modeConfig.label}
+                </Badge>
+              )}
+            </div>
           </div>
           
           {/* Status Badge */}
-          <Badge className={`${getStatusColor()} text-xs`}>
-            {is_verified ? 'Verified' : 
-             has_acknowledgement ? getVerificationStatusDisplay(acknowledgement_data?.verification_status) :
-             pending_requests.length > 0 ? 'Sent' : 'Not Completed'}
+          <Badge className={`${statusConfig.bgColor} ${statusConfig.textColor} text-xs`}>
+            {statusConfig.label}
           </Badge>
         </div>
         
@@ -199,52 +287,45 @@ export default function AgreementRow({
         <div className="flex items-center gap-2 ml-4">
           {!isAuditor && (
             <>
-              {/* Send Form / Fill Internally / Complete by Phone */}
-              {!has_acknowledgement && pending_requests.length === 0 && (
-                <>
-                  {allowed_actions.includes('send_form') && employeeEmail && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => { e.stopPropagation(); if (onSendForm) onSendForm(key, title); }}
-                      className="h-8 text-xs text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg"
-                      data-testid={`send-form-${key}`}
-                    >
-                      <Mail className="h-3.5 w-3.5 mr-1" />
-                      Send
-                    </Button>
-                  )}
-                  
-                  {allowed_actions.includes('fill_internally') && (
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={(e) => { e.stopPropagation(); if (onFillInternally) onFillInternally(key, title); }}
-                      className="h-8 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg"
-                      data-testid={`fill-internally-${key}`}
-                    >
-                      <Edit className="h-3.5 w-3.5 mr-1" />
-                      Fill
-                    </Button>
-                  )}
-                  
-                  {allowed_actions.includes('complete_by_phone') && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={(e) => { e.stopPropagation(); if (onCompleteByPhone) onCompleteByPhone(key, title); }}
-                      className="h-8 text-xs rounded-lg"
-                      data-testid={`complete-by-phone-${key}`}
-                    >
-                      <Phone className="h-3.5 w-3.5 mr-1" />
-                      Phone
-                    </Button>
-                  )}
-                </>
+              {/* Open Form - for not started or to redo */}
+              {lifecycleStatus === 'not_sent' && templateId && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (onOpenForm) onOpenForm(key, title, templateId, 'create');
+                  }}
+                  className="h-8 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg"
+                  data-testid={`open-form-${key}`}
+                >
+                  <Edit className="h-3.5 w-3.5 mr-1" />
+                  Complete
+                </Button>
+              )}
+              
+              {/* View Submission - for submitted/verified */}
+              {(lifecycleStatus === 'submitted' || lifecycleStatus === 'verified' || lifecycleStatus === 'rejected') && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    if (onViewSubmission) {
+                      const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
+                      onViewSubmission(key, title, templateId, submissionId);
+                    }
+                  }}
+                  className="h-8 text-xs rounded-lg"
+                  data-testid={`view-submission-${key}`}
+                >
+                  <Eye className="h-3.5 w-3.5 mr-1" />
+                  View
+                </Button>
               )}
               
               {/* Verify / Reject for awaiting review */}
-              {has_acknowledgement && !is_verified && acknowledgement_data?.verification_status === 'awaiting_review' && (
+              {lifecycleStatus === 'submitted' && (
                 <>
                   <Button
                     size="sm"
@@ -254,7 +335,7 @@ export default function AgreementRow({
                     className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg"
                     data-testid={`verify-${key}`}
                   >
-                    <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                    {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5 mr-1" />}
                     Verify
                   </Button>
                   <Button
@@ -271,33 +352,31 @@ export default function AgreementRow({
                 </>
               )}
               
-              {/* Fill internally when request is pending */}
-              {pending_requests.length > 0 && allowed_actions.includes('fill_internally') && (
+              {/* Export PDF for completed */}
+              {(lifecycleStatus === 'submitted' || lifecycleStatus === 'verified') && (submission_data?.id || acknowledgement_data?.submission_id) && (
                 <Button
                   size="sm"
-                  variant="outline"
-                  onClick={(e) => { e.stopPropagation(); if (onFillInternally) onFillInternally(key, title); }}
+                  variant="ghost"
+                  onClick={(e) => { e.stopPropagation(); handleExportPDF(); }}
                   className="h-8 text-xs rounded-lg"
-                  data-testid={`fill-internally-pending-${key}`}
+                  data-testid={`export-pdf-${key}`}
                 >
-                  <Edit className="h-3.5 w-3.5 mr-1" />
-                  Complete on Behalf
+                  <Download className="h-3.5 w-3.5" />
                 </Button>
               )}
             </>
           )}
           
-          {/* View History */}
-          {counts.history > 0 && (
+          {/* History */}
+          {onViewHistory && (
             <Button
               size="sm"
               variant="ghost"
-              onClick={(e) => { e.stopPropagation(); if (onViewHistory) onViewHistory(key); }}
-              className="h-8 text-xs"
+              onClick={(e) => { e.stopPropagation(); onViewHistory(key, title); }}
+              className="h-8 text-xs rounded-lg"
               data-testid={`history-${key}`}
             >
-              <History className="h-3.5 w-3.5 mr-1" />
-              {counts.history}
+              <History className="h-3.5 w-3.5" />
             </Button>
           )}
           
@@ -305,123 +384,90 @@ export default function AgreementRow({
           <Button
             size="sm"
             variant="ghost"
-            className="h-8 w-8 p-0"
             onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="h-8 w-8 p-0"
           >
             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </Button>
         </div>
       </div>
-      
-      {/* Expanded Content - Has Acknowledgement */}
-      {expanded && has_acknowledgement && acknowledgement_data && (
-        <div className="border-t border-gray-100 p-4 bg-white/50">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            {/* Version */}
-            <div>
-              <p className="text-xs text-text-muted uppercase tracking-wide">Version</p>
-              <p className="font-medium text-text-primary">{acknowledgement_data.version_acknowledged}</p>
-            </div>
+
+      {/* Expanded Details */}
+      {expanded && (
+        <div className="px-4 pb-4 pt-2 border-t border-gray-200/50">
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            {/* Submission Details */}
+            {(submission_data || acknowledgement_data) && (
+              <>
+                <div>
+                  <p className="text-gray-500 text-xs">Completed</p>
+                  <p className="text-gray-900">
+                    {formatBackendDate(submission_data?.completed_at || acknowledgement_data?.completed_at, { format: 'medium' })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500 text-xs">Completion Mode</p>
+                  <div className="flex items-center gap-1">
+                    {modeConfig && <ModeIcon className="h-3.5 w-3.5 text-gray-500" />}
+                    <p className="text-gray-900">{modeConfig?.label || 'Unknown'}</p>
+                  </div>
+                </div>
+                {submission_data?.signature_name && (
+                  <div>
+                    <p className="text-gray-500 text-xs">Signed By</p>
+                    <p className="text-gray-900 font-serif italic">{submission_data.signature_name}</p>
+                  </div>
+                )}
+                {submission_data?.admin_note && (
+                  <div className="col-span-2">
+                    <p className="text-gray-500 text-xs">Admin Note</p>
+                    <p className="text-gray-700 text-sm bg-blue-50 p-2 rounded">{submission_data.admin_note}</p>
+                  </div>
+                )}
+              </>
+            )}
             
-            {/* Completion Mode */}
-            <div>
-              <p className="text-xs text-text-muted uppercase tracking-wide">Completed Via</p>
-              <p className="font-medium text-text-primary">{getCompletionModeDisplay(acknowledgement_data.completion_mode)}</p>
-            </div>
-            
-            {/* Completed At */}
-            <div>
-              <p className="text-xs text-text-muted uppercase tracking-wide">Completed</p>
-              <p className="font-medium text-text-primary">
-                {formatBackendDate(acknowledgement_data.completed_at, { format: 'medium' })}
-              </p>
-            </div>
-            
-            {/* Verification Status */}
-            <div>
-              <p className="text-xs text-text-muted uppercase tracking-wide">Status</p>
-              <p className={`font-medium ${
-                acknowledgement_data.verification_status === 'verified' ? 'text-green-600' :
-                acknowledgement_data.verification_status === 'rejected' ? 'text-red-600' : 'text-amber-600'
-              }`}>
-                {getVerificationStatusDisplay(acknowledgement_data.verification_status)}
-              </p>
-            </div>
-          </div>
-          
-          {/* Call Note (for phone-assisted) */}
-          {acknowledgement_data.call_note && (
-            <div className="mt-4 pt-4 border-t border-gray-100">
-              <p className="text-xs text-text-muted uppercase tracking-wide mb-1">Call Note</p>
-              <p className="text-sm text-text-primary">{acknowledgement_data.call_note}</p>
-            </div>
-          )}
-          
-          {/* Verified info */}
-          {acknowledgement_data.verified_at && (
-            <div className="mt-4 pt-4 border-t border-gray-100 text-sm text-text-muted">
-              Verified on {formatBackendDate(acknowledgement_data.verified_at, { format: 'medium' })}
-            </div>
-          )}
-        </div>
-      )}
-      
-      {/* Expanded Content - Pending Request */}
-      {expanded && !has_acknowledgement && pending_requests.length > 0 && (
-        <div className="border-t border-gray-100 p-4 bg-white/50">
-          <h5 className="text-xs font-medium text-text-muted uppercase tracking-wide mb-3">Pending Request</h5>
-          {pending_requests.map((req, idx) => (
-            <div key={req.id || idx} className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
-              <Mail className="h-5 w-5 text-blue-600" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-blue-900">Form sent to employee</p>
-                <p className="text-xs text-blue-700">
-                  Sent {formatBackendDate(req.sent_at, { format: 'relative' })} • 
-                  Due {formatBackendDate(req.due_at, { format: 'medium' })}
+            {/* Verification Details */}
+            {lifecycleStatus === 'verified' && (
+              <div className="col-span-2 p-3 bg-green-50 rounded-lg border border-green-200">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  <span className="font-medium text-green-800">Verified</span>
+                </div>
+                <p className="text-sm text-green-700 mt-1">
+                  {formatBackendDate(submission_data?.verified_at || acknowledgement_data?.verified_at, { format: 'medium' })}
+                  {(submission_data?.verified_by || acknowledgement_data?.verified_by) && 
+                    ` by ${submission_data?.verified_by || acknowledgement_data?.verified_by}`}
                 </p>
               </div>
-              <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
-                {req.status}
-              </Badge>
-            </div>
-          ))}
-        </div>
-      )}
-      
-      {/* Not Completed State */}
-      {expanded && !has_acknowledgement && pending_requests.length === 0 && (
-        <div className="border-t border-gray-100 p-6 bg-white/50 text-center">
-          <FileSignature className="h-10 w-10 mx-auto mb-3 text-red-400" />
-          <p className="text-sm text-text-muted mb-2">Agreement not completed yet</p>
-          <p className="text-xs text-text-muted mb-4">
-            This requirement blocks work readiness until the agreement is completed and verified.
-          </p>
-          {!isAuditor && (
-            <div className="flex items-center justify-center gap-2">
-              {allowed_actions.includes('send_form') && employeeEmail && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => onSendForm && onSendForm(key, title)}
-                  className="text-blue-600 border-blue-200 hover:bg-blue-50 rounded-lg"
-                >
-                  <Mail className="h-4 w-4 mr-2" />
-                  Send Form
-                </Button>
-              )}
-              {allowed_actions.includes('fill_internally') && (
-                <Button
-                  size="sm"
-                  variant="default"
-                  onClick={() => onFillInternally && onFillInternally(key, title)}
-                  className="bg-primary hover:bg-primary-hover text-white rounded-lg"
-                >
-                  <Edit className="h-4 w-4 mr-2" />
-                  Fill Internally
-                </Button>
-              )}
-            </div>
-          )}
+            )}
+            
+            {/* Rejection Details */}
+            {lifecycleStatus === 'rejected' && (
+              <div className="col-span-2 p-3 bg-red-50 rounded-lg border border-red-200">
+                <div className="flex items-center gap-2">
+                  <XCircle className="h-4 w-4 text-red-600" />
+                  <span className="font-medium text-red-800">Rejected</span>
+                </div>
+                <p className="text-sm text-red-700 mt-1">
+                  {submission_data?.rejection_reason || acknowledgement_data?.rejection_reason || 'No reason provided'}
+                </p>
+              </div>
+            )}
+            
+            {/* No submission yet */}
+            {lifecycleStatus === 'not_sent' && (
+              <div className="col-span-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-gray-500" />
+                  <span className="font-medium text-gray-700">Not Started</span>
+                </div>
+                <p className="text-sm text-gray-600 mt-1">
+                  Click "Complete" to fill out the {title} form
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -21,7 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
-import { DualRowComplianceSection, RecordCheckDialog, CompleteAgreementDialog, SendAgreementDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -287,13 +287,6 @@ export default function EmployeeProfilePage() {
   // Dual-Row Compliance Model State (Step 11)
   const [recordCheckDialogOpen, setRecordCheckDialogOpen] = useState(false);
   const [recordCheckType, setRecordCheckType] = useState(null);
-  const [completeAgreementDialogOpen, setCompleteAgreementDialogOpen] = useState(false);
-  const [completeAgreementKey, setCompleteAgreementKey] = useState(null);
-  const [completeAgreementTitle, setCompleteAgreementTitle] = useState('');
-  const [completeAgreementMode, setCompleteAgreementMode] = useState('admin_assisted');
-  const [sendAgreementDialogOpen, setSendAgreementDialogOpen] = useState(false);
-  const [sendAgreementKey, setSendAgreementKey] = useState(null);
-  const [sendAgreementTitle, setSendAgreementTitle] = useState('');
   
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
   const fetchRecruitmentStatus = async () => {
@@ -4365,24 +4358,7 @@ export default function EmployeeProfilePage() {
                         setRecordCheckType(checkType);
                         setRecordCheckDialogOpen(true);
                       }}
-                      onSendAgreement={(agreementKey, title) => {
-                        // Open the send agreement dialog to email form to employee
-                        setSendAgreementKey(agreementKey);
-                        setSendAgreementTitle(title);
-                        setSendAgreementDialogOpen(true);
-                      }}
-                      onFillAgreement={(agreementKey, title) => {
-                        setCompleteAgreementKey(agreementKey);
-                        setCompleteAgreementTitle(title);
-                        setCompleteAgreementMode('admin_assisted');
-                        setCompleteAgreementDialogOpen(true);
-                      }}
-                      onCompleteByPhone={(agreementKey, title) => {
-                        setCompleteAgreementKey(agreementKey);
-                        setCompleteAgreementTitle(title);
-                        setCompleteAgreementMode('phone_assisted');
-                        setCompleteAgreementDialogOpen(true);
-                      }}
+                      employeeData={employee}
                       isAuditor={isAuditor()}
                       onRefresh={() => {
                         fetchData();
@@ -9540,44 +9516,6 @@ export default function EmployeeProfilePage() {
         }}
         employeeId={employeeId}
         checkType={recordCheckType}
-        onComplete={() => {
-          fetchData();
-          fetchCompliance();
-        }}
-      />
-      
-      {/* Complete Agreement Dialog */}
-      <CompleteAgreementDialog
-        open={completeAgreementDialogOpen}
-        onClose={() => {
-          setCompleteAgreementDialogOpen(false);
-          setCompleteAgreementKey(null);
-          setCompleteAgreementTitle('');
-          setCompleteAgreementMode('admin_assisted');
-        }}
-        employeeId={employeeId}
-        agreementKey={completeAgreementKey}
-        agreementTitle={completeAgreementTitle}
-        mode={completeAgreementMode}
-        onComplete={() => {
-          fetchData();
-          fetchCompliance();
-        }}
-      />
-      
-      {/* Send Agreement Dialog */}
-      <SendAgreementDialog
-        open={sendAgreementDialogOpen}
-        onClose={() => {
-          setSendAgreementDialogOpen(false);
-          setSendAgreementKey(null);
-          setSendAgreementTitle('');
-        }}
-        employeeId={employeeId}
-        employeeEmail={employee?.email}
-        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
-        agreementKey={sendAgreementKey}
-        agreementTitle={sendAgreementTitle}
         onComplete={() => {
           fetchData();
           fetchCompliance();

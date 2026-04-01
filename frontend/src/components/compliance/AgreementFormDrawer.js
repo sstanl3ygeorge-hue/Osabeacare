@@ -130,13 +130,40 @@ export default function AgreementFormDrawer({
   const [completionMode, setCompletionMode] = useState('self');
   const [adminNote, setAdminNote] = useState('');
   const [errors, setErrors] = useState({});
+  const [submission, setSubmission] = useState(null);
 
   // Fetch template on open
   useEffect(() => {
     if (isOpen && templateId) {
       fetchTemplate();
     }
-  }, [isOpen, templateId]);
+    // Fetch submission when viewing
+    if (isOpen && mode === 'view' && existingSubmission?.id) {
+      fetchSubmission(existingSubmission.id);
+    }
+  }, [isOpen, templateId, mode, existingSubmission]);
+
+  // Fetch submission data
+  const fetchSubmission = async (submissionId) => {
+    try {
+      const response = await axios.get(
+        `${API}/agreement-submissions/${submissionId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const sub = response.data.submission;
+      setSubmission(sub);
+      setFormData(sub.form_data || {});
+      setCompletionMode(sub.completion_mode || 'self');
+      setAdminNote(sub.admin_note || '');
+      // Also get template from response
+      if (response.data.template) {
+        setTemplate(response.data.template);
+      }
+    } catch (err) {
+      toast.error('Failed to load submission');
+      console.error(err);
+    }
+  };
 
   // Pre-fill form with employee data
   useEffect(() => {
@@ -482,20 +509,20 @@ export default function AgreementFormDrawer({
           </div>
           
           {/* Verification status badge for view mode */}
-          {mode === 'view' && existingSubmission && (
+          {mode === 'view' && submission && (
             <div className="mt-3">
               <Badge className={
-                existingSubmission.verification_status === 'verified' 
+                submission.verification_status === 'verified' 
                   ? 'bg-green-100 text-green-700' 
-                  : existingSubmission.verification_status === 'rejected'
+                  : submission.verification_status === 'rejected'
                   ? 'bg-red-100 text-red-700'
                   : 'bg-amber-100 text-amber-700'
               }>
-                {existingSubmission.verification_status?.replace('_', ' ').toUpperCase()}
+                {submission.verification_status?.replace('_', ' ').toUpperCase()}
               </Badge>
               <span className="ml-2 text-sm text-gray-500">
-                Completed: {existingSubmission.completed_at?.substring(0, 10)} | 
-                Mode: {existingSubmission.completion_mode?.replace('_', ' ')}
+                Completed: {submission.completed_at?.substring(0, 10)} | 
+                Mode: {submission.completion_mode?.replace('_', ' ')}
               </span>
             </div>
           )}

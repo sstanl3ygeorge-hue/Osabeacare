@@ -3,6 +3,59 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Compliance Stabilization - Requirement Capability Map (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented comprehensive requirement capability map ensuring every requirement shown on the compliance page is a real record that can be collected, saved, viewed, and downloaded according to its type.
+
+### New Capability Map
+Created `/app/frontend/src/config/requirementCapabilityMap.js` defining:
+- **Requirement Types**: evidence, form, hybrid, reference, check, agreement, training
+- **Delivery Modes**: admin_only, employee_sendable, internal_only, hybrid
+- **Actions**: request, upload, view, download, verify, reject, history, send, fill_form, export_pdf, etc.
+- **Backend Paths**: Real API endpoints for each action
+
+### New Form Requirement Component
+Created `/app/frontend/src/components/compliance/FormRequirementRow.js`:
+- Renders form-type requirement rows with expandable action buttons
+- Shows delivery mode badges (Sendable, Admin Only, Hybrid)
+- Shows status badges (Verified, Draft, Awaiting Review, Not Started)
+- Shows Optional badge for non-required forms
+- Shows Required badge for work-readiness-affecting forms
+- Shows blocking error message for incomplete required items
+
+### New Compliance File Sections
+Added 3 new sections to the compliance file API:
+
+**Recruitment Record** (4 rows)
+- Interview Record (admin_only, form)
+- Application Form (hybrid, form)
+- CV / Resume (hybrid, evidence)
+- Recruitment Compliance Checklist (admin_only, form)
+
+**Health & Competency** (2 rows)
+- Staff Health Questionnaire (employee_sendable, form, affects_readiness)
+- Induction & Competency Assessment (admin_only, form, affects_readiness)
+
+**Admin Forms** (3 rows)
+- Staff Personal Information (employee_sendable, form)
+- HMRC Starter Checklist (employee_sendable, form)
+- Equal Opportunities Monitoring (employee_sendable, form, optional)
+
+### Files Changed
+- `/app/frontend/src/config/requirementCapabilityMap.js` - NEW
+- `/app/frontend/src/components/compliance/FormRequirementRow.js` - NEW
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js` - Updated imports and section rendering
+- `/app/backend/server.py` - Added build_form_row(), build_cv_row() helpers and 3 new sections
+
+### Testing
+- Backend: 100% (15/15 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_103.json`
+
+---
+
 ## Ticket D: Agreement Templates System (2026-04-01)
 **Status**: COMPLETE ✅ (Backend + Frontend UI Wiring)
 

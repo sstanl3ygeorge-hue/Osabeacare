@@ -3,6 +3,33 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Review-First Recruitment Page UX (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Redesigned the Recruitment page to prioritize review over approval. Applicant cards now show "Review Applicant" as the primary action, with approval as a secondary action that depends on approval engine status.
+
+### Key Changes to RecruitmentPage.js
+- **Primary Action**: "Review Applicant" (solid primary button)
+- **Secondary Action**: "Approve Recruitment" or "View Blockers" (outline/ghost variant)
+- **Card Layout**:
+  - Top row: Name, Role badge, Stage badge (New/Screening/Interview/Compliance Review), Applicant badge
+  - Middle row: Approval readiness summary (e.g., "Blocked by 8 items • Progress: 3/11")
+  - Bottom row: Review Applicant | Approve/View Blockers | Overflow menu
+- **Navigation**: Review Applicant → `/portal/recruitment/:id` (keeps recruitment context)
+- **After Approval**: Redirect to `/portal/employees/:id`
+
+### EmployeeProfilePage.js Updates
+- Added "Applicant Profile" banner when in recruitment context
+- Shows "Back to Recruitment Pipeline" link
+- "Recruitment Review" badge visible
+
+### Testing
+- Frontend: 100% (10/10 features verified)
+- Test report: `/app/test_reports/iteration_107.json`
+
+---
+
 ## Work Readiness Engine - Gate 2 (2026-04-01)
 **Status**: COMPLETE ✅
 

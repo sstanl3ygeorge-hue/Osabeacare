@@ -25030,8 +25030,18 @@ async def get_normalized_references(
             "employment_end": employee.get(f"{prefix}end_date"),
             "can_contact_before_offer": employee.get(f"{prefix}can_contact_before_offer", True),
             "from_cv": employee.get(f"{prefix}from_cv"),
+            # Change history
+            "changed_at": employee.get(f"{prefix}referee_changed_at"),
+            "changed_by": employee.get(f"{prefix}referee_changed_by"),
+            "change_reason": employee.get(f"{prefix}referee_change_reason"),
+            "change_history": employee.get(f"{prefix}referee_change_history", []),
         }
         has_declared = bool(declared_referee.get("name") or declared_referee.get("email"))
+        
+        # Reset info
+        reset_at = employee.get(f"{prefix}reset_at")
+        reset_by = employee.get(f"{prefix}reset_by")
+        reset_reason = employee.get(f"{prefix}reset_reason")
         
         # 2. REQUEST LIFECYCLE
         request_status = employee.get(f"{prefix}request_status")  # requested, awaiting_response, submitted
@@ -25060,10 +25070,12 @@ async def get_normalized_references(
         response_data = employee.get(f"{prefix}response_data") or {}
         response_received_at = employee.get(f"{prefix}response_received_at")
         has_response = bool(response_data) and bool(response_received_at)
+        response_source = employee.get(f"{prefix}response_source", "external_submission" if has_response else None)
         
         response = {
             "exists": has_response,
             "submitted_at": response_received_at,
+            "source": response_source,  # external_submission, manual_entry, test_data
             "referee_full_name": response_data.get("referee_full_name"),
             "referee_email": response_data.get("referee_work_email"),
             "organisation": response_data.get("referee_organisation") or response_data.get("current_employer"),
@@ -25218,12 +25230,16 @@ async def get_normalized_references(
         if verification_status in ["sent", "viewed"] and has_declared:
             allowed_actions.append("resend_request")
         
-        # View Response - response exists
+        # View Response - only if real response exists
         if has_response:
             allowed_actions.append("view_response")
         
-        # Request Replacement - no response after attempts, rejected, mismatch unresolved
-        if verification_status in ["rejected", "sent", "viewed"] or (integrity.get("mismatch_detected") and not integrity.get("override_applied")):
+        # Review - response exists but unverified (show instead of View Response)
+        if has_response and not verified and not rejected:
+            allowed_actions.append("review")
+        
+        # Request Replacement - no response, invalid response, or admin chooses
+        if verification_status in ["rejected", "sent", "viewed", "pending", "not_sent"] or (integrity.get("mismatch_detected") and not integrity.get("override_applied")):
             allowed_actions.append("request_replacement")
         
         # Verify - response exists, not yet verified
@@ -25237,6 +25253,14 @@ async def get_normalized_references(
         # Override mismatch - mismatch detected, response exists, not yet overridden
         if integrity.get("mismatch_detected") and has_response and not integrity.get("override_applied"):
             allowed_actions.append("override_mismatch")
+        
+        # Reset Reference - always available (even after verification for corrections)
+        if has_declared or has_response or request.get("sent_at"):
+            allowed_actions.append("reset_reference")
+        
+        # Change Referee - always available to update referee details
+        if has_declared:
+            allowed_actions.append("change_referee")
         
         # View history always available
         allowed_actions.append("view_history")
@@ -25272,7 +25296,7 @@ async def get_normalized_references(
             # 5 sections of truth
             "declared_referee": declared_referee if has_declared else None,
             "request": request,
-            "response": response if has_response else {"exists": False},
+            "response": response if has_response else {"exists": False, "source": None},
             "integrity": integrity,
             "verification": verification,
             
@@ -25283,6 +25307,14 @@ async def get_normalized_references(
             "blocker_text": blocker_text,
             "blocks_approval": blocks_approval,
             "counts_toward_readiness": verification_status == "verified" and has_response and (not integrity.get("mismatch_detected") or integrity.get("override_applied")),
+            
+            # Reset info (if reference was reset)
+            "reset_info": {
+                "was_reset": bool(reset_at),
+                "reset_at": reset_at,
+                "reset_by": reset_by,
+                "reset_reason": reset_reason,
+            } if reset_at else None,
         }
     
     # Build both references
@@ -25359,6 +25391,266 @@ async def request_reference_replacement(
         "status": "success",
         "message": f"Replacement requested for Reference {ref_num}. Update employee profile with new referee details.",
         "reference_num": ref_num
+    }
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/reset")
+async def reset_reference(
+    employee_id: str,
+    ref_num: int,
+    reset_reason: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """
+    Reset a reference to "not_started" state.
+    
+    Clears:
+    - Response data
+    - Verification status
+    - Request status
+    - Mismatch flags
+    
+    Preserves:
+    - Declared referee details (so admin can resend)
+    - History of what was cleared
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    if not reset_reason or len(reset_reason.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Reset reason must be at least 10 characters")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture old state for audit
+    old_state = {
+        "verified": employee.get(f"{prefix}verified"),
+        "rejected": employee.get(f"{prefix}rejected"),
+        "request_status": employee.get(f"{prefix}request_status"),
+        "response_received_at": employee.get(f"{prefix}response_received_at"),
+        "has_response": bool(employee.get(f"{prefix}response_data")),
+        "mismatch_detected": employee.get(f"{prefix}mismatch_detected"),
+    }
+    
+    # Reset to not_started state
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            # Clear verification
+            f"{prefix}verified": False,
+            f"{prefix}verified_at": None,
+            f"{prefix}verified_by": None,
+            f"{prefix}rejected": False,
+            f"{prefix}rejected_at": None,
+            f"{prefix}rejected_reason": None,
+            f"{prefix}rejected_by": None,
+            f"{prefix}reviewed": False,
+            f"{prefix}reviewed_at": None,
+            f"{prefix}reviewed_by": None,
+            # Clear response
+            f"{prefix}response_data": None,
+            f"{prefix}response_received_at": None,
+            f"{prefix}response_source": None,
+            # Clear request lifecycle
+            f"{prefix}request_status": None,
+            f"{prefix}request_sent_at": None,
+            f"{prefix}request_token": None,
+            f"{prefix}request_viewed_at": None,
+            f"{prefix}resend_count": 0,
+            f"{prefix}last_reminder_at": None,
+            # Clear mismatch
+            f"{prefix}mismatch_detected": False,
+            f"{prefix}mismatch_notes": None,
+            f"{prefix}override_reason": None,
+            f"{prefix}override_by": None,
+            f"{prefix}override_at": None,
+            # Clear replacement
+            f"{prefix}replacement_requested_at": None,
+            f"{prefix}replacement_requested_by": None,
+            f"{prefix}replacement_reason": None,
+            # Record reset
+            f"{prefix}reset_at": now,
+            f"{prefix}reset_by": user['user_id'],
+            f"{prefix}reset_reason": reset_reason.strip(),
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "reset_reference", "employee", employee_id, {
+        "reference_num": ref_num,
+        "reason": reset_reason.strip(),
+        "previous_state": old_state
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Reference {ref_num} has been reset to not_started state.",
+        "reference_num": ref_num,
+        "previous_state": old_state
+    }
+
+
+class ChangeRefereeRequest(BaseModel):
+    name: Optional[str] = None
+    job_title: Optional[str] = None
+    company: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    relationship: Optional[str] = None
+    change_reason: str
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/change-referee")
+async def change_referee_details(
+    employee_id: str,
+    ref_num: int,
+    request: ChangeRefereeRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Change referee details for a reference.
+    
+    Stores change history (old vs new referee).
+    Can be done even after verification (in case of correction).
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    if not request.change_reason or len(request.change_reason.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Change reason must be at least 10 characters")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Capture old referee for history
+    old_referee = {
+        "name": employee.get(f"{prefix}name"),
+        "job_title": employee.get(f"{prefix}job_title"),
+        "company": employee.get(f"{prefix}company"),
+        "email": employee.get(f"{prefix}email"),
+        "phone": employee.get(f"{prefix}phone"),
+        "relationship": employee.get(f"{prefix}relationship"),
+    }
+    
+    # Build update with only provided fields
+    update_fields = {}
+    new_referee = {}
+    
+    if request.name is not None:
+        update_fields[f"{prefix}name"] = request.name.strip()
+        new_referee["name"] = request.name.strip()
+    if request.job_title is not None:
+        update_fields[f"{prefix}job_title"] = request.job_title.strip()
+        new_referee["job_title"] = request.job_title.strip()
+    if request.company is not None:
+        update_fields[f"{prefix}company"] = request.company.strip()
+        new_referee["company"] = request.company.strip()
+    if request.email is not None:
+        update_fields[f"{prefix}email"] = request.email.strip().lower()
+        new_referee["email"] = request.email.strip().lower()
+    if request.phone is not None:
+        update_fields[f"{prefix}phone"] = request.phone.strip()
+        new_referee["phone"] = request.phone.strip()
+    if request.relationship is not None:
+        update_fields[f"{prefix}relationship"] = request.relationship.strip()
+        new_referee["relationship"] = request.relationship.strip()
+    
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+    
+    # Record change metadata
+    update_fields[f"{prefix}referee_changed_at"] = now
+    update_fields[f"{prefix}referee_changed_by"] = user['user_id']
+    update_fields[f"{prefix}referee_change_reason"] = request.change_reason.strip()
+    
+    # Get existing change history or create new
+    change_history = employee.get(f"{prefix}referee_change_history", [])
+    change_history.append({
+        "changed_at": now,
+        "changed_by": user['user_id'],
+        "reason": request.change_reason.strip(),
+        "old_referee": old_referee,
+        "new_referee": new_referee
+    })
+    update_fields[f"{prefix}referee_change_history"] = change_history
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_fields}
+    )
+    
+    await log_audit_action(user['user_id'], "change_referee", "employee", employee_id, {
+        "reference_num": ref_num,
+        "reason": request.change_reason.strip(),
+        "old_referee": old_referee,
+        "new_referee": new_referee
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Referee details updated for Reference {ref_num}.",
+        "reference_num": ref_num,
+        "old_referee": old_referee,
+        "new_referee": new_referee
+    }
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/set-response-source")
+async def set_reference_response_source(
+    employee_id: str,
+    ref_num: int,
+    source: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """
+    Set the response source for a reference.
+    
+    Sources:
+    - external_submission: Real response from referee via secure form
+    - manual_entry: Admin entered response data manually
+    - test_data: Test/placeholder data (should be replaced)
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    valid_sources = ["external_submission", "manual_entry", "test_data"]
+    if source not in valid_sources:
+        raise HTTPException(status_code=400, detail=f"Source must be one of: {', '.join(valid_sources)}")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}response_source": source,
+            f"{prefix}response_source_set_at": now,
+            f"{prefix}response_source_set_by": user['user_id'],
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "set_reference_response_source", "employee", employee_id, {
+        "reference_num": ref_num,
+        "source": source
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Response source set to '{source}' for Reference {ref_num}.",
+        "reference_num": ref_num,
+        "source": source
     }
 
 

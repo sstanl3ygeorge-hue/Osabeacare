@@ -16,11 +16,14 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { toast } from 'sonner';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
 import { 
   X, User, Building, Mail, Phone, Calendar, Send, Eye, Clock,
   CheckCircle, XCircle, AlertTriangle, Shield, Briefcase,
   ChevronDown, ChevronUp, Loader2, FileText, History, RefreshCw,
-  ThumbsUp, ThumbsDown, MessageSquare, Star, UserCheck
+  ThumbsUp, ThumbsDown, MessageSquare, Star, UserCheck, Edit, RotateCcw,
+  ExternalLink, Database, TestTube
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -90,9 +93,21 @@ export default function ReferenceResponseDrawer({
   const [overrideReason, setOverrideReason] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const [replacementReason, setReplacementReason] = useState('');
+  const [resetReason, setResetReason] = useState('');
   const [showOverrideForm, setShowOverrideForm] = useState(false);
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [showReplacementForm, setShowReplacementForm] = useState(false);
+  const [showResetForm, setShowResetForm] = useState(false);
+  const [showChangeRefereeForm, setShowChangeRefereeForm] = useState(false);
+  const [changeRefereeData, setChangeRefereeData] = useState({
+    name: '',
+    job_title: '',
+    company: '',
+    email: '',
+    phone: '',
+    relationship: '',
+    change_reason: ''
+  });
 
   // Fetch normalized reference data
   useEffect(() => {
@@ -216,6 +231,68 @@ export default function ReferenceResponseDrawer({
     }
   };
 
+  // Handle reset reference
+  const handleResetReference = async () => {
+    if (!resetReason || resetReason.trim().length < 10) {
+      toast.error('Please provide a reset reason (min 10 characters)');
+      return;
+    }
+    setActionLoading('reset');
+    try {
+      await axios.post(
+        `${API}/references/${employeeId}/${referenceNum}/reset`,
+        { reset_reason: resetReason.trim() },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`Reference ${referenceNum} has been reset`);
+      setShowResetForm(false);
+      setResetReason('');
+      fetchReferenceData();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to reset reference');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Handle change referee
+  const handleChangeReferee = async () => {
+    if (!changeRefereeData.change_reason || changeRefereeData.change_reason.trim().length < 10) {
+      toast.error('Please provide a reason for the change (min 10 characters)');
+      return;
+    }
+    
+    // Check if any field changed
+    const hasChanges = changeRefereeData.name || changeRefereeData.job_title || 
+                       changeRefereeData.company || changeRefereeData.email || 
+                       changeRefereeData.phone || changeRefereeData.relationship;
+    if (!hasChanges) {
+      toast.error('Please update at least one referee field');
+      return;
+    }
+    
+    setActionLoading('change_referee');
+    try {
+      await axios.post(
+        `${API}/references/${employeeId}/${referenceNum}/change-referee`,
+        changeRefereeData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`Referee details updated for Reference ${referenceNum}`);
+      setShowChangeRefereeForm(false);
+      setChangeRefereeData({
+        name: '', job_title: '', company: '', email: '', phone: '', relationship: '', change_reason: ''
+      });
+      fetchReferenceData();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to update referee details');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   const { 
@@ -226,8 +303,23 @@ export default function ReferenceResponseDrawer({
     verification,
     lifecycle_status,
     summary_text,
-    allowed_actions = []
+    allowed_actions = [],
+    reset_info
   } = data || {};
+
+  // Response source label
+  const getResponseSourceLabel = (source) => {
+    switch (source) {
+      case 'external_submission':
+        return { label: 'External Submission', color: 'green', description: 'Submitted by referee via secure form' };
+      case 'manual_entry':
+        return { label: 'Manual Entry', color: 'blue', description: 'Entered manually by admin' };
+      case 'test_data':
+        return { label: 'Test Data', color: 'amber', description: 'Test/placeholder data - should be replaced' };
+      default:
+        return { label: 'Unknown', color: 'gray', description: 'Source not recorded' };
+    }
+  };
 
   // Status badge config
   const getStatusConfig = () => {
@@ -387,6 +479,25 @@ export default function ReferenceResponseDrawer({
                 badgeColor="green"
               >
                 <div className="space-y-6">
+                  {/* Response Source Indicator */}
+                  {(() => {
+                    const sourceInfo = getResponseSourceLabel(response.source);
+                    const SourceIcon = response.source === 'external_submission' ? ExternalLink : 
+                                       response.source === 'manual_entry' ? Database : 
+                                       response.source === 'test_data' ? TestTube : Clock;
+                    return (
+                      <div className={`flex items-center gap-2 p-3 rounded-lg border bg-${sourceInfo.color}-50 border-${sourceInfo.color}-200`}>
+                        <SourceIcon className={`h-4 w-4 text-${sourceInfo.color}-600`} />
+                        <div>
+                          <span className={`text-sm font-medium text-${sourceInfo.color}-800`}>
+                            Response Source: {sourceInfo.label}
+                          </span>
+                          <p className={`text-xs text-${sourceInfo.color}-600`}>{sourceInfo.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
                   {/* Responder Info */}
                   <div>
                     <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Responder Details</p>
@@ -826,6 +937,189 @@ export default function ReferenceResponseDrawer({
                             size="sm"
                             variant="ghost"
                             onClick={() => { setShowReplacementForm(false); setReplacementReason(''); }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Reset Reference */}
+                {!isAuditor && allowed_actions.includes('reset_reference') && (
+                  <div className="pt-2 border-t border-gray-200">
+                    {!showResetForm ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowResetForm(true)}
+                        className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                        data-testid="show-reset-form-btn"
+                      >
+                        <RotateCcw className="h-4 w-4 mr-1" />
+                        Reset Reference
+                      </Button>
+                    ) : (
+                      <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
+                        <p className="text-sm font-medium text-gray-800">Reset Reference</p>
+                        <p className="text-xs text-gray-600">
+                          This will clear the response, verification status, and request history. Referee details will be preserved.
+                        </p>
+                        <Textarea
+                          value={resetReason}
+                          onChange={(e) => setResetReason(e.target.value)}
+                          placeholder="Reason for reset (min 10 characters)..."
+                          className="min-h-[80px]"
+                          data-testid="reset-reason-input"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={handleResetReference}
+                            disabled={actionLoading === 'reset' || resetReason.length < 10}
+                            className="bg-gray-600 hover:bg-gray-700 text-white"
+                            data-testid="confirm-reset-btn"
+                          >
+                            {actionLoading === 'reset' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Reset'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => { setShowResetForm(false); setResetReason(''); }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Change Referee Details */}
+                {!isAuditor && allowed_actions.includes('change_referee') && (
+                  <div className="pt-2 border-t border-gray-200">
+                    {!showChangeRefereeForm ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          // Pre-fill with current values
+                          setChangeRefereeData({
+                            name: declared_referee?.name || '',
+                            job_title: declared_referee?.job_title || '',
+                            company: declared_referee?.organisation || '',
+                            email: declared_referee?.email || '',
+                            phone: declared_referee?.phone || '',
+                            relationship: declared_referee?.relationship || '',
+                            change_reason: ''
+                          });
+                          setShowChangeRefereeForm(true);
+                        }}
+                        className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                        data-testid="show-change-referee-form-btn"
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Change Referee Details
+                      </Button>
+                    ) : (
+                      <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+                        <p className="text-sm font-medium text-blue-800">Change Referee Details</p>
+                        <p className="text-xs text-blue-700">
+                          Update referee information. Leave fields blank to keep current values.
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs">Full Name</Label>
+                            <Input
+                              value={changeRefereeData.name}
+                              onChange={(e) => setChangeRefereeData({...changeRefereeData, name: e.target.value})}
+                              placeholder={declared_referee?.name || 'Enter name'}
+                              className="h-8 text-sm"
+                              data-testid="change-referee-name"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Job Title</Label>
+                            <Input
+                              value={changeRefereeData.job_title}
+                              onChange={(e) => setChangeRefereeData({...changeRefereeData, job_title: e.target.value})}
+                              placeholder={declared_referee?.job_title || 'Enter job title'}
+                              className="h-8 text-sm"
+                              data-testid="change-referee-job-title"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Organisation</Label>
+                            <Input
+                              value={changeRefereeData.company}
+                              onChange={(e) => setChangeRefereeData({...changeRefereeData, company: e.target.value})}
+                              placeholder={declared_referee?.organisation || 'Enter organisation'}
+                              className="h-8 text-sm"
+                              data-testid="change-referee-company"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Email</Label>
+                            <Input
+                              type="email"
+                              value={changeRefereeData.email}
+                              onChange={(e) => setChangeRefereeData({...changeRefereeData, email: e.target.value})}
+                              placeholder={declared_referee?.email || 'Enter email'}
+                              className="h-8 text-sm"
+                              data-testid="change-referee-email"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Phone</Label>
+                            <Input
+                              value={changeRefereeData.phone}
+                              onChange={(e) => setChangeRefereeData({...changeRefereeData, phone: e.target.value})}
+                              placeholder={declared_referee?.phone || 'Enter phone'}
+                              className="h-8 text-sm"
+                              data-testid="change-referee-phone"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Relationship</Label>
+                            <Input
+                              value={changeRefereeData.relationship}
+                              onChange={(e) => setChangeRefereeData({...changeRefereeData, relationship: e.target.value})}
+                              placeholder={declared_referee?.relationship || 'Enter relationship'}
+                              className="h-8 text-sm"
+                              data-testid="change-referee-relationship"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Reason for Change *</Label>
+                          <Textarea
+                            value={changeRefereeData.change_reason}
+                            onChange={(e) => setChangeRefereeData({...changeRefereeData, change_reason: e.target.value})}
+                            placeholder="Why are you changing these details? (min 10 characters)"
+                            className="min-h-[60px]"
+                            data-testid="change-referee-reason"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={handleChangeReferee}
+                            disabled={actionLoading === 'change_referee' || changeRefereeData.change_reason.length < 10}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                            data-testid="confirm-change-referee-btn"
+                          >
+                            {actionLoading === 'change_referee' ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Changes'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => { 
+                              setShowChangeRefereeForm(false); 
+                              setChangeRefereeData({
+                                name: '', job_title: '', company: '', email: '', phone: '', relationship: '', change_reason: ''
+                              }); 
+                            }}
                           >
                             Cancel
                           </Button>

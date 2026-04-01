@@ -1,0 +1,94 @@
+{
+  "summary": "Ticket F: Reference Lifecycle Controls testing complete. All backend endpoints (reset, change-referee, set-response-source) working correctly. Frontend UI shows Response Source indicator, Reset Reference button, and Change Referee Details button with proper validation.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "/api/dashboard/stats",
+        "issue": "Returns 500 error - pre-existing issue from previous iterations",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_reference_lifecycle_controls.py",
+    "/app/test_reports/pytest/reference_lifecycle_controls_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [
+    "/app/backend/tests/test_reference_lifecycle_controls.py"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 tests passed)",
+    "frontend": "100%"
+  },
+  "test_credentials": {
+    "admin": "admin@osabea.care / admin123"
+  },
+  "seed_data_creation": "Added test response data to Reference 1 for employee d88335f6-1b18-435a-8086-28af4a583f77 to test ReferenceResponseDrawer",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Ticket F Reference Lifecycle Controls is complete. The new endpoints (reset, change-referee, set-response-source) are working. The ReferenceResponseDrawer shows Response Source indicator and has Reset Reference and Change Referee Details buttons at the bottom of the Review Outcome section.",
+  "features_tested": {
+    "reset_reference_endpoint": {
+      "status": "PASS",
+      "details": "POST /api/references/{id}/{ref_num}/reset clears response and verification, requires 10+ char reason"
+    },
+    "change_referee_endpoint": {
+      "status": "PASS",
+      "details": "POST /api/references/{id}/{ref_num}/change-referee updates referee details with change history"
+    },
+    "set_response_source_endpoint": {
+      "status": "PASS",
+      "details": "POST /api/references/{id}/{ref_num}/set-response-source sets source (external_submission, manual_entry, test_data)"
+    },
+    "normalized_references_allowed_actions": {
+      "status": "PASS",
+      "details": "GET /api/employees/{id}/references-normalized returns allowed_actions including reset_reference, change_referee"
+    },
+    "normalized_references_response_source": {
+      "status": "PASS",
+      "details": "GET /api/employees/{id}/references-normalized returns response.source field"
+    },
+    "response_source_indicator_ui": {
+      "status": "PASS",
+      "details": "ReferenceResponseDrawer shows Response Source indicator (Test Data shown with amber warning)"
+    },
+    "reset_reference_button_ui": {
+      "status": "PASS",
+      "details": "ReferenceResponseDrawer shows Reset Reference button with data-testid='show-reset-form-btn'"
+    },
+    "change_referee_button_ui": {
+      "status": "PASS",
+      "details": "ReferenceResponseDrawer shows Change Referee Details button with data-testid='show-change-referee-form-btn'"
+    },
+    "reset_form_validation": {
+      "status": "PASS",
+      "details": "Reset Reference form requires 10+ character reason, button disabled until valid"
+    },
+    "change_referee_form_prefill": {
+      "status": "PASS",
+      "details": "Change Referee form pre-fills with current referee values (name, email, phone, organisation)"
+    },
+    "change_referee_form_validation": {
+      "status": "PASS",
+      "details": "Change Referee form requires 10+ character reason for change"
+    }
+  },
+  "data_testids_verified": {
+    "reference-response-drawer": "FOUND",
+    "show-reset-form-btn": "FOUND",
+    "reset-reason-input": "FOUND",
+    "confirm-reset-btn": "FOUND",
+    "show-change-referee-form-btn": "FOUND",
+    "change-referee-name": "FOUND",
+    "change-referee-reason": "FOUND",
+    "confirm-change-referee-btn": "FOUND"
+  }
+}

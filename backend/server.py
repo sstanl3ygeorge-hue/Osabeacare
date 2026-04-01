@@ -17105,11 +17105,24 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     rtw_type = await db.document_types.find_one({"name": {"$regex": "Right to Work", "$options": "i"}}, {"_id": 0})
     ref_type = await db.document_types.find_one({"name": {"$regex": "Reference", "$options": "i"}}, {"_id": 0})
     
-    # Count missing documents
-    missing_urgent = await db.employee_documents.count_documents({"status": {"$in": [DocumentStatus.NOT_STARTED, DocumentStatus.REQUESTED]}})
-    dbs_pending = await db.employee_documents.count_documents({"document_type_id": dbs_type['id'] if dbs_type else "", "status": {"$ne": DocumentStatus.APPROVED}}) if dbs_type else 0
-    rtw_missing = await db.employee_documents.count_documents({"document_type_id": rtw_type['id'] if rtw_type else "", "status": {"$ne": DocumentStatus.APPROVED}}) if rtw_type else 0
-    refs_outstanding = await db.employee_documents.count_documents({"document_type_id": ref_type['id'] if ref_type else "", "status": {"$ne": DocumentStatus.APPROVED}}) if ref_type else 0
+    # Count missing documents - use correct enum values
+    # NOT_STARTED doesn't exist in DocumentStatus enum, use REQUESTED or null status
+    missing_urgent = await db.employee_documents.count_documents({
+        "status": {"$in": ["not_started", "requested", DocumentStatus.REQUESTED.value]}
+    })
+    # APPROVED doesn't exist in enum - use VERIFIED instead
+    dbs_pending = await db.employee_documents.count_documents({
+        "document_type_id": dbs_type['id'] if dbs_type else "", 
+        "status": {"$ne": DocumentStatus.VERIFIED.value}
+    }) if dbs_type else 0
+    rtw_missing = await db.employee_documents.count_documents({
+        "document_type_id": rtw_type['id'] if rtw_type else "", 
+        "status": {"$ne": DocumentStatus.VERIFIED.value}
+    }) if rtw_type else 0
+    refs_outstanding = await db.employee_documents.count_documents({
+        "document_type_id": ref_type['id'] if ref_type else "", 
+        "status": {"$ne": DocumentStatus.VERIFIED.value}
+    }) if ref_type else 0
     
     # Unsigned policies
     unsigned_policies = await db.policy_assignments.count_documents({"status": {"$ne": "signed"}})

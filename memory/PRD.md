@@ -3,6 +3,53 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Dashboard Stats Fix (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Issue Fixed
+- **500 error on dashboard data fetch**: Fixed `AttributeError: NOT_STARTED` in `get_dashboard_stats` endpoint
+- **Root cause**: Dashboard code at line 17109 used `DocumentStatus.NOT_STARTED` and `DocumentStatus.APPROVED` which don't exist in the `DocumentStatus` enum (which has `VERIFIED`, `UPLOADED`, etc.)
+- **Solution**: Updated status queries to use correct enum values (`VERIFIED` instead of `APPROVED`, string literals for legacy statuses)
+
+### Files Changed
+- `/app/backend/server.py` - Fixed dashboard stats query at line 17109
+
+---
+
+## Recruitment Approval Engine (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented centralized recruitment approval logic that cross-checks an applicant's verified documents/forms against role-specific requirements to determine if they can be moved to "Employee/Onboarding" status.
+
+### New Components Created
+- `/app/backend/approval_engine.py` - Evaluates role-specific blocking requirements
+- `/app/frontend/src/components/compliance/RecruitmentApprovalPanel.js` - Applicant banner showing approval status
+
+### Backend Endpoints
+- `GET /api/employees/{id}/recruitment-approval-check` - Returns evaluation with can_approve, blockers, verified_count, required_count
+- `POST /api/employees/{id}/approve-recruitment` - Approves applicant if no blockers, sets recruitment_approved=true, status=onboarding, assigns employee_code
+
+### Role-Specific Requirements
+| Role | Required Items |
+|------|---------------|
+| Healthcare Assistant | 10 items (right_to_work, identity, proof_of_address, dbs, reference_1, reference_2, interview_record, recruitment_checklist, staff_health_questionnaire, staff_personal_info) |
+| Nurse | 11 items (10 base + nmc_registration) |
+
+### Frontend Features
+- Progress bar showing verified_count / required_count
+- Blocking items list with label and reason
+- "View All Blockers" dialog
+- Blocker navigation to Compliance File tab
+- Panel hidden for employees (person_stage='employee')
+
+### Testing
+- Backend: 100% (10/10 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_105.json`
+
+---
+
 ## Form Actions Wiring + Send/Verify/Reject (2026-04-01)
 **Status**: COMPLETE ✅
 

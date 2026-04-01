@@ -3,6 +3,63 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Work Readiness Engine - Gate 2 (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented centralized work readiness evaluation (Gate 2) - separate from recruitment approval (Gate 1). This determines if an approved employee can start working based on post-recruitment requirements.
+
+### New Files Created
+- `/app/backend/work_readiness_engine.py` - Work readiness evaluation logic with ROLE_WORK_REQUIREMENTS
+- `/app/frontend/src/components/compliance/WorkReadinessPanel.js` - Work readiness UI component
+
+### Backend Endpoint
+- `GET /api/employees/{id}/work-readiness-check`
+
+Returns:
+```json
+{
+  "employee_id": "...",
+  "can_work": true/false,
+  "readiness_status": "READY_TO_WORK | READY_WITH_CONDITIONS | NOT_READY",
+  "blockers": [{ "requirement_key", "label", "reason", "category", "section" }],
+  "warnings": [{ "requirement_key", "label", "reason", "category" }],
+  "verified_count": 3,
+  "required_count": 9,
+  "role": "healthcare assistant",
+  "stage_identity": "employee"
+}
+```
+
+### Work Readiness Blockers
+| Category | Items Checked |
+|----------|---------------|
+| Agreements | contract_acceptance, handbook_acknowledgement |
+| Forms | induction, staff_health_questionnaire |
+| Competencies | care_certificate (HCA), clinical_competency (Nurse) |
+| Critical Documents | right_to_work, dbs, identity, nmc_registration (Nurse) |
+| Training | Required training matrix |
+| Expired Documents | RTW, DBS, Identity, NMC if expired |
+
+### Role-Specific Requirements
+| Role | Required Items |
+|------|---------------|
+| Healthcare Assistant | 9 items (agreements x2, forms x2, care_certificate, documents x3, training) |
+| Nurse | 10 items (9 HCA + nmc_registration) |
+
+### Frontend Features
+- Progress bar with verified_count / required_count
+- Blocker list with labels and reasons by category
+- "View All Blockers" dialog grouped by category
+- Panel only shows for approved employees (recruitment_approved=true)
+
+### Testing
+- Backend: 100% (15/15 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_106.json`
+
+---
+
 ## Dashboard Stats Fix (2026-04-01)
 **Status**: COMPLETE ✅
 

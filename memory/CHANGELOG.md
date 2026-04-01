@@ -10,6 +10,12 @@
 - Request logging shows source (MONGO/SUPABASE), latency, record count
 - Fallback to Mongo if Supabase fails
 
+### Staging Verification & Switch Checklist
+- Created `/app/STAGING_SWITCH_CHECKLIST.md` - Complete operational checklist
+- Created `/app/migration/validate_pre_switch.py` - Automated validation script
+- Includes: record counts, FK validation, dual-row model checks
+- Defines rollback procedures and go/no-go criteria
+
 ### Supabase Migration Scripts Complete
 - Implemented Phase 7-10 migration scripts:
   - `phase_7_training.py`: Training catalogue & records migration

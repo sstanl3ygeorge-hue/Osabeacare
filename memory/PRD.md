@@ -11,6 +11,28 @@
 ### Overview
 Implemented minimal staging feature flag system for backend source switching. Env-based read-source flags with MongoDB fallback. Includes request logging showing which backend served the data.
 
+### Staging Verification & Switch Checklist
+**Document:** `/app/STAGING_SWITCH_CHECKLIST.md`
+
+Contains:
+- Pre-switch validation procedures (counts, relationships, dual-row model)
+- Step-by-step read switch plan (ordered: employees → profile → compliance → training)
+- Response shape validation rules
+- Live log monitoring rules
+- Failure & rollback procedures
+- Go/No-Go criteria
+
+### Validation Script
+**Script:** `/app/migration/validate_pre_switch.py`
+
+```bash
+# Run full validation
+python /app/migration/validate_pre_switch.py
+
+# Run specific check
+python /app/migration/validate_pre_switch.py --check dual-row
+```
+
 ### Endpoints Modified
 | Endpoint | Entity | Logging |
 |----------|--------|---------|

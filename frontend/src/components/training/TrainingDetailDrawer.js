@@ -207,7 +207,7 @@ export default function TrainingDetailDrawer({
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto" data-testid="training-detail-drawer">
         <SheetHeader className="pb-4 border-b">
           <SheetTitle className="text-xl">{trainingItem.title}</SheetTitle>
-          <SheetDescription className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mt-1">
             <Badge variant="outline" className="font-mono text-xs">
               {trainingItem.code}
             </Badge>
@@ -223,7 +223,7 @@ export default function TrainingDetailDrawer({
                 Verified
               </Badge>
             )}
-          </SheetDescription>
+          </div>
         </SheetHeader>
         
         <Tabs value={activeTab} onValueChange={handleTabChange} className="mt-4">

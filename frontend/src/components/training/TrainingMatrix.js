@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
@@ -364,9 +364,8 @@ export default function TrainingMatrix({
                   const isExpanded = expandedRows[item.code];
                   
                   return (
-                    <>
+                    <React.Fragment key={item.code}>
                       <TableRow 
-                        key={item.code}
                         className={cn(
                           "hover:bg-gray-50 transition-colors",
                           item.blocker && item.status !== 'current' && "bg-red-50/30"
@@ -523,7 +522,7 @@ export default function TrainingMatrix({
                           </TableCell>
                         </TableRow>
                       )}
-                    </>
+                    </React.Fragment>
                   );
                 })
               )}

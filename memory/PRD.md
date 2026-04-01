@@ -3,6 +3,61 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Employment Gap Detection and Verification (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented automatic employment gap detection from employment history dates, with structured gap records, admin review flow, and recruitment approval gating.
+
+### New Files
+- `/app/backend/employment_gap_engine.py` - Gap detection and evaluation logic
+- `/app/frontend/src/components/compliance/EmploymentGapPanel.js` - Gap verification UI
+
+### Backend Endpoints
+| Endpoint | Description |
+|----------|-------------|
+| `GET /employees/{id}/employment-gaps` | Get gap detection and verification status |
+| `POST /employees/{id}/employment-gaps/{gap_id}/explain` | Submit gap explanation |
+| `POST /employees/{id}/employment-gaps/{gap_id}/verify` | Approve/reject gap (admin) |
+| `POST /employees/{id}/employment-gaps/{gap_id}/request-info` | Request more info (admin) |
+| `POST /employees/{id}/detect-employment-gaps` | Re-detect gaps from history |
+
+### Gap Detection Logic
+- Detects gaps ≥30 days between employment records
+- Creates structured gap records with:
+  - `gap_start`, `gap_end`, `duration_months`
+  - `previous_employment`, `next_employment` context
+  - `explanation`, `status`, `verified_by`, `verified_at`
+- Stores in `employment_gaps` collection and `employee.employment_gaps` array
+
+### Gap Status Values
+| Status | Description |
+|--------|-------------|
+| `pending` | Gap detected, no explanation yet |
+| `explained` | Explanation provided, awaiting verification |
+| `verified` | Admin approved |
+| `rejected` | Explanation rejected, revision needed |
+| `needs_more_info` | Admin requested more details |
+
+### UI Summary (EmploymentGapPanel)
+- Shows detected gaps with duration and date range
+- Status badges per gap (color-coded)
+- Expandable gap cards with employment context
+- Explanation form for applicants
+- Admin actions: Verify, Reject, Request Info
+
+### Approval Integration
+- `employment_history_verification` added to ROLE_APPROVAL_REQUIREMENTS
+- Blocks approval if any gap not verified (status !== 'verified')
+- No gaps = requirement automatically met
+
+### Testing
+- Backend: 100% (18/18 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_110.json`
+
+---
+
 ## Proof of Address Freshness Automation (2026-04-01)
 **Status**: COMPLETE ✅
 

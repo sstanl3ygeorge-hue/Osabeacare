@@ -46,7 +46,6 @@ export default function DualRowComplianceSection({
   onSendAgreement,
   onFillAgreement,
   onCompleteByPhone,
-  onViewHistory,
   isAuditor = false,
   onRefresh
 }) {

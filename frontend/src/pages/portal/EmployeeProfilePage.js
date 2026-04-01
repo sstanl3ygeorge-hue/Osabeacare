@@ -4383,10 +4383,6 @@ export default function EmployeeProfilePage() {
                         setCompleteAgreementMode('phone_assisted');
                         setCompleteAgreementDialogOpen(true);
                       }}
-                      onViewHistory={(key) => {
-                        // History view functionality can be added later
-                        toast.info(`View history for ${key}`);
-                      }}
                       isAuditor={isAuditor()}
                       onRefresh={() => {
                         fetchData();

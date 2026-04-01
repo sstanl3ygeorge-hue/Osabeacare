@@ -25282,7 +25282,7 @@ async def get_normalized_references(
             "allowed_actions": list(set(allowed_actions)),
             "blocker_text": blocker_text,
             "blocks_approval": blocks_approval,
-            "counts_toward_readiness": verified and has_response and (not integrity.get("mismatch_detected") or integrity.get("override_applied")),
+            "counts_toward_readiness": verification_status == "verified" and has_response and (not integrity.get("mismatch_detected") or integrity.get("override_applied")),
         }
     
     # Build both references

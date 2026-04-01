@@ -3,6 +3,52 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Ticket F: Remove Fake States (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Audited all compliance badges, counters, summaries, and action buttons. Removed/fixed dead UI elements not backed by real backend data.
+
+### Audit Results
+
+**Backend Fixes:**
+1. **`counts_toward_readiness` logic in references-normalized endpoint** - Fixed to use `verification_status == "verified"` instead of raw `verified` flag. This ensures rejected references don't count toward readiness even if they have a stale verified flag.
+
+**Frontend Fixes:**
+1. **Removed unused `onViewHistory` prop from DualRowComplianceSection** - The component handles view history internally via `handleViewHistory` function that opens `RequirementHistoryDrawer`. The parent-passed prop was never used and showed toast placeholder in EmployeeProfilePage.
+
+### Validation Summary (All PASS)
+
+| Item | Status | Source |
+|------|--------|--------|
+| Upload requirement card counts vs drawer counts | ✅ PASS | Both use `surfaceNormalizers.js` which computes from backend file data |
+| Request lifecycle summaries vs actual requests | ✅ PASS | `deriveRequestState()` in surfaceNormalizers maps to real request.status |
+| Reference status text vs normalized response | ✅ PASS | `summary_text` computed from `verification_status` (fixed) |
+| Applicant/employee banners vs recruitment approval | ✅ PASS | `ApplicantStageBanner` shows only when `person_stage === 'applicant'` |
+| History actions | ✅ PASS | All wired to `RequirementHistoryDrawer` via `handleViewHistory` |
+| Readiness percentage | ✅ PASS | Uses `statuses.overall_compliance.percentage` from backend |
+| What's Needed items | ✅ PASS | Generated from `work_readiness_3tier.reasons` and `requirements.filter(r => r.status === 'missing')` |
+| Audit Quick View stats | ✅ PASS | Uses `dbs_summary`, `rtw_summary`, `training_summary` from backend |
+
+### Data Flow Verification
+
+All UI components pull from single backend sources:
+- **Completion %**: `complianceRequirements.statuses.overall_compliance.percentage`
+- **DBS Status**: `complianceRequirements.dbs_summary`
+- **RTW Status**: `complianceRequirements.rtw_summary`
+- **Training Status**: `complianceRequirements.training_summary`
+- **Blocking Reasons**: `complianceRequirements.work_readiness_3tier.reasons`
+- **Missing Items**: `complianceRequirements.requirements.filter(r => r.status === 'missing')`
+- **Reference Status**: `/api/employees/{id}/references-normalized`
+- **File Counts**: `surfaceNormalizers.js` computing from backend file arrays
+
+### Files Changed
+- `/app/backend/server.py` - Line 25285: Fixed `counts_toward_readiness` logic
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js` - Removed unused `onViewHistory` prop
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` - Removed placeholder `onViewHistory` handler
+
+---
+
 ## Ticket E: References Alignment (2026-04-01)
 **Status**: COMPLETE ✅
 

@@ -2565,6 +2565,24 @@ export default function EmployeeProfilePage() {
         {isRecruitmentView ? 'Back to Recruitment Pipeline' : 'Back to Staff'}
       </button>
 
+      {/* Recruitment Context Banner - Show when viewing applicant from recruitment */}
+      {isRecruitmentView && employee?.person_stage === 'applicant' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+              <User className="h-5 w-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="font-medium text-blue-800">Applicant Profile</p>
+              <p className="text-sm text-blue-600">Review this applicant's compliance status before approval</p>
+            </div>
+          </div>
+          <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
+            Recruitment Review
+          </Badge>
+        </div>
+      )}
+
       {/* Header Card */}
       <Card className="border-[#E4E8EB] shadow-sm">
         <CardContent className="p-6">

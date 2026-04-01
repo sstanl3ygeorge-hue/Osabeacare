@@ -32,6 +32,7 @@ ROLE_APPROVAL_REQUIREMENTS = {
         "recruitment_checklist",
         "staff_health_questionnaire",
         "staff_personal_info",  # Match the actual key used in compliance file
+        "employment_history_verification",  # Employment gap verification
     ],
     "nurse": [
         "right_to_work",
@@ -45,6 +46,7 @@ ROLE_APPROVAL_REQUIREMENTS = {
         "staff_health_questionnaire",
         "staff_personal_info",
         "nmc_registration",  # Nurse-specific
+        "employment_history_verification",  # Employment gap verification
     ],
     "senior_carer": [
         "right_to_work",
@@ -57,6 +59,7 @@ ROLE_APPROVAL_REQUIREMENTS = {
         "recruitment_checklist",
         "staff_health_questionnaire",
         "staff_personal_info",
+        "employment_history_verification",  # Employment gap verification
     ],
     "support_worker": [
         "right_to_work",
@@ -91,6 +94,7 @@ REQUIREMENT_LABELS = {
     "clinical_competency": "Clinical Competency",
     "induction": "Induction & Competency Assessment",
     "care_certificate": "Care Certificate",
+    "employment_history_verification": "Employment History Verification",
 }
 
 # =============================================================================
@@ -127,6 +131,7 @@ def is_requirement_approval_ready(req: dict) -> bool:
     - Agreements: must be verified
     - Checks: must be verified
     - PoA: must have 2+ valid documents within 12 months AND verified
+    - Employment gaps: all gaps must be verified
     """
     if not req:
         return False
@@ -135,6 +140,18 @@ def is_requirement_approval_ready(req: dict) -> bool:
     status = req.get("status", "")
     is_verified = req.get("is_verified", False)
     key = req.get("key", "")
+    
+    # Special handling for employment history verification
+    if key == "employment_history_verification":
+        gap_evaluation = req.get("gap_evaluation", {})
+        if gap_evaluation:
+            # If no gaps, requirement is met
+            if not gap_evaluation.get("has_gaps"):
+                return True
+            # All gaps must be verified
+            return gap_evaluation.get("is_complete", False)
+        # Fallback to is_verified
+        return is_verified
     
     # Special handling for PoA - must check freshness
     if key in ["address_verification", "proof_of_address"]:

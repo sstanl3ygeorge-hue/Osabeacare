@@ -25,6 +25,7 @@ import TrainingMatrix from '../../components/training/TrainingMatrix';
 import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
+import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -93,6 +94,7 @@ export default function EmployeeProfilePage() {
   const [generatedForms, setGeneratedForms] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [compliance, setCompliance] = useState(null);
+  const [complianceFile, setComplianceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
@@ -719,9 +721,21 @@ export default function EmployeeProfilePage() {
     }
   };
 
+  const fetchComplianceFile = async () => {
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}/compliance-file`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setComplianceFile(response.data);
+    } catch (error) {
+      console.error('Failed to fetch compliance file:', error);
+    }
+  };
+
   useEffect(() => {
     fetchData();
     fetchCompliance();
+    fetchComplianceFile();
     fetchRecruitmentStatus();
     fetchReferenceStatus();
     fetchEmploymentMismatch();
@@ -4391,6 +4405,29 @@ export default function EmployeeProfilePage() {
                 </div>
               ) : (
                 <div className="space-y-6">
+                  {/* ============================================ */}
+                  {/* EMPLOYMENT GAP VERIFICATION PANEL */}
+                  {/* Shows detected gaps and verification status */}
+                  {/* ============================================ */}
+                  {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
+                    <div className="mb-4">
+                      <EmploymentGapPanel
+                        employeeId={employeeId}
+                        employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                        initialData={{
+                          has_gaps: true,
+                          gaps: complianceFile.sections.employment_history.rows[0].gaps,
+                          evaluation: complianceFile.sections.employment_history.rows[0].gap_evaluation
+                        }}
+                        isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
+                        onGapUpdate={() => {
+                          fetchCompliance();
+                          fetchComplianceFile();
+                        }}
+                      />
+                    </div>
+                  )}
+
                   {/* ============================================ */}
                   {/* DUAL-ROW COMPLIANCE SECTION (Phase 4A) */}
                   {/* Separates evidence from employer checks */}

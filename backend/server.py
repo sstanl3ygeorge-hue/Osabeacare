@@ -93,6 +93,15 @@ from poa_freshness_engine import (
     POA_FRESHNESS_MONTHS,
     POA_MINIMUM_DOCUMENTS
 )
+from employment_gap_engine import (
+    detect_employment_gaps,
+    evaluate_gaps_compliance,
+    get_gap_blocker_for_approval,
+    create_gap_record,
+    format_gap_summary,
+    GapStatus,
+    MIN_GAP_DAYS
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -21908,12 +21917,49 @@ async def submit_structured_application(form: StructuredApplicationForm):
             "status": "required"
         })
     
-    # Employment Gap Review (if declared)
-    if form.has_employment_gaps:
+    # ==================== AUTO-DETECT EMPLOYMENT GAPS ====================
+    # Detect gaps automatically from employment history dates
+    employment_history_list = [eh.model_dump() for eh in form.employment_history]
+    detected_gaps = detect_employment_gaps(employment_history_list)
+    
+    # Store detected gaps in employee record and create gap records
+    if detected_gaps:
+        # Update employee with gaps
+        await db.employees.update_one(
+            {"id": app_id},
+            {"$set": {
+                "employment_gaps": detected_gaps,
+                "employment_gaps_detected_at": now,
+                "has_employment_gaps": True
+            }}
+        )
+        
+        # Create individual gap records in gaps collection
+        for gap in detected_gaps:
+            gap_record = create_gap_record(app_id, gap, created_by="system")
+            await db.employment_gaps.update_one(
+                {"id": gap_record["id"]},
+                {"$set": gap_record},
+                upsert=True
+            )
+        
+        # Add to follow-up items
         follow_up_items.append({
             "type": "employment_gaps",
-            "requirement_key": "employment_gaps",
-            "description": "Employment gap explanation requires review",
+            "requirement_key": "employment_history_verification",
+            "description": f"{len(detected_gaps)} employment gap(s) detected - explanation required",
+            "status": "review_required",
+            "gap_count": len(detected_gaps),
+            "total_gap_months": sum(g.get("duration_months", 0) for g in detected_gaps)
+        })
+        
+        logger.info(f"Detected {len(detected_gaps)} employment gaps for {app_id}")
+    elif form.has_employment_gaps:
+        # Applicant declared gaps but none detected - flag for review
+        follow_up_items.append({
+            "type": "employment_gaps",
+            "requirement_key": "employment_history_verification",
+            "description": "Applicant declared employment gaps - review required",
             "status": "review_required"
         })
     
@@ -28330,6 +28376,374 @@ async def override_poa_freshness(
     }
 
 
+# =============================================================================
+# EMPLOYMENT GAP VERIFICATION ENDPOINTS
+# =============================================================================
+
+@api_router.get("/employees/{employee_id}/employment-gaps")
+async def get_employment_gaps(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get employment gap detection and verification status.
+    
+    Returns:
+    - has_gaps: whether gaps exist
+    - gaps: list of detected gaps with verification status
+    - evaluation: compliance evaluation (is_complete, blockers)
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get gap records
+    gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).sort("gap_start", 1).to_list(50)
+    
+    # Remove _id from records
+    for gap in gap_records:
+        gap.pop("_id", None)
+    
+    # If no gap records but employee has employment_gaps field, use that
+    if not gap_records and employee.get("employment_gaps"):
+        gap_records = employee.get("employment_gaps", [])
+    
+    # Evaluate compliance
+    evaluation = evaluate_gaps_compliance(gap_records)
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "has_gaps": evaluation.get("has_gaps", False),
+        "total_gaps": evaluation.get("total_gaps", 0),
+        "gaps": gap_records,
+        "evaluation": evaluation
+    }
+
+
+@api_router.post("/employees/{employee_id}/employment-gaps/{gap_id}/explain")
+async def explain_employment_gap(
+    employee_id: str,
+    gap_id: str,
+    explanation: str,
+    evidence_document_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Provide explanation for an employment gap.
+    
+    Can be called by applicant during application or by admin.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    gap_record_id = f"{employee_id}_{gap_id}"
+    
+    # Update gap record
+    update_data = {
+        "explanation": explanation,
+        "explanation_provided_at": now,
+        "status": GapStatus.EXPLAINED.value,
+        "updated_at": now
+    }
+    
+    if evidence_document_id:
+        update_data["evidence_document_id"] = evidence_document_id
+    
+    result = await db.employment_gaps.update_one(
+        {"id": gap_record_id},
+        {"$set": update_data}
+    )
+    
+    # Also update in employee.employment_gaps array
+    await db.employees.update_one(
+        {"id": employee_id, "employment_gaps.gap_id": gap_id},
+        {"$set": {
+            "employment_gaps.$.explanation": explanation,
+            "employment_gaps.$.explanation_provided_at": now,
+            "employment_gaps.$.status": GapStatus.EXPLAINED.value,
+            "employment_gaps.$.evidence_document_id": evidence_document_id
+        }}
+    )
+    
+    # Audit log
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "employment_gap_explained",
+        "entity_type": "employment_gap",
+        "entity_id": gap_record_id,
+        "employee_id": employee_id,
+        "performed_by": user.get("user_id", "unknown"),
+        "details": {
+            "gap_id": gap_id,
+            "explanation_length": len(explanation),
+            "has_evidence": bool(evidence_document_id)
+        },
+        "created_at": now
+    })
+    
+    return {
+        "status": "success",
+        "message": "Gap explanation submitted",
+        "gap_id": gap_id,
+        "new_status": GapStatus.EXPLAINED.value
+    }
+
+
+@api_router.post("/employees/{employee_id}/employment-gaps/{gap_id}/verify")
+async def verify_employment_gap(
+    employee_id: str,
+    gap_id: str,
+    approved: bool,
+    notes: Optional[str] = None,
+    rejection_reason: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """
+    Verify (approve/reject) an employment gap explanation.
+    
+    Admin only.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get admin info
+    admin = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    admin_name = admin.get("name", user['user_id']) if admin else user['user_id']
+    
+    now = datetime.now(timezone.utc).isoformat()
+    gap_record_id = f"{employee_id}_{gap_id}"
+    
+    new_status = GapStatus.VERIFIED.value if approved else GapStatus.REJECTED.value
+    
+    update_data = {
+        "status": new_status,
+        "verified_by": user['user_id'],
+        "verified_by_name": admin_name,
+        "verified_at": now,
+        "updated_at": now
+    }
+    
+    if not approved and rejection_reason:
+        update_data["rejection_reason"] = rejection_reason
+    
+    if notes:
+        # Add to notes array
+        update_data["$push"] = {
+            "notes": {
+                "note": notes,
+                "by": admin_name,
+                "at": now
+            }
+        }
+    
+    # Update gap record
+    await db.employment_gaps.update_one(
+        {"id": gap_record_id},
+        {"$set": {k: v for k, v in update_data.items() if k != "$push"}}
+    )
+    
+    if notes:
+        await db.employment_gaps.update_one(
+            {"id": gap_record_id},
+            {"$push": {
+                "notes": {
+                    "note": notes,
+                    "by": admin_name,
+                    "at": now
+                }
+            }}
+        )
+    
+    # Also update in employee.employment_gaps array
+    await db.employees.update_one(
+        {"id": employee_id, "employment_gaps.gap_id": gap_id},
+        {"$set": {
+            "employment_gaps.$.status": new_status,
+            "employment_gaps.$.verified_by": user['user_id'],
+            "employment_gaps.$.verified_at": now,
+            "employment_gaps.$.rejection_reason": rejection_reason if not approved else None
+        }}
+    )
+    
+    # Audit log
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "employment_gap_verified" if approved else "employment_gap_rejected",
+        "entity_type": "employment_gap",
+        "entity_id": gap_record_id,
+        "employee_id": employee_id,
+        "performed_by": user['user_id'],
+        "performed_by_name": admin_name,
+        "details": {
+            "gap_id": gap_id,
+            "approved": approved,
+            "rejection_reason": rejection_reason,
+            "notes": notes
+        },
+        "created_at": now
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Gap {'verified' if approved else 'rejected'}",
+        "gap_id": gap_id,
+        "new_status": new_status
+    }
+
+
+@api_router.post("/employees/{employee_id}/employment-gaps/{gap_id}/request-info")
+async def request_more_gap_info(
+    employee_id: str,
+    gap_id: str,
+    request_message: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Request more information about an employment gap.
+    
+    Admin only.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get admin info
+    admin = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    admin_name = admin.get("name", user['user_id']) if admin else user['user_id']
+    
+    now = datetime.now(timezone.utc).isoformat()
+    gap_record_id = f"{employee_id}_{gap_id}"
+    
+    # Update gap record
+    await db.employment_gaps.update_one(
+        {"id": gap_record_id},
+        {
+            "$set": {
+                "status": GapStatus.NEEDS_MORE_INFO.value,
+                "info_request_message": request_message,
+                "info_request_by": admin_name,
+                "info_request_at": now,
+                "updated_at": now
+            },
+            "$push": {
+                "notes": {
+                    "note": f"More info requested: {request_message}",
+                    "by": admin_name,
+                    "at": now
+                }
+            }
+        }
+    )
+    
+    # Also update in employee.employment_gaps array
+    await db.employees.update_one(
+        {"id": employee_id, "employment_gaps.gap_id": gap_id},
+        {"$set": {
+            "employment_gaps.$.status": GapStatus.NEEDS_MORE_INFO.value,
+            "employment_gaps.$.info_request_message": request_message
+        }}
+    )
+    
+    return {
+        "status": "success",
+        "message": "Information request sent",
+        "gap_id": gap_id,
+        "new_status": GapStatus.NEEDS_MORE_INFO.value
+    }
+
+
+@api_router.post("/employees/{employee_id}/detect-employment-gaps")
+async def detect_and_store_employment_gaps(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Re-detect employment gaps from current employment history.
+    
+    Admin action to refresh gap detection.
+    """
+    # Get employee with employment history
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employment_history = employee.get("employment_history", [])
+    
+    if not employment_history:
+        return {
+            "status": "success",
+            "message": "No employment history found",
+            "gaps_detected": 0,
+            "gaps": []
+        }
+    
+    # Detect gaps
+    detected_gaps = detect_employment_gaps(employment_history)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Merge with existing gaps (preserve explanations/verifications)
+    existing_gaps = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).to_list(50)
+    
+    existing_by_period = {}
+    for eg in existing_gaps:
+        key = f"{eg.get('gap_start')}_{eg.get('gap_end')}"
+        existing_by_period[key] = eg
+    
+    # Update or create gap records
+    final_gaps = []
+    for gap in detected_gaps:
+        key = f"{gap['gap_start']}_{gap['gap_end']}"
+        existing = existing_by_period.get(key)
+        
+        if existing:
+            # Preserve existing explanation and status
+            gap["explanation"] = existing.get("explanation")
+            gap["explanation_provided_at"] = existing.get("explanation_provided_at")
+            gap["evidence_document_id"] = existing.get("evidence_document_id")
+            gap["status"] = existing.get("status", GapStatus.PENDING.value)
+            gap["verified_by"] = existing.get("verified_by")
+            gap["verified_at"] = existing.get("verified_at")
+            gap["notes"] = existing.get("notes", [])
+        
+        gap_record = create_gap_record(employee_id, gap, created_by=user['user_id'])
+        await db.employment_gaps.update_one(
+            {"id": gap_record["id"]},
+            {"$set": gap_record},
+            upsert=True
+        )
+        final_gaps.append(gap)
+    
+    # Update employee record
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "employment_gaps": final_gaps,
+            "employment_gaps_detected_at": now,
+            "has_employment_gaps": len(final_gaps) > 0
+        }}
+    )
+    
+    return {
+        "status": "success",
+        "message": f"Detected {len(final_gaps)} employment gap(s)",
+        "gaps_detected": len(final_gaps),
+        "gaps": final_gaps
+    }
+
+
 async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     """
     Internal helper to get compliance file data for approval evaluation.
@@ -28546,6 +28960,39 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     sections["agreements"] = {
         "title": "Agreements",
         "rows": agreement_rows
+    }
+    
+    # ---- Employment History Verification ----
+    # Get gap records from database
+    gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).to_list(50)
+    
+    # Remove _id
+    for gap in gap_records:
+        gap.pop("_id", None)
+    
+    # If no records, check employee.employment_gaps
+    if not gap_records and employee.get("employment_gaps"):
+        gap_records = employee.get("employment_gaps", [])
+    
+    # Evaluate
+    gap_evaluation = evaluate_gaps_compliance(gap_records)
+    
+    has_gaps = gap_evaluation.get("has_gaps", False)
+    is_complete = gap_evaluation.get("is_complete", True)
+    
+    sections["employment_history"] = {
+        "title": "Employment History Verification",
+        "rows": [{
+            "key": "employment_history_verification",
+            "row_type": "employment_gap",
+            "has_gaps": has_gaps,
+            "is_verified": is_complete or not has_gaps,
+            "status": "verified" if (is_complete or not has_gaps) else "pending",
+            "gap_evaluation": gap_evaluation,
+            "gaps": gap_records
+        }]
     }
     
     return {"sections": sections}
@@ -29919,6 +30366,93 @@ async def get_compliance_file(
                 build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"])
             ]
         }
+    }
+    
+    # =========================================================================
+    # ADD EMPLOYMENT GAP VERIFICATION SECTION
+    # =========================================================================
+    gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).sort("gap_start", 1).to_list(50)
+    
+    # Remove _id from records
+    for gap in gap_records:
+        gap.pop("_id", None)
+    
+    # If no gap records but employee has employment_gaps field, use that
+    if not gap_records and employee.get("employment_gaps"):
+        gap_records = employee.get("employment_gaps", [])
+    
+    # Evaluate gap compliance
+    gap_evaluation = evaluate_gaps_compliance(gap_records)
+    
+    # Build employment history verification section
+    has_gaps = gap_evaluation.get("has_gaps", False)
+    all_verified = gap_evaluation.get("all_verified", True)
+    is_complete = gap_evaluation.get("is_complete", True)
+    
+    # Determine status
+    if not has_gaps:
+        gap_status = "no_gaps"
+        gap_status_summary = "No employment gaps detected"
+        is_verified = True
+        blocker_text = None
+    elif is_complete:
+        gap_status = "verified"
+        gap_status_summary = f"All {gap_evaluation.get('total_gaps', 0)} gap(s) verified"
+        is_verified = True
+        blocker_text = None
+    elif gap_evaluation.get("pending_count", 0) > 0:
+        gap_status = "pending"
+        gap_status_summary = f"{gap_evaluation.get('pending_count', 0)} gap(s) need explanation"
+        is_verified = False
+        blocker_text = f"Employment gaps: {gap_evaluation.get('pending_count', 0)} gap(s) require explanation"
+    elif gap_evaluation.get("explained_count", 0) > 0:
+        gap_status = "awaiting_verification"
+        gap_status_summary = f"{gap_evaluation.get('explained_count', 0)} explanation(s) awaiting verification"
+        is_verified = False
+        blocker_text = f"Employment gaps: {gap_evaluation.get('explained_count', 0)} explanation(s) awaiting verification"
+    elif gap_evaluation.get("rejected_count", 0) > 0:
+        gap_status = "rejected"
+        gap_status_summary = f"{gap_evaluation.get('rejected_count', 0)} explanation(s) rejected"
+        is_verified = False
+        blocker_text = f"Employment gaps: {gap_evaluation.get('rejected_count', 0)} explanation(s) rejected - revision needed"
+    else:
+        gap_status = "incomplete"
+        gap_status_summary = f"Gap verification incomplete"
+        is_verified = False
+        blocker_text = "Employment history verification incomplete"
+    
+    sections["employment_history"] = {
+        "title": "Employment History Verification",
+        "rows": [{
+            "key": "employment_history_verification",
+            "title": "Employment Gap Review",
+            "row_type": "employment_gap",
+            
+            "affects_readiness": True,
+            "is_supporting_evidence": False,
+            "blocker_text": blocker_text,
+            
+            "has_gaps": has_gaps,
+            "is_verified": is_verified,
+            "status": gap_status,
+            "status_summary": gap_status_summary,
+            
+            "gap_evaluation": gap_evaluation,
+            "gaps": gap_records,
+            
+            "counts": {
+                "total_gaps": gap_evaluation.get("total_gaps", 0),
+                "verified": gap_evaluation.get("verified_count", 0),
+                "explained": gap_evaluation.get("explained_count", 0),
+                "pending": gap_evaluation.get("pending_count", 0),
+                "rejected": gap_evaluation.get("rejected_count", 0),
+                "needs_info": gap_evaluation.get("needs_info_count", 0)
+            },
+            
+            "allowed_actions": ["view_gaps", "verify_gap", "reject_gap", "request_info"] if has_gaps else ["view_gaps"]
+        }]
     }
     
     # =========================================================================

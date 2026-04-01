@@ -1,0 +1,660 @@
+import { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import { useAuth } from '../../context/AuthContext';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/card';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { Input } from '../ui/input';
+import { Textarea } from '../ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../ui/alert-dialog';
+import {
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Clock,
+  Loader2,
+  CalendarDays,
+  Building2,
+  MessageSquare,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  HelpCircle,
+  Upload
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '../../lib/utils';
+import { formatBackendDate } from '../../lib/dateUtils';
+
+const API = process.env.REACT_APP_BACKEND_URL;
+
+// Gap status styling
+const GAP_STATUS_STYLES = {
+  pending: { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', icon: Clock, label: 'Awaiting Explanation' },
+  explained: { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', icon: MessageSquare, label: 'Awaiting Verification' },
+  verified: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', icon: CheckCircle2, label: 'Verified' },
+  rejected: { bg: 'bg-red-50', border: 'border-red-200', text: 'text-red-700', icon: XCircle, label: 'Rejected' },
+  needs_more_info: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', icon: HelpCircle, label: 'More Info Needed' }
+};
+
+/**
+ * EmploymentGapPanel - Displays and manages employment gap verification
+ * 
+ * Shows:
+ * - Detected employment gaps
+ * - Gap explanations and status
+ * - Admin actions (verify, reject, request info)
+ */
+export default function EmploymentGapPanel({
+  employeeId,
+  employeeName,
+  initialData,
+  isAdmin = false,
+  onGapUpdate
+}) {
+  const { token } = useAuth();
+  const [loading, setLoading] = useState(!initialData);
+  const [gapData, setGapData] = useState(initialData);
+  const [expandedGaps, setExpandedGaps] = useState({});
+  
+  // Dialog states
+  const [explainDialogOpen, setExplainDialogOpen] = useState(false);
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [requestInfoDialogOpen, setRequestInfoDialogOpen] = useState(false);
+  const [selectedGap, setSelectedGap] = useState(null);
+  
+  // Form states
+  const [explanation, setExplanation] = useState('');
+  const [verifyNotes, setVerifyNotes] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [infoRequest, setInfoRequest] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Fetch gap data
+  const fetchGaps = useCallback(async () => {
+    if (!employeeId) return;
+    
+    setLoading(true);
+    try {
+      const response = await axios.get(
+        `${API}/api/employees/${employeeId}/employment-gaps`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setGapData(response.data);
+    } catch (err) {
+      console.error('Error fetching employment gaps:', err);
+      if (err.response?.status !== 404) {
+        toast.error('Failed to load employment gaps');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [employeeId, token]);
+  
+  useEffect(() => {
+    if (!initialData) {
+      fetchGaps();
+    }
+  }, [fetchGaps, initialData]);
+  
+  // Toggle gap expansion
+  const toggleGap = (gapId) => {
+    setExpandedGaps(prev => ({
+      ...prev,
+      [gapId]: !prev[gapId]
+    }));
+  };
+  
+  // Submit explanation
+  const handleSubmitExplanation = async () => {
+    if (!selectedGap || !explanation.trim()) return;
+    
+    setIsSubmitting(true);
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/employment-gaps/${selectedGap.gap_id}/explain`,
+        null,
+        { 
+          params: { explanation: explanation.trim() },
+          headers: { Authorization: `Bearer ${token}` } 
+        }
+      );
+      
+      toast.success('Gap explanation submitted');
+      setExplainDialogOpen(false);
+      setExplanation('');
+      setSelectedGap(null);
+      fetchGaps();
+      onGapUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to submit explanation');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  // Verify gap
+  const handleVerifyGap = async () => {
+    if (!selectedGap) return;
+    
+    setIsSubmitting(true);
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/employment-gaps/${selectedGap.gap_id}/verify`,
+        null,
+        { 
+          params: { approved: true, notes: verifyNotes.trim() || null },
+          headers: { Authorization: `Bearer ${token}` } 
+        }
+      );
+      
+      toast.success('Gap explanation verified');
+      setVerifyDialogOpen(false);
+      setVerifyNotes('');
+      setSelectedGap(null);
+      fetchGaps();
+      onGapUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to verify gap');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  // Reject gap
+  const handleRejectGap = async () => {
+    if (!selectedGap || !rejectionReason.trim()) return;
+    
+    setIsSubmitting(true);
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/employment-gaps/${selectedGap.gap_id}/verify`,
+        null,
+        { 
+          params: { approved: false, rejection_reason: rejectionReason.trim() },
+          headers: { Authorization: `Bearer ${token}` } 
+        }
+      );
+      
+      toast.success('Gap explanation rejected');
+      setRejectDialogOpen(false);
+      setRejectionReason('');
+      setSelectedGap(null);
+      fetchGaps();
+      onGapUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to reject gap');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  // Request more info
+  const handleRequestInfo = async () => {
+    if (!selectedGap || !infoRequest.trim()) return;
+    
+    setIsSubmitting(true);
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/employment-gaps/${selectedGap.gap_id}/request-info`,
+        null,
+        { 
+          params: { request_message: infoRequest.trim() },
+          headers: { Authorization: `Bearer ${token}` } 
+        }
+      );
+      
+      toast.success('Information request sent');
+      setRequestInfoDialogOpen(false);
+      setInfoRequest('');
+      setSelectedGap(null);
+      fetchGaps();
+      onGapUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to send request');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  // Loading state
+  if (loading) {
+    return (
+      <Card className="border-dashed" data-testid="employment-gap-panel-loading">
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <span className="ml-2 text-gray-500">Loading employment gaps...</span>
+        </CardContent>
+      </Card>
+    );
+  }
+  
+  if (!gapData) {
+    return null;
+  }
+  
+  const { has_gaps, gaps, evaluation } = gapData;
+  
+  // No gaps - show success state
+  if (!has_gaps || !gaps || gaps.length === 0) {
+    return (
+      <Card className="border-emerald-200 bg-emerald-50/30" data-testid="employment-gap-panel-no-gaps">
+        <CardContent className="p-4 flex items-center gap-3">
+          <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+          </div>
+          <div>
+            <p className="font-medium text-emerald-800">No Employment Gaps Detected</p>
+            <p className="text-sm text-emerald-600">Employment history is continuous</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+  
+  return (
+    <>
+      <Card data-testid="employment-gap-panel">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <CalendarDays className="h-5 w-5 text-amber-600" />
+                Employment Gap Verification
+              </CardTitle>
+              <CardDescription>
+                {evaluation?.total_gaps || gaps.length} gap(s) detected • {evaluation?.verified_count || 0} verified
+              </CardDescription>
+            </div>
+            
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchGaps}
+              disabled={loading}
+              data-testid="refresh-gaps-btn"
+            >
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            </Button>
+          </div>
+          
+          {/* Summary badges */}
+          <div className="flex flex-wrap gap-2 mt-3">
+            {evaluation?.pending_count > 0 && (
+              <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                {evaluation.pending_count} awaiting explanation
+              </Badge>
+            )}
+            {evaluation?.explained_count > 0 && (
+              <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                {evaluation.explained_count} awaiting verification
+              </Badge>
+            )}
+            {evaluation?.rejected_count > 0 && (
+              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                {evaluation.rejected_count} rejected
+              </Badge>
+            )}
+            {evaluation?.verified_count > 0 && (
+              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                {evaluation.verified_count} verified
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        
+        <CardContent className="space-y-3">
+          {gaps.map((gap) => {
+            const status = gap.status || 'pending';
+            const style = GAP_STATUS_STYLES[status] || GAP_STATUS_STYLES.pending;
+            const StatusIcon = style.icon;
+            const isExpanded = expandedGaps[gap.gap_id];
+            
+            return (
+              <div
+                key={gap.gap_id}
+                className={cn(
+                  "rounded-lg border p-4 transition-colors",
+                  style.bg, style.border
+                )}
+                data-testid={`gap-card-${gap.gap_id}`}
+              >
+                {/* Gap Header */}
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={cn("w-8 h-8 rounded-full flex items-center justify-center", style.bg)}>
+                      <StatusIcon className={cn("h-4 w-4", style.text)} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">
+                        {gap.duration_months} month gap
+                      </p>
+                      <p className="text-sm text-gray-600">
+                        {gap.gap_start === 'present' 
+                          ? 'From present' 
+                          : formatBackendDate(gap.gap_start, { format: 'medium' })}
+                        {' → '}
+                        {gap.gap_end === 'present' 
+                          ? 'Present' 
+                          : formatBackendDate(gap.gap_end, { format: 'medium' })}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={cn(style.bg, style.text, style.border)}>
+                      {style.label}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleGap(gap.gap_id)}
+                      className="h-8 w-8 p-0"
+                    >
+                      {isExpanded ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* Expanded Details */}
+                {isExpanded && (
+                  <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
+                    {/* Employment context */}
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="p-3 bg-white rounded border">
+                        <p className="text-gray-500 text-xs mb-1">Previous Employment</p>
+                        <p className="font-medium">{gap.previous_employment?.company || 'Unknown'}</p>
+                        <p className="text-gray-600">{gap.previous_employment?.role}</p>
+                        <p className="text-xs text-gray-500">
+                          Ended: {formatBackendDate(gap.previous_employment?.end_date, { format: 'short' })}
+                        </p>
+                      </div>
+                      <div className="p-3 bg-white rounded border">
+                        <p className="text-gray-500 text-xs mb-1">Next Employment</p>
+                        <p className="font-medium">{gap.next_employment?.company || 'Unknown'}</p>
+                        <p className="text-gray-600">{gap.next_employment?.role}</p>
+                        <p className="text-xs text-gray-500">
+                          Started: {formatBackendDate(gap.next_employment?.start_date, { format: 'short' })}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Explanation */}
+                    {gap.explanation && (
+                      <div className="p-3 bg-white rounded border">
+                        <p className="text-gray-500 text-xs mb-1">Explanation</p>
+                        <p className="text-gray-800">{gap.explanation}</p>
+                        {gap.explanation_provided_at && (
+                          <p className="text-xs text-gray-500 mt-2">
+                            Provided: {formatBackendDate(gap.explanation_provided_at, { format: 'medium' })}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Rejection reason */}
+                    {status === 'rejected' && gap.rejection_reason && (
+                      <div className="p-3 bg-red-50 rounded border border-red-100">
+                        <p className="text-red-700 text-xs mb-1">Rejection Reason</p>
+                        <p className="text-red-800">{gap.rejection_reason}</p>
+                      </div>
+                    )}
+                    
+                    {/* Info request */}
+                    {status === 'needs_more_info' && gap.info_request_message && (
+                      <div className="p-3 bg-purple-50 rounded border border-purple-100">
+                        <p className="text-purple-700 text-xs mb-1">Information Requested</p>
+                        <p className="text-purple-800">{gap.info_request_message}</p>
+                      </div>
+                    )}
+                    
+                    {/* Actions */}
+                    <div className="flex flex-wrap gap-2">
+                      {/* Applicant/Employee actions */}
+                      {(status === 'pending' || status === 'rejected' || status === 'needs_more_info') && (
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setSelectedGap(gap);
+                            setExplanation(gap.explanation || '');
+                            setExplainDialogOpen(true);
+                          }}
+                          data-testid={`explain-gap-btn-${gap.gap_id}`}
+                        >
+                          <MessageSquare className="h-4 w-4 mr-1.5" />
+                          {status === 'pending' ? 'Explain Gap' : 'Update Explanation'}
+                        </Button>
+                      )}
+                      
+                      {/* Admin actions */}
+                      {isAdmin && status === 'explained' && (
+                        <>
+                          <Button
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                            onClick={() => {
+                              setSelectedGap(gap);
+                              setVerifyDialogOpen(true);
+                            }}
+                            data-testid={`verify-gap-btn-${gap.gap_id}`}
+                          >
+                            <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                            Verify
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-red-300 text-red-700 hover:bg-red-50"
+                            onClick={() => {
+                              setSelectedGap(gap);
+                              setRejectDialogOpen(true);
+                            }}
+                            data-testid={`reject-gap-btn-${gap.gap_id}`}
+                          >
+                            <XCircle className="h-4 w-4 mr-1.5" />
+                            Reject
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setSelectedGap(gap);
+                              setRequestInfoDialogOpen(true);
+                            }}
+                            data-testid={`request-info-btn-${gap.gap_id}`}
+                          >
+                            <HelpCircle className="h-4 w-4 mr-1.5" />
+                            Request Info
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+      
+      {/* Explain Gap Dialog */}
+      <Dialog open={explainDialogOpen} onOpenChange={setExplainDialogOpen}>
+        <DialogContent className="sm:max-w-lg" data-testid="explain-gap-dialog">
+          <DialogHeader>
+            <DialogTitle>Explain Employment Gap</DialogTitle>
+            <DialogDescription>
+              Please provide an explanation for the {selectedGap?.duration_months} month gap in your employment history.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <Textarea
+              placeholder="Describe what you were doing during this period (e.g., education, travel, family responsibilities, career break)..."
+              value={explanation}
+              onChange={(e) => setExplanation(e.target.value)}
+              rows={5}
+              className="resize-none"
+            />
+            <p className="text-xs text-gray-500 mt-2">
+              Be specific and honest. This will be reviewed by our recruitment team.
+            </p>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExplainDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSubmitExplanation}
+              disabled={isSubmitting || !explanation.trim()}
+            >
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <MessageSquare className="h-4 w-4 mr-2" />
+              )}
+              Submit Explanation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Verify Gap Dialog */}
+      <AlertDialog open={verifyDialogOpen} onOpenChange={setVerifyDialogOpen}>
+        <AlertDialogContent data-testid="verify-gap-dialog">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-emerald-700">
+              <CheckCircle2 className="h-5 w-5" />
+              Verify Gap Explanation?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This will approve the applicant's explanation for the {selectedGap?.duration_months} month gap.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="py-4">
+            <label className="text-sm font-medium">Notes (optional)</label>
+            <Textarea
+              placeholder="Add any verification notes..."
+              value={verifyNotes}
+              onChange={(e) => setVerifyNotes(e.target.value)}
+              rows={3}
+              className="mt-2"
+            />
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleVerifyGap}
+              disabled={isSubmitting}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Verify'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      {/* Reject Gap Dialog */}
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+        <DialogContent className="sm:max-w-lg" data-testid="reject-gap-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <XCircle className="h-5 w-5" />
+              Reject Gap Explanation
+            </DialogTitle>
+            <DialogDescription>
+              The applicant will need to provide a revised explanation.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <label className="text-sm font-medium">Rejection Reason <span className="text-red-500">*</span></label>
+            <Textarea
+              placeholder="Explain why the explanation is not acceptable..."
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+              rows={4}
+              className="mt-2"
+            />
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive"
+              onClick={handleRejectGap}
+              disabled={isSubmitting || !rejectionReason.trim()}
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Reject Explanation'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Request Info Dialog */}
+      <Dialog open={requestInfoDialogOpen} onOpenChange={setRequestInfoDialogOpen}>
+        <DialogContent className="sm:max-w-lg" data-testid="request-info-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HelpCircle className="h-5 w-5 text-purple-600" />
+              Request More Information
+            </DialogTitle>
+            <DialogDescription>
+              Ask the applicant for additional details about this gap.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <label className="text-sm font-medium">Information Request <span className="text-red-500">*</span></label>
+            <Textarea
+              placeholder="What additional information do you need?"
+              value={infoRequest}
+              onChange={(e) => setInfoRequest(e.target.value)}
+              rows={4}
+              className="mt-2"
+            />
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequestInfoDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleRequestInfo}
+              disabled={isSubmitting || !infoRequest.trim()}
+            >
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send Request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

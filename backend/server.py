@@ -28721,6 +28721,252 @@ async def get_compliance_file(
         }
     
     # =========================================================================
+    # FETCH FORM SUBMISSIONS FOR ALL FORM-TYPE REQUIREMENTS
+    # =========================================================================
+    
+    # Get all form submissions for this employee
+    all_form_submissions = await db.form_submissions.find(
+        {"employee_id": employee_id}
+    ).sort("created_at", -1).to_list(length=100)
+    
+    # Index by requirement_id
+    form_submissions_by_req = {}
+    for sub in all_form_submissions:
+        req_id = sub.get("requirement_id", "")
+        if req_id and req_id not in form_submissions_by_req:
+            form_submissions_by_req[req_id] = sub
+    
+    # Form delivery modes
+    FORM_DELIVERY_MODES = {
+        "staff_health_questionnaire": "employee_sendable",
+        "hmrc_starter_checklist": "employee_sendable",
+        "equal_opportunities": "employee_sendable",
+        "staff_personal_info": "employee_sendable",
+        "interview_record": "admin_only",
+        "recruitment_checklist": "admin_only",
+        "induction": "admin_only",
+        "application_form": "hybrid"
+    }
+    
+    # Form requirement metadata
+    FORM_REQUIREMENT_CONFIG = {
+        "staff_health_questionnaire": {
+            "name": "Staff Health Questionnaire",
+            "category": "health_competency",
+            "affects_readiness": True,
+            "optional": False
+        },
+        "induction": {
+            "name": "Induction & Competency Assessment",
+            "category": "health_competency",
+            "affects_readiness": True,
+            "optional": False
+        },
+        "interview_record": {
+            "name": "Interview Record",
+            "category": "recruitment_record",
+            "affects_readiness": False,
+            "optional": False
+        },
+        "recruitment_checklist": {
+            "name": "Recruitment Compliance Checklist",
+            "category": "recruitment_record",
+            "affects_readiness": False,
+            "optional": False
+        },
+        "application_form": {
+            "name": "Application Form",
+            "category": "recruitment_record",
+            "affects_readiness": False,
+            "optional": False
+        },
+        "staff_personal_info": {
+            "name": "Staff Personal Information",
+            "category": "admin_forms",
+            "affects_readiness": False,
+            "optional": False
+        },
+        "hmrc_starter_checklist": {
+            "name": "HMRC Starter Checklist",
+            "category": "admin_forms",
+            "affects_readiness": False,
+            "optional": False,
+            "conditional_on": "p45"
+        },
+        "equal_opportunities": {
+            "name": "Equal Opportunities Monitoring",
+            "category": "admin_forms",
+            "affects_readiness": False,
+            "optional": True
+        }
+    }
+    
+    def build_form_row(
+        key: str,
+        config: dict
+    ) -> dict:
+        """Build a form-type requirement row."""
+        name = config.get("name", key.replace("_", " ").title())
+        delivery_mode = FORM_DELIVERY_MODES.get(key, "admin_only")
+        affects_readiness = config.get("affects_readiness", False)
+        optional = config.get("optional", False)
+        
+        # Get submission for this form
+        submission = form_submissions_by_req.get(key)
+        
+        has_submission = submission is not None
+        status_value = submission.get("status") if submission else None
+        is_verified = status_value == "signed_off" or submission.get("verified") if submission else False
+        is_awaiting_review = status_value == "submitted" if submission else False
+        
+        # Determine status
+        if is_verified:
+            status = "verified"
+            completed_at = submission.get("verified_at") or submission.get("signed_off_at") or submission.get("updated_at")
+            status_summary = f"Verified"
+            if completed_at:
+                status_summary += f" • {str(completed_at)[:10]}"
+        elif is_awaiting_review:
+            status = "awaiting_review"
+            status_summary = "Submitted • awaiting verification"
+        elif has_submission:
+            # Has submission but not verified/submitted
+            status = "recorded"
+            status_summary = f"Draft saved"
+        else:
+            status = "not_completed"
+            status_summary = "Not completed"
+        
+        # Blocker text
+        blocker_text = None
+        if affects_readiness and not is_verified and not optional:
+            blocker_text = f"{name} not completed"
+        
+        # Allowed actions based on delivery mode and state
+        allowed_actions = []
+        if not has_submission:
+            if delivery_mode in ["employee_sendable", "hybrid"]:
+                allowed_actions.append("send")
+            allowed_actions.append("fill_form")
+        else:
+            allowed_actions.append("view_submission")
+            allowed_actions.append("export_pdf")
+            if not is_verified:
+                allowed_actions.append("verify")
+                if not optional:
+                    allowed_actions.append("reject")
+            if delivery_mode in ["admin_only", "hybrid"]:
+                allowed_actions.append("edit")
+        allowed_actions.append("history")
+        
+        return {
+            "key": key,
+            "title": name,
+            "row_type": "form",
+            "form_type": key,
+            "delivery_mode": delivery_mode,
+            
+            "affects_readiness": affects_readiness,
+            "optional": optional,
+            "is_supporting_evidence": False,
+            "blocker_text": blocker_text,
+            
+            # Submission data
+            "has_submission": has_submission,
+            "submission_data": {
+                "id": submission.get("id"),
+                "status": status_value,
+                "created_at": submission.get("created_at"),
+                "updated_at": submission.get("updated_at"),
+                "submitted_at": submission.get("submitted_at"),
+                "signed_off_at": submission.get("signed_off_at"),
+                "signed_off_by": submission.get("signed_off_by"),
+                "has_pdf": bool(submission.get("pdf_url")),
+                "pdf_url": submission.get("pdf_url")
+            } if has_submission else None,
+            
+            # Verification
+            "is_verified": is_verified,
+            "verified_at": submission.get("verified_at") or submission.get("signed_off_at") if submission else None,
+            "verified_by": submission.get("verified_by") or submission.get("signed_off_by") if submission else None,
+            
+            # Status
+            "status": status,
+            "status_summary": status_summary,
+            
+            # Actions
+            "allowed_actions": allowed_actions,
+            
+            # Counts toward readiness
+            "counts_toward_readiness": is_verified and affects_readiness
+        }
+    
+    # =========================================================================
+    # FETCH CV/DOCUMENT-BASED RECRUITMENT ITEMS
+    # =========================================================================
+    
+    # Get CV documents from docs_by_requirement
+    cv_docs = docs_by_requirement.get("cv", [])
+    active_cv_docs = [d for d in cv_docs if d.get("file_url") and d.get("status") not in ["superseded", "archived"]]
+    
+    def build_cv_row() -> dict:
+        """Build the CV/Resume requirement row."""
+        has_files = len(active_cv_docs) > 0
+        is_verified = any(d.get("verified") for d in active_cv_docs)
+        
+        if is_verified:
+            status = "verified"
+            status_summary = f"CV on file • verified"
+        elif has_files:
+            status = "awaiting_review"
+            status_summary = f"{len(active_cv_docs)} file(s) • awaiting review"
+        else:
+            status = "not_completed"
+            status_summary = "No CV uploaded"
+        
+        allowed_actions = []
+        allowed_actions.append("upload")
+        if has_files:
+            allowed_actions.extend(["view", "download"])
+            if not is_verified:
+                allowed_actions.append("verify")
+        allowed_actions.append("history")
+        
+        return {
+            "key": "cv",
+            "title": "CV / Resume",
+            "row_type": "evidence",
+            "delivery_mode": "hybrid",
+            
+            "affects_readiness": False,
+            "is_supporting_evidence": False,
+            "blocker_text": None,
+            
+            # Files
+            "has_files": has_files,
+            "file_count": len(active_cv_docs),
+            "files": [{
+                "id": d.get("id"),
+                "file_name": d.get("file_name"),
+                "file_url": d.get("file_url"),
+                "uploaded_at": d.get("uploaded_at"),
+                "verified": d.get("verified", False)
+            } for d in active_cv_docs[:3]],
+            
+            # Verification
+            "is_verified": is_verified,
+            
+            # Status
+            "status": status,
+            "status_summary": status_summary,
+            
+            # Actions
+            "allowed_actions": allowed_actions,
+            
+            "counts_toward_readiness": False
+        }
+    
+    # =========================================================================
     # BUILD DUAL-ROW SECTIONS
     # =========================================================================
     
@@ -28840,6 +29086,36 @@ async def get_compliance_file(
         "training": {
             "title": "Training",
             "evaluation": await evaluate_employee_training_status(employee_id, employee.get("role", ""))
+        },
+        
+        # Recruitment & Application - Form-based records
+        "recruitment_record": {
+            "title": "Recruitment Record",
+            "rows": [
+                build_form_row("interview_record", FORM_REQUIREMENT_CONFIG["interview_record"]),
+                build_form_row("application_form", FORM_REQUIREMENT_CONFIG["application_form"]),
+                build_cv_row(),
+                build_form_row("recruitment_checklist", FORM_REQUIREMENT_CONFIG["recruitment_checklist"])
+            ]
+        },
+        
+        # Health & Competency - Form-based assessments
+        "health_competency": {
+            "title": "Health & Competency",
+            "rows": [
+                build_form_row("staff_health_questionnaire", FORM_REQUIREMENT_CONFIG["staff_health_questionnaire"]),
+                build_form_row("induction", FORM_REQUIREMENT_CONFIG["induction"])
+            ]
+        },
+        
+        # Admin Forms - Misc internal forms
+        "admin_forms": {
+            "title": "Admin Forms",
+            "rows": [
+                build_form_row("staff_personal_info", FORM_REQUIREMENT_CONFIG["staff_personal_info"]),
+                build_form_row("hmrc_starter_checklist", FORM_REQUIREMENT_CONFIG["hmrc_starter_checklist"]),
+                build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"])
+            ]
         }
     }
     

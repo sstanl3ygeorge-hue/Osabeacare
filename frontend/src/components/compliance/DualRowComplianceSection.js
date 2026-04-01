@@ -11,6 +11,7 @@ import EvidenceRow from './EvidenceRow';
 import CheckRow from './CheckRow';
 import AgreementRow from './AgreementRow';
 import ReferenceRow from './ReferenceRow';
+import FormRequirementRow from './FormRequirementRow';
 import UploadRequirementCard from './UploadRequirementCard';
 import UploadRequirementDrawer from './UploadRequirementDrawer';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
@@ -59,7 +60,20 @@ export default function DualRowComplianceSection({
     identity: true,
     proof_of_address: true,
     agreements: true,
-    references: true  // Added for references
+    references: true,
+    training: false,
+    recruitment_record: false,
+    health_competency: false,
+    admin_forms: false
+  });
+  
+  // Form submission drawer state (for new form-type requirements)
+  const [formDrawer, setFormDrawer] = useState({
+    isOpen: false,
+    formKey: null,
+    formType: null,
+    submissionId: null,
+    mode: 'create' // 'create', 'view', 'edit'
   });
   
   // Phase D2: Files drawer state (for legacy rows)
@@ -416,6 +430,75 @@ export default function DualRowComplianceSection({
                 );
               }
               
+              // Form-type requirement rows
+              if (row.row_type === 'form' || row.row_type === 'evidence' && row.key === 'cv') {
+                return (
+                  <FormRequirementRow
+                    key={row.key || idx}
+                    row={row}
+                    employeeId={employeeId}
+                    employeeEmail={employeeEmail}
+                    employeeName={employeeName}
+                    onRefresh={handleRefresh}
+                    onOpenForm={(formKey, formType, submissionId) => {
+                      setFormDrawer({
+                        isOpen: true,
+                        formKey,
+                        formType,
+                        submissionId,
+                        mode: submissionId ? 'edit' : 'create'
+                      });
+                    }}
+                    onViewSubmission={(formKey, formType, submissionId) => {
+                      setFormDrawer({
+                        isOpen: true,
+                        formKey,
+                        formType,
+                        submissionId,
+                        mode: 'view'
+                      });
+                    }}
+                    onSendForm={async (formKey, empId, empEmail) => {
+                      try {
+                        await axios.post(
+                          `${API}/employees/${empId}/send-form`,
+                          { 
+                            form_type: formKey,
+                            employee_email: empEmail
+                          },
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        toast.success(`Form sent to ${empEmail}`);
+                        handleRefresh();
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Failed to send form');
+                      }
+                    }}
+                    onExportPdf={async (formKey, formType, submissionId) => {
+                      try {
+                        const response = await axios.get(
+                          `${API}/form-submissions/${submissionId}/download-pdf`,
+                          { 
+                            headers: { Authorization: `Bearer ${token}` },
+                            responseType: 'blob'
+                          }
+                        );
+                        const url = window.URL.createObjectURL(new Blob([response.data]));
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${formKey}_${submissionId}.pdf`;
+                        link.click();
+                        window.URL.revokeObjectURL(url);
+                      } catch (err) {
+                        toast.error('Failed to download PDF');
+                      }
+                    }}
+                    onViewHistory={(reqKey, title) => handleViewHistory(reqKey, title)}
+                    isAuditor={isAuditor}
+                  />
+                );
+              }
+              
               return null;
             })}
           </div>
@@ -518,6 +601,18 @@ export default function DualRowComplianceSection({
           
           {/* References - Uses legacy section for now */}
           {sections.references && sections.references.rows && renderSection('references', sections.references)}
+          
+          {/* Training */}
+          {sections.training && renderSection('training', sections.training)}
+          
+          {/* Recruitment Record - Form-type requirements */}
+          {sections.recruitment_record && sections.recruitment_record.rows && renderSection('recruitment_record', sections.recruitment_record)}
+          
+          {/* Health & Competency - Form-type requirements */}
+          {sections.health_competency && sections.health_competency.rows && renderSection('health_competency', sections.health_competency)}
+          
+          {/* Admin Forms - Form-type requirements */}
+          {sections.admin_forms && sections.admin_forms.rows && renderSection('admin_forms', sections.admin_forms)}
         </>
       )}
       

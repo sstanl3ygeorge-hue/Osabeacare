@@ -4,6 +4,33 @@
 **Osabea Healthcare Solutions**
 
 
+## System Audit & Stabilization Phase (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Critical Issues Fixed
+
+#### 1. CRITICAL: Document View/Download 404 Error
+- **Root Cause**: Backend returned relative API paths (`/api/employee-documents/{id}/file`) but frontend tried to use them directly without proper URL construction, resulting in `/api/api/...` double prefix
+- **Fix**: Frontend properly constructs absolute URLs by stripping `/api/` prefix (since `API` variable already ends with `/api`)
+- **Files Fixed**: `UploadRequirementDrawer.js`, `EvidenceRow.js`, `EmployeeProfilePage.js`
+
+#### 2. CRITICAL: Files Not Showing in UI ("No active files")
+- **Root Cause**: Frontend filter in `surfaceNormalizers.js` only accepted `status === 'active'` but backend sends `status === 'uploaded'`
+- **Fix**: Updated filter to include `status === 'uploaded'` as active files
+- **File**: `surfaceNormalizers.js`
+
+#### 3. MAJOR: Legacy Checklist View Duplication  
+- **Root Cause**: ~1029 lines of legacy "Previous Format" checklist existed alongside new DualRowComplianceSection
+- **Fix**: Removed entire legacy checklist section
+- **Lines Removed**: 1029 lines from `EmployeeProfilePage.js`
+
+### Testing
+- Backend: 100% (File view/download endpoints return 200)
+- Frontend: 100% (All document view/download features working)
+- Test report: `/app/test_reports/iteration_113.json`
+
+---
+
 ## System Consolidation Phase - Full UI Consolidation (2026-04-01)
 **Status**: COMPLETE ✅
 

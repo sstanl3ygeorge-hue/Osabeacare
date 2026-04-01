@@ -44,6 +44,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { formatBackendDate } from '../../lib/dateUtils';
+import TrainingDetailDrawer from './TrainingDetailDrawer';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -77,13 +78,20 @@ export default function TrainingMatrix({
   onViewCertificate,
   onRefresh
 }) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [trainingData, setTrainingData] = useState(null);
   const [expandedRows, setExpandedRows] = useState({});
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showBlockersOnly, setShowBlockersOnly] = useState(false);
+  
+  // Detail drawer state
+  const [selectedTraining, setSelectedTraining] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  
+  // Check if user is admin
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
   
   // Fetch training matrix data
   const fetchTrainingMatrix = useCallback(async () => {
@@ -133,6 +141,24 @@ export default function TrainingMatrix({
       ...prev,
       [code]: !prev[code]
     }));
+  };
+  
+  // Open detail drawer for a training item
+  const handleOpenDetail = (item) => {
+    setSelectedTraining(item);
+    setDrawerOpen(true);
+  };
+  
+  // Close detail drawer
+  const handleCloseDrawer = () => {
+    setDrawerOpen(false);
+    setSelectedTraining(null);
+  };
+  
+  // Refresh after drawer update
+  const handleDrawerUpdate = () => {
+    fetchTrainingMatrix();
+    onRefresh?.();
   };
   
   // Filter items
@@ -190,6 +216,7 @@ export default function TrainingMatrix({
   }
   
   return (
+    <>
     <Card data-testid="training-matrix">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
@@ -361,7 +388,13 @@ export default function TrainingMatrix({
                         
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <span className="font-medium text-gray-900">{item.title}</span>
+                            <button
+                              onClick={() => handleOpenDetail(item)}
+                              className="font-medium text-gray-900 hover:text-primary hover:underline text-left cursor-pointer"
+                              data-testid={`training-title-${item.code}`}
+                            >
+                              {item.title}
+                            </button>
                             {item.blocker && (
                               <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
                                 Blocker
@@ -499,5 +532,16 @@ export default function TrainingMatrix({
         </div>
       </CardContent>
     </Card>
+    
+    {/* Training Detail Drawer */}
+    <TrainingDetailDrawer
+      isOpen={drawerOpen}
+      onClose={handleCloseDrawer}
+      trainingItem={selectedTraining}
+      employeeId={employeeId}
+      isAdmin={isAdmin}
+      onUpdate={handleDrawerUpdate}
+    />
+    </>
   );
 }

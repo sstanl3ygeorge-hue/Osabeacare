@@ -85,9 +85,11 @@ export default function TrainingDetailDrawer({
         `${API}/api/training-records/${trainingItem.record_id}/history`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setHistory(response.data || []);
+      // Backend returns { training_record, history, total_corrections }
+      setHistory(response.data?.history || []);
     } catch (err) {
       console.error('Error fetching history:', err);
+      setHistory([]); // Reset to empty array on error
     } finally {
       setHistoryLoading(false);
     }
@@ -428,7 +430,7 @@ export default function TrainingDetailDrawer({
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
               </div>
-            ) : history.length === 0 ? (
+            ) : !Array.isArray(history) || history.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <History className="h-12 w-12 mx-auto mb-3 opacity-50" />
                 <p>No history available</p>

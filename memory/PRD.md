@@ -4,6 +4,54 @@
 **Osabea Healthcare Solutions**
 
 
+
+## Compliance Verification Proof Enforcement (2026-04-02)
+**Status**: COMPLETE ✅
+
+### Overview
+Enforced CQC/NHS inspection-readiness by strictly requiring proof file uploads when recording verification checks. Every check (RTW, DBS, Identity, Address) must now be linked to a proof document.
+
+### Critical Issues Fixed
+
+#### 1. CRITICAL: RecordCheckDialog Upload Endpoint Fix
+- **Root Cause**: Frontend was using incorrect endpoint `/employees/{id}/documents/upload` instead of `/employees/{id}/upload-document`
+- **Fix**: Changed line 157 in RecordCheckDialog.js to use correct endpoint
+- **File**: `/app/frontend/src/components/compliance/RecordCheckDialog.js`
+
+### Features Implemented
+
+1. **RecordCheckDialog Proof Upload Requirement**
+   - Added mandatory file upload section with compliance alert warning
+   - Disabled submit button until proof file is uploaded
+   - File validation: PDF, JPG, PNG (max 10MB)
+   - Uploads proof to `employee_documents` with `type: 'verification_proof'`
+
+2. **Check Record ↔ Proof Linkage**
+   - Check records store `evidence_document_id` linking to the uploaded proof
+   - Backend endpoints (`/right-to-work/check`, `/dbs/check`, `/identity/check`) accept `evidence_document_id`
+   - Compliance file endpoint returns `evidence_document` details in `check_data`
+
+3. **CheckRow Proof Display**
+   - Expanded view shows "Proof of Check" section when evidence_document exists
+   - View/Download buttons with data-testids for proof file
+   - Amber warning displayed for legacy checks without proof file
+
+### Files Modified
+- `/app/frontend/src/components/compliance/RecordCheckDialog.js` - Added file upload, validation, proof linking
+- `/app/frontend/src/components/compliance/CheckRow.js` - Added proof file display section
+- `/app/backend/server.py` - Lines 29541-29555: Returns evidence_document in check_data
+
+### Testing
+- Backend: 100% (11/11 tests passed)
+- Frontend: 95% (All features working after endpoint fix)
+- Test report: `/app/test_reports/iteration_114.json`
+
+### Credentials
+- Admin: `admin@osabea.care` / `admin123`
+- Test Employee: Olakunle Alonge (ID: `d88335f6-1b18-435a-8086-28af4a583f77`)
+
+---
+
 ## System Audit & Stabilization Phase (2026-04-01)
 **Status**: COMPLETE ✅
 

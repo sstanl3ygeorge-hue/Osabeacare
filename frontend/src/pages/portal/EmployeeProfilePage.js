@@ -23,6 +23,7 @@ import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
+import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -3610,6 +3611,28 @@ export default function EmployeeProfilePage() {
               // Navigate to compliance tab
               setActiveTab('checklist');
               toast.info(`Navigate to: ${requirementKey.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase())}`);
+            }}
+          />
+        </div>
+      )}
+
+      {/* WORK READINESS PANEL (GATE 2) - Show for approved employees */}
+      {employee?.recruitment_approved && (
+        <div className="mb-6">
+          <WorkReadinessPanel
+            employeeId={employee.id}
+            employeeName={`${employee.first_name} ${employee.last_name}`}
+            role={employee.role}
+            stageIdentity={employee.person_stage}
+            recruitmentApproved={employee.recruitment_approved}
+            onNavigateToRequirement={(requirementKey, section) => {
+              // Navigate to compliance or training tab based on section
+              if (section === 'training') {
+                setActiveTab('training');
+              } else {
+                setActiveTab('checklist');
+              }
+              toast.info(`Navigate to: ${requirementKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}`);
             }}
           />
         </div>

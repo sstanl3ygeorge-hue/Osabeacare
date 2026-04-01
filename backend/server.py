@@ -79,6 +79,11 @@ from approval_engine import (
     ROLE_APPROVAL_REQUIREMENTS,
     get_requirement_label
 )
+from work_readiness_engine import (
+    evaluate_work_readiness,
+    ROLE_WORK_REQUIREMENTS,
+    get_work_readiness_label
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27984,6 +27989,77 @@ async def approve_recruitment(
         "employee": result["employee"],
         "employee_code": result["employee_code"],
         "evaluation": result["evaluation"]
+    }
+
+
+# =============================================================================
+# WORK READINESS ENGINE ENDPOINTS (GATE 2)
+# =============================================================================
+
+@api_router.get("/employees/{employee_id}/work-readiness-check")
+async def check_work_readiness(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Evaluate work readiness (Gate 2) - Can this employee start work?
+    
+    This is separate from recruitment approval (Gate 1).
+    Checks:
+    - Contract and handbook acknowledgement verified
+    - Induction and health questionnaire completed/verified
+    - Role-specific competency (care certificate / clinical competency)
+    - Required training matrix satisfied
+    - Critical documents not expired (RTW, DBS, Identity, NMC)
+    
+    Returns:
+    - can_work: whether employee can start work now
+    - readiness_status: READY_TO_WORK | READY_WITH_CONDITIONS | NOT_READY
+    - blockers: list of requirements blocking work
+    - warnings: non-blocking issues (e.g., expiring soon)
+    - verified_count / required_count: progress tracking
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get compliance file sections
+    compliance_file = await get_compliance_file_data(employee_id, employee)
+    sections = compliance_file.get("sections", {})
+    
+    # Get agreements data
+    agreements_data = await get_employee_agreements_data(employee_id)
+    
+    # Get training status
+    role = employee.get("role", "")
+    training_status = await evaluate_employee_training_status(employee_id, role)
+    
+    # Evaluate work readiness
+    evaluation = await evaluate_work_readiness(
+        person=employee,
+        compliance_sections=sections,
+        agreements_data=agreements_data,
+        training_status=training_status,
+        db=db
+    )
+    
+    return evaluation
+
+
+async def get_employee_agreements_data(employee_id: str) -> dict:
+    """
+    Get agreement/acknowledgement data for an employee.
+    Used by work readiness engine to check contract and handbook status.
+    """
+    # Get agreement submissions
+    agreement_submissions = await db.agreement_submissions.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return {
+        "acknowledgements": agreement_submissions
     }
 
 

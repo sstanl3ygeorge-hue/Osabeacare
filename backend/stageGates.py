@@ -1,189 +1,308 @@
 """
-stageGates.py - Stage Gate Validation Service
+stageGates.py - Stage Gate Service
 
-Validates whether an employee can move to the next stage based on:
-- Role pack requirements
-- Verified documents/checks
-- Submitted forms
-- Valid references
+Generates requirement slots and validates stage transitions.
+Uses employee_documents collection for requirement slots.
 """
 
+import uuid
 from datetime import datetime, timezone
-from typing import List, Dict, Optional, Tuple
-from rolePacks import (
-    get_role_pack, 
-    get_requirement_type, 
-    REQUIREMENT_METADATA,
-    STAGE_GATES
-)
+from typing import List, Tuple
+
+from role_packs import get_role_pack, get_role_requirements, get_role_policies
+from role_normalization import normalize_role
+from requirement_definitions import get_requirement_definition
 
 
 class StageGateService:
     """
-    Service for validating stage transitions and recruitment approval.
+    Service for generating requirements and validating stage transitions.
+    Uses employee_documents as the requirement-slot store.
     """
     
     def __init__(self, db):
         self.db = db
     
     # =========================================================================
-    # CORE VERIFICATION CHECKS
+    # REQUIREMENT GENERATION
     # =========================================================================
     
-    async def is_requirement_verified(self, employee_id: str, requirement_key: str) -> bool:
-        """Check if a specific requirement is verified for an employee"""
-        req_type = get_requirement_type(requirement_key)
-        
-        if req_type == "document":
-            return await self._is_document_verified(employee_id, requirement_key)
-        elif req_type == "reference":
-            return await self._is_reference_verified(employee_id, requirement_key)
-        elif req_type == "form":
-            return await self._is_form_completed(employee_id, requirement_key)
-        elif req_type == "registration":
-            return await self._is_registration_verified(employee_id, requirement_key)
-        else:
-            return False
-    
-    async def _is_document_verified(self, employee_id: str, requirement_key: str) -> bool:
-        """Check if document requirement has verified check"""
-        # Map requirement to check collection
-        check_collections = {
-            "right_to_work": "rtw_checks",
-            "identity": "identity_verifications",
-            "proof_of_address": "address_verifications",
-            "dbs": "dbs_checks"
-        }
-        
-        collection_name = check_collections.get(requirement_key)
-        if not collection_name:
-            return False
-        
-        collection = self.db[collection_name]
-        check = await collection.find_one({
-            "employee_id": employee_id,
-            "outcome": "verified"
-        })
-        
-        return check is not None
-    
-    async def _is_reference_verified(self, employee_id: str, requirement_key: str) -> bool:
-        """Check if reference is verified"""
-        ref_num = 1 if requirement_key == "reference_1" else 2
-        
-        employee = await self.db.employees.find_one(
-            {"id": employee_id},
-            {f"reference_{ref_num}_verification_status": 1}
-        )
-        
-        if not employee:
-            return False
-        
-        return employee.get(f"reference_{ref_num}_verification_status") == "verified"
-    
-    async def _is_form_completed(self, employee_id: str, requirement_key: str) -> bool:
-        """Check if form requirement is completed"""
-        # Check form_submissions or agreement_acknowledgements
-        form_submission = await self.db.form_submissions.find_one({
-            "employee_id": employee_id,
-            "form_type": requirement_key,
-            "status": "completed"
-        })
-        
-        if form_submission:
-            return True
-        
-        # Also check agreement_acknowledgements for agreement forms
-        if requirement_key in ["contract_acceptance", "handbook_acknowledgement", "induction"]:
-            acknowledgement = await self.db.agreement_acknowledgements.find_one({
-                "employee_id": employee_id,
-                "agreement_type": requirement_key,
-                "verification_status": "verified"
-            })
-            return acknowledgement is not None
-        
-        return False
-    
-    async def _is_registration_verified(self, employee_id: str, requirement_key: str) -> bool:
-        """Check if professional registration is verified (e.g., NMC)"""
-        if requirement_key == "nmc_registration":
-            employee = await self.db.employees.find_one(
-                {"id": employee_id},
-                {"nmc_pin": 1, "nmc_verified": 1, "nmc_expiry": 1}
-            )
-            
-            if not employee:
-                return False
-            
-            # Must have PIN, be verified, and not expired
-            if not employee.get("nmc_pin") or not employee.get("nmc_verified"):
-                return False
-            
-            expiry = employee.get("nmc_expiry")
-            if expiry:
-                expiry_date = datetime.fromisoformat(expiry.replace("Z", "+00:00")) if isinstance(expiry, str) else expiry
-                if expiry_date < datetime.now(timezone.utc):
-                    return False
-            
-            return True
-        
-        return False
-    
-    # =========================================================================
-    # PROOF OF ADDRESS - SPECIAL VALIDATION
-    # =========================================================================
-    
-    async def is_valid_poa(self, employee_id: str, validity_months: int = 12) -> bool:
+    async def generate_requirements_for_employee(
+        self, 
+        employee_id: str, 
+        role: str,
+        reference_metadata: dict = None
+    ) -> List[dict]:
         """
-        Check if Proof of Address requirement is satisfied.
-        Requires 2 valid documents within validity_months.
+        Generate requirement slots for an employee based on their role.
+        
+        Args:
+            employee_id: The employee/applicant ID
+            role: The role (will be normalized)
+            reference_metadata: Optional dict with ref1/ref2 details from form
+            
+        Returns:
+            List of created requirement slot documents
         """
-        # Get active PoA files
-        files_cursor = self.db.employee_documents.find({
-            "employee_id": employee_id,
-            "requirement_id": {"$in": ["proof_of_address", "proof_of_address_evidence"]},
-            "status": {"$in": ["active", "uploaded"]},
-            "rejected": {"$ne": True}
-        })
+        # Normalize role
+        normalized_role = normalize_role(role)
         
-        files = await files_cursor.to_list(length=100)
+        # Get role pack
+        role_pack = get_role_pack(normalized_role)
+        requirements = role_pack.get("requirements", [])
+        policies = role_pack.get("policies", {})
         
-        # Filter to valid files (within validity period)
-        now = datetime.now(timezone.utc)
-        valid_files = []
+        now = datetime.now(timezone.utc).isoformat()
+        created_slots = []
         
-        for f in files:
-            doc_date = f.get("document_date") or f.get("uploaded_at")
-            if not doc_date:
+        for req_key in requirements:
+            # Skip cv, application_form, equal_opportunities - these are seeded separately
+            if req_key in ["cv", "application_form", "equal_opportunities"]:
                 continue
             
-            if isinstance(doc_date, str):
-                doc_date = datetime.fromisoformat(doc_date.replace("Z", "+00:00"))
+            # Check if slot already exists (by requirement_key)
+            existing = await self.db.employee_documents.find_one({
+                "employee_id": employee_id,
+                "requirement_key": req_key
+            })
             
-            months_diff = (now.year - doc_date.year) * 12 + (now.month - doc_date.month)
+            if existing:
+                continue
             
-            if months_diff <= validity_months:
-                valid_files.append(f)
+            # Get requirement definition
+            defn = get_requirement_definition(req_key)
+            
+            # Build requirement slot document
+            slot = {
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                
+                # Requirement metadata
+                "requirement_key": req_key,
+                "requirement_type": defn.get("type", "document"),
+                "document_type_name": defn.get("label", req_key),
+                "category": defn.get("category", "Other"),
+                
+                # Role context
+                "role_scope": normalized_role,
+                
+                # Behavior flags
+                "blocking": defn.get("blocking", False),
+                "supports_files": defn.get("supports_files", True),
+                "supports_requests": defn.get("supports_requests", True),
+                
+                # Status
+                "status": "not_started",
+                "verified": False,
+                
+                # Policy (merged from definition + role policies)
+                "policy": self._build_policy(req_key, defn, policies),
+                
+                # Metadata (for references, etc.)
+                "metadata": self._build_metadata(req_key, reference_metadata),
+                
+                # Notes
+                "notes": self._build_notes(req_key, defn),
+                
+                # Timestamps
+                "created_at": now,
+                "updated_at": now
+            }
+            
+            await self.db.employee_documents.insert_one(slot)
+            created_slots.append(slot)
         
-        # Need at least 2 valid files
-        return len(valid_files) >= 2
+        return created_slots
+    
+    def _build_policy(self, req_key: str, defn: dict, role_policies: dict) -> dict:
+        """Build policy dict for a requirement"""
+        policy = defn.get("policy", {}).copy()
+        
+        # Merge role-specific policies
+        if req_key == "proof_of_address":
+            policy["min_files"] = role_policies.get("poa_min_files", 2)
+            policy["validity_months"] = role_policies.get("poa_validity_months", 12)
+        
+        if req_key == "dbs":
+            policy["required_before_approval"] = role_policies.get("dbs_required_before_approval", True)
+        
+        return policy
+    
+    def _build_metadata(self, req_key: str, reference_metadata: dict) -> dict:
+        """Build metadata dict for a requirement"""
+        if not reference_metadata:
+            return {}
+        
+        if req_key == "reference_1" and "ref1" in reference_metadata:
+            return reference_metadata["ref1"]
+        
+        if req_key == "reference_2" and "ref2" in reference_metadata:
+            return reference_metadata["ref2"]
+        
+        return {}
+    
+    def _build_notes(self, req_key: str, defn: dict) -> str:
+        """Build initial notes for a requirement"""
+        req_type = defn.get("type", "document")
+        label = defn.get("label", req_key)
+        
+        if req_type == "reference":
+            return f"{label} verification required"
+        elif req_type == "document":
+            return f"{label} evidence required"
+        elif req_type == "form":
+            return f"{label} completion required"
+        elif req_type == "registration":
+            return f"{label} verification required"
+        else:
+            return f"{label} required"
     
     # =========================================================================
-    # REFERENCES - SPECIAL VALIDATION
+    # APPLICATION COMPLETION SEEDING
     # =========================================================================
     
-    async def has_verified_references(self, employee_id: str, min_references: int = 2) -> bool:
-        """Check if employee has required number of verified references"""
-        verified_count = 0
+    async def seed_application_completion(
+        self,
+        employee_id: str,
+        cv_file_id: str = None,
+        form_submission_id: str = None
+    ):
+        """
+        Seed the application-stage requirements as completed.
         
-        for ref_num in [1, 2]:
-            if await self._is_reference_verified(employee_id, f"reference_{ref_num}"):
-                verified_count += 1
+        Args:
+            employee_id: The employee/applicant ID
+            cv_file_id: The CV file ID if uploaded
+            form_submission_id: The form submission ID
+        """
+        now = datetime.now(timezone.utc).isoformat()
         
-        return verified_count >= min_references
+        # CV - mark as completed if uploaded
+        if cv_file_id:
+            # Update the existing CV document
+            await self.db.employee_documents.update_one(
+                {"id": cv_file_id},
+                {"$set": {
+                    "employee_id": employee_id,
+                    "requirement_key": "cv",
+                    "requirement_type": "system",
+                    "status": "uploaded",
+                    "verified": False,
+                    "updated_at": now
+                }}
+            )
+        
+        # Application form - create completed slot
+        existing_app = await self.db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_key": "application_form"
+        })
+        
+        if not existing_app:
+            defn = get_requirement_definition("application_form")
+            await self.db.employee_documents.insert_one({
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "requirement_key": "application_form",
+                "requirement_type": "form",
+                "document_type_name": defn.get("label"),
+                "category": defn.get("category"),
+                "blocking": defn.get("blocking", True),
+                "supports_files": False,
+                "supports_requests": False,
+                "status": "completed",
+                "verified": False,
+                "form_submission_id": form_submission_id,
+                "policy": {},
+                "metadata": {},
+                "notes": "Application form submitted",
+                "created_at": now,
+                "updated_at": now
+            })
+        
+        # Equal opportunities - create completed slot (data is in form_submissions)
+        existing_eo = await self.db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_key": "equal_opportunities"
+        })
+        
+        if not existing_eo:
+            defn = get_requirement_definition("equal_opportunities")
+            await self.db.employee_documents.insert_one({
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "requirement_key": "equal_opportunities",
+                "requirement_type": "form",
+                "document_type_name": defn.get("label"),
+                "category": defn.get("category"),
+                "blocking": defn.get("blocking", False),
+                "supports_files": False,
+                "supports_requests": False,
+                "status": "completed",
+                "verified": False,
+                "form_submission_id": form_submission_id,
+                "policy": {},
+                "metadata": {},
+                "notes": "Equal opportunities data submitted with application",
+                "created_at": now,
+                "updated_at": now
+            })
     
     # =========================================================================
-    # RECRUITMENT APPROVAL GATE
+    # FOLLOW-UP ITEMS BUILDER
+    # =========================================================================
+    
+    def build_follow_up_items(self, role: str, created_slots: list) -> list:
+        """
+        Build the follow-up items list for the application response.
+        
+        Args:
+            role: The normalized role
+            created_slots: List of created requirement slots
+            
+        Returns:
+            List of follow-up item dicts
+        """
+        items = []
+        
+        for slot in created_slots:
+            req_key = slot.get("requirement_key")
+            req_type = slot.get("requirement_type")
+            label = slot.get("document_type_name", req_key)
+            
+            if req_type == "reference":
+                items.append({
+                    "type": "reference",
+                    "requirement_key": req_key,
+                    "description": f"{label} verification required",
+                    "status": "pending"
+                })
+            elif req_type == "document":
+                items.append({
+                    "type": req_key,
+                    "requirement_key": req_key,
+                    "description": f"{label} evidence required",
+                    "status": "required"
+                })
+            elif req_type == "registration":
+                items.append({
+                    "type": "professional_registration",
+                    "requirement_key": req_key,
+                    "description": f"{label} verification required",
+                    "status": "verification_required"
+                })
+            elif req_type == "form":
+                items.append({
+                    "type": "form",
+                    "requirement_key": req_key,
+                    "description": f"{label} completion required",
+                    "status": "required"
+                })
+        
+        return items
+    
+    # =========================================================================
+    # VALIDATION (kept simple for now)
     # =========================================================================
     
     async def can_approve_recruitment(self, employee_id: str) -> Tuple[bool, List[str]]:
@@ -196,238 +315,54 @@ class StageGateService:
             return False, ["Employee not found"]
         
         role = employee.get("role", "healthcare_assistant")
-        role_pack = get_role_pack(role)
-        policies = role_pack.get("policies", {})
+        normalized_role = normalize_role(role)
+        policies = get_role_policies(normalized_role)
         
         blockers = []
         
-        # 1. Right to Work verified
-        if not await self.is_requirement_verified(employee_id, "right_to_work"):
-            blockers.append("Right to Work not verified")
+        # Check blocking requirements
+        blocking_keys = [
+            "right_to_work", "identity", "proof_of_address", "dbs",
+            "reference_1", "reference_2"
+        ]
         
-        # 2. Identity verified
-        if not await self.is_requirement_verified(employee_id, "identity"):
-            blockers.append("Identity not verified")
+        # Add nurse-specific
+        if normalized_role == "nurse":
+            blocking_keys.extend(["nmc_registration", "clinical_competency"])
         
-        # 3. Proof of Address valid (2 files within 12 months)
-        poa_months = policies.get("poa_validity_months", 12)
-        if not await self.is_valid_poa(employee_id, poa_months):
-            blockers.append(f"Proof of Address requires 2 valid documents (within {poa_months} months)")
-        
-        # 4. DBS verified (if required)
-        if policies.get("dbs_required_before_approval", True):
-            if not await self.is_requirement_verified(employee_id, "dbs"):
-                blockers.append("DBS not verified")
-        
-        # 5. References verified
-        min_refs = policies.get("min_references", 2)
-        if not await self.has_verified_references(employee_id, min_refs):
-            blockers.append(f"Requires {min_refs} verified references")
-        
-        # 6. NMC Registration (nurse only)
-        if role == "nurse" and policies.get("nmc_required", False):
-            if not await self.is_requirement_verified(employee_id, "nmc_registration"):
-                blockers.append("NMC Registration not verified")
-        
-        can_approve = len(blockers) == 0
-        return can_approve, blockers
-    
-    # =========================================================================
-    # STAGE TRANSITION VALIDATION
-    # =========================================================================
-    
-    async def can_transition_stage(
-        self, 
-        employee_id: str, 
-        from_stage: str, 
-        to_stage: str
-    ) -> Tuple[bool, List[str]]:
-        """
-        Check if employee can transition from one stage to another.
-        Returns (can_transition, list_of_blockers)
-        """
-        gate_key = f"{from_stage}_to_{to_stage}"
-        
-        # Special case: recruitment approval
-        if to_stage == "recruitment_approval" or (from_stage == "compliance_review" and to_stage == "onboarding"):
-            return await self.can_approve_recruitment(employee_id)
-        
-        gate = STAGE_GATES.get(gate_key)
-        if not gate:
-            # No gate defined, allow transition
-            return True, []
-        
-        employee = await self.db.employees.find_one({"id": employee_id})
-        if not employee:
-            return False, ["Employee not found"]
-        
-        role = employee.get("role", "healthcare_assistant")
-        blockers = []
-        
-        # Check required_verified
-        for req_key in gate.get("required_verified", []):
-            if not await self.is_requirement_verified(employee_id, req_key):
-                metadata = REQUIREMENT_METADATA.get(req_key, {})
-                label = metadata.get("label", req_key)
-                blockers.append(f"{label} not verified")
-        
-        # Check role-specific requirements
-        role_specific = gate.get("role_specific", {}).get(role, [])
-        for req_key in role_specific:
-            if not await self.is_requirement_verified(employee_id, req_key):
-                metadata = REQUIREMENT_METADATA.get(req_key, {})
-                label = metadata.get("label", req_key)
-                blockers.append(f"{label} not verified (required for {role})")
-        
-        can_transition = len(blockers) == 0
-        return can_transition, blockers
-    
-    # =========================================================================
-    # REQUIREMENT GENERATION
-    # =========================================================================
-    
-    async def generate_requirements_for_employee(self, employee_id: str, role: str) -> List[dict]:
-        """
-        Generate requirement slots for an employee based on their role.
-        Called when application is submitted or candidate moves to screening.
-        """
-        role_pack = get_role_pack(role)
-        requirements = role_pack.get("requirements", [])
-        policies = role_pack.get("policies", {})
-        
-        created_requirements = []
-        now = datetime.now(timezone.utc).isoformat()
-        
-        for req_key in requirements:
-            # Check if requirement already exists
-            existing = await self.db.employee_requirements.find_one({
+        for req_key in blocking_keys:
+            slot = await self.db.employee_documents.find_one({
                 "employee_id": employee_id,
                 "requirement_key": req_key
             })
             
-            if existing:
+            if not slot:
+                blockers.append(f"{req_key} requirement slot not found")
                 continue
             
-            req_type = get_requirement_type(req_key)
-            metadata = REQUIREMENT_METADATA.get(req_key, {})
-            
-            # Build requirement document
-            requirement = {
-                "employee_id": employee_id,
-                "requirement_key": req_key,
-                "type": req_type,
-                "status": "not_started",
-                "required": metadata.get("required", True),
-                "blocking": metadata.get("blocking", False),
-                "role": role,
-                "created_at": now,
-                "updated_at": now,
-                "policy": {}
-            }
-            
-            # Add policy-specific fields
-            if req_key == "proof_of_address":
-                requirement["policy"]["validity_months"] = policies.get("poa_validity_months", 12)
-                requirement["policy"]["min_files"] = metadata.get("min_files", 2)
-            
-            if metadata.get("expiry_tracked"):
-                requirement["expiry_tracked"] = True
-            
-            if metadata.get("extraction_enabled"):
-                requirement["extraction_enabled"] = True
-            
-            if metadata.get("check_required"):
-                requirement["check_required"] = True
-            
-            # Insert
-            await self.db.employee_requirements.insert_one(requirement)
-            created_requirements.append(requirement)
+            if not slot.get("verified"):
+                defn = get_requirement_definition(req_key)
+                label = defn.get("label", req_key)
+                blockers.append(f"{label} not verified")
         
-        return created_requirements
-    
-    # =========================================================================
-    # COMPLIANCE SUMMARY
-    # =========================================================================
-    
-    async def get_compliance_summary(self, employee_id: str) -> dict:
-        """
-        Get a summary of compliance status for an employee.
-        """
-        employee = await self.db.employees.find_one({"id": employee_id})
-        if not employee:
-            return {"error": "Employee not found"}
-        
-        role = employee.get("role", "healthcare_assistant")
-        role_pack = get_role_pack(role)
-        requirements = role_pack.get("requirements", [])
-        
-        summary = {
+        # Check PoA special rule (2 files)
+        poa_slot = await self.db.employee_documents.find_one({
             "employee_id": employee_id,
-            "role": role,
-            "total_requirements": len(requirements),
-            "verified": 0,
-            "pending": 0,
-            "not_started": 0,
-            "blocking": [],
-            "can_approve": False,
-            "approval_blockers": []
-        }
+            "requirement_key": "proof_of_address"
+        })
         
-        for req_key in requirements:
-            metadata = REQUIREMENT_METADATA.get(req_key, {})
-            is_verified = await self.is_requirement_verified(employee_id, req_key)
+        if poa_slot:
+            # Count verified PoA files
+            poa_files = await self.db.employee_documents.count_documents({
+                "employee_id": employee_id,
+                "requirement_key": {"$regex": "proof_of_address"},
+                "status": {"$in": ["uploaded", "active"]},
+                "verified": True
+            })
             
-            if is_verified:
-                summary["verified"] += 1
-            else:
-                # Check if has any activity
-                has_activity = await self._has_requirement_activity(employee_id, req_key)
-                if has_activity:
-                    summary["pending"] += 1
-                else:
-                    summary["not_started"] += 1
-                
-                # Check if blocking
-                if metadata.get("blocking", False):
-                    summary["blocking"].append({
-                        "key": req_key,
-                        "label": metadata.get("label", req_key)
-                    })
+            min_files = policies.get("poa_min_files", 2)
+            if poa_files < min_files:
+                blockers.append(f"Proof of Address requires {min_files} verified files (has {poa_files})")
         
-        # Check recruitment approval
-        can_approve, blockers = await self.can_approve_recruitment(employee_id)
-        summary["can_approve"] = can_approve
-        summary["approval_blockers"] = blockers
-        
-        return summary
-    
-    async def _has_requirement_activity(self, employee_id: str, requirement_key: str) -> bool:
-        """Check if a requirement has any activity (files, requests, etc.)"""
-        req_type = get_requirement_type(requirement_key)
-        
-        if req_type == "document":
-            # Check for files
-            file = await self.db.employee_documents.find_one({
-                "employee_id": employee_id,
-                "requirement_id": {"$regex": requirement_key}
-            })
-            return file is not None
-        
-        if req_type == "reference":
-            ref_num = 1 if requirement_key == "reference_1" else 2
-            employee = await self.db.employees.find_one(
-                {"id": employee_id},
-                {f"reference_{ref_num}_request_status": 1}
-            )
-            if employee:
-                status = employee.get(f"reference_{ref_num}_request_status")
-                return status and status != "not_started"
-        
-        if req_type == "form":
-            submission = await self.db.form_submissions.find_one({
-                "employee_id": employee_id,
-                "form_type": requirement_key
-            })
-            return submission is not None
-        
-        return False
+        can_approve = len(blockers) == 0
+        return can_approve, blockers

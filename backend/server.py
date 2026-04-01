@@ -56,6 +56,8 @@ import pytesseract
 from PIL import Image as PILImage
 from pdf2image import convert_from_bytes
 import pdfplumber  # Primary method for typed PDF extraction
+from role_normalization import normalize_role
+from stageGates import StageGateService
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -21486,7 +21488,8 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "postcode": form.postcode,
         
         # Role & availability
-        "role": form.role_applied,
+        "role_applied_raw": form.role_applied,  # Original input
+        "role": normalize_role(form.role_applied),  # Normalized canonical role
         "assignment": "Unassigned",
         "availability": form.availability,
         "earliest_start_date": form.earliest_start_date,
@@ -21612,129 +21615,82 @@ async def submit_structured_application(form: StructuredApplicationForm):
         )
     
     # ==================== 4. CREATE FOLLOW-UP REQUIREMENT SLOTS ====================
-    # These are items that need to be collected/verified after application
+    # Uses StageGateService to generate role-based requirement slots
     
-    follow_up_items = []
+    # Normalize the role
+    normalized_role = normalize_role(form.role_applied)
     
-    # Reference 1 - Needs verification
+    # Extract reference metadata from form
     ref1 = form.references[0]
-    ref1_doc_id = str(uuid.uuid4())
-    await db.employee_documents.insert_one({
-        "id": ref1_doc_id,
-        "employee_id": app_id,
-        "document_type_id": None,  # Will be linked to Reference doc type
-        "document_type_name": "Reference 1",
-        "category": "References",
-        "status": DocumentStatus.REQUESTED,
-        "verified": False,
-        "notes": f"Referee: {ref1.referee_name} ({ref1.referee_organisation}). Contact: {ref1.referee_email}",
-        "metadata": ref1.model_dump(),
-        "created_at": now,
-        "updated_at": now
-    })
-    follow_up_items.append({
-        "type": "reference",
-        "description": f"Reference verification required from {ref1.referee_name} ({ref1.referee_organisation})",
-        "status": "pending"
-    })
-    
-    # Reference 2 - Needs verification
     ref2 = form.references[1]
-    ref2_doc_id = str(uuid.uuid4())
-    await db.employee_documents.insert_one({
-        "id": ref2_doc_id,
-        "employee_id": app_id,
-        "document_type_id": None,
-        "document_type_name": "Reference 2",
-        "category": "References",
-        "status": DocumentStatus.REQUESTED,
-        "verified": False,
-        "notes": f"Referee: {ref2.referee_name} ({ref2.referee_organisation}). Contact: {ref2.referee_email}",
-        "metadata": ref2.model_dump(),
-        "created_at": now,
-        "updated_at": now
-    })
-    follow_up_items.append({
-        "type": "reference",
-        "description": f"Reference verification required from {ref2.referee_name} ({ref2.referee_organisation})",
-        "status": "pending"
-    })
+    reference_metadata = {
+        "ref1": {
+            "referee_name": ref1.referee_name,
+            "referee_email": ref1.referee_email,
+            "referee_phone": ref1.referee_phone,
+            "referee_organisation": ref1.referee_organisation,
+            "referee_job_title": ref1.referee_job_title,
+            "relationship": ref1.relationship,
+            "years_known": ref1.years_known,
+            "is_professional": ref1.is_professional,
+            "can_contact_before_offer": ref1.can_contact_before_offer
+        },
+        "ref2": {
+            "referee_name": ref2.referee_name,
+            "referee_email": ref2.referee_email,
+            "referee_phone": ref2.referee_phone,
+            "referee_organisation": ref2.referee_organisation,
+            "referee_job_title": ref2.referee_job_title,
+            "relationship": ref2.relationship,
+            "years_known": ref2.years_known,
+            "is_professional": ref2.is_professional,
+            "can_contact_before_offer": ref2.can_contact_before_offer
+        }
+    }
     
-    # DBS Check - Always required
-    dbs_doc_id = str(uuid.uuid4())
-    dbs_notes = "DBS check required"
-    if form.criminal_declaration.has_criminal_convictions:
-        dbs_notes += " - Applicant declared convictions (requires review)"
-    await db.employee_documents.insert_one({
-        "id": dbs_doc_id,
-        "employee_id": app_id,
-        "document_type_id": None,
-        "document_type_name": "DBS Certificate",
-        "category": "Identity & DBS",
-        "status": DocumentStatus.NOT_STARTED,
-        "verified": False,
-        "notes": dbs_notes,
-        "metadata": form.criminal_declaration.model_dump(),
-        "created_at": now,
-        "updated_at": now
-    })
-    follow_up_items.append({
-        "type": "dbs",
-        "description": "Enhanced DBS check required",
-        "status": "required"
-    })
+    # Generate requirement slots based on role pack
+    stage_service = StageGateService(db)
+    created_slots = await stage_service.generate_requirements_for_employee(
+        employee_id=app_id,
+        role=normalized_role,
+        reference_metadata=reference_metadata
+    )
     
-    # Right to Work - Needs verification
-    rtw_doc_id = str(uuid.uuid4())
-    rtw_notes = f"Right to work verification required. Declared status: {form.right_to_work.citizenship_status}"
-    if form.right_to_work.requires_sponsorship:
-        rtw_notes += " - SPONSORSHIP MAY BE REQUIRED"
-    await db.employee_documents.insert_one({
-        "id": rtw_doc_id,
-        "employee_id": app_id,
-        "document_type_id": None,
-        "document_type_name": "Right to Work",
-        "category": "Right to Work",
-        "status": DocumentStatus.NOT_STARTED,
-        "verified": False,
-        "notes": rtw_notes,
-        "metadata": form.right_to_work.model_dump(),
-        "created_at": now,
-        "updated_at": now
-    })
-    follow_up_items.append({
-        "type": "right_to_work",
-        "description": "Right to work evidence required",
-        "status": "required"
-    })
+    # Seed application completion (cv, application_form, equal_opportunities)
+    await stage_service.seed_application_completion(
+        employee_id=app_id,
+        cv_file_id=form.cv_file_id,
+        form_submission_id=form_submission_id
+    )
+    
+    # Build follow-up items from created slots
+    follow_up_items = stage_service.build_follow_up_items(normalized_role, created_slots)
+    
+    # Add conditional follow-up items based on declarations
     
     # Health Declaration Review
     if form.health_declaration.has_condition_affecting_work or form.health_declaration.requires_reasonable_adjustments:
         follow_up_items.append({
             "type": "health_review",
+            "requirement_key": "health_review",
             "description": "Health declaration requires Occupational Health review",
             "status": "review_required"
         })
     
-    # ID Verification
-    follow_up_items.append({
-        "type": "id_verification",
-        "description": "Photo ID verification required (Passport/Driving Licence)",
-        "status": "required"
-    })
-    
-    # Professional Registration (if declared)
-    if form.declarations.has_professional_registration:
+    # Professional Registration (if declared and not already in role pack)
+    if form.declarations.has_professional_registration and normalized_role != "nurse":
         follow_up_items.append({
             "type": "professional_registration",
+            "requirement_key": "professional_registration",
             "description": f"Verify {form.declarations.registration_body} registration: {form.declarations.registration_number}",
             "status": "verification_required"
         })
     
-    # Address Verification (if at current address < 5 years)
+    # Address History (if at current address < 5 years)
     if form.years_at_current_address < 5:
         follow_up_items.append({
             "type": "address_history",
+            "requirement_key": "address_history",
             "description": "5-year address history verification required for DBS",
             "status": "required"
         })
@@ -21743,6 +21699,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
     if form.has_employment_gaps:
         follow_up_items.append({
             "type": "employment_gaps",
+            "requirement_key": "employment_gaps",
             "description": "Employment gap explanation requires review",
             "status": "review_required"
         })

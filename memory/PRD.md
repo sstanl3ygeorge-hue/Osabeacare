@@ -3,6 +3,78 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Ticket E: References Alignment (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Aligned References with the same shell and action structure as other compliance groups. References now behave like a proper operational workflow with clear lifecycle, admin-controlled sending, visible integrity checks, response review, and replacement flow.
+
+### Backend Changes
+
+**New Endpoint: GET /api/employees/{id}/references-normalized**
+Returns normalized reference data with 5 sections of truth:
+1. `declared_referee` - What applicant entered (name, email, organisation, phone, relationship, employment dates)
+2. `request` - Request lifecycle (status, sent_at, viewed_at, responded_at, resend_count, token_active)
+3. `response` - What referee submitted (exists, submitted_at, referee details, employment details, performance assessment, safeguarding)
+4. `integrity` - Match status (email_match, name_match, organisation_match, mismatch_reasons, override_applied)
+5. `verification` - Admin decision (status, verified, rejected, replacement_requested, verified_by/at)
+
+**New Endpoint: POST /api/references/{id}/{ref_num}/request-replacement**
+- Allows requesting a replacement referee when: no response after attempts, rejected, or mismatch unresolved
+- Requires 10+ character reason
+- Clears current reference data and marks replacement requested
+
+**Bug Fix:**
+- Fixed AttributeError in `ReferenceIntegrityService.build_response_data` where `response_data` could be None
+
+### Frontend Changes
+
+**New Component: ReferenceResponseDrawer.js**
+Full-screen drawer for viewing reference details with 5 collapsible sections:
+1. **Declared Referee** - Name, job title, organisation, email, phone, relationship, employment period, CV match badge
+2. **Request Details** - Request status badge, sent/viewed/responded timestamps, resend count, recipient email
+3. **Submitted Response** - Responder details, employment details, performance rating (5-star), attendance, team working, would rehire, safeguarding (disciplinary, concerns, suitable for vulnerable)
+4. **Integrity Check** - Email/Name/Organisation match grid with Match/Mismatch badges, mismatch reasons, override form
+5. **Review Outcome** - Verification status box, Verify/Reject/Request Replacement action buttons
+
+**Updated: DualRowComplianceSection.js**
+- Added `referenceDrawer` state for drawer open/close
+- Wired `onViewResponse` to open ReferenceResponseDrawer
+- Added ReferenceResponseDrawer component at end of return
+
+**Action Buttons Available:**
+- Send Request (when declared, not yet sent)
+- Resend (when sent but no response)
+- View Response (when response exists)
+- Verify (response exists, not yet verified)
+- Reject (response exists, not yet verified)
+- Override Mismatch (mismatch detected, not overridden)
+- Request Replacement (rejected, stale, or mismatch unresolved)
+- View History (always)
+
+### Reference Lifecycle States
+1. `not_sent` - Referee declared but request not sent
+2. `sent` - Request sent, awaiting view
+3. `viewed` - Request viewed by referee
+4. `responded` / `awaiting_review` - Response received, pending admin review
+5. `verified` - Admin verified the reference
+6. `rejected` - Admin rejected the reference
+7. `replacement_requested` - New referee required
+
+### Testing
+- 18/18 backend tests passed (iteration_100.json)
+- 100% frontend success rate
+- All data-testids verified
+
+### Data-testids Added
+- `reference-row-reference_1`, `reference-row-reference_2`
+- `view-response-reference_2`
+- `reference-response-drawer`
+- `verify-reference-btn`, `show-reject-form-btn`, `show-replacement-form-btn`
+- `override-reason-input`, `reject-reason-input`, `replacement-reason-input`
+- `confirm-override-btn`, `confirm-reject-btn`, `confirm-replacement-btn`
+
+---
 
 ## Compliance File Stabilisation - STEP A (2026-03-31)
 **Status**: COMPLETE ✅

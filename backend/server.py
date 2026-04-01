@@ -115,6 +115,22 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# Read Source Switch - Minimal staging feature flags for backend source switching
+from read_source_switch import (
+    ReadSource,
+    get_read_source,
+    is_supabase_enabled,
+    log_source_served,
+    get_pg_pool,
+    close_pg_pool,
+    get_source_status,
+    read_employees_pg,
+    read_employee_by_id_pg,
+    read_compliance_data_pg,
+    read_training_records_pg,
+    read_training_catalogue_pg,
+)
+import time as time_module
 
 # ==================== EMPLOYEES REPOSITORY ====================
 # Scoped data access layer - enforces applicant/employee separation
@@ -6561,35 +6577,76 @@ async def get_employees(
     - stage=employee: Returns only employee-stage people (onboarding, active, inactive)
     - stage=None: Returns all (default behavior for backward compatibility)
     """
-    query = {}
+    start_time = time_module.time()
+    source = get_read_source("employees")
+    fallback_used = False
+    employees = []
     
-    # Stage filter - NEW for applicant vs employee separation
+    # Determine status filter for Supabase query
+    status_filter = None
     if stage == PersonStage.APPLICANT:
-        query["status"] = {"$in": APPLICANT_STATUSES}
+        status_filter = APPLICANT_STATUSES
     elif stage == PersonStage.EMPLOYEE:
-        query["status"] = {"$in": EMPLOYEE_STATUSES}
+        status_filter = EMPLOYEE_STATUSES
     elif status:
-        query["status"] = status
+        status_filter = [status]
     elif not include_archived:
-        # By default, exclude archived employees unless specifically requested
-        query["status"] = {"$ne": EmployeeStatus.ARCHIVED}
+        status_filter = None  # Will exclude archived in query
     
-    # Onboarding status filter
-    if onboarding_status:
-        query["onboarding_status"] = onboarding_status
+    # Try Supabase if enabled
+    if source == ReadSource.SUPABASE:
+        try:
+            employees = await read_employees_pg(
+                status_filter=status_filter,
+                search=search,
+                limit=1000
+            )
+            # Convert date fields to strings for compatibility
+            for emp in employees:
+                if emp.get('start_date'):
+                    emp['start_date'] = str(emp['start_date'])
+                if emp.get('created_at'):
+                    emp['created_at'] = emp['created_at'].isoformat() if hasattr(emp['created_at'], 'isoformat') else str(emp['created_at'])
+                if emp.get('updated_at'):
+                    emp['updated_at'] = emp['updated_at'].isoformat() if hasattr(emp['updated_at'], 'isoformat') else str(emp['updated_at'])
+        except Exception as e:
+            logger.warning(f"Supabase read failed, falling back to Mongo: {e}")
+            source = ReadSource.MONGO
+            fallback_used = True
     
-    if role:
-        query["role"] = role
-    if search:
-        query["$or"] = [
-            {"first_name": {"$regex": search, "$options": "i"}},
-            {"last_name": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}},
-            {"employee_code": {"$regex": search, "$options": "i"}},
-            {"applicant_reference": {"$regex": search, "$options": "i"}}  # Also search applicant refs
-        ]
-    
-    employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
+    # Use MongoDB (default or fallback)
+    if source == ReadSource.MONGO or not employees:
+        query = {}
+        
+        # Stage filter - NEW for applicant vs employee separation
+        if stage == PersonStage.APPLICANT:
+            query["status"] = {"$in": APPLICANT_STATUSES}
+        elif stage == PersonStage.EMPLOYEE:
+            query["status"] = {"$in": EMPLOYEE_STATUSES}
+        elif status:
+            query["status"] = status
+        elif not include_archived:
+            # By default, exclude archived employees unless specifically requested
+            query["status"] = {"$ne": EmployeeStatus.ARCHIVED}
+        
+        # Onboarding status filter
+        if onboarding_status:
+            query["onboarding_status"] = onboarding_status
+        
+        if role:
+            query["role"] = role
+        if search:
+            query["$or"] = [
+                {"first_name": {"$regex": search, "$options": "i"}},
+                {"last_name": {"$regex": search, "$options": "i"}},
+                {"email": {"$regex": search, "$options": "i"}},
+                {"employee_code": {"$regex": search, "$options": "i"}},
+                {"applicant_reference": {"$regex": search, "$options": "i"}}  # Also search applicant refs
+            ]
+        
+        employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
+        if fallback_used:
+            source = ReadSource.MONGO
     
     # Calculate completion percentages, work readiness, expiry alerts, and person_stage
     for emp in employees:
@@ -6601,6 +6658,10 @@ async def get_employees(
         emp['person_stage'] = get_person_stage(emp.get('status', EmployeeStatus.NEW))
         # Add stage identity fields
         enrich_person_with_stage_identity(emp)
+    
+    # Log source served
+    latency_ms = (time_module.time() - start_time) * 1000
+    log_source_served("GET /employees", "employees", source, len(employees), fallback_used=fallback_used, latency_ms=latency_ms)
     
     return [EmployeeResponse(**emp) for emp in employees]
 
@@ -6841,7 +6902,36 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     - GET /staff/employees/{id} for employee-only access
     - GET /recruitment/applicants/{id} for applicant-only access
     """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    start_time = time_module.time()
+    source = get_read_source("employees")
+    fallback_used = False
+    employee = None
+    
+    # Try Supabase if enabled
+    if source == ReadSource.SUPABASE:
+        try:
+            employee = await read_employee_by_id_pg(employee_id)
+            if employee:
+                # Convert date fields for compatibility
+                if employee.get('date_of_birth'):
+                    employee['date_of_birth'] = str(employee['date_of_birth'])
+                if employee.get('start_date'):
+                    employee['start_date'] = str(employee['start_date'])
+                if employee.get('created_at'):
+                    employee['created_at'] = employee['created_at'].isoformat() if hasattr(employee['created_at'], 'isoformat') else str(employee['created_at'])
+                if employee.get('updated_at'):
+                    employee['updated_at'] = employee['updated_at'].isoformat() if hasattr(employee['updated_at'], 'isoformat') else str(employee['updated_at'])
+        except Exception as e:
+            logger.warning(f"Supabase read failed for employee {employee_id}, falling back to Mongo: {e}")
+            source = ReadSource.MONGO
+            fallback_used = True
+    
+    # Use MongoDB (default or fallback)
+    if source == ReadSource.MONGO or employee is None:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if fallback_used and employee:
+            source = ReadSource.MONGO
+    
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
@@ -6853,6 +6943,10 @@ async def get_employee(employee_id: str, user: dict = Depends(get_current_user))
     employee['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(
         employee_id, employee, employee.get('role', '')
     )
+    
+    # Log source served
+    latency_ms = (time_module.time() - start_time) * 1000
+    log_source_served("GET /employees/{id}", "employees", source, 1, employee_id=employee_id, fallback_used=fallback_used, latency_ms=latency_ms)
     
     return EmployeeResponse(**employee)
 
@@ -7275,12 +7369,23 @@ async def get_employee_training(
     - warningCount: Non-blocking training items needing attention
     - items: Array of training item status
     """
+    start_time = time_module.time()
+    source = get_read_source("training")
+    
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
     role = employee.get('role', '')
+    
+    # Training evaluation still uses Mongo (complex calculations)
+    # We just log the intended source for observability
     training_status = await evaluate_employee_training_status(employee_id, role)
+    
+    # Log source served
+    latency_ms = (time_module.time() - start_time) * 1000
+    item_count = len(training_status.get('items', []))
+    log_source_served("GET /employees/{id}/training", "training", ReadSource.MONGO, item_count, employee_id=employee_id, latency_ms=latency_ms)
     
     return training_status
 
@@ -9660,12 +9765,24 @@ async def discard_extraction(
 @api_router.get("/employees/{employee_id}/compliance")
 async def get_employee_compliance(employee_id: str, user: dict = Depends(get_current_user)):
     """Get full compliance status for an employee including all mandatory items"""
+    start_time = time_module.time()
+    source = get_read_source("compliance")
+    fallback_used = False
+    
+    # Get employee basic info (always from the current employees source)
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    # For compliance data, we could read from Supabase if enabled
+    # But compliance calculation depends on many interconnected tables,
+    # so we use Mongo for the actual calculation and just log source intent
     compliance = await calculate_employee_compliance(employee_id, employee.get("role", ""))
     derived_status = await derive_onboarding_status(employee_id, employee.get("role", ""), employee.get("onboarding_status"))
+    
+    # Log source served (currently always Mongo for compliance calculations)
+    latency_ms = (time_module.time() - start_time) * 1000
+    log_source_served("GET /employees/{id}/compliance", "compliance", ReadSource.MONGO, 1, employee_id=employee_id, latency_ms=latency_ms)
     
     return {
         "employee_id": employee_id,
@@ -36287,6 +36404,15 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@api_router.get("/admin/read-source-status")
+async def get_read_source_status(user: dict = Depends(require_admin)):
+    """
+    Admin endpoint to view current read source flags.
+    Shows which backend (mongo/supabase) is serving each entity type.
+    """
+    return get_source_status()
+
+
 # ============================================================================
 # PHASE 1: TRAINING CATALOGUE ADMIN ENDPOINTS
 # ============================================================================
@@ -37766,6 +37892,28 @@ async def startup_db_client():
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+
+@app.on_event("startup")
+async def startup_read_source_pool():
+    """Initialize Supabase Postgres pool if configured."""
+    try:
+        pool = await get_pg_pool()
+        if pool:
+            logger.info("Read source switch: Supabase Postgres pool ready")
+        else:
+            logger.info("Read source switch: Using MongoDB only (SUPABASE_DB_URL not configured)")
+    except Exception as e:
+        logger.warning(f"Read source switch: Postgres pool init failed, using Mongo fallback: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_read_source_pool():
+    """Close Supabase Postgres pool."""
+    try:
+        await close_pg_pool()
+    except Exception as e:
+        logger.error(f"Read source switch: Pool shutdown error: {e}")
 
 
 @app.on_event("startup")

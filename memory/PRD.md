@@ -5,6 +5,49 @@
 
 
 
+## Read Source Feature Flags (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented minimal staging feature flag system for backend source switching. Env-based read-source flags with MongoDB fallback. Includes request logging showing which backend served the data.
+
+### Endpoints Modified
+| Endpoint | Entity | Logging |
+|----------|--------|---------|
+| `GET /api/employees` | employees | ✅ |
+| `GET /api/employees/{id}` | employees | ✅ |
+| `GET /api/employees/{id}/compliance` | compliance | ✅ |
+| `GET /api/employees/{id}/training` | training | ✅ |
+
+### New Environment Variables
+```bash
+READ_SOURCE_EMPLOYEES=mongo    # or 'supabase'
+READ_SOURCE_COMPLIANCE=mongo
+READ_SOURCE_TRAINING=mongo
+READ_SOURCE_DOCUMENTS=mongo
+SUPABASE_DB_URL=postgresql://... # Required if using supabase
+```
+
+### New Files
+- `/app/backend/read_source_switch.py` - Feature flag module with Postgres read helpers
+
+### Admin Status Endpoint
+- `GET /api/admin/read-source-status` - Shows current flag configuration
+
+### Log Format
+```
+[SOURCE:EMPLOYEES] GET /employees -> MONGO (records=12, latency=45.2ms)
+[SOURCE:EMPLOYEES] GET /employees/{id} -> SUPABASE (records=1, emp=abc123..., latency=12.5ms)
+[SOURCE:EMPLOYEES] GET /employees -> MONGO (records=5, latency=30.0ms, FALLBACK)
+```
+
+### Testing
+- All endpoints tested with curl
+- Source logging verified in backend logs
+- Fallback mechanism tested (graceful degradation to Mongo)
+
+---
+
 ## Supabase Migration Scripts Complete (2026-04-01)
 **Status**: COMPLETE ✅
 

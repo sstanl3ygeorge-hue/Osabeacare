@@ -2,6 +2,14 @@
 
 ## 2026-04-01
 
+### Read Source Feature Flags
+- Implemented minimal staging feature flag system for backend source switching
+- Added `/app/backend/read_source_switch.py` module
+- Modified endpoints: GET /employees, GET /employees/{id}, compliance, training
+- Added admin status endpoint: GET /api/admin/read-source-status
+- Request logging shows source (MONGO/SUPABASE), latency, record count
+- Fallback to Mongo if Supabase fails
+
 ### Supabase Migration Scripts Complete
 - Implemented Phase 7-10 migration scripts:
   - `phase_7_training.py`: Training catalogue & records migration

@@ -154,7 +154,7 @@ export default function RecordCheckDialog({
       formDataUpload.append('document_label', `${getTitle()} - Proof`);
 
       const response = await axios.post(
-        `${API}/employees/${employeeId}/documents/upload`,
+        `${API}/employees/${employeeId}/upload-document`,
         formDataUpload,
         {
           headers: {

@@ -7267,6 +7267,116 @@ async def get_employee_training(
     return training_status
 
 
+@api_router.get("/employees/{employee_id}/training/matrix")
+async def get_employee_training_matrix(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get comprehensive training matrix for an employee.
+    
+    Provides detailed view of all required training with:
+    - Current completion status
+    - Evidence/verification status
+    - Expiry tracking
+    - Work-blocking indicators
+    - Summary statistics
+    
+    Used by the TrainingMatrix frontend component.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    role = employee.get('role', '')
+    
+    # Get canonical training evaluation
+    training_eval = await evaluate_employee_training_status(employee_id, role)
+    
+    # Get training records for evidence details
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0}).to_list(100)
+    
+    records_by_req = {}
+    for r in training_records:
+        req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_')
+        records_by_req[req_id] = r
+    
+    # Build enhanced matrix items
+    matrix_items = []
+    total_current = 0
+    total_expiring = 0
+    total_missing = 0
+    total_blockers = 0
+    
+    for item in training_eval.get('items', []):
+        code = item.get('code', '')
+        record = records_by_req.get(code, {})
+        
+        # Determine evidence status
+        has_evidence = bool(
+            record.get('certificate_url') or 
+            record.get('evidence_files') or
+            record.get('certificate_document_id')
+        )
+        is_verified = (
+            record.get('verified', False) or 
+            record.get('verification_status') == 'verified'
+        )
+        
+        # Get blocker config
+        blocker_config = get_training_blocker_config(code)
+        validity_days = get_training_validity_days(code)
+        
+        matrix_item = {
+            "code": code,
+            "title": item.get('title', code),
+            "status": item.get('status', 'missing'),
+            "detail": item.get('detail', ''),
+            "blocker": item.get('blocker', False),
+            "evidence_required": blocker_config.get('evidence_required', True),
+            "completed_at": record.get('completion_date') or record.get('completed_at'),
+            "expires_at": item.get('expires_at'),
+            "days_until_expiry": item.get('days_until_expiry'),
+            "has_evidence": has_evidence,
+            "verified": is_verified,
+            "record_id": record.get('id'),
+            "provider": record.get('provider_name'),
+            "validity_days": validity_days
+        }
+        matrix_items.append(matrix_item)
+        
+        # Count by status
+        status = item.get('status', 'missing')
+        if status == 'current' or status == 'completed':
+            total_current += 1
+        elif status in ['expiring_soon', 'due_soon']:
+            total_expiring += 1
+        elif status in ['missing', 'expired', 'overdue']:
+            total_missing += 1
+        
+        if item.get('blocker') and status not in ['current', 'completed']:
+            total_blockers += 1
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "role": role,
+        "overall": training_eval.get('overall', 'missing'),
+        "items": matrix_items,
+        "summary": {
+            "total": len(matrix_items),
+            "current": total_current,
+            "expiring": total_expiring,
+            "missing": total_missing,
+            "blockers": total_blockers
+        },
+        "evaluated_at": training_eval.get('evaluatedAt')
+    }
+
+
 # ============ TRAINING INTAKE ENDPOINTS (MUST BE BEFORE PARAMETERIZED ROUTES) ============
 # These routes use fixed paths like /training/proposed-items and must be defined
 # BEFORE routes like /training/{requirement_id} to avoid being shadowed

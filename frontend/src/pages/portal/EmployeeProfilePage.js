@@ -21,6 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
+import TrainingMatrix from '../../components/training/TrainingMatrix';
 import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
@@ -6236,32 +6237,70 @@ export default function EmployeeProfilePage() {
 
         {/* Training Tab */}
         <TabsContent value="training">
+          {/* Training Matrix - Grid view of all required training */}
+          <div className="mb-6">
+            <TrainingMatrix
+              employeeId={employeeId}
+              employeeName={`${employee?.first_name} ${employee?.last_name}`}
+              role={employee?.role}
+              onUploadCertificate={(trainingCode, trainingTitle) => {
+                // Set the training code and open the intake wizard
+                setSelectedTrainingReq({ id: trainingCode, name: trainingTitle });
+                setTrainingIntakeOpen(true);
+              }}
+              onViewCertificate={(recordId, trainingCode) => {
+                handleViewTrainingCertificate(recordId, `${trainingCode}_certificate`);
+              }}
+              onRefresh={() => {
+                fetchTraining();
+                fetchProposedTrainingItems();
+              }}
+            />
+          </div>
+
+          {/* Pending Review Banner - Show if proposed items exist */}
+          {proposedTrainingItems.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50/30 mb-6">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                    <Clock className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-amber-800">
+                      {proposedTrainingItems.length} Certificate{proposedTrainingItems.length !== 1 ? 's' : ''} Pending Review
+                    </p>
+                    <p className="text-sm text-amber-600">
+                      Scanned training items awaiting admin confirmation
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  className="border-amber-300 text-amber-700 hover:bg-amber-100"
+                  onClick={() => setTrainingIntakeOpen(true)}
+                  data-testid="review-proposed-training-btn"
+                >
+                  <Eye className="h-4 w-4 mr-2" />
+                  Review Items
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Existing Training Records Card */}
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardContent className="p-6">
               <div className="mb-4 pb-4 border-b border-[#E4E8EB]">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h3 className="font-heading text-lg font-semibold text-text-primary">Training & Certifications</h3>
-                    <p className="text-sm text-text-muted">Track completion status, expiry dates, and renewal status. Verified training counts toward work readiness.</p>
+                    <h3 className="font-heading text-lg font-semibold text-text-primary">Training Records</h3>
+                    <p className="text-sm text-text-muted">Individual training completion records with evidence.</p>
                   </div>
                   
                   {/* Training Tab Action Buttons */}
                   {!isAuditor() && (
                     <div className="flex flex-wrap items-center gap-2">
-                      {/* Review Pending Badge */}
-                      {proposedTrainingItems.length > 0 && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-xl border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                          onClick={() => setTrainingIntakeOpen(true)}
-                          data-testid="review-pending-training-btn"
-                        >
-                          <Clock className="h-4 w-4 mr-1.5" />
-                          {proposedTrainingItems.length} Pending Review
-                        </Button>
-                      )}
-                      
                       {/* Upload & Scan Certificate */}
                       <Button
                         size="sm"

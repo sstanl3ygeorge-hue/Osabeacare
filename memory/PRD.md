@@ -3,6 +3,47 @@
 ## Company
 **Osabea Healthcare Solutions**
 
+## Training Scan → Training Matrix (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Implemented comprehensive training certificate scanning, extraction, and matrix visualization. Training certificates can be uploaded and scanned by AI to extract multiple training items, which are reviewed by admins and saved as canonical training records feeding the work readiness engine.
+
+### New Components
+- `/app/frontend/src/components/training/TrainingMatrix.js` - Training matrix grid component
+
+### Backend Endpoint
+- `GET /api/employees/{id}/training/matrix` - Returns comprehensive training data
+
+### Extraction/Review Flow
+1. Admin uploads certificate via "Upload & Scan" button
+2. GPT-5.2 Vision extracts course name, provider, completion/expiry dates
+3. Extracted items saved to `proposed_training_items` as "proposed" status
+4. Admin reviews via TrainingIntakeWizard - can approve/reject/edit
+5. Approved items create canonical `training_records`
+
+### Training Matrix Features
+- Summary stats: Total Required, Current, Needs Renewal, Missing
+- Progress bar with completion percentage
+- Table with: Training, Status, Completed, Expires, Evidence, Actions
+- Status badges: Current, Verified, Missing, Expired
+- Blocker indicators for work-blocking training
+- Evidence status: Verified, Uploaded, None
+- Filters: Search, Status filter, Blockers only checkbox
+- Action buttons: Upload certificate, View certificate
+
+### Work Readiness Integration
+- Work Readiness Engine (`work_readiness_engine.py`) evaluates training status
+- Training blockers only appear when required training is incomplete/missing
+- Verified training counts toward work readiness progress
+
+### Testing
+- Backend: 100% (14/14 tests passed)
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_108.json`
+
+---
+
 ## Review-First Recruitment Page UX (2026-04-01)
 **Status**: COMPLETE ✅
 

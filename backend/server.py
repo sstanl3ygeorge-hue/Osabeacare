@@ -7350,14 +7350,14 @@ async def get_employee_training_matrix(
         
         # Count by status
         status = item.get('status', 'missing')
-        if status == 'current' or status == 'completed':
+        if status in ['current', 'completed', 'verified']:
             total_current += 1
         elif status in ['expiring_soon', 'due_soon']:
             total_expiring += 1
         elif status in ['missing', 'expired', 'overdue']:
             total_missing += 1
         
-        if item.get('blocker') and status not in ['current', 'completed']:
+        if item.get('blocker') and status not in ['current', 'completed', 'verified']:
             total_blockers += 1
     
     return {

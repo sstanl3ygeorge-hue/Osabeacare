@@ -1,0 +1,16 @@
+{
+  "phase": "phase_10_audit_logs",
+  "status": "completed",
+  "started_at": "2026-04-01T21:34:37.168431+00:00",
+  "completed_at": "2026-04-01T21:34:37.177966+00:00",
+  "total_records": 8,
+  "migrated_records": 8,
+  "skipped_records": 0,
+  "failed_records": 0,
+  "last_processed_id": "migration_18833bbb",
+  "success_rate": "100.0%",
+  "error_count": 0,
+  "errors": [],
+  "warning_count": 0,
+  "warnings": []
+}

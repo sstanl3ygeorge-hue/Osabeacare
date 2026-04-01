@@ -1,0 +1,16 @@
+{
+  "phase": "phase_1_users",
+  "status": "completed",
+  "started_at": "2026-04-01T21:36:16.174259+00:00",
+  "completed_at": "2026-04-01T21:36:16.181272+00:00",
+  "total_records": 5,
+  "migrated_records": 5,
+  "skipped_records": 0,
+  "failed_records": 0,
+  "last_processed_id": "user_e791b6509f40",
+  "success_rate": "100.0%",
+  "error_count": 0,
+  "errors": [],
+  "warning_count": 0,
+  "warnings": []
+}

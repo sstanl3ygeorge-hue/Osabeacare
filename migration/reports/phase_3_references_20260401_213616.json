@@ -1,0 +1,29 @@
+{
+  "phase": "phase_3_references",
+  "status": "completed",
+  "started_at": "2026-04-01T21:36:16.187510+00:00",
+  "completed_at": "2026-04-01T21:36:16.192257+00:00",
+  "total_records": 12,
+  "migrated_records": 0,
+  "skipped_records": 0,
+  "failed_records": 0,
+  "last_processed_id": null,
+  "success_rate": "0.0%",
+  "error_count": 0,
+  "errors": [],
+  "warning_count": 12,
+  "warnings": [
+    "No mapping for employee 0c639866-ba09-4e05-9436-b7c52fb9da13",
+    "No mapping for employee 2469f024-02ae-4849-94f9-62adf23af06f",
+    "No mapping for employee 281cae8d-5309-4bb6-ae21-cc513f8bb554",
+    "No mapping for employee 4aa1843e-457a-4c22-9bf5-708b83b23300",
+    "No mapping for employee 50c8de24-e01f-4617-a2b4-45176e7445f3",
+    "No mapping for employee 8f351317-8623-4df5-8788-c6a3ce5364cf",
+    "No mapping for employee 955f65b7-5095-457b-bab6-fcf60cfced36",
+    "No mapping for employee c281070d-4178-42e9-8262-53ebe794e148",
+    "No mapping for employee ca0e267f-faf2-4a4f-bd2e-afe8ea089b1f",
+    "No mapping for employee ccfcbdbb-feda-4043-a8b2-2f1f9da88bdf",
+    "No mapping for employee d88335f6-1b18-435a-8086-28af4a583f77",
+    "No mapping for employee e0c1b651-909f-46b9-ad51-d4c237d4b3d3"
+  ]
+}

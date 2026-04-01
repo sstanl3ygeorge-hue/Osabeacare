@@ -17,14 +17,18 @@ Staging migration scripts for migrating from MongoDB to Supabase/Postgres.
 │   └── rollback/
 │       └── rollback_schema.sql     # Full schema rollback
 ├── scripts/
-│   ├── base.py               # Base migration class
-│   ├── utils.py              # Utility functions
-│   ├── phase_1_users.py      # User/profile migration
-│   ├── phase_2_employees.py  # Employee migration
-│   ├── phase_3_references.py # Reference extraction
-│   ├── phase_4_documents.py  # Document migration
-│   ├── phase_5_files.py      # File transfer
-│   └── phase_6_checks.py     # Verification checks
+│   ├── base.py                  # Base migration class
+│   ├── utils.py                 # Utility functions
+│   ├── phase_1_users.py         # User/profile migration
+│   ├── phase_2_employees.py     # Employee migration
+│   ├── phase_3_references.py    # Reference extraction
+│   ├── phase_4_documents.py     # Document migration
+│   ├── phase_5_files.py         # File transfer
+│   ├── phase_6_checks.py        # Verification checks
+│   ├── phase_7_training.py      # Training catalogue & records
+│   ├── phase_8_forms.py         # Forms & agreements
+│   ├── phase_9_org.py           # Org policies & certificates
+│   └── phase_10_audit_logs.py   # Audit logs
 ├── run_migration.py          # Main orchestrator
 ├── run_validation.py         # Validation runner
 ├── run_rollback.py           # Rollback runner
@@ -108,6 +112,10 @@ python run_rollback.py --all --confirm
 | 4 | Documents | `employee_documents` | `documents` |
 | 5 | Files | Emergent Storage | Supabase Storage |
 | 6 | Checks | `rtw_checks`, `dbs_checks`, etc. | Check tables + junctions |
+| 7 | Training | `training_catalogue`, `training_records` | `training_catalogue`, `training_records` |
+| 8 | Forms | `form_submissions`, `agreement_acknowledgements` | `form_templates`, `form_submissions`, `agreement_templates`, `agreement_acknowledgements` |
+| 9 | Org Data | `org_policies`, `insurance_docs`, `policy_assignments` | `org_policies`, `org_certificates`, `policy_assignments` |
+| 10 | Audit Logs | `audit_logs`, `audit_log` | `audit_logs` |
 
 ## Key Features
 
@@ -144,6 +152,14 @@ rtw_checks        ────────►     rtw_checks
 dbs_checks        ────────►     dbs_checks
 identity_verifications ───►     identity_checks + junction
 address_verifications ────►     address_checks + junction
+training_catalogue   ─────►     training_catalogue
+training_records     ─────►     training_records
+form_submissions     ─────►     form_templates + form_submissions
+agreement_acknowledgements ►    agreement_templates + agreement_acknowledgements
+org_policies         ─────►     org_policies
+insurance_docs       ─────►     org_certificates
+policy_assignments   ─────►     policy_assignments
+audit_logs + audit_log ───►     audit_logs
 ```
 
 ## ID Mapping

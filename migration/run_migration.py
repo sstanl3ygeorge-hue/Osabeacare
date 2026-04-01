@@ -26,6 +26,10 @@ from scripts import (
     phase_4_documents,
     phase_5_files,
     phase_6_checks,
+    phase_7_training,
+    phase_8_forms,
+    phase_9_org,
+    phase_10_audit_logs,
 )
 from config.settings import REPORTS_DIR
 
@@ -51,6 +55,10 @@ PHASES = {
     4: ("phase_4_documents", phase_4_documents),
     5: ("phase_5_files", phase_5_files),
     6: ("phase_6_checks", phase_6_checks),
+    7: ("phase_7_training", phase_7_training),
+    8: ("phase_8_forms", phase_8_forms),
+    9: ("phase_9_org", phase_9_org),
+    10: ("phase_10_audit_logs", phase_10_audit_logs),
 }
 
 
@@ -85,7 +93,7 @@ async def run_phase(phase_num: int, dry_run: bool = False) -> bool:
 
 async def run_migration(
     start_phase: int = 1,
-    end_phase: int = 6,
+    end_phase: int = 10,
     dry_run: bool = False,
     stop_on_error: bool = True
 ):
@@ -126,9 +134,9 @@ async def run_migration(
 
 def main():
     parser = argparse.ArgumentParser(description="Run Supabase migration")
-    parser.add_argument("--phase", type=int, help="Run single phase (1-6)")
+    parser.add_argument("--phase", type=int, help="Run single phase (1-10)")
     parser.add_argument("--start", type=int, default=1, help="Start phase")
-    parser.add_argument("--end", type=int, default=6, help="End phase")
+    parser.add_argument("--end", type=int, default=10, help="End phase")
     parser.add_argument("--dry-run", action="store_true", help="Dry run (no writes)")
     parser.add_argument("--continue-on-error", action="store_true", help="Continue on error")
     

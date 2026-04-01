@@ -1,0 +1,16 @@
+{
+  "phase": "phase_2_employees",
+  "status": "completed",
+  "started_at": "2026-04-01T21:36:16.182119+00:00",
+  "completed_at": "2026-04-01T21:36:16.186624+00:00",
+  "total_records": 12,
+  "migrated_records": 12,
+  "skipped_records": 0,
+  "failed_records": 0,
+  "last_processed_id": "e0c1b651-909f-46b9-ad51-d4c237d4b3d3",
+  "success_rate": "100.0%",
+  "error_count": 0,
+  "errors": [],
+  "warning_count": 0,
+  "warnings": []
+}

@@ -482,6 +482,216 @@ CREATE INDEX IF NOT EXISTS idx_employment_history_employee ON employment_history
 CREATE INDEX IF NOT EXISTS idx_employment_gaps_employee ON employment_gaps(employee_id);
 
 -- ============================================================
+-- TRAINING TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS training_catalogue (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    category TEXT,
+    is_mandatory BOOLEAN DEFAULT FALSE,
+    is_blocker BOOLEAN DEFAULT FALSE,
+    evidence_required BOOLEAN DEFAULT TRUE,
+    validity_months INTEGER,
+    applicable_roles TEXT[],
+    sort_order INTEGER,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS training_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    training_id UUID REFERENCES training_catalogue(id),
+    completion_date DATE,
+    expiry_date DATE,
+    completion_method TEXT,
+    certificate_document_id UUID REFERENCES documents(id),
+    status TEXT NOT NULL DEFAULT 'missing' CHECK (status IN ('missing', 'current', 'expiring', 'expired')),
+    verified BOOLEAN DEFAULT FALSE,
+    verified_at TIMESTAMPTZ,
+    verified_by UUID REFERENCES profiles(id),
+    verified_by_name TEXT,
+    is_current BOOLEAN DEFAULT TRUE,
+    superseded_at TIMESTAMPTZ,
+    superseded_by UUID REFERENCES training_records(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    mongo_id TEXT UNIQUE
+);
+
+-- ============================================================
+-- FORMS TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS form_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    form_type TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    schema JSONB DEFAULT '{}',
+    is_blocker BOOLEAN DEFAULT FALSE,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form_submissions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    form_template_id UUID REFERENCES form_templates(id),
+    form_type TEXT NOT NULL,
+    data JSONB NOT NULL DEFAULT '{}',
+    status form_status NOT NULL DEFAULT 'not_started',
+    submitted_at TIMESTAMPTZ,
+    submitted_by UUID REFERENCES profiles(id),
+    submitted_by_name TEXT,
+    verified BOOLEAN DEFAULT FALSE,
+    verified_at TIMESTAMPTZ,
+    verified_by UUID REFERENCES profiles(id),
+    verified_by_name TEXT,
+    verification_notes TEXT,
+    rejected BOOLEAN DEFAULT FALSE,
+    rejected_at TIMESTAMPTZ,
+    rejected_by UUID REFERENCES profiles(id),
+    rejection_reason TEXT,
+    version INTEGER DEFAULT 1,
+    is_current BOOLEAN DEFAULT TRUE,
+    superseded_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    mongo_id TEXT UNIQUE
+);
+
+-- ============================================================
+-- AGREEMENTS TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS agreement_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agreement_type TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    is_blocker BOOLEAN DEFAULT FALSE,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS agreement_acknowledgements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    agreement_template_id UUID REFERENCES agreement_templates(id),
+    agreement_type TEXT NOT NULL,
+    completion_mode TEXT,
+    completed_at TIMESTAMPTZ,
+    completed_by UUID REFERENCES profiles(id),
+    assisted_by UUID REFERENCES profiles(id),
+    version_acknowledged TEXT,
+    call_note TEXT,
+    signed_document_id UUID REFERENCES documents(id),
+    status agreement_status NOT NULL DEFAULT 'not_started',
+    verified BOOLEAN DEFAULT FALSE,
+    verified_at TIMESTAMPTZ,
+    verified_by UUID REFERENCES profiles(id),
+    verification_notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    mongo_id TEXT UNIQUE
+);
+
+-- ============================================================
+-- ORGANIZATION TABLES
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS org_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    category TEXT,
+    version TEXT,
+    status TEXT DEFAULT 'active',
+    storage_path TEXT,
+    file_url TEXT,
+    original_filename TEXT,
+    review_date DATE,
+    last_reviewed_at TIMESTAMPTZ,
+    reviewed_by UUID REFERENCES profiles(id),
+    notes TEXT,
+    cqc_required BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by UUID REFERENCES profiles(id),
+    mongo_id TEXT UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS org_certificates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    certificate_type TEXT,
+    storage_path TEXT,
+    file_url TEXT,
+    original_filename TEXT,
+    issue_date DATE,
+    expiry_date DATE,
+    status TEXT DEFAULT 'active',
+    cqc_required BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_by UUID REFERENCES profiles(id),
+    mongo_id TEXT UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS policy_assignments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    policy_id UUID NOT NULL REFERENCES org_policies(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    assigned_by UUID REFERENCES profiles(id),
+    acknowledged BOOLEAN DEFAULT FALSE,
+    acknowledged_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(employee_id, policy_id)
+);
+
+-- ============================================================
+-- AUDIT LOGS TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    action TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    employee_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+    user_email TEXT,
+    user_name TEXT,
+    details JSONB,
+    old_values JSONB,
+    new_values JSONB,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    mongo_id TEXT UNIQUE
+);
+
+-- ============================================================
+-- ADDITIONAL INDEXES
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_training_records_employee ON training_records(employee_id);
+CREATE INDEX IF NOT EXISTS idx_training_records_training ON training_records(training_id);
+CREATE INDEX IF NOT EXISTS idx_form_submissions_employee ON form_submissions(employee_id);
+CREATE INDEX IF NOT EXISTS idx_form_submissions_type ON form_submissions(form_type);
+CREATE INDEX IF NOT EXISTS idx_agreement_acks_employee ON agreement_acknowledgements(employee_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_employee ON audit_logs(employee_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
+
+-- ============================================================
 -- INSERT INITIAL MIGRATION STATE
 -- ============================================================
 
@@ -492,5 +702,9 @@ INSERT INTO migration_state (phase, status) VALUES
     ('phase_3_references', 'pending'),
     ('phase_4_documents', 'pending'),
     ('phase_5_files', 'pending'),
-    ('phase_6_checks', 'pending')
+    ('phase_6_checks', 'pending'),
+    ('phase_7_training', 'pending'),
+    ('phase_8_forms', 'pending'),
+    ('phase_9_org', 'pending'),
+    ('phase_10_audit_logs', 'pending')
 ON CONFLICT (phase) DO NOTHING;

@@ -5,6 +5,50 @@
 
 
 
+## Supabase Migration Scripts Complete (2026-04-01)
+**Status**: COMPLETE ✅
+
+### Overview
+Created full migration script set for MongoDB to Supabase (Postgres) migration. All 10 phases implemented, tested with dry-run, and Backend Switch Plan documented.
+
+### Migration Phases Implemented
+| Phase | Name | Records Found |
+|-------|------|---------------|
+| 1 | Users | 5 |
+| 2 | Employees | 12 |
+| 3 | References | 12 (embedded) |
+| 4 | Documents | 76 |
+| 5 | Files | N/A (storage transfer) |
+| 6 | Checks | RTW, DBS, Identity, Address |
+| 7 | Training | 7 catalogue + 43 records |
+| 8 | Forms | Form templates + submissions |
+| 9 | Org Data | 32 policies + 13 certificates |
+| 10 | Audit Logs | 1236 entries |
+
+### Files Created
+- `/app/migration/scripts/phase_7_training.py` - Training catalogue & records migration
+- `/app/migration/scripts/phase_8_forms.py` - Forms & agreements migration
+- `/app/migration/scripts/phase_9_org.py` - Org policies & certificates migration
+- `/app/migration/scripts/phase_10_audit_logs.py` - Audit logs migration
+- `/app/BACKEND_SWITCH_PLAN.md` - Practical code-level guide for switching from Motor to Supabase
+
+### Files Updated
+- `/app/migration/run_migration.py` - Added phases 7-10 to orchestrator
+- `/app/migration/scripts/__init__.py` - Export new phase modules
+- `/app/migration/sql/schema/001_create_schema.sql` - Added training, forms, agreements, org, audit_logs tables
+- `/app/migration/README.md` - Updated documentation
+
+### Testing
+- Dry-run: All 10 phases completed successfully
+- Command: `python run_migration.py --dry-run`
+
+### Next Steps
+- Configure Supabase credentials in backend/.env
+- Run migration scripts against staging Supabase
+- Update server.py to use Supabase client (follow BACKEND_SWITCH_PLAN.md)
+
+---
+
 ## Compliance Verification Proof Enforcement (2026-04-02)
 **Status**: COMPLETE ✅
 

@@ -84,6 +84,15 @@ from work_readiness_engine import (
     ROLE_WORK_REQUIREMENTS,
     get_work_readiness_label
 )
+from poa_freshness_engine import (
+    calculate_document_freshness,
+    evaluate_poa_compliance,
+    get_poa_blocker_for_approval,
+    PoAFreshnessStatus,
+    PoAOverallStatus,
+    POA_FRESHNESS_MONTHS,
+    POA_MINIMUM_DOCUMENTS
+)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -22887,22 +22896,43 @@ Return JSON only:
                 except json.JSONDecodeError:
                     issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
             
-            # Check freshness
+            # Check freshness - 12 months for PoA policy
             if fields.get("document_date"):
                 try:
                     doc_date = datetime.fromisoformat(fields["document_date"])
                     days_old = (datetime.now(timezone.utc).replace(tzinfo=None) - doc_date.replace(tzinfo=None)).days
+                    months_old = days_old // 30
                     fields["days_old"] = days_old
-                    fields["meets_recency_requirement"] = days_old <= 90
+                    fields["months_old"] = months_old
+                    fields["meets_recency_requirement"] = days_old <= 365  # 12 months
+                    fields["freshness_status"] = "valid" if days_old <= 365 else "expired"
                     
-                    if days_old > 90:
+                    if days_old > 365:
                         issues.append({
                             "code": "proof_of_address_out_of_date",
-                            "detail": f"Document is {days_old} days old (>90 days)",
+                            "detail": f"Document is {months_old} months old (exceeds 12 month limit)",
+                            "severity": "blocker"
+                        })
+                    elif days_old > 270:  # 9 months - warning
+                        issues.append({
+                            "code": "proof_of_address_expiring_soon",
+                            "detail": f"Document is {months_old} months old (expires in {12 - months_old} months)",
                             "severity": "warning"
                         })
                 except:
-                    pass
+                    fields["freshness_status"] = "date_unclear"
+                    issues.append({
+                        "code": "date_parse_error",
+                        "detail": "Could not parse document date - manual review required",
+                        "severity": "warning"
+                    })
+            else:
+                fields["freshness_status"] = "date_unclear"
+                issues.append({
+                    "code": "date_not_extracted",
+                    "detail": "Document date could not be extracted - manual review required",
+                    "severity": "warning"
+                })
         
         except Exception as e:
             issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
@@ -28173,6 +28203,133 @@ async def get_employee_agreements_data(employee_id: str) -> dict:
     }
 
 
+# =============================================================================
+# PROOF OF ADDRESS FRESHNESS ENDPOINTS
+# =============================================================================
+
+@api_router.get("/employees/{employee_id}/poa-freshness")
+async def get_poa_freshness(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get Proof of Address freshness evaluation.
+    
+    Policy: 2 documents within 12 months required.
+    
+    Returns:
+    - overall_status: complete | partial | review_needed | incomplete
+    - valid_count: documents within 12 months
+    - expired_count: documents older than 12 months
+    - unclear_count: documents without extractable date (need manual review)
+    - documents: list with freshness details for each
+    - blockers: list of issues
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get PoA documents
+    poa_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": ["proof_of_address", "proof_of_address_evidence", "address_proof"]},
+        "status": {"$nin": ["superseded", "deleted", "removed"]}
+    }, {"_id": 0}).to_list(50)
+    
+    # Enrich with extraction data
+    for doc in poa_docs:
+        extraction = await db.document_extractions.find_one(
+            {"document_id": doc.get("id")},
+            {"_id": 0}
+        )
+        if extraction:
+            doc["extraction_result"] = extraction
+            # Get document date from extraction
+            fields = extraction.get("fields", {})
+            if fields.get("document_date"):
+                doc["extracted_date"] = fields["document_date"]
+    
+    # Evaluate freshness
+    evaluation = evaluate_poa_compliance(poa_docs)
+    evaluation["employee_id"] = employee_id
+    evaluation["employee_name"] = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    return evaluation
+
+
+@api_router.post("/employees/{employee_id}/poa-freshness/override")
+async def override_poa_freshness(
+    employee_id: str,
+    document_id: str,
+    reason: Optional[str] = None,
+    user: dict = Depends(require_admin)
+):
+    """
+    Manually override freshness status for a PoA document.
+    
+    Use when:
+    - Document date could not be extracted but admin verifies it's valid
+    - Document is slightly over 12 months but business needs justify approval
+    
+    Creates audit trail of the override.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Verify document exists and belongs to employee
+    document = await db.employee_documents.find_one({
+        "id": document_id,
+        "employee_id": employee_id
+    })
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get admin info
+    admin = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
+    admin_name = admin.get("name", user['user_id']) if admin else user['user_id']
+    
+    # Update document with freshness override
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.employee_documents.update_one(
+        {"id": document_id},
+        {"$set": {
+            "freshness_override": True,
+            "freshness_status": PoAFreshnessStatus.MANUAL_OVERRIDE.value,
+            "freshness_override_at": now,
+            "freshness_override_by": user['user_id'],
+            "freshness_override_by_name": admin_name,
+            "freshness_override_reason": reason
+        }}
+    )
+    
+    # Write audit log
+    await db.audit_log.insert_one({
+        "id": str(uuid.uuid4()),
+        "action": "poa_freshness_override",
+        "entity_type": "document",
+        "entity_id": document_id,
+        "employee_id": employee_id,
+        "performed_by": user['user_id'],
+        "performed_by_name": admin_name,
+        "details": {
+            "reason": reason,
+            "document_file": document.get("file_name") or document.get("original_filename")
+        },
+        "created_at": now
+    })
+    
+    return {
+        "status": "success",
+        "message": "Freshness override applied",
+        "document_id": document_id,
+        "freshness_status": PoAFreshnessStatus.MANUAL_OVERRIDE.value
+    }
+
+
 async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     """
     Internal helper to get compliance file data for approval evaluation.
@@ -28903,16 +29060,49 @@ async def get_compliance_file(
     # HELPER: Build Address Verification Row (special case - count-based)
     # =========================================================================
     def build_address_verification_row() -> dict:
-        """Build address verification row (needs 2/2 verified)."""
+        """Build address verification row with freshness policy (needs 2/2 valid within 12 months)."""
         has_verification = address_verification is not None
         verified_count = address_verification.get("verified_count", 0) if has_verification else 0
         meets_requirement = address_verification.get("meets_requirement", False) if has_verification else False
         
-        status_summary = f"{verified_count}/2 verified"
-        blocker_text = None if meets_requirement else f"Address Verification: {verified_count}/2 verified"
+        # Get PoA documents for freshness evaluation
+        poa_docs = [d for d in documents if d.get("requirement_id") in ["proof_of_address", "proof_of_address_evidence", "address_proof"]]
+        
+        # Evaluate freshness for all PoA documents
+        poa_freshness = evaluate_poa_compliance(poa_docs)
+        
+        # Freshness-aware counts
+        valid_fresh_count = poa_freshness.get("valid_count", 0)
+        expired_count = poa_freshness.get("expired_count", 0)
+        unclear_count = poa_freshness.get("unclear_count", 0)
+        is_fresh_complete = poa_freshness.get("is_complete", False)
+        
+        # Status must consider both verification AND freshness
+        if is_fresh_complete and meets_requirement:
+            status_summary = f"{valid_fresh_count}/2 valid & verified (within 12 months)"
+            blocker_text = None
+            overall_status = "verified"
+        elif valid_fresh_count >= 2 and not meets_requirement:
+            status_summary = f"{valid_fresh_count} valid docs (awaiting verification)"
+            blocker_text = f"Address Verification needed ({valid_fresh_count} valid documents)"
+            overall_status = "awaiting_verification"
+        elif expired_count > 0 and valid_fresh_count < 2:
+            status_summary = f"{valid_fresh_count}/2 valid ({expired_count} expired)"
+            blocker_text = f"PoA: {expired_count} document(s) expired (older than 12 months)"
+            overall_status = "expired"
+        elif unclear_count > 0:
+            status_summary = f"{valid_fresh_count}/2 valid ({unclear_count} need date review)"
+            blocker_text = f"PoA: {unclear_count} document(s) need date verification"
+            overall_status = "review_needed"
+        else:
+            status_summary = f"{verified_count}/2 verified"
+            blocker_text = f"Address: need {2 - valid_fresh_count} more valid document(s)"
+            overall_status = "partial" if valid_fresh_count > 0 else "not_recorded"
         
         allowed_actions = ["record_check"] if not has_verification else ["update_check"]
         allowed_actions.append("view_history")
+        if unclear_count > 0:
+            allowed_actions.append("review_dates")
         
         return {
             "key": "address_verification",
@@ -28925,7 +29115,7 @@ async def get_compliance_file(
             "blocker_text": blocker_text,
             
             "has_check": has_verification,
-            "is_verified": meets_requirement,
+            "is_verified": is_fresh_complete and meets_requirement,
             "check_data": {
                 "id": address_verification.get("id") if has_verification else None,
                 "verified_count": verified_count,
@@ -28934,16 +29124,32 @@ async def get_compliance_file(
                 "verified_document_ids": address_verification.get("verified_document_ids", []) if has_verification else [],
                 "verified_at": address_verification.get("verified_at") if has_verification else None,
                 "verified_by": address_verification.get("verified_by") if has_verification else None,
-                "recency_policy_passed": address_verification.get("recency_policy_passed", True) if has_verification else None
+                "recency_policy_passed": is_fresh_complete
             } if has_verification else None,
+            
+            # Freshness evaluation (new)
+            "freshness": {
+                "overall_status": poa_freshness.get("overall_status"),
+                "is_complete": is_fresh_complete,
+                "valid_count": valid_fresh_count,
+                "expired_count": expired_count,
+                "unclear_count": unclear_count,
+                "required_count": POA_MINIMUM_DOCUMENTS,
+                "freshness_months": POA_FRESHNESS_MONTHS,
+                "blockers": poa_freshness.get("blockers", []),
+                "documents": poa_freshness.get("documents", [])
+            },
             
             "counts": {
                 "verified_count": verified_count,
+                "valid_fresh_count": valid_fresh_count,
+                "expired_count": expired_count,
+                "unclear_count": unclear_count,
                 "required_count": 2,
-                "history": 0  # TODO: Add history tracking
+                "history": 0
             },
             
-            "status": "verified" if meets_requirement else ("partial" if verified_count > 0 else "not_recorded"),
+            "status": overall_status,
             "status_summary": status_summary,
             
             "allowed_actions": allowed_actions,

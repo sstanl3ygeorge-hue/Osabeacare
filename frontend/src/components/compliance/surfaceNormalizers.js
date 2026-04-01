@@ -180,7 +180,8 @@ export function normalizeUploadRequirementSurface({
   requirementKey,
   files = [],
   requests = [],
-  checks = []
+  checks = [],
+  freshness = null  // PoA freshness data
 }) {
   const activeFiles = files.filter(f => f.status === 'active' || (!f.status && !f.superseded_at && !f.error_at));
   const historicalFiles = files.filter(f => f.status !== 'active' && (f.superseded_at || f.error_at || f.status === 'superseded' || f.status === 'uploaded_in_error'));
@@ -205,6 +206,59 @@ export function normalizeUploadRequirementSurface({
     requirementKey
   });
   
+  // Build counters
+  const counters = {
+    active: activeFiles.length,
+    pendingReview: activeFiles.filter(f => 
+      !f.verified && (f.extraction_status?.status === 'awaiting_review' || f.status === 'active' || !f.status)
+    ).length,
+    verified: activeFiles.filter(f => f.verified).length,
+    superseded: historicalFiles.filter(f => f.status === 'superseded').length,
+    historical: historicalFiles.length
+  };
+  
+  // Add PoA freshness counters
+  if (requirementKey === 'proof_of_address' && freshness) {
+    counters.validFresh = freshness.valid_count || 0;
+    counters.expired = freshness.expired_count || 0;
+    counters.dateUnclear = freshness.unclear_count || 0;
+    counters.freshnessRequired = freshness.required_count || 2;
+    counters.freshnessComplete = freshness.is_complete || false;
+  } else if (requirementKey === 'proof_of_address') {
+    // Derive from file-level freshness data if no aggregate provided
+    counters.validFresh = activeFiles.filter(f => f.freshness_is_valid).length;
+    counters.expired = activeFiles.filter(f => f.freshness_status === 'expired').length;
+    counters.dateUnclear = activeFiles.filter(f => f.freshness_status === 'date_unclear').length;
+    counters.freshnessRequired = 2;
+    counters.freshnessComplete = counters.validFresh >= 2;
+  }
+  
+  // Build summary with freshness for PoA
+  let summary = buildUploadSummary({
+    requirementKey,
+    activeFiles,
+    historicalFiles,
+    latestRequest,
+    authoritativeCheck
+  });
+  
+  // Enhance summary for PoA with freshness
+  if (requirementKey === 'proof_of_address' && (counters.expired > 0 || counters.dateUnclear > 0)) {
+    const parts = [];
+    if (counters.validFresh > 0) {
+      parts.push(`${counters.validFresh}/${counters.freshnessRequired} valid`);
+    }
+    if (counters.expired > 0) {
+      parts.push(`${counters.expired} expired`);
+    }
+    if (counters.dateUnclear > 0) {
+      parts.push(`${counters.dateUnclear} need date review`);
+    }
+    if (parts.length > 0) {
+      summary = parts.join(' • ');
+    }
+  }
+  
   return {
     key: requirementKey,
     label: UPLOAD_LABELS[requirementKey] || requirementKey,
@@ -214,25 +268,19 @@ export function normalizeUploadRequirementSurface({
     latestRequest,
     checks: sortedChecks,
     authoritativeCheck,
-    summary: buildUploadSummary({
-      requirementKey,
-      activeFiles,
-      historicalFiles,
-      latestRequest,
-      authoritativeCheck
-    }),
-    counters: {
-      active: activeFiles.length,
-      pendingReview: activeFiles.filter(f => 
-        !f.verified && (f.extraction_status?.status === 'awaiting_review' || f.status === 'active' || !f.status)
-      ).length,
-      verified: activeFiles.filter(f => f.verified).length,
-      superseded: historicalFiles.filter(f => f.status === 'superseded').length,
-      historical: historicalFiles.length
-    },
+    summary,
+    counters,
     requestState,
     rowStatus,
-    rules: UPLOAD_RULES[requirementKey] || {}
+    rules: UPLOAD_RULES[requirementKey] || {},
+    freshness: requirementKey === 'proof_of_address' ? {
+      validCount: counters.validFresh,
+      expiredCount: counters.expired,
+      unclearCount: counters.dateUnclear,
+      requiredCount: counters.freshnessRequired,
+      isComplete: counters.freshnessComplete,
+      freshnessMonths: 12
+    } : null
   };
 }
 

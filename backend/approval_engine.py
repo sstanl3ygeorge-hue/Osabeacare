@@ -126,6 +126,7 @@ def is_requirement_approval_ready(req: dict) -> bool:
     - Forms: must be submitted and (verified or awaiting_review acceptable for non-blocking)
     - Agreements: must be verified
     - Checks: must be verified
+    - PoA: must have 2+ valid documents within 12 months AND verified
     """
     if not req:
         return False
@@ -133,6 +134,17 @@ def is_requirement_approval_ready(req: dict) -> bool:
     row_type = req.get("row_type", "")
     status = req.get("status", "")
     is_verified = req.get("is_verified", False)
+    key = req.get("key", "")
+    
+    # Special handling for PoA - must check freshness
+    if key in ["address_verification", "proof_of_address"]:
+        freshness = req.get("freshness", {})
+        if freshness:
+            # Must be complete (2+ valid documents within 12 months) AND verified
+            is_fresh_complete = freshness.get("is_complete", False)
+            return is_verified and is_fresh_complete
+        # Fallback to just verified if freshness data not available
+        return is_verified
     
     # For evidence/document requirements
     if row_type in {"evidence", "check"}:
@@ -166,10 +178,29 @@ def get_block_reason(req: dict) -> str:
     status = req.get("status", "")
     is_verified = req.get("is_verified", False)
     is_rejected = req.get("is_rejected", False)
+    key = req.get("key", "")
     
     # Handle rejection first
     if is_rejected or status == "rejected":
         return "Rejected - needs resubmission"
+    
+    # Special handling for PoA freshness
+    if key in ["address_verification", "proof_of_address"]:
+        freshness = req.get("freshness", {})
+        if freshness:
+            valid_count = freshness.get("valid_count", 0)
+            expired_count = freshness.get("expired_count", 0)
+            unclear_count = freshness.get("unclear_count", 0)
+            required = freshness.get("required_count", 2)
+            
+            if unclear_count > 0:
+                return f"PoA: {unclear_count} document(s) need date verification"
+            if expired_count > 0 and valid_count < required:
+                return f"PoA: {expired_count} document(s) expired (older than 12 months)"
+            if valid_count < required:
+                return f"PoA: {valid_count}/{required} valid documents (within 12 months)"
+            if not is_verified:
+                return f"PoA: {valid_count} valid documents awaiting verification"
     
     # Evidence/Document requirements
     if row_type in {"evidence", "check"}:

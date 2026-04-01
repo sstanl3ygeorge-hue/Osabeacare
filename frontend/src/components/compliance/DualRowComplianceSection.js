@@ -220,6 +220,25 @@ export default function DualRowComplianceSection({
       extraction_status: doc.extraction_status ? { status: doc.extraction_status } : null
     }));
     
+    // Add freshness data for PoA files
+    if (sectionKey === 'proof_of_address' && checkRow?.freshness?.documents) {
+      const freshnessMap = {};
+      checkRow.freshness.documents.forEach(fd => {
+        freshnessMap[fd.file_id] = fd;
+      });
+      
+      files.forEach(file => {
+        const fd = freshnessMap[file.file_id];
+        if (fd) {
+          file.freshness_status = fd.status;
+          file.freshness_is_valid = fd.is_valid;
+          file.freshness_reason = fd.reason;
+          file.document_date = fd.document_date;
+          file.months_old = fd.months_old;
+        }
+      });
+    }
+    
     // Add remaining files if has_more_documents indicates there are more
     // The counts tell us how many total active files
     const totalActive = evidenceRow.counts?.active_files || files.length;
@@ -260,7 +279,8 @@ export default function DualRowComplianceSection({
       requirementKey: sectionKey,
       files,
       requests,
-      checks
+      checks,
+      freshness: sectionKey === 'proof_of_address' && checkRow ? checkRow.freshness : null
     });
   };
 

@@ -18,6 +18,8 @@ import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 import ReferenceResponseDrawer from './ReferenceResponseDrawer';
 import AgreementFormDrawer from './AgreementFormDrawer';
+import FormSubmissionDrawer from './FormSubmissionDrawer';
+import RejectFormDialog from './RejectFormDialog';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
 
@@ -111,6 +113,15 @@ export default function DualRowComplianceSection({
     agreementKey: null,
     agreementTitle: null
   });
+  
+  // Reject form dialog state
+  const [rejectDialog, setRejectDialog] = useState({
+    isOpen: false,
+    submissionId: null,
+    formName: '',
+    formKey: null
+  });
+  const [rejectLoading, setRejectLoading] = useState(false);
   
   const { token } = useAuth();
   
@@ -461,11 +472,8 @@ export default function DualRowComplianceSection({
                     onSendForm={async (formKey, empId, empEmail) => {
                       try {
                         await axios.post(
-                          `${API}/employees/${empId}/send-form`,
-                          { 
-                            form_type: formKey,
-                            employee_email: empEmail
-                          },
+                          `${API}/employees/${empId}/send-form?form_type=${formKey}`,
+                          {},
                           { headers: { Authorization: `Bearer ${token}` } }
                         );
                         toast.success(`Form sent to ${empEmail}`);
@@ -492,6 +500,27 @@ export default function DualRowComplianceSection({
                       } catch (err) {
                         toast.error('Failed to download PDF');
                       }
+                    }}
+                    onVerify={async (submissionId) => {
+                      try {
+                        await axios.post(
+                          `${API}/form-submissions/${submissionId}/verify`,
+                          {},
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        toast.success('Form verified successfully');
+                        handleRefresh();
+                      } catch (err) {
+                        toast.error(err.response?.data?.detail || 'Failed to verify form');
+                      }
+                    }}
+                    onReject={(submissionId, formName) => {
+                      setRejectDialog({
+                        isOpen: true,
+                        submissionId,
+                        formName: formName || row.title,
+                        formKey: row.key
+                      });
                     }}
                     onViewHistory={(reqKey, title) => handleViewHistory(reqKey, title)}
                     isAuditor={isAuditor}
@@ -682,6 +711,70 @@ export default function DualRowComplianceSection({
         onSubmitSuccess={handleRefresh}
         mode={agreementDrawer.mode}
         existingSubmission={agreementDrawer.submissionId ? { id: agreementDrawer.submissionId } : null}
+      />
+      
+      {/* Form Submission Drawer for form-type requirements */}
+      <FormSubmissionDrawer
+        isOpen={formDrawer.isOpen}
+        onClose={() => setFormDrawer({
+          isOpen: false, formKey: null, formType: null,
+          submissionId: null, mode: 'create'
+        })}
+        employeeId={employeeId}
+        employeeName={employeeName}
+        formKey={formDrawer.formKey}
+        formType={formDrawer.formType}
+        submissionId={formDrawer.submissionId}
+        mode={formDrawer.mode}
+        onSubmitSuccess={handleRefresh}
+        onVerify={async (submissionId) => {
+          try {
+            await axios.post(
+              `${API}/form-submissions/${submissionId}/verify`,
+              {},
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            toast.success('Form verified successfully');
+            handleRefresh();
+            setFormDrawer(prev => ({ ...prev, isOpen: false }));
+          } catch (err) {
+            toast.error(err.response?.data?.detail || 'Failed to verify form');
+          }
+        }}
+        onReject={(submissionId) => {
+          setRejectDialog({
+            isOpen: true,
+            submissionId,
+            formName: formDrawer.formKey?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            formKey: formDrawer.formKey
+          });
+        }}
+      />
+      
+      {/* Reject Form Dialog */}
+      <RejectFormDialog
+        isOpen={rejectDialog.isOpen}
+        onClose={() => setRejectDialog({ isOpen: false, submissionId: null, formName: '', formKey: null })}
+        formName={rejectDialog.formName}
+        loading={rejectLoading}
+        onConfirm={async (reason) => {
+          setRejectLoading(true);
+          try {
+            await axios.post(
+              `${API}/form-submissions/${rejectDialog.submissionId}/reject`,
+              { rejection_reason: reason },
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            toast.success('Form rejected');
+            handleRefresh();
+            setRejectDialog({ isOpen: false, submissionId: null, formName: '', formKey: null });
+            setFormDrawer(prev => ({ ...prev, isOpen: false }));
+          } catch (err) {
+            toast.error(err.response?.data?.detail || 'Failed to reject form');
+          } finally {
+            setRejectLoading(false);
+          }
+        }}
       />
     </div>
   );

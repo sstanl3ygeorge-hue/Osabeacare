@@ -4640,7 +4640,11 @@ class FormSubmissionResponse(BaseModel):
     verified_by: Optional[str] = None
     verified_by_name: Optional[str] = None
     verified_at: Optional[str] = None
-    status: str = "submitted"  # submitted, verified, superseded
+    rejected_by: Optional[str] = None
+    rejected_by_name: Optional[str] = None
+    rejected_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    status: str = "submitted"  # submitted, verified, superseded, rejected
     version: int = 1
     notes: Optional[str] = None
 
@@ -14653,6 +14657,55 @@ async def unverify_form_submission(submission_id: str, user: dict = Depends(requ
     await log_audit_action(user['user_id'], "form_unverified", "form_submission", submission_id, {
         "employee_id": submission["employee_id"],
         "requirement_id": submission["requirement_id"]
+    })
+    
+    updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
+    return FormSubmissionResponse(**updated)
+
+
+class FormRejectionRequest(BaseModel):
+    rejection_reason: str
+
+
+@api_router.post("/form-submissions/{submission_id}/reject")
+async def reject_form_submission(
+    submission_id: str, 
+    rejection: FormRejectionRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Reject a form submission with a reason.
+    Sets status to 'rejected' and stores rejection details.
+    """
+    submission = await db.form_submissions.find_one({"id": submission_id})
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form submission not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get rejector name
+    rejector = await db.users.find_one({"id": user['user_id']})
+    rejector_name = rejector.get("name", user['user_id']) if rejector else user['user_id']
+    
+    await db.form_submissions.update_one(
+        {"id": submission_id},
+        {"$set": {
+            "verified": False,
+            "verified_by": None,
+            "verified_at": None,
+            "status": "rejected",
+            "rejected_by": user['user_id'],
+            "rejected_by_name": rejector_name,
+            "rejected_at": now,
+            "rejection_reason": rejection.rejection_reason
+        }}
+    )
+    
+    # Log audit action
+    await log_audit_action(user['user_id'], "form_rejected", "form_submission", submission_id, {
+        "employee_id": submission["employee_id"],
+        "requirement_id": submission["requirement_id"],
+        "rejection_reason": rejection.rejection_reason
     })
     
     updated = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
@@ -28724,12 +28777,12 @@ async def get_compliance_file(
     # FETCH FORM SUBMISSIONS FOR ALL FORM-TYPE REQUIREMENTS
     # =========================================================================
     
-    # Get all form submissions for this employee
+    # Get all form submissions for this employee (excluding superseded and deleted)
     all_form_submissions = await db.form_submissions.find(
-        {"employee_id": employee_id}
+        {"employee_id": employee_id, "status": {"$nin": ["superseded", "deleted"]}}
     ).sort("created_at", -1).to_list(length=100)
     
-    # Index by requirement_id
+    # Index by requirement_id (first/newest match wins)
     form_submissions_by_req = {}
     for sub in all_form_submissions:
         req_id = sub.get("requirement_id", "")
@@ -28816,8 +28869,9 @@ async def get_compliance_file(
         
         has_submission = submission is not None
         status_value = submission.get("status") if submission else None
-        is_verified = status_value == "signed_off" or submission.get("verified") if submission else False
+        is_verified = status_value == "signed_off" or status_value == "verified" or submission.get("verified") if submission else False
         is_awaiting_review = status_value == "submitted" if submission else False
+        is_rejected = status_value == "rejected" if submission else False
         
         # Determine status
         if is_verified:
@@ -28826,6 +28880,13 @@ async def get_compliance_file(
             status_summary = f"Verified"
             if completed_at:
                 status_summary += f" • {str(completed_at)[:10]}"
+        elif is_rejected:
+            status = "rejected"
+            rejected_at = submission.get("rejected_at", "")
+            rejection_reason = submission.get("rejection_reason", "")
+            status_summary = f"Rejected"
+            if rejected_at:
+                status_summary += f" • {str(rejected_at)[:10]}"
         elif is_awaiting_review:
             status = "awaiting_review"
             status_summary = "Submitted • awaiting verification"
@@ -28882,13 +28943,23 @@ async def get_compliance_file(
                 "signed_off_at": submission.get("signed_off_at"),
                 "signed_off_by": submission.get("signed_off_by"),
                 "has_pdf": bool(submission.get("pdf_url")),
-                "pdf_url": submission.get("pdf_url")
+                "pdf_url": submission.get("pdf_url"),
+                # Rejection details
+                "rejected_at": submission.get("rejected_at"),
+                "rejected_by": submission.get("rejected_by"),
+                "rejected_by_name": submission.get("rejected_by_name"),
+                "rejection_reason": submission.get("rejection_reason")
             } if has_submission else None,
             
             # Verification
             "is_verified": is_verified,
+            "is_rejected": is_rejected,
             "verified_at": submission.get("verified_at") or submission.get("signed_off_at") if submission else None,
             "verified_by": submission.get("verified_by") or submission.get("signed_off_by") if submission else None,
+            "verified_by_name": submission.get("verified_by_name") or submission.get("signed_off_by_name") if submission else None,
+            "rejected_at": submission.get("rejected_at") if submission else None,
+            "rejected_by": submission.get("rejected_by") if submission else None,
+            "rejection_reason": submission.get("rejection_reason") if submission else None,
             
             # Status
             "status": status,
@@ -32302,9 +32373,13 @@ async def get_reference_status(
 
 FORM_TO_REQUIREMENT_MAPPING = {
     "staff_health_questionnaire": "staff_health_questionnaire",
-    "staff_personal_info": "staff_personal_information",
+    "staff_personal_info": "staff_personal_info",
     "hmrc_starter_checklist": "hmrc_starter_checklist",
     "interview_record": "interview_record",
+    "equal_opportunities": "equal_opportunities",
+    "induction": "induction",
+    "recruitment_checklist": "recruitment_checklist",
+    "application_form": "application_form"
 }
 
 @api_router.post("/employees/{employee_id}/send-form")

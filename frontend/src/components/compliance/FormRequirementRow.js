@@ -45,6 +45,8 @@ export default function FormRequirementRow({
   onViewSubmission,   // Callback to view existing submission
   onSendForm,         // Callback to send form to employee
   onExportPdf,        // Callback to export PDF
+  onVerify,           // Callback to verify submission
+  onReject,           // Callback to reject submission (opens dialog)
   onViewHistory,
   isAuditor = false
 }) {
@@ -63,8 +65,10 @@ export default function FormRequirementRow({
     has_submission,
     submission_data,
     is_verified,
+    is_rejected,
     verified_at,
     verified_by,
+    rejection_reason,
     status,
     status_summary,
     allowed_actions
@@ -80,6 +84,8 @@ export default function FormRequirementRow({
     switch (status) {
       case 'verified':
         return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      case 'rejected':
+        return 'bg-red-100 text-red-800 border-red-200';
       case 'awaiting_review':
         return 'bg-amber-100 text-amber-800 border-amber-200';
       case 'recorded':
@@ -95,6 +101,8 @@ export default function FormRequirementRow({
     switch (status) {
       case 'verified':
         return <CheckCircle className="h-4 w-4 text-emerald-600" />;
+      case 'rejected':
+        return <XCircle className="h-4 w-4 text-red-600" />;
       case 'awaiting_review':
         return <Clock className="h-4 w-4 text-amber-600" />;
       case 'recorded':
@@ -102,6 +110,17 @@ export default function FormRequirementRow({
       case 'not_completed':
       default:
         return <FileText className="h-4 w-4 text-gray-400" />;
+    }
+  };
+  
+  // Status text for badge
+  const getStatusText = () => {
+    switch (status) {
+      case 'verified': return 'Verified';
+      case 'rejected': return 'Rejected';
+      case 'awaiting_review': return 'Awaiting Review';
+      case 'recorded': return 'Draft';
+      default: return 'Not Started';
     }
   };
   
@@ -187,6 +206,7 @@ export default function FormRequirementRow({
           <div className={cn(
             "w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0",
             status === 'verified' ? "bg-emerald-100" :
+            status === 'rejected' ? "bg-red-100" :
             status === 'awaiting_review' ? "bg-amber-100" :
             status === 'recorded' ? "bg-blue-100" : "bg-gray-100"
           )}>
@@ -211,9 +231,7 @@ export default function FormRequirementRow({
         {/* Right: Status Badge + Expand Icon */}
         <div className="flex items-center gap-2">
           <Badge className={cn("text-xs", getStatusColor())}>
-            {status === 'verified' ? 'Verified' :
-             status === 'awaiting_review' ? 'Awaiting Review' :
-             status === 'recorded' ? 'Draft' : 'Not Started'}
+            {getStatusText()}
           </Badge>
           {isExpanded ? (
             <ChevronUp className="h-4 w-4 text-gray-400" />
@@ -223,8 +241,23 @@ export default function FormRequirementRow({
         </div>
       </div>
       
+      {/* Rejection Notice */}
+      {status === 'rejected' && rejection_reason && (
+        <div className="px-3 pb-2">
+          <div className="p-2 bg-red-50 border border-red-200 rounded text-sm">
+            <div className="flex items-start gap-2 text-red-700">
+              <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <span className="font-medium">Rejected:</span>
+                <span className="ml-1">{rejection_reason}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Blocker Warning */}
-      {blocker_text && (
+      {blocker_text && status !== 'rejected' && (
         <div className="px-3 pb-2">
           <div className="flex items-center gap-2 text-red-600 text-sm">
             <AlertCircle className="h-4 w-4" />
@@ -340,10 +373,20 @@ export default function FormRequirementRow({
                 size="sm"
                 variant="outline"
                 className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                onClick={(e) => { e.stopPropagation(); /* TODO: Implement verify */ }}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  if (onVerify && submission_data?.id) {
+                    onVerify(submission_data.id);
+                  }
+                }}
+                disabled={actionLoading === 'verify'}
                 data-testid={`verify-form-${key}`}
               >
-                <CheckCircle className="h-4 w-4 mr-1.5" />
+                {actionLoading === 'verify' ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-4 w-4 mr-1.5" />
+                )}
                 Verify
               </Button>
             )}
@@ -353,7 +396,12 @@ export default function FormRequirementRow({
                 size="sm"
                 variant="outline"
                 className="text-red-600 border-red-200 hover:bg-red-50"
-                onClick={(e) => { e.stopPropagation(); /* TODO: Implement reject */ }}
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  if (onReject && submission_data?.id) {
+                    onReject(submission_data.id, title);
+                  }
+                }}
                 data-testid={`reject-form-${key}`}
               >
                 <XCircle className="h-4 w-4 mr-1.5" />

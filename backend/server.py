@@ -24122,7 +24122,7 @@ class ReferenceIntegrityService:
     def build_response_data(employee: dict, ref_num: int) -> dict:
         """Extract independent response data."""
         prefix = f"reference_{ref_num}_"
-        response_data = employee.get(f"{prefix}response_data", {})
+        response_data = employee.get(f"{prefix}response_data") or {}
         
         # Determine evidence source
         source = employee.get(f"{prefix}evidence_source")
@@ -24988,6 +24988,377 @@ async def get_all_references_integrity(
             r.get("blocking_reason") for r in [ref1, ref2] 
             if r and r.get("blocked_by_integrity")
         ]
+    }
+
+
+@api_router.get("/employees/{employee_id}/references-normalized")
+async def get_normalized_references(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get normalized reference data per Ticket E spec.
+    
+    Returns the full 5-section reference model:
+    1. declared_referee - What applicant entered
+    2. request - Request lifecycle (sent, viewed, responded)
+    3. response - What referee actually submitted
+    4. integrity - Did response match declared referee
+    5. verification - What admin concluded
+    
+    Lifecycle states:
+    not_sent -> sent -> viewed -> responded -> awaiting_review -> verified/rejected -> replacement_requested
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    applicant_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    def build_normalized_reference(ref_num: int) -> dict:
+        prefix = f"reference_{ref_num}_"
+        
+        # 1. DECLARED REFEREE
+        declared_referee = {
+            "name": employee.get(f"{prefix}name"),
+            "job_title": employee.get(f"{prefix}job_title"),
+            "organisation": employee.get(f"{prefix}company"),
+            "email": employee.get(f"{prefix}email"),
+            "phone": employee.get(f"{prefix}phone"),
+            "relationship": employee.get(f"{prefix}relationship"),
+            "employment_start": employee.get(f"{prefix}start_date"),
+            "employment_end": employee.get(f"{prefix}end_date"),
+            "can_contact_before_offer": employee.get(f"{prefix}can_contact_before_offer", True),
+            "from_cv": employee.get(f"{prefix}from_cv"),
+        }
+        has_declared = bool(declared_referee.get("name") or declared_referee.get("email"))
+        
+        # 2. REQUEST LIFECYCLE
+        request_status = employee.get(f"{prefix}request_status")  # requested, awaiting_response, submitted
+        request_sent_at = employee.get(f"{prefix}request_sent_at")
+        request_token = employee.get(f"{prefix}request_token")
+        request_viewed_at = employee.get(f"{prefix}request_viewed_at")
+        resend_count = employee.get(f"{prefix}resend_count", 0)
+        last_reminder_at = employee.get(f"{prefix}last_reminder_at")
+        replacement_requested_at = employee.get(f"{prefix}replacement_requested_at")
+        
+        # Determine if token is still active
+        token_active = bool(request_token) and request_status in ["requested", "awaiting_response"]
+        
+        request = {
+            "status": "not_sent" if not request_status else request_status,
+            "sent_at": request_sent_at,
+            "viewed_at": request_viewed_at,
+            "responded_at": employee.get(f"{prefix}response_received_at"),
+            "resend_count": resend_count,
+            "last_reminder_at": last_reminder_at,
+            "recipient_email": employee.get(f"{prefix}email"),
+            "token_active": token_active,
+        }
+        
+        # 3. RESPONSE
+        response_data = employee.get(f"{prefix}response_data") or {}
+        response_received_at = employee.get(f"{prefix}response_received_at")
+        has_response = bool(response_data) and bool(response_received_at)
+        
+        response = {
+            "exists": has_response,
+            "submitted_at": response_received_at,
+            "referee_full_name": response_data.get("referee_full_name"),
+            "referee_email": response_data.get("referee_work_email"),
+            "organisation": response_data.get("referee_organisation") or response_data.get("current_employer"),
+            "job_title": response_data.get("referee_job_title"),
+            "relationship_to_applicant": response_data.get("relationship_type"),
+            # Employment details
+            "employment_start": response_data.get("employment_start_date"),
+            "employment_end": response_data.get("employment_end_date"),
+            "job_title_held": response_data.get("job_title_held"),
+            "reason_for_leaving": response_data.get("reason_for_leaving"),
+            # Performance
+            "performance_rating": response_data.get("performance_rating"),
+            "attendance_reliability": response_data.get("attendance_reliability"),
+            "team_working": response_data.get("team_working"),
+            "overall_assessment": response_data.get("overall_assessment"),
+            "would_rehire": response_data.get("would_rehire"),
+            "rehire_comments": response_data.get("rehire_comments"),
+            # DBS/Conduct
+            "disciplinary_actions": response_data.get("disciplinary_actions"),
+            "safeguarding_concerns": response_data.get("safeguarding_concerns"),
+            "suitable_for_vulnerable": response_data.get("suitable_for_vulnerable"),
+            # Additional
+            "additional_comments": response_data.get("additional_comments"),
+            # Raw payload (for admin reference)
+            "payload": response_data if user.get('role') in ['admin', 'manager'] else None,
+        }
+        
+        # 4. INTEGRITY CHECKS
+        mismatch_detected = employee.get(f"{prefix}mismatch_detected", False)
+        mismatch_notes = employee.get(f"{prefix}mismatch_notes")
+        
+        # Compute match status
+        email_match = None
+        name_match = None
+        org_match = None
+        mismatch_reasons = []
+        
+        if has_response:
+            # Email comparison
+            declared_email = (declared_referee.get("email") or "").lower().strip()
+            response_email = (response.get("referee_email") or "").lower().strip()
+            if declared_email and response_email:
+                email_match = declared_email == response_email
+                if not email_match:
+                    mismatch_reasons.append("Referee email does not match declared email")
+            
+            # Name comparison
+            declared_name = (declared_referee.get("name") or "").lower().strip()
+            response_name = (response.get("referee_full_name") or "").lower().strip()
+            if declared_name and response_name:
+                # Partial match acceptable (name parts)
+                declared_parts = set(declared_name.split())
+                response_parts = set(response_name.split())
+                common = declared_parts.intersection(response_parts)
+                name_match = len(common) >= 1
+                if not name_match:
+                    mismatch_reasons.append("Referee name does not match declared name")
+            
+            # Organisation comparison
+            declared_org = (declared_referee.get("organisation") or "").lower().strip()
+            response_org = (response.get("organisation") or "").lower().strip()
+            if declared_org and response_org:
+                org_match = (declared_org in response_org) or (response_org in declared_org)
+                if not org_match:
+                    mismatch_reasons.append("Organisation does not match declared organisation")
+        
+        integrity = {
+            "mismatch_detected": mismatch_detected or len(mismatch_reasons) > 0,
+            "email_match": email_match,
+            "name_match": name_match,
+            "organisation_match": org_match,
+            "mismatch_reasons": mismatch_reasons if mismatch_reasons else (mismatch_notes.split(";") if mismatch_notes else []),
+            "override_applied": bool(employee.get(f"{prefix}override_reason")),
+            "override_reason": employee.get(f"{prefix}override_reason"),
+            "override_by": employee.get(f"{prefix}override_by"),
+            "override_at": employee.get(f"{prefix}override_at"),
+        }
+        
+        # 5. VERIFICATION OUTCOME
+        verified = employee.get(f"{prefix}verified", False)
+        rejected = employee.get(f"{prefix}rejected", False)
+        reviewed = employee.get(f"{prefix}reviewed", False)
+        
+        # Determine verification status
+        if replacement_requested_at:
+            verification_status = "replacement_requested"
+        elif rejected:
+            verification_status = "rejected"
+        elif verified:
+            verification_status = "verified"
+        elif reviewed:
+            verification_status = "awaiting_verification"
+        elif has_response:
+            verification_status = "awaiting_review"
+        elif request.get("responded_at"):
+            verification_status = "responded"
+        elif request.get("viewed_at"):
+            verification_status = "viewed"
+        elif request.get("sent_at"):
+            verification_status = "sent"
+        else:
+            verification_status = "pending"
+        
+        verification = {
+            "status": verification_status,
+            "verified": verified,
+            "verified_at": employee.get(f"{prefix}verified_at"),
+            "verified_by": employee.get(f"{prefix}verified_by"),
+            "rejected": rejected,
+            "rejected_at": employee.get(f"{prefix}rejected_at"),
+            "rejected_reason": employee.get(f"{prefix}rejected_reason"),
+            "rejected_by": employee.get(f"{prefix}rejected_by"),
+            "reviewed": reviewed,
+            "reviewed_at": employee.get(f"{prefix}reviewed_at"),
+            "reviewed_by": employee.get(f"{prefix}reviewed_by"),
+            "replacement_requested": bool(replacement_requested_at),
+            "replacement_requested_at": replacement_requested_at,
+            "replacement_requested_by": employee.get(f"{prefix}replacement_requested_by"),
+            "replacement_reason": employee.get(f"{prefix}replacement_reason"),
+        }
+        
+        # SUMMARY for row display
+        if verification_status == "verified":
+            summary_text = "Verified"
+            if verification.get("verified_at"):
+                summary_text += f" • {verification.get('verified_at')[:10]}"
+        elif verification_status == "rejected":
+            summary_text = "Rejected"
+        elif verification_status == "replacement_requested":
+            summary_text = "Replacement requested"
+        elif verification_status == "awaiting_review" or verification_status == "awaiting_verification":
+            summary_text = "Response received • awaiting review"
+        elif verification_status == "responded":
+            summary_text = "Response received • awaiting review"
+        elif verification_status == "viewed":
+            summary_text = "Viewed • awaiting response"
+        elif verification_status == "sent":
+            summary_text = "Sent • awaiting response"
+        elif has_declared:
+            summary_text = "Not sent"
+        else:
+            summary_text = "Referee not declared"
+        
+        # ALLOWED ACTIONS
+        allowed_actions = []
+        
+        # Send Request - only when declared, not yet sent
+        if has_declared and declared_referee.get("email") and verification_status in ["pending", "not_sent"]:
+            allowed_actions.append("send_request")
+        
+        # Resend - already sent, not yet verified, token valid or resend allowed
+        if verification_status in ["sent", "viewed"] and has_declared:
+            allowed_actions.append("resend_request")
+        
+        # View Response - response exists
+        if has_response:
+            allowed_actions.append("view_response")
+        
+        # Request Replacement - no response after attempts, rejected, mismatch unresolved
+        if verification_status in ["rejected", "sent", "viewed"] or (integrity.get("mismatch_detected") and not integrity.get("override_applied")):
+            allowed_actions.append("request_replacement")
+        
+        # Verify - response exists, not yet verified
+        if has_response and not verified and not rejected:
+            allowed_actions.append("verify")
+        
+        # Reject - response exists, not yet verified
+        if has_response and not verified and not rejected:
+            allowed_actions.append("reject")
+        
+        # Override mismatch - mismatch detected, response exists, not yet overridden
+        if integrity.get("mismatch_detected") and has_response and not integrity.get("override_applied"):
+            allowed_actions.append("override_mismatch")
+        
+        # View history always available
+        allowed_actions.append("view_history")
+        
+        # BLOCKER text for compliance
+        blocker_text = None
+        blocks_approval = False
+        if not has_declared:
+            blocker_text = f"Reference {ref_num} not declared"
+            blocks_approval = True
+        elif verification_status == "pending" or verification_status == "not_sent":
+            blocker_text = f"Reference {ref_num} request not sent"
+            blocks_approval = True
+        elif verification_status in ["sent", "viewed"]:
+            blocker_text = f"Reference {ref_num} awaiting response"
+            blocks_approval = True
+        elif verification_status in ["awaiting_review", "responded", "awaiting_verification"]:
+            blocker_text = f"Reference {ref_num} awaiting review"
+            blocks_approval = True
+        elif verification_status == "rejected":
+            blocker_text = f"Reference {ref_num} rejected"
+            blocks_approval = True
+        elif integrity.get("mismatch_detected") and not integrity.get("override_applied"):
+            blocker_text = f"Reference {ref_num} has unresolved mismatch"
+            blocks_approval = True
+        
+        return {
+            "reference_number": ref_num,
+            "requirement_key": f"reference_{ref_num}",
+            "label": f"Reference {ref_num}",
+            "applicant_name": applicant_name,
+            
+            # 5 sections of truth
+            "declared_referee": declared_referee if has_declared else None,
+            "request": request,
+            "response": response if has_response else {"exists": False},
+            "integrity": integrity,
+            "verification": verification,
+            
+            # UI helpers
+            "summary_text": summary_text,
+            "lifecycle_status": verification_status,
+            "allowed_actions": list(set(allowed_actions)),
+            "blocker_text": blocker_text,
+            "blocks_approval": blocks_approval,
+            "counts_toward_readiness": verified and has_response and (not integrity.get("mismatch_detected") or integrity.get("override_applied")),
+        }
+    
+    # Build both references
+    ref1 = build_normalized_reference(1)
+    ref2 = build_normalized_reference(2)
+    
+    # Count valid
+    valid_count = sum(1 for r in [ref1, ref2] if r.get("counts_toward_readiness"))
+    
+    return {
+        "employee_id": employee_id,
+        "applicant_name": applicant_name,
+        "references": [ref1, ref2],
+        "summary": {
+            "verified_count": valid_count,
+            "minimum_required": 2,
+            "meets_minimum": valid_count >= 2,
+            "all_blockers": [r.get("blocker_text") for r in [ref1, ref2] if r.get("blocks_approval")],
+        }
+    }
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/request-replacement")
+async def request_reference_replacement(
+    employee_id: str,
+    ref_num: int,
+    replacement_reason: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """
+    Request a replacement referee for a reference.
+    
+    Use when:
+    - No response after multiple attempts
+    - Response rejected
+    - Mismatch unresolved
+    - Referee no longer suitable
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    if not replacement_reason or len(replacement_reason.strip()) < 10:
+        raise HTTPException(status_code=400, detail="Replacement reason must be at least 10 characters")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Mark replacement requested
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}replacement_requested_at": now,
+            f"{prefix}replacement_requested_by": user['user_id'],
+            f"{prefix}replacement_reason": replacement_reason.strip(),
+            # Reset verification status
+            f"{prefix}verified": False,
+            f"{prefix}rejected": False,
+            f"{prefix}request_status": None,
+            f"{prefix}response_data": None,
+            f"{prefix}response_received_at": None,
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "request_reference_replacement", "employee", employee_id, {
+        "reference_num": ref_num,
+        "reason": replacement_reason.strip()
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Replacement requested for Reference {ref_num}. Update employee profile with new referee details.",
+        "reference_num": ref_num
     }
 
 

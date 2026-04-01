@@ -15,6 +15,7 @@ import UploadRequirementCard from './UploadRequirementCard';
 import UploadRequirementDrawer from './UploadRequirementDrawer';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
+import ReferenceResponseDrawer from './ReferenceResponseDrawer';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
 
@@ -81,6 +82,12 @@ export default function DualRowComplianceSection({
     open: false,
     requirementKey: null,
     requirementTitle: ''
+  });
+  
+  // Ticket E: Reference response drawer state
+  const [referenceDrawer, setReferenceDrawer] = useState({
+    open: false,
+    referenceNum: null
   });
   
   const { token } = useAuth();
@@ -344,8 +351,8 @@ export default function DualRowComplianceSection({
                     onRefresh={handleRefresh}
                     onViewHistory={handleViewHistory}
                     onViewResponse={(refNum) => {
-                      // TODO: Open reference response modal/drawer
-                      toast.info(`View response for Reference ${refNum}`);
+                      // Open reference response drawer
+                      setReferenceDrawer({ open: true, referenceNum: refNum });
                     }}
                     onVerify={async (refNum) => {
                       try {
@@ -369,7 +376,7 @@ export default function DualRowComplianceSection({
                       try {
                         await axios.post(
                           `${API}/references/${employeeId}/${refNum}/reject`,
-                          { reason: 'Rejected by admin' },
+                          { rejection_reason: 'Rejected by admin' },
                           { headers: { Authorization: `Bearer ${token}` } }
                         );
                         toast.success(`Reference ${refNum} rejected`);
@@ -529,6 +536,16 @@ export default function DualRowComplianceSection({
         employeeId={employeeId}
         requirementKey={historyDrawer.requirementKey}
         requirementTitle={historyDrawer.requirementTitle}
+      />
+      
+      {/* Ticket E: Reference Response Drawer */}
+      <ReferenceResponseDrawer
+        isOpen={referenceDrawer.open}
+        onClose={() => setReferenceDrawer({ open: false, referenceNum: null })}
+        employeeId={employeeId}
+        referenceNum={referenceDrawer.referenceNum}
+        onRefresh={handleRefresh}
+        isAuditor={isAuditor}
       />
     </div>
   );

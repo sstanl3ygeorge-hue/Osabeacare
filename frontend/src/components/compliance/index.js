@@ -41,3 +41,6 @@ export { default as RequestStatusBadge, RequestStatusInline } from './RequestSta
 // Stage Identity Components (Applicant vs Employee)
 export { default as StageIdentityBadge, STAGE_CONFIGS } from './StageIdentityBadge';
 export { default as ApplicantStageBanner } from './ApplicantStageBanner';
+
+// Reference Response Drawer (Ticket E)
+export { default as ReferenceResponseDrawer } from './ReferenceResponseDrawer';

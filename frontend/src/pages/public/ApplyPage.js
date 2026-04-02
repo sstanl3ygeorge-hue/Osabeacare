@@ -1466,10 +1466,9 @@ export default function ApplyPage() {
         <h3 className="font-medium text-blue-800 mb-2">What happens next?</h3>
         <ul className="text-sm text-blue-700 space-y-1">
           <li>• Your application will be reviewed by our recruitment team</li>
-          <li>• We will contact your references for verification</li>
+          <li>• We may contact your references for verification</li>
           <li>• You may be invited for an interview</li>
-          <li>• A DBS check will be required before any offer is made</li>
-          <li>• Right to work evidence will need to be verified in person</li>
+          <li>• Additional evidence may be requested during the recruitment process</li>
         </ul>
       </div>
     </div>
@@ -1481,20 +1480,21 @@ export default function ApplyPage() {
         <CheckCircle className="h-10 w-10 text-green-600" />
       </div>
       <h2 className="font-heading text-2xl font-semibold text-text-primary mb-4">
-        Application Submitted
+        Application Received
       </h2>
       <p className="text-text-muted mb-6 max-w-md mx-auto">
-        Thank you for applying to Osabea Healthcare Solutions. Our recruitment team will review your application and contact you.
+        Thank you for applying to Osabea Healthcare Solutions. We have received your application and our recruitment team will review it.
       </p>
       
       <div className="bg-[#F8FAFA] rounded-xl p-6 inline-block mb-6">
         <p className="text-sm text-text-muted mb-1">Your application reference:</p>
         <p className="font-heading font-bold text-2xl text-primary">{submissionResult?.reference}</p>
+        <p className="text-xs text-text-muted mt-2">Please save this reference for your records</p>
       </div>
       
       {submissionResult?.next_steps && (
         <div className="text-left max-w-md mx-auto bg-white rounded-xl border p-4 mb-6">
-          <h3 className="font-medium text-text-primary mb-2">Next Steps</h3>
+          <h3 className="font-medium text-text-primary mb-2">What Happens Next</h3>
           <ul className="text-sm text-text-muted space-y-1">
             {submissionResult.next_steps.map((step, idx) => (
               <li key={idx}>• {step}</li>
@@ -1504,9 +1504,10 @@ export default function ApplyPage() {
       )}
       
       {submissionResult?.follow_up_items?.length > 0 && (
-        <div className="text-left max-w-md mx-auto bg-amber-50 rounded-xl border border-amber-200 p-4 mb-6">
-          <h3 className="font-medium text-amber-800 mb-2">Items We Will Request</h3>
-          <ul className="text-sm text-amber-700 space-y-1">
+        <div className="text-left max-w-md mx-auto bg-blue-50 rounded-xl border border-blue-200 p-4 mb-6">
+          <h3 className="font-medium text-blue-800 mb-2">Evidence We May Request</h3>
+          <p className="text-xs text-blue-600 mb-2">During the recruitment process, you may be asked to provide:</p>
+          <ul className="text-sm text-blue-700 space-y-1">
             {submissionResult.follow_up_items.map((item, idx) => (
               <li key={idx}>• {item.description}</li>
             ))}
@@ -1514,11 +1515,27 @@ export default function ApplyPage() {
         </div>
       )}
       
-      <div className="bg-red-50 border border-red-200 rounded-xl p-4 max-w-md mx-auto">
-        <p className="text-sm text-red-700">
-          <strong>Important:</strong> This submission does NOT constitute a job offer. 
-          All information will be verified before any employment decision is made.
+      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 max-w-md mx-auto mb-8">
+        <p className="text-sm text-gray-600">
+          <strong>Please note:</strong> This submission confirms receipt of your application only. 
+          All information is subject to verification. You will be contacted if we require additional information.
         </p>
+      </div>
+      
+      {/* Navigation buttons */}
+      <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-md mx-auto">
+        <a 
+          href="/"
+          className="inline-flex items-center justify-center px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+        >
+          Return to Homepage
+        </a>
+        <a 
+          href="mailto:recruitment@osabeacares.co.uk"
+          className="inline-flex items-center justify-center px-6 py-3 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          Contact Recruitment
+        </a>
       </div>
     </div>
   );

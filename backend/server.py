@@ -22115,25 +22115,22 @@ async def submit_structured_application(form: StructuredApplicationForm):
                 upsert=True
             )
         
-        # Add to follow-up items
+        # Add to follow-up items - ONLY when there are ACTUAL detected gaps
         follow_up_items.append({
             "type": "employment_gaps",
             "requirement_key": "employment_history_verification",
-            "description": f"{len(detected_gaps)} employment gap(s) detected - explanation required",
+            "description": f"{len(detected_gaps)} employment gap(s) detected ({sum(g.get('duration_months', 0) for g in detected_gaps):.0f} months total) - explanation will be requested",
             "status": "review_required",
             "gap_count": len(detected_gaps),
-            "total_gap_months": sum(g.get("duration_months", 0) for g in detected_gaps)
+            "total_gap_months": sum(g.get("duration_months", 0) for g in detected_gaps),
+            "is_admin_only": True  # Flag to filter from applicant-facing display
         })
         
         logger.info(f"Detected {len(detected_gaps)} employment gaps for {app_id}")
-    elif form.has_employment_gaps:
-        # Applicant declared gaps but none detected - flag for review
-        follow_up_items.append({
-            "type": "employment_gaps",
-            "requirement_key": "employment_history_verification",
-            "description": "Applicant declared employment gaps - review required",
-            "status": "review_required"
-        })
+    
+    # NOTE: Removed misleading "Applicant declared employment gaps" warning
+    # The gap flag on the form (has_employment_gaps) is now only used internally
+    # We only show gap warnings when there are ACTUAL detected gaps from date analysis
     
     # ==================== 5. LOG AUDIT TRAIL ====================
     
@@ -22161,23 +22158,68 @@ async def submit_structured_application(form: StructuredApplicationForm):
     
     logger.info(f"Structured application submitted: {applicant_ref} for {form.email}")
     
+    # Filter follow-up items for applicant-facing display (remove admin-only items)
+    applicant_facing_items = [
+        item for item in follow_up_items 
+        if not item.get("is_admin_only") and item.get("type") in [
+            "reference", "right_to_work", "identity", "proof_of_address"
+        ]
+    ]
+    
+    # Send confirmation email to applicant
+    try:
+        from email_service import EmailService
+        email_svc = EmailService(db)
+        
+        await email_svc.send_raw(
+            to_email=form.email,
+            subject=f"Application Received - Reference {applicant_ref}",
+            body=f"""
+Dear {form.first_name} {form.last_name},
+
+Thank you for submitting your application to join Osabea Healthcare Solutions.
+
+Your Application Reference: {applicant_ref}
+
+We have received your application and it is now being reviewed by our recruitment team.
+
+What happens next:
+- Our team will review your application within 5 working days
+- We may contact your references for verification
+- You may be invited for an interview
+- Additional evidence (Right to Work, DBS, etc.) will be requested as needed
+
+Please keep this reference number for your records. If you have any questions, contact our recruitment team at recruitment@osabeacares.co.uk quoting your reference number.
+
+Thank you for your interest in joining our team.
+
+Best regards,
+Osabea Healthcare Recruitment Team
+            """.strip()
+        )
+        logger.info(f"Confirmation email sent to {form.email} for application {applicant_ref}")
+    except Exception as e:
+        # Log but don't fail the submission if email fails
+        logger.warning(f"Failed to send confirmation email to {form.email}: {e}")
+    except Exception as e:
+        # Log but don't fail the submission if email fails
+        logger.warning(f"Failed to send confirmation email to {form.email}: {e}")
+    
     return {
         "status": "submitted",
-        "message": "Your application has been submitted successfully. Our recruitment team will review it and contact you regarding next steps.",
+        "message": "Your application has been submitted successfully. Our recruitment team will review it and contact you.",
         "reference": applicant_ref,
         "applicant_id": app_id,
         "next_steps": [
             "Our team will review your application within 5 working days",
-            "We will contact your references for verification",
-            "You may be invited for an interview",
-            "A DBS check will be required before any offer is made",
-            "Right to work evidence will need to be verified in person"
+            "We may contact your references for verification",
+            "You may be invited for an interview"
         ],
-        "follow_up_items": follow_up_items,
+        "follow_up_items": applicant_facing_items,
         "important_notes": [
             "This submission does NOT constitute a job offer",
             "All information will be verified before any employment decision",
-            "You will be contacted if any additional information is required"
+            "You will be contacted if additional information is required"
         ]
     }
 

@@ -36404,6 +36404,40 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@api_router.post("/setup/init-admin")
+async def init_admin_user():
+    """
+    One-time setup endpoint to create initial admin user.
+    Only works if no users exist in the database.
+    """
+    # Check if any users exist
+    user_count = await db.users.count_documents({})
+    if user_count > 0:
+        raise HTTPException(status_code=400, detail="Setup already completed. Users exist.")
+    
+    # Create admin user
+    from uuid import uuid4
+    admin_user = {
+        "id": str(uuid4()),
+        "email": "admin@osabea.care",
+        "password_hash": pwd_context.hash("admin123"),
+        "name": "Admin User",
+        "role": "super_admin",
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    
+    await db.users.insert_one(admin_user)
+    
+    return {
+        "status": "success",
+        "message": "Admin user created",
+        "email": "admin@osabea.care",
+        "password": "admin123"
+    }
+
+
 @api_router.get("/admin/read-source-status")
 async def get_read_source_status(user: dict = Depends(require_admin)):
     """

@@ -22204,19 +22204,41 @@ async def upload_application_cv(file: UploadFile = File(...)):
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large. Maximum size: 10MB")
-    await file.seek(0)
     
     now = datetime.now(timezone.utc).isoformat()
     doc_id = str(uuid.uuid4())
     
-    # Upload to storage
+    # Upload to storage (try Supabase first, fallback to Emergent)
+    file_url = None
+    storage_path = None
+    
     try:
-        from emergentintegrations.file_storage import upload_file
-        upload_result = upload_file(content, file.filename)
-        file_url = upload_result.get('url') if isinstance(upload_result, dict) else str(upload_result)
+        from supabase_storage import is_supabase_storage_configured, upload_to_supabase
+        
+        if is_supabase_storage_configured():
+            # Use Supabase Storage
+            upload_result = await upload_to_supabase(
+                content, 
+                file.filename,
+                bucket="documents",
+                folder="application-cvs"
+            )
+            file_url = upload_result.get('url')
+            storage_path = upload_result.get('path')
+            logger.info(f"CV uploaded to Supabase: {storage_path}")
+        else:
+            # Fallback to Emergent storage
+            from emergentintegrations.file_storage import upload_file
+            upload_result = upload_file(content, file.filename)
+            file_url = upload_result.get('url') if isinstance(upload_result, dict) else str(upload_result)
+            logger.info(f"CV uploaded to Emergent storage")
+            
     except Exception as e:
         logger.error(f"CV upload failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload file")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
+    
+    if not file_url:
+        raise HTTPException(status_code=500, detail="Upload succeeded but no URL returned")
     
     # Create pending document record
     doc_data = {
@@ -22226,7 +22248,9 @@ async def upload_application_cv(file: UploadFile = File(...)):
         "document_type_name": "CV / Resume",
         "category": "Application Documents",
         "file_name": file.filename,
+        "original_filename": file.filename,
         "file_url": file_url,
+        "storage_path": storage_path,
         "file_size": len(content),
         "file_type": file_ext,
         "status": DocumentStatus.UPLOADED,

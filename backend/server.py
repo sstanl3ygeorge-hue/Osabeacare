@@ -30350,24 +30350,49 @@ async def get_compliance_file(
         # Get submission for this form
         submission = form_submissions_by_req.get(key)
         
-        has_submission = submission is not None
-        status_value = submission.get("status") if submission else None
-        is_verified = status_value == "signed_off" or status_value == "verified" or submission.get("verified") if submission else False
-        # Public application forms come with "completed" status and need review
-        is_awaiting_review = status_value in ["submitted", "completed"] if submission else False
-        is_rejected = status_value == "rejected" if submission else False
+        # FALLBACK: For application_form, also check employee_documents if no form_submission exists
+        # This handles legacy employees created through different paths (e.g., CV extraction, admin import)
+        fallback_doc = None
+        if not submission and key == "application_form":
+            app_form_docs = docs_by_requirement.get("application_form", [])
+            if app_form_docs:
+                # Get the most recent non-superseded document
+                active_docs = [d for d in app_form_docs if d.get("status") not in ["superseded", "archived", "deleted"]]
+                if active_docs:
+                    fallback_doc = sorted(active_docs, key=lambda x: x.get("created_at", ""), reverse=True)[0]
+        
+        has_submission = submission is not None or fallback_doc is not None
+        
+        # Determine status from either submission or fallback document
+        if submission:
+            status_value = submission.get("status")
+            is_verified = status_value in ["signed_off", "verified"] or submission.get("verified", False)
+            is_awaiting_review = status_value in ["submitted", "completed"]
+            is_rejected = status_value == "rejected"
+        elif fallback_doc:
+            status_value = fallback_doc.get("status")
+            is_verified = status_value in ["verified", "approved", "signed_off"] or fallback_doc.get("verified", False)
+            is_awaiting_review = status_value in ["uploaded", "submitted", "completed"]
+            is_rejected = status_value == "rejected"
+        else:
+            status_value = None
+            is_verified = False
+            is_awaiting_review = False
+            is_rejected = False
         
         # Determine status
+        source_record = submission or fallback_doc
+        
         if is_verified:
             status = "verified"
-            completed_at = submission.get("verified_at") or submission.get("signed_off_at") or submission.get("updated_at")
+            completed_at = source_record.get("verified_at") or source_record.get("signed_off_at") or source_record.get("updated_at") if source_record else None
             status_summary = f"Verified"
             if completed_at:
                 status_summary += f" • {str(completed_at)[:10]}"
         elif is_rejected:
             status = "rejected"
-            rejected_at = submission.get("rejected_at", "")
-            rejection_reason = submission.get("rejection_reason", "")
+            rejected_at = source_record.get("rejected_at", "") if source_record else ""
+            rejection_reason = source_record.get("rejection_reason", "") if source_record else ""
             status_summary = f"Rejected"
             if rejected_at:
                 status_summary += f" • {str(rejected_at)[:10]}"
@@ -30404,6 +30429,43 @@ async def get_compliance_file(
                 allowed_actions.append("edit")
         allowed_actions.append("history")
         
+        # Build submission_data from either source
+        submission_data = None
+        if has_submission:
+            if submission:
+                submission_data = {
+                    "id": submission.get("id"),
+                    "source": "form_submission",
+                    "status": status_value,
+                    "created_at": submission.get("created_at"),
+                    "updated_at": submission.get("updated_at"),
+                    "submitted_at": submission.get("submitted_at"),
+                    "signed_off_at": submission.get("signed_off_at"),
+                    "signed_off_by": submission.get("signed_off_by"),
+                    "has_pdf": bool(submission.get("pdf_url")),
+                    "pdf_url": submission.get("pdf_url"),
+                    "rejected_at": submission.get("rejected_at"),
+                    "rejected_by": submission.get("rejected_by"),
+                    "rejected_by_name": submission.get("rejected_by_name"),
+                    "rejection_reason": submission.get("rejection_reason")
+                }
+            elif fallback_doc:
+                submission_data = {
+                    "id": fallback_doc.get("id"),
+                    "source": "employee_document",
+                    "status": status_value,
+                    "created_at": fallback_doc.get("created_at"),
+                    "updated_at": fallback_doc.get("updated_at"),
+                    "uploaded_at": fallback_doc.get("uploaded_at"),
+                    "has_file": bool(fallback_doc.get("file_url")),
+                    "file_url": fallback_doc.get("file_url"),
+                    "file_name": fallback_doc.get("file_name"),
+                    "form_submission_id": fallback_doc.get("form_submission_id"),
+                    "rejected_at": fallback_doc.get("rejected_at"),
+                    "rejected_by": fallback_doc.get("rejected_by"),
+                    "rejection_reason": fallback_doc.get("rejection_reason")
+                }
+        
         return {
             "key": key,
             "title": name,
@@ -30418,22 +30480,7 @@ async def get_compliance_file(
             
             # Submission data
             "has_submission": has_submission,
-            "submission_data": {
-                "id": submission.get("id"),
-                "status": status_value,
-                "created_at": submission.get("created_at"),
-                "updated_at": submission.get("updated_at"),
-                "submitted_at": submission.get("submitted_at"),
-                "signed_off_at": submission.get("signed_off_at"),
-                "signed_off_by": submission.get("signed_off_by"),
-                "has_pdf": bool(submission.get("pdf_url")),
-                "pdf_url": submission.get("pdf_url"),
-                # Rejection details
-                "rejected_at": submission.get("rejected_at"),
-                "rejected_by": submission.get("rejected_by"),
-                "rejected_by_name": submission.get("rejected_by_name"),
-                "rejection_reason": submission.get("rejection_reason")
-            } if has_submission else None,
+            "submission_data": submission_data,
             
             # Verification
             "is_verified": is_verified,

@@ -560,15 +560,19 @@ def build_secure_action_link(
         expiry_hours=expiry_hours
     )
     
-    # Route based on action type
+    # Route based on action type - PUBLIC routes for user-facing actions
     if action_type in ["upload_proof_of_address", "upload_document", "upload_training_certificate"]:
-        path = f"/portal/employees/{person_id}?tab=checklist&action={action_type}&token={token}"
+        # PUBLIC route - no login required for document uploads
+        path = f"/upload-document?token={token}&requirement={requirement_id or ''}"
     elif action_type == "explain_cv_gap":
-        path = f"/portal/employees/{person_id}?tab=recruitment&action={action_type}&token={token}"
+        # PUBLIC route for gap explanations
+        path = f"/forms/complete/{token}?action={action_type}"
     elif action_type == "update_reference":
-        path = f"/portal/employees/{person_id}?tab=recruitment&action={action_type}&token={token}"
+        # PUBLIC route for reference updates
+        path = f"/referee/complete/{token}"
     else:
-        path = f"/portal/employees/{person_id}?action={action_type}&token={token}"
+        # Fallback to public upload page
+        path = f"/upload-document?token={token}&action={action_type}"
     
     return f"{PORTAL_URL}{path}"
 

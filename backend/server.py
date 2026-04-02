@@ -34471,7 +34471,11 @@ REQUIREMENT_DISPLAY_NAMES = {
 }
 
 @api_router.get("/public/validate-upload-token")
-async def validate_upload_token(token: str, request_id: Optional[str] = None):
+async def validate_upload_token(
+    token: str, 
+    request_id: Optional[str] = None,
+    requirement: Optional[str] = None
+):
     """
     PUBLIC endpoint - Validate a document upload token from email link.
     No authentication required.
@@ -34509,6 +34513,10 @@ async def validate_upload_token(token: str, request_id: Optional[str] = None):
         requirement_id = token_data.get("requirement_id")
         request_id_val = request_id
         action_type = token_data.get("action_type")
+    
+    # Use requirement from query param if not in token/request (fallback)
+    if not requirement_id and requirement:
+        requirement_id = requirement
     
     # Get person details
     person = await db.employees.find_one({"id": person_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1})

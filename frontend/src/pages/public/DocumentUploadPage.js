@@ -15,6 +15,7 @@ export default function DocumentUploadPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
   const requestId = searchParams.get('request_id');
+  const requirementParam = searchParams.get('requirement');
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -37,7 +38,11 @@ export default function DocumentUploadPage() {
   const validateToken = async () => {
     try {
       const response = await axios.get(`${API}/api/public/validate-upload-token`, {
-        params: { token, request_id: requestId }
+        params: { 
+          token, 
+          request_id: requestId,
+          requirement: requirementParam 
+        }
       });
       setTokenData(response.data);
     } catch (err) {

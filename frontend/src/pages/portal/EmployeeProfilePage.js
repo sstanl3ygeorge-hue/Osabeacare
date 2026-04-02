@@ -2130,17 +2130,24 @@ export default function EmployeeProfilePage() {
   // ========== Document Request Handlers ==========
   
   // Open request document dialog
-  const openRequestDocDialog = (requirement) => {
+  const openRequestDocDialog = (requirement, isResend = false) => {
     setRequestingRequirement(requirement);
     setRequestDocMessage('');
+    setIsResendMode(isResend);
     setRequestDocDialogOpen(true);
   };
   
+  // State for resend mode
+  const [isResendMode, setIsResendMode] = useState(false);
+  const [duplicateBlockedInfo, setDuplicateBlockedInfo] = useState(null);
+  
   // Send document request email
-  const handleRequestDocument = async () => {
+  const handleRequestDocument = async (forceResend = false) => {
     if (!requestingRequirement) return;
     
     setIsRequestingDoc(true);
+    setDuplicateBlockedInfo(null);
+    
     try {
       const response = await axios.post(
         `${API}/employees/${employeeId}/request-document`,
@@ -2150,19 +2157,47 @@ export default function EmployeeProfilePage() {
           params: {
             requirement_id: requestingRequirement.id,
             message: requestDocMessage || undefined,
-            due_days: 14
+            due_days: 14,
+            force_resend: forceResend || isResendMode
           }
         }
       );
-      toast.success(response.data.message || 'Document request sent');
-      setRequestDocDialogOpen(false);
-      setRequestingRequirement(null);
-      setRequestDocMessage('');
+      
+      const status = response.data.status;
+      
+      if (status === 'sent') {
+        toast.success(response.data.message || 'Request sent successfully');
+        setRequestDocDialogOpen(false);
+        setRequestingRequirement(null);
+        setRequestDocMessage('');
+        setIsResendMode(false);
+      } else if (status === 'resent') {
+        toast.success(response.data.message || 'Request resent successfully');
+        setRequestDocDialogOpen(false);
+        setRequestingRequirement(null);
+        setRequestDocMessage('');
+        setIsResendMode(false);
+      } else if (status === 'duplicate_blocked') {
+        // Show duplicate blocked info and offer resend option
+        setDuplicateBlockedInfo({
+          message: response.data.message,
+          existingRequestId: response.data.existing_request_id
+        });
+        toast.warning('An active request already exists. Click "Resend" to send a new email.');
+      } else {
+        toast.info(response.data.message || 'Request processed');
+        setRequestDocDialogOpen(false);
+      }
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to send request');
     } finally {
       setIsRequestingDoc(false);
     }
+  };
+  
+  // Handle resend action
+  const handleResendRequest = () => {
+    handleRequestDocument(true);
   };
   
   // Request all missing items for this employee
@@ -7285,23 +7320,51 @@ export default function EmployeeProfilePage() {
       </Dialog>
 
       {/* Document Request Dialog */}
-      <Dialog open={requestDocDialogOpen} onOpenChange={setRequestDocDialogOpen}>
+      <Dialog open={requestDocDialogOpen} onOpenChange={(open) => {
+        setRequestDocDialogOpen(open);
+        if (!open) {
+          setDuplicateBlockedInfo(null);
+          setIsResendMode(false);
+        }
+      }}>
         <DialogContent className="sm:max-w-md bg-white">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2 text-gray-900">
               <Send className="h-5 w-5 text-blue-600" />
-              Request Document
+              {isResendMode ? 'Resend Document Request' : 'Request Document'}
             </DialogTitle>
             <DialogDescription>
               Send an email request to {employee?.first_name} for {requestingRequirement?.name}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 mt-4">
-            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
-              <p className="text-sm text-blue-800">
-                An email will be sent to <strong>{employee?.email}</strong> requesting them to upload this document.
-              </p>
-            </div>
+            {/* Duplicate blocked warning */}
+            {duplicateBlockedInfo && (
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">Active Request Exists</p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      {duplicateBlockedInfo.message}
+                    </p>
+                    <p className="text-xs text-amber-600 mt-2">
+                      Click "Resend" to supersede the previous request and send a new email.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {!duplicateBlockedInfo && (
+              <div className="p-3 bg-blue-50 rounded-lg border border-blue-100">
+                <p className="text-sm text-blue-800">
+                  An email will be sent to <strong>{employee?.email}</strong> requesting them to upload this document.
+                  {isResendMode && <span className="block mt-1 text-blue-600">This will supersede any previous active request.</span>}
+                </p>
+              </div>
+            )}
+            
             <div className="space-y-2">
               <Label className="text-gray-700 font-medium">Additional Message (Optional)</Label>
               <Textarea
@@ -7316,24 +7379,45 @@ export default function EmployeeProfilePage() {
           <DialogFooter className="flex gap-2 mt-4">
             <Button 
               variant="outline" 
-              onClick={() => setRequestDocDialogOpen(false)}
+              onClick={() => {
+                setRequestDocDialogOpen(false);
+                setDuplicateBlockedInfo(null);
+                setIsResendMode(false);
+              }}
               className="border-[#E4E8EB]"
             >
               Cancel
             </Button>
-            <Button 
-              onClick={handleRequestDocument}
-              disabled={isRequestingDoc}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-              data-testid="send-request-btn"
-            >
-              {isRequestingDoc ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4 mr-2" />
-              )}
-              Send Request
-            </Button>
+            
+            {duplicateBlockedInfo ? (
+              <Button 
+                onClick={handleResendRequest}
+                disabled={isRequestingDoc}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                data-testid="resend-request-btn"
+              >
+                {isRequestingDoc ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Resend Request
+              </Button>
+            ) : (
+              <Button 
+                onClick={() => handleRequestDocument(isResendMode)}
+                disabled={isRequestingDoc}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                data-testid="send-request-btn"
+              >
+                {isRequestingDoc ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4 mr-2" />
+                )}
+                {isResendMode ? 'Resend Request' : 'Send Request'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

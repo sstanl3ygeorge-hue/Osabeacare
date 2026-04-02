@@ -211,20 +211,8 @@ export default function UploadRequirementCard({
       isOpen={isOpen}
       onToggle={onToggle}
       testId={`upload-requirement-${key}`}
-      actions={
-        <RequirementActionBar
-          viewLabel={hasFiles ? "View Files" : "Manage"}
-          canView={true}
-          onView={onOpenDrawer}
-          canUpload={!isAuditor}
-          onUpload={onUpload}
-          canRequest={!isAuditor && !hasPendingRequest && !hasFiles}
-          onRequest={onRequest}
-          canResend={!isAuditor && hasPendingRequest}
-          onResend={onResend}
-          testIdPrefix={`${key}-action`}
-        />
-      }
+      /* REMOVED: Outer card header actions - these are now ONLY in the Evidence row */
+      /* Actions were duplicated between header and Evidence row. Each row now has its own actions. */
     >
       <div className="space-y-4">
         {/* ============================================== */}
@@ -679,6 +667,20 @@ export default function UploadRequirementCard({
                     >
                       <RefreshCw className="h-3.5 w-3.5 mr-1" />
                       Update Check
+                    </Button>
+                  )}
+                  
+                  {/* Manage/View Verification - always available */}
+                  {hasCheck && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={onOpenDrawer}
+                      className="h-8 text-xs rounded-lg"
+                      data-testid={`${key}-verification-manage-btn`}
+                    >
+                      <Eye className="h-3.5 w-3.5 mr-1" />
+                      View Details
                     </Button>
                   )}
                 </div>

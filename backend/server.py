@@ -32102,9 +32102,18 @@ async def request_document_from_employee(
     requirement_id: str,
     message: Optional[str] = None,
     due_days: int = 14,
+    force_resend: bool = False,
     user: dict = Depends(require_manager_or_admin)
 ):
-    """Request a specific document using the email automation system."""
+    """
+    Request a specific document using the email automation system.
+    
+    Args:
+        force_resend: If True, supersede any existing active request and send new email
+    
+    Returns:
+        status: 'sent', 'resent', 'duplicate_blocked', or 'error'
+    """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -32122,20 +32131,42 @@ async def request_document_from_employee(
             request_type=RequestType.UPLOAD_DOCUMENT,
             due_days=due_days,
             context=context,
-            admin_id=user['user_id']
+            admin_id=user['user_id'],
+            force_resend=force_resend
         )
         
         if result.get("status") == "error":
             raise HTTPException(status_code=400, detail=result.get("reason", "Failed"))
         
-        await log_audit_action(user['user_id'], "document_requested", "employee", employee_id, {
-            "requirement_id": requirement_id, "requirement_name": requirement_name, "request_id": result.get("request_id")
-        })
+        # Return the actual status from EmailRequestService
+        response_status = result.get("status")  # 'sent', 'resent', 'duplicate_blocked', etc.
+        
+        # Only log audit for actual sends
+        if response_status in ["sent", "resent"]:
+            await log_audit_action(user['user_id'], "document_requested", "employee", employee_id, {
+                "requirement_id": requirement_id, 
+                "requirement_name": requirement_name, 
+                "request_id": result.get("request_id"),
+                "is_resend": response_status == "resent",
+                "superseded_request_id": result.get("superseded_request_id")
+            })
+        
+        # Build response message
+        if response_status == "sent":
+            message_text = f"Request sent to {employee['email']}"
+        elif response_status == "resent":
+            message_text = f"Request resent to {employee['email']} (previous request superseded)"
+        elif response_status == "duplicate_blocked":
+            message_text = result.get("reason", "An active request already exists")
+        else:
+            message_text = result.get("reason", "Request processed")
         
         return {
-            "status": "success",
+            "status": response_status,
             "request_id": result.get("request_id"),
-            "message": f"Request sent to {employee['email']}",
+            "existing_request_id": result.get("existing_request_id"),
+            "superseded_request_id": result.get("superseded_request_id"),
+            "message": message_text,
             "requirement": requirement_name,
             "due_date": result.get("due_date")
         }

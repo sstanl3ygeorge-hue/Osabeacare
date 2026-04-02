@@ -361,13 +361,17 @@ class EmailRequestService:
         expiry_days: int = DEFAULT_REQUEST_EXPIRY_DAYS,
         context: Optional[Dict[str, Any]] = None,
         send_immediately: bool = True,
-        admin_id: Optional[str] = None
+        admin_id: Optional[str] = None,
+        force_resend: bool = False
     ) -> Dict[str, Any]:
         """
         Create an email request with duplicate checking.
         
+        Args:
+            force_resend: If True, supersede any existing active request and send new email
+        
         Returns:
-            Dict with status, request_id, or error details
+            Dict with status (sent, resent, duplicate_blocked, error, etc.), request_id, or error details
         """
         if cls._db is None:
             return {"status": "error", "reason": "Service not initialized"}
@@ -376,19 +380,30 @@ class EmailRequestService:
         duplicate_check = await cls._check_duplicate(
             person_id, person_type, requirement_id, request_type, related_entity_type, related_entity_id
         )
+        
+        superseded_request_id = None
+        is_resend = False
+        
         if duplicate_check["has_duplicate"]:
-            await cls._track_event(
-                duplicate_check["existing_request_id"],
-                EventType.DUPLICATE_BLOCKED,
-                actor_id=admin_id,
-                actor_type="admin" if admin_id else "system",
-                details={"new_request_attempted": True}
-            )
-            return {
-                "status": "duplicate_blocked",
-                "reason": "Active request already exists",
-                "existing_request_id": duplicate_check["existing_request_id"]
-            }
+            if force_resend:
+                # Supersede the existing request
+                superseded_request_id = duplicate_check["existing_request_id"]
+                await cls._supersede_request(superseded_request_id, admin_id)
+                is_resend = True
+            else:
+                # Block the duplicate
+                await cls._track_event(
+                    duplicate_check["existing_request_id"],
+                    EventType.DUPLICATE_BLOCKED,
+                    actor_id=admin_id,
+                    actor_type="admin" if admin_id else "system",
+                    details={"new_request_attempted": True}
+                )
+                return {
+                    "status": "duplicate_blocked",
+                    "reason": "Active request already exists. Use 'Resend' to send a new email.",
+                    "existing_request_id": duplicate_check["existing_request_id"]
+                }
         
         # Check if requirement is already satisfied
         if requirement_id:
@@ -450,15 +465,27 @@ class EmailRequestService:
             recipient_email=recipient["email"],
         )
         
+        # Add reference to superseded request if this is a resend
+        request_dict = request.to_dict()
+        if superseded_request_id:
+            request_dict["supersedes_request_id"] = superseded_request_id
+            request_dict["is_resend"] = True
+        
         # Store request
-        await cls._db.email_requests.insert_one(request.to_dict())
+        await cls._db.email_requests.insert_one(request_dict)
         
         # Track creation event
+        event_details = {}
+        if is_resend:
+            event_details["is_resend"] = True
+            event_details["superseded_request_id"] = superseded_request_id
+        
         await cls._track_event(
             request.id,
             EventType.CREATED,
             actor_id=admin_id,
-            actor_type="admin" if admin_id else "system"
+            actor_type="admin" if admin_id else "system",
+            details=event_details if event_details else None
         )
         
         # Send email if requested
@@ -474,7 +501,15 @@ class EmailRequestService:
                     "email_log_id": request.email_log_id
                 })
                 await cls._track_event(request.id, EventType.SENT)
-                return {"status": "sent", "request_id": request.id, "due_date": request.due_at}
+                
+                # Return 'resent' status if this was a resend operation
+                final_status = "resent" if is_resend else "sent"
+                return {
+                    "status": final_status, 
+                    "request_id": request.id, 
+                    "due_date": request.due_at,
+                    "superseded_request_id": superseded_request_id
+                }
             else:
                 request.status = RequestStatus.FAILED
                 request.failure_reason = send_result.get("error", "Unknown send error")
@@ -530,6 +565,41 @@ class EmailRequestService:
             "has_duplicate": existing is not None,
             "existing_request_id": existing["id"] if existing else None
         }
+    
+    @classmethod
+    async def _supersede_request(
+        cls,
+        request_id: str,
+        admin_id: Optional[str] = None
+    ) -> bool:
+        """
+        Supersede an existing request when a resend is triggered.
+        Marks the old request as superseded and tracks the event.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        # Update the old request status to superseded
+        result = await cls._db.email_requests.update_one(
+            {"id": request_id},
+            {"$set": {
+                "status": RequestStatus.SUPERSEDED.value,
+                "resolved_at": now,
+                "superseded_at": now,
+                "superseded_by_admin": admin_id
+            }}
+        )
+        
+        # Track the superseded event
+        await cls._track_event(
+            request_id,
+            EventType.SUPERSEDED,
+            actor_id=admin_id,
+            actor_type="admin" if admin_id else "system",
+            details={"reason": "Replaced by resend operation"}
+        )
+        
+        logger.info(f"Request {request_id} superseded by admin {admin_id}")
+        return result.modified_count > 0
     
     @classmethod
     async def _check_requirement_satisfied(

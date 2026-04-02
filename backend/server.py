@@ -36404,6 +36404,99 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+@api_router.post("/setup/init-production")
+async def init_production():
+    """
+    One-time production initialization endpoint.
+    Seeds ONLY reference/config data - NO test employees or compliance records.
+    
+    Seeds:
+    - Admin user (if not exists)
+    - Training catalogue (mandatory training items)
+    - Database indexes
+    
+    Does NOT seed:
+    - Employees
+    - Documents
+    - Compliance records
+    - Test data
+    """
+    results = {
+        "admin_user": None,
+        "training_catalogue": None,
+        "indexes": None,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # 1. Create admin user if not exists
+    admin_exists = await db.users.find_one({"email": "admin@osabea.care"})
+    if not admin_exists:
+        from uuid import uuid4
+        user_id = str(uuid4())
+        admin_user = {
+            "id": user_id,
+            "user_id": user_id,
+            "email": "admin@osabea.care",
+            "password": hash_password("admin123"),
+            "name": "Admin User",
+            "role": "super_admin",
+            "is_active": True,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        await db.users.insert_one(admin_user)
+        results["admin_user"] = "created"
+    else:
+        results["admin_user"] = "exists"
+    
+    # 2. Seed training catalogue
+    training_result = await ensure_training_catalogue_exists()
+    results["training_catalogue"] = {
+        "seeded": training_result["seeded"],
+        "total": training_result["total"]
+    }
+    
+    # 3. Create indexes
+    try:
+        # Users indexes
+        await db.users.create_index("email", unique=True)
+        await db.users.create_index("user_id", unique=True)
+        
+        # Employees indexes
+        await db.employees.create_index("id", unique=True)
+        await db.employees.create_index("email")
+        await db.employees.create_index("status")
+        await db.employees.create_index("employee_code", unique=True, sparse=True)
+        
+        # Documents indexes
+        await db.employee_documents.create_index("id", unique=True)
+        await db.employee_documents.create_index("employee_id")
+        await db.employee_documents.create_index([("employee_id", 1), ("category", 1)])
+        
+        # Training indexes
+        await db.training_catalogue.create_index("id", unique=True)
+        await db.training_records.create_index([("employee_id", 1), ("training_id", 1)])
+        
+        # Checks indexes
+        await db.rtw_checks.create_index("employee_id")
+        await db.dbs_checks.create_index("employee_id")
+        
+        results["indexes"] = "created"
+    except Exception as e:
+        results["indexes"] = f"error: {str(e)}"
+    
+    return {
+        "status": "success",
+        "message": "Production initialization complete",
+        "results": results,
+        "next_steps": [
+            "Login at app.osabeacares.co.uk with admin@osabea.care / admin123",
+            "Create your first employee via Recruitment > New Applicant",
+            "Begin compliance onboarding workflow"
+        ]
+    }
+
+
 @api_router.post("/setup/init-admin")
 async def init_admin_user():
     """

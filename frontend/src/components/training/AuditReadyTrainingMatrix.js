@@ -65,12 +65,14 @@ const API = process.env.REACT_APP_BACKEND_URL;
 const STATUS_STYLES = {
   current: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Current' },
   completed: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Completed' },
+  verified: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
   expiring_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Renew Soon' },
   due_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Due Soon' },
   expired: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Expired' },
   overdue: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Overdue' },
   missing: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: XCircle, label: 'Missing' },
   pending: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Pending Review' },
+  awaiting_review: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Clock, label: 'Awaiting Review' },
   proposed: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Wand2, label: 'Awaiting Review' },
 };
 
@@ -142,17 +144,23 @@ export default function AuditReadyTrainingMatrix({
       // Process matrix data
       const matrixData = matrixRes?.data || {};
       const allItems = matrixData.items || [];
+      const additionalFromMatrix = matrixData.additional_items || [];
       
-      // Separate mandatory vs additional
-      const mandatory = allItems.filter(item => item.is_required || item.blocker !== undefined);
-      const additional = allItems.filter(item => !item.is_required && item.blocker === undefined);
+      // All items from the main matrix endpoint are mandatory (6 core items)
+      // They may have blocker=true/false but are all required
+      setMandatoryTraining(allItems);
+      setAdditionalTraining(additionalFromMatrix);
       
-      setMandatoryTraining(mandatory);
-      setAdditionalTraining(additional);
-      setProposedItems(proposedRes.data || []);
+      // Handle proposed items - ensure it's an array
+      const proposedData = proposedRes?.data;
+      const proposedArray = Array.isArray(proposedData) ? proposedData : 
+                           proposedData?.items || proposedData?.proposed_items || [];
+      setProposedItems(proposedArray);
       
-      // Get training certificates
-      const docs = docsRes.data || [];
+      // Get training certificates - ensure docs is an array
+      const docsData = docsRes?.data;
+      const docs = Array.isArray(docsData) ? docsData : 
+                   docsData?.documents || [];
       const trainingCerts = docs.filter(d => 
         d.document_type === 'training_certificate' || 
         d.requirement_id?.includes('training') ||
@@ -160,20 +168,17 @@ export default function AuditReadyTrainingMatrix({
       );
       setCertificates(trainingCerts);
       
-      // Calculate summary
-      const currentCount = mandatory.filter(i => i.status === 'current' || i.status === 'completed').length;
-      const expiringCount = mandatory.filter(i => ['expiring_soon', 'due_soon'].includes(i.status)).length;
-      const missingCount = mandatory.filter(i => i.status === 'missing').length;
-      const blockerCount = mandatory.filter(i => i.blocker).length;
-      const pendingReview = (proposedRes.data || []).filter(p => p.status === 'proposed').length;
+      // Use the summary from API which already has correct calculations
+      const apiSummary = matrixData.summary || {};
+      const pendingReview = proposedArray.filter(p => p.status === 'proposed').length;
       
       setSummary({
-        totalRequired: mandatory.length,
-        current: currentCount,
-        needsRenewal: expiringCount,
-        missing: missingCount,
-        blockers: blockerCount,
-        additionalQualifications: additional.length,
+        totalRequired: apiSummary.total || allItems.length,
+        current: apiSummary.current || 0,
+        needsRenewal: apiSummary.expiring || 0,
+        missing: apiSummary.missing || 0,
+        blockers: apiSummary.blockers || 0,
+        additionalQualifications: apiSummary.additional_count || additionalFromMatrix.length,
         certificatesUploaded: trainingCerts.length,
         needsReview: pendingReview
       });

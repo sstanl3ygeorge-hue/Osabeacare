@@ -21,7 +21,7 @@ import RecurringComplianceSection from '../../components/portal/RecurringComplia
 import DocumentExtractionReview from '../../components/documents/DocumentExtractionReview';
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
-import TrainingMatrix from '../../components/training/TrainingMatrix';
+import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
 import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
@@ -4527,56 +4527,23 @@ export default function EmployeeProfilePage() {
 
         {/* Training Tab */}
         <TabsContent value="training">
-          {/* Training Matrix - Grid view of all required training */}
-          <div className="mb-6">
-            <TrainingMatrix
-              employeeId={employeeId}
-              employeeName={`${employee?.first_name} ${employee?.last_name}`}
-              role={employee?.role}
-              onUploadCertificate={(trainingCode, trainingTitle) => {
-                // Set the training code and open the intake wizard
-                setSelectedTrainingReq({ id: trainingCode, name: trainingTitle });
-                setTrainingIntakeOpen(true);
-              }}
-              onViewCertificate={(recordId, trainingCode) => {
-                handleViewTrainingCertificate(recordId, `${trainingCode}_certificate`);
-              }}
-              onRefresh={() => {
-                fetchTraining();
-                fetchProposedTrainingItems();
-              }}
-            />
-          </div>
-
-          {/* Pending Review Banner - Show if proposed items exist */}
-          {proposedTrainingItems.length > 0 && (
-            <Card className="border-amber-200 bg-amber-50/30 mb-6">
-              <CardContent className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-                    <Clock className="h-5 w-5 text-amber-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-amber-800">
-                      {proposedTrainingItems.length} Certificate{proposedTrainingItems.length !== 1 ? 's' : ''} Pending Review
-                    </p>
-                    <p className="text-sm text-amber-600">
-                      Scanned training items awaiting admin confirmation
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  className="border-amber-300 text-amber-700 hover:bg-amber-100"
-                  onClick={() => setTrainingIntakeOpen(true)}
-                  data-testid="review-proposed-training-btn"
-                >
-                  <Eye className="h-4 w-4 mr-2" />
-                  Review Items
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+          {/* Audit-Ready Training Matrix - Complete training record with tabs */}
+          <AuditReadyTrainingMatrix
+            employeeId={employeeId}
+            employeeName={`${employee?.first_name} ${employee?.last_name}`}
+            role={employee?.role}
+            onUploadCertificate={() => {
+              // Open the training intake wizard
+              setTrainingIntakeOpen(true);
+            }}
+            onViewCertificate={(documentId) => {
+              handleViewTrainingCertificate(documentId, 'training_certificate');
+            }}
+            onRefresh={() => {
+              fetchTraining();
+              fetchProposedTrainingItems();
+            }}
+          />
         </TabsContent>
 
         {/* Audit Log Tab */}

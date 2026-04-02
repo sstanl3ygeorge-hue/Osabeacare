@@ -12,6 +12,7 @@ import ApplyPage from "./pages/public/ApplyPage";
 import FormCompletionPage from "./pages/public/FormCompletionPage";
 import RefereeCompletionPage from "./pages/public/RefereeCompletionPage";
 import TrainingUploadPage from "./pages/public/TrainingUploadPage";
+import DocumentUploadPage from "./pages/public/DocumentUploadPage";
 
 // Auth Pages
 import LoginPage from "./pages/auth/LoginPage";
@@ -70,6 +71,9 @@ function AppRouter() {
       
       {/* Public Training Certificate Upload Route (No Auth Required) */}
       <Route path="/training/upload/:token" element={<TrainingUploadPage />} />
+      
+      {/* Public Document Upload Route (No Auth Required - From Email Links) */}
+      <Route path="/upload-document" element={<DocumentUploadPage />} />
       
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />

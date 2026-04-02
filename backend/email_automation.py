@@ -680,15 +680,11 @@ class EmailRequestService:
         # Use correct path based on person type
         if request.person_type == "applicant":
             # For applicants, use public upload page
-            path = f"/upload?token={token}&request_id={request.id}"
+            path = f"/upload-document?token={token}&request_id={request.id}"
         else:
-            # For employees, use portal page with deep-linking to the requirement
-            if action_type in ["upload_proof_of_address", "upload_document", "upload_training_certificate"]:
-                path = f"/portal/employees/{request.person_id}?tab=checklist&action={action_type}&requirement={requirement_id}&token={token}&request_id={request.id}"
-            elif action_type in ["explain_cv_gap", "update_reference"]:
-                path = f"/portal/employees/{request.person_id}?tab=recruitment&action={action_type}&token={token}&request_id={request.id}"
-            else:
-                path = f"/portal/employees/{request.person_id}?action={action_type}&requirement={requirement_id}&token={token}&request_id={request.id}"
+            # For employees, also use public upload page (no login required)
+            # This allows employees to upload documents directly from email links
+            path = f"/upload-document?token={token}&request_id={request.id}"
         
         email_context["action_link"] = f"{PORTAL_URL}{path}"
         email_context["admin_link"] = f"{PORTAL_URL}/portal/employees/{request.person_id}"

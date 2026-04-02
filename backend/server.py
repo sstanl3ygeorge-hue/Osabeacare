@@ -34617,45 +34617,65 @@ async def public_upload_document(
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Upload file to storage
+    # Upload file to storage using the standard put_object function
     try:
-        from emergentintegrations.file_storage import upload_file
-        safe_filename = f"{requirement_id}_{person_id}_{uuid.uuid4().hex[:8]}{file_ext}"
-        file_url = await upload_file(file_content, safe_filename, file.content_type or "application/octet-stream")
+        person_name_safe = f"{person.get('first_name', 'unknown')}{person.get('last_name', '')}".replace(" ", "")
+        timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H%M%S')
+        safe_filename = f"{person_name_safe}_{requirement_id}_{timestamp}{file_ext}"
+        storage_path = f"{APP_NAME}/documents/{person_id}/{requirement_id}/{safe_filename}"
+        
+        logger.info(f"Public upload: Uploading file to storage path: {storage_path}")
+        
+        put_object(storage_path, file_content, file.content_type or "application/octet-stream")
+        file_url = storage_path  # Store the path, not a URL - consistent with other uploads
+        
+        logger.info(f"Public upload: File uploaded successfully to {storage_path}")
     except Exception as e:
-        logger.error(f"File upload failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload file. Please try again.")
+        logger.error(f"Public upload: File storage failed - {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file: {str(e)}")
     
-    # Get requirement display name
-    requirement_name = REQUIREMENT_DISPLAY_NAMES.get(
+    # Get requirement name and config
+    req_name = REQUIREMENT_DISPLAY_NAMES.get(
         requirement_id, 
         requirement_id.replace("_", " ").title() if requirement_id else "Document"
     )
     
-    # Create document record
+    # Create document record - using consistent schema with other upload endpoints
     document_id = str(uuid.uuid4())
     document_record = {
         "id": document_id,
         "employee_id": person_id,
+        "document_type_id": requirement_id,  # Use requirement_id as type
+        "document_type_name": req_name,
+        "category": "C_Compliance",  # Default category for compliance docs
         "requirement_id": requirement_id,
-        "document_type": requirement_id,
-        "file_name": file.filename,
+        "requirement_name": req_name,
+        "document_label": file.filename,
         "file_url": file_url,
-        "file_size": len(file_content),
-        "mime_type": file.content_type,
-        "uploaded_at": now,
+        "original_filename": file.filename,
+        "status": "uploaded",  # Awaiting admin verification
         "uploaded_by": None,  # Self-uploaded via email link
         "uploaded_by_name": f"{person.get('first_name', '')} {person.get('last_name', '')}".strip(),
-        "status": "uploaded",  # Awaiting admin verification
+        "uploaded_at": now,
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "expiry_date": None,
+        "version_number": 1,
         "verified": False,
         "verified_by": None,
         "verified_at": None,
-        "source": "email_upload_link",
+        "source_type": "email_upload_link",
         "email_request_id": request_id_val,
-        "notes": f"Uploaded via email link by {person.get('first_name', '')} {person.get('last_name', '')}"
+        "notes": f"Uploaded via email link by {person.get('first_name', '')} {person.get('last_name', '')}",
+        "created_at": now,
+        "updated_at": now
     }
     
+    logger.info(f"Public upload: Creating document record for requirement_id={requirement_id}, person_id={person_id}")
+    
     await db.employee_documents.insert_one(document_record)
+    
+    logger.info(f"Public upload: Document record created with id={document_id}")
     
     # Link submission to email request
     if request_id_val:
@@ -34686,20 +34706,20 @@ async def public_upload_document(
         "metadata": {
             "employee_id": person_id,
             "requirement_id": requirement_id,
-            "requirement_name": requirement_name,
+            "requirement_name": req_name,
             "file_name": file.filename,
             "source": "email_upload_link",
             "request_id": request_id_val
         }
     })
     
-    logger.info(f"Public document upload: {requirement_name} for {person_id} via email link")
+    logger.info(f"Public document upload complete: {req_name} for {person_id} via email link")
     
     return {
         "status": "success",
-        "message": f"Your {requirement_name} has been uploaded successfully. It will be reviewed by the team.",
+        "message": f"Your {req_name} has been uploaded successfully. It will be reviewed by the team.",
         "document_id": document_id,
-        "requirement": requirement_name,
+        "requirement": req_name,
         "next_steps": [
             "Your document has been received",
             "Our team will verify it within 2-3 working days",

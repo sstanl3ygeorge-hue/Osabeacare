@@ -74,11 +74,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - F811 duplicate function definitions in server.py (technical debt)
 - server.py >38k lines - needs modular split
 
+## Recent Fixes (Apr 2, 2026)
+- [x] Fixed DuplicateKeyError on public application submission - MongoDB unique index on `employee_code` was rejecting multiple `null` values. Now generating unique `APPLICANT-{uuid}` codes for applicants.
+
 ## Prioritized Backlog
 
 ### P0 (Critical)
-- [ ] User verification of email in inbox (pending)
-- [ ] GitHub push after verification
+- [x] Fix DuplicateKeyError on application submit (DONE - requires production verification)
+- [ ] Restore db.references insertion logic with error safety
+- [ ] Verify "Request sent" state displays correctly for new applicants
 
 ### P1 (High)
 - [ ] Employee self-service portal

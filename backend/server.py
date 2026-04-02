@@ -21908,10 +21908,14 @@ async def submit_structured_application(form: StructuredApplicationForm):
     if form.county:
         full_address += f", {form.county}"
     
+    # Generate a temporary unique employee_code for applicants to avoid MongoDB unique index collision
+    # This will be replaced with a proper employee code upon recruitment approval
+    temp_employee_code = f"APPLICANT-{uuid.uuid4().hex[:8].upper()}"
+    
     employee_doc = {
         "id": app_id,
         "applicant_reference": applicant_ref,
-        "employee_code": None,  # NEVER assigned at application - only on recruitment approval
+        "employee_code": temp_employee_code,  # Temporary code for applicants - replaced on recruitment approval
         
         # Personal details
         "title": form.title,

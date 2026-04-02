@@ -260,17 +260,23 @@ export default function DualRowComplianceSection({
     }
     
     // Transform check row to checks array
+    // Backend returns check_data in check rows, not check_record
     const checks = [];
-    if (checkRow && checkRow.check_record) {
-      const check = checkRow.check_record;
+    if (checkRow && (checkRow.check_data || checkRow.has_check)) {
+      const check = checkRow.check_data || {};
       checks.push({
-        id: check.check_id || check.id,
-        status: check.outcome || check.status || (checkRow.is_verified ? 'verified' : 'pending'),
-        method: check.method || check.check_method,
-        checked_at: check.checked_at || check.verified_at || check.updated_at,
-        checked_by: check.checked_by || check.verified_by,
-        follow_up_date: check.follow_up_date,
-        updated_at: check.updated_at
+        id: check.id,
+        status: check.outcome || (checkRow.is_verified ? 'verified' : 'pending'),
+        outcome: check.outcome,
+        method: check.method,
+        checked_at: check.checked_at,
+        checked_by: check.checked_by,
+        notes: check.notes,
+        follow_up_date: checkRow.follow_up_info?.date || check.follow_up_date,
+        updated_at: check.updated_at,
+        // COMPLIANCE-CRITICAL: Include verification proof document link
+        evidence_document_id: check.evidence_document_id,
+        evidence_document: check.evidence_document
       });
     }
     
@@ -286,6 +292,7 @@ export default function DualRowComplianceSection({
 
   /**
    * Render upload-type requirement using UploadRequirementCard
+   * DUAL-ROW MODEL: Each card shows Evidence row + Verification row
    */
   const renderUploadSection = (sectionKey, section) => {
     const surface = transformToUploadSurface(sectionKey, section);
@@ -306,6 +313,9 @@ export default function DualRowComplianceSection({
           onRecordCheck={() => onRecordCheck && onRecordCheck(sectionKey)}
           onUpdateCheck={() => onRecordCheck && onRecordCheck(sectionKey)}
           onViewHistory={() => handleViewHistory(sectionKey, section.title)}
+          onPreviewFile={onPreviewFile}
+          employeeId={employeeId}
+          onRefresh={handleRefresh}
           isAuditor={isAuditor}
         />
       </div>

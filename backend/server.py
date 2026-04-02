@@ -7416,16 +7416,26 @@ async def get_employee_training_matrix(
     # Get canonical training evaluation
     training_eval = await evaluate_employee_training_status(employee_id, role)
     
-    # Get training records for evidence details
+    # Get training records for evidence details (including additional qualifications)
     training_records = await db.training_records.find({
         "employee_id": employee_id,
         "record_status": {"$nin": ["superseded", "deleted"]}
-    }, {"_id": 0}).to_list(100)
+    }, {"_id": 0}).to_list(200)
     
     records_by_req = {}
+    additional_records = []  # Non-mandatory training records
+    
     for r in training_records:
         req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_')
-        records_by_req[req_id] = r
+        is_additional = r.get('is_additional', False)
+        
+        # Check if this is a mandatory training
+        mandatory_codes = {'safeguarding', 'manual_handling', 'infection_control', 
+                         'basic_life_support', 'bls', 'fire_safety', 'health_safety'}
+        if req_id in mandatory_codes or not is_additional:
+            records_by_req[req_id] = r
+        else:
+            additional_records.append(r)
     
     # Build enhanced matrix items
     matrix_items = []
@@ -7483,18 +7493,58 @@ async def get_employee_training_matrix(
         if item.get('blocker') and status not in ['current', 'completed', 'verified']:
             total_blockers += 1
     
+    # Build additional qualifications list
+    additional_items = []
+    for record in additional_records:
+        # Calculate status based on expiry
+        status = 'current'
+        expires_at = record.get('expiry_date') or record.get('expires_at')
+        if expires_at:
+            from datetime import datetime, timezone
+            try:
+                if isinstance(expires_at, str):
+                    exp_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                else:
+                    exp_date = expires_at
+                now = datetime.now(timezone.utc)
+                days_until = (exp_date - now).days
+                if days_until < 0:
+                    status = 'expired'
+                elif days_until <= 30:
+                    status = 'expiring_soon'
+            except:
+                pass
+        
+        additional_items.append({
+            "code": record.get('id', ''),
+            "title": record.get('training_name', 'Unknown Training'),
+            "status": status,
+            "is_required": False,
+            "is_additional": True,
+            "completed_at": record.get('completion_date') or record.get('completed_at'),
+            "expires_at": expires_at,
+            "has_evidence": bool(record.get('certificate_url') or record.get('evidence_files')),
+            "verified": record.get('verified', False),
+            "record_id": record.get('id'),
+            "provider": record.get('provider_name'),
+            "source_document_id": record.get('source_document_id'),
+            "needs_review": record.get('needs_review', False)
+        })
+    
     return {
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
         "role": role,
         "overall": training_eval.get('overall', 'missing'),
         "items": matrix_items,
+        "additional_items": additional_items,
         "summary": {
             "total": len(matrix_items),
             "current": total_current,
             "expiring": total_expiring,
             "missing": total_missing,
-            "blockers": total_blockers
+            "blockers": total_blockers,
+            "additional_count": len(additional_items)
         },
         "evaluated_at": training_eval.get('evaluatedAt')
     }
@@ -36259,20 +36309,89 @@ async def cleanup_employee_data(employee_id: str, user: dict = Depends(require_m
     # STEP 2: Deduplicate and normalize training
     # ========================================
     # Training name normalization map (training_record name -> MANDATORY_ITEMS training_name)
+    # Extended mapping for common synonyms and variations
     training_normalization = {
+        # Manual Handling variants
         "moving & handling": "Manual Handling",
         "moving and handling": "Manual Handling",
         "manual handling": "Manual Handling",
+        "people moving and handling": "Manual Handling",
+        "moving people safely": "Manual Handling",
+        
+        # Health & Safety variants
         "health & safety": "Health & Safety",
         "health and safety": "Health & Safety",
+        "h&s": "Health & Safety",
+        "health and safety awareness": "Health & Safety",
+        
+        # Infection Control variants
         "infection control": "Infection Control",
         "infection control and hygiene": "Infection Control",
+        "infection prevention": "Infection Control",
+        "ipc": "Infection Control",
+        "infection prevention and control": "Infection Control",
+        
+        # Safeguarding variants
         "safeguarding": "Safeguarding",
+        "safeguarding adults": "Safeguarding",
+        "safeguarding children": "Safeguarding",
+        "adult safeguarding": "Safeguarding",
+        "child safeguarding": "Safeguarding",
+        "safeguarding vulnerable adults": "Safeguarding",
+        
+        # Basic Life Support variants
         "basic life support": "Basic Life Support",
         "bls": "Basic Life Support",
+        "basic life support (bls)": "Basic Life Support",
+        "cpr": "Basic Life Support",
+        "cpr and bls": "Basic Life Support",
+        
+        # Fire Safety variants
         "fire safety": "Fire Safety",
-        "first aid": None,  # Not in mandatory items, will be deleted
-        "first aid awareness": None,  # Not in mandatory items, will be deleted
+        "fire awareness": "Fire Safety",
+        "fire safety awareness": "Fire Safety",
+        "fire safety training": "Fire Safety",
+        
+        # Additional qualifications (keep but don't map to mandatory)
+        # These return the normalized name, not None, so they're preserved
+        "first aid": "First Aid",
+        "first aid awareness": "First Aid",
+        "first aid at work": "First Aid at Work",
+        "emergency first aid": "Emergency First Aid",
+        "dementia": "Dementia Care",
+        "dementia awareness": "Dementia Care",
+        "dementia care": "Dementia Care",
+        "medication administration": "Medication Administration",
+        "medication": "Medication Administration",
+        "peg feeding": "PEG Feeding",
+        "epilepsy": "Epilepsy Awareness",
+        "epilepsy awareness": "Epilepsy Awareness",
+        "autism": "Autism Awareness",
+        "autism awareness": "Autism Awareness",
+        "mca": "MCA/DoLS",
+        "dols": "MCA/DoLS",
+        "mca/dols": "MCA/DoLS",
+        "mental capacity act": "MCA/DoLS",
+        "deprivation of liberty": "MCA/DoLS",
+        "pmva": "PMVA",
+        "catheter care": "Catheter Care",
+        "end of life": "End of Life Care",
+        "end of life care": "End of Life Care",
+        "palliative care": "Palliative Care",
+        "food safety": "Food Safety",
+        "food hygiene": "Food Hygiene",
+        "nutrition": "Nutrition",
+        "pressure ulcer": "Pressure Ulcer Prevention",
+        "pressure ulcer prevention": "Pressure Ulcer Prevention",
+        "skin integrity": "Skin Integrity",
+        "falls prevention": "Falls Prevention",
+        "continence care": "Continence Care",
+        "diabetes": "Diabetes Awareness",
+        "diabetes awareness": "Diabetes Awareness",
+        "equality and diversity": "Equality and Diversity",
+        "equality & diversity": "Equality and Diversity",
+        "gdpr": "GDPR/Data Protection",
+        "data protection": "GDPR/Data Protection",
     }
     
     # MANDATORY training names (from MANDATORY_ITEMS)
@@ -36285,25 +36404,43 @@ async def cleanup_employee_data(employee_id: str, user: dict = Depends(require_m
     
     # Group by normalized name
     training_by_normalized = {}
-    orphan_training = []
+    additional_training = []  # Non-mandatory qualifications to keep
+    unknown_training = []  # Completely unknown, will be kept but flagged
     
     for t in all_training:
         name = t.get('training_name', '')
         normalized = training_normalization.get(name.lower())
         
         if normalized is None:
-            # Not in mandatory items, mark for deletion
-            orphan_training.append(t)
-        else:
+            # Not in our mapping - keep but flag as unknown
+            unknown_training.append(t)
+        elif normalized in mandatory_training:
+            # Maps to a mandatory training
             if normalized not in training_by_normalized:
                 training_by_normalized[normalized] = []
             training_by_normalized[normalized].append(t)
+        else:
+            # Additional qualification (normalized but not mandatory)
+            # Keep it but update the name to normalized form
+            additional_training.append((t, normalized))
     
-    # Delete orphan training (not in mandatory items)
-    for t in orphan_training:
-        await db.training_records.delete_one({"id": t['id']})
-        results['training_deleted'] += 1
-        results['details'].append(f"Deleted non-mandatory training: {t.get('training_name')}")
+    # Update additional training names to normalized form
+    for t, normalized in additional_training:
+        if t.get('training_name') != normalized:
+            await db.training_records.update_one(
+                {"id": t['id']},
+                {"$set": {"training_name": normalized, "is_additional": True, "updated_at": now}}
+            )
+            results['training_normalized'] += 1
+            results['details'].append(f"Normalized additional training: {t.get('training_name')} -> {normalized}")
+    
+    # Flag unknown training (keep for audit trail but mark for review)
+    for t in unknown_training:
+        await db.training_records.update_one(
+            {"id": t['id']},
+            {"$set": {"is_additional": True, "needs_review": True, "updated_at": now}}
+        )
+        results['details'].append(f"Flagged unknown training for review: {t.get('training_name')}")
     
     # For each mandatory training, keep only ONE record (prefer completed, then most recent)
     for normalized_name, records in training_by_normalized.items():

@@ -76,6 +76,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Recent Fixes (Apr 2, 2026)
 - [x] Fixed DuplicateKeyError on public application submission - MongoDB unique index on `employee_code` was rejecting multiple `null` values. Now generating unique `APPLICANT-{uuid}` codes for applicants.
+- [x] Added clickable blockers in Recruitment Checks - Each blocker item now scrolls to the relevant compliance section with highlight effect
+- [x] Added "Next Steps" panel - Shows up to 4 actionable items above Recruitment Approval for quick admin navigation
 
 ## Prioritized Backlog
 

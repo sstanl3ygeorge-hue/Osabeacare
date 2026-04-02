@@ -339,21 +339,61 @@ TEMPLATE_REGISTRY: Dict[str, EmailTemplate] = {
         template_key="documents.missing_mandatory",
         category=EmailCategory.DOCUMENTS,
         sender_key="recruitment",
-        subject_template="Missing Required Document - {document_name}",
+        subject_template="Action Required: Please upload your {document_name}",
         requires_secure_link=True,
         secure_link_action="upload_document",
         description="Notification for missing mandatory document",
         employee_body_template="""
-        <h2 style="color: #0d6c6c; margin-bottom: 20px;">Missing Required Document</h2>
-        <p>Dear {employee_name},</p>
-        <p>We are missing the following mandatory document from your file:</p>
-        <div style="background: #e8f4f8; border-left: 4px solid #0d6c6c; padding: 15px; margin: 15px 0;">
-            <strong>Document:</strong> {document_name}<br>
-            <strong>Category:</strong> {category}
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #0d6c6c 0%, #0a5555 100%); padding: 30px 25px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 22px; font-weight: 600;">Osabea Care</h1>
+                <p style="color: rgba(255,255,255,0.8); margin: 5px 0 0 0; font-size: 13px;">Recruitment & Compliance</p>
+            </div>
+            
+            <!-- Body -->
+            <div style="padding: 30px 25px;">
+                <h2 style="color: #1f2937; margin: 0 0 20px 0; font-size: 20px; font-weight: 600;">Document Required</h2>
+                
+                <p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    Hello <strong>{first_name}</strong>,
+                </p>
+                
+                <p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin: 0 0 20px 0;">
+                    We need you to upload the following document to complete your compliance file:
+                </p>
+                
+                <div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 18px 20px; margin: 25px 0;">
+                    <p style="margin: 0 0 8px 0; color: #166534; font-weight: 600; font-size: 14px;">DOCUMENT REQUIRED</p>
+                    <p style="margin: 0; color: #15803d; font-size: 18px; font-weight: 700;">{document_name}</p>
+                    <p style="margin: 8px 0 0 0; color: #4ade80; font-size: 13px;">{category}</p>
+                </div>
+                
+                <p style="color: #4b5563; font-size: 15px; line-height: 1.6; margin: 0 0 25px 0;">
+                    Please click the button below to securely upload your document. This link will expire in 14 days.
+                </p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{action_link}" style="background: #0d6c6c; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 15px; box-shadow: 0 2px 4px rgba(13,108,108,0.3);">
+                        Upload Document Now
+                    </a>
+                </div>
+                
+                <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin: 25px 0 0 0; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                    If you have any questions or need assistance, please contact our recruitment team.
+                </p>
+            </div>
+            
+            <!-- Footer -->
+            <div style="background: #f9fafb; padding: 20px 25px; text-align: center; border-top: 1px solid #e5e7eb;">
+                <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                    Osabea Care Ltd | CQC Registered Provider
+                </p>
+                <p style="color: #9ca3af; font-size: 11px; margin: 8px 0 0 0;">
+                    This is an automated message. Please do not reply to this email.
+                </p>
+            </div>
         </div>
-        <p>Please upload this document to complete your requirements.</p>
-        <p><a href="{action_link}" style="background: #0d6c6c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Upload Document</a></p>
-        <p style="margin-top: 20px;">Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
         """,
         admin_body_template="""
         <h2 style="color: #0d6c6c; margin-bottom: 20px;">Missing Document: {employee_name}</h2>

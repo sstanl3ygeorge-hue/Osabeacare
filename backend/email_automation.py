@@ -474,6 +474,7 @@ class EmailRequestService:
                     "email_log_id": request.email_log_id
                 })
                 await cls._track_event(request.id, EventType.SENT)
+                return {"status": "sent", "request_id": request.id, "due_date": request.due_at}
             else:
                 request.status = RequestStatus.FAILED
                 request.failure_reason = send_result.get("error", "Unknown send error")

@@ -185,6 +185,7 @@ class StageGateService:
                 {"$set": {
                     "employee_id": employee_id,
                     "requirement_key": "cv",
+                    "requirement_id": "cv",  # Also set requirement_id for compliance file query
                     "requirement_type": "system",
                     "status": "uploaded",
                     "verified": False,
@@ -204,6 +205,7 @@ class StageGateService:
                 "id": str(uuid.uuid4()),
                 "employee_id": employee_id,
                 "requirement_key": "application_form",
+                "requirement_id": "application_form",  # Also set requirement_id for compliance file query
                 "requirement_type": "form",
                 "document_type_name": defn.get("label"),
                 "category": defn.get("category"),
@@ -232,6 +234,7 @@ class StageGateService:
                 "id": str(uuid.uuid4()),
                 "employee_id": employee_id,
                 "requirement_key": "equal_opportunities",
+                "requirement_id": "equal_opportunities",  # Also set requirement_id for compliance file query
                 "requirement_type": "form",
                 "document_type_name": defn.get("label"),
                 "category": defn.get("category"),

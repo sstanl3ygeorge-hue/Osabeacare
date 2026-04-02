@@ -22108,6 +22108,49 @@ async def submit_structured_application(form: StructuredApplicationForm):
         form_submission_id=form_submission_id
     )
     
+    # Populate references collection with declared reference data from application
+    # This ensures the compliance-file endpoint can read reference data correctly
+    references_doc = {
+        "employee_id": app_id,
+        "ref1": {
+            "declared": {
+                "name": ref1.referee_name,
+                "email": ref1.referee_email,
+                "phone": ref1.referee_phone,
+                "organisation": ref1.referee_organisation,
+                "job_title": ref1.referee_job_title,
+                "relationship": ref1.relationship,
+                "years_known": ref1.years_known,
+                "is_professional": ref1.is_professional,
+                "can_contact_before_offer": ref1.can_contact_before_offer
+            },
+            "request": {},
+            "response": None,
+            "verification_status": "not_started",
+            "created_at": datetime.now(timezone.utc)
+        },
+        "ref2": {
+            "declared": {
+                "name": ref2.referee_name,
+                "email": ref2.referee_email,
+                "phone": ref2.referee_phone,
+                "organisation": ref2.referee_organisation,
+                "job_title": ref2.referee_job_title,
+                "relationship": ref2.relationship,
+                "years_known": ref2.years_known,
+                "is_professional": ref2.is_professional,
+                "can_contact_before_offer": ref2.can_contact_before_offer
+            },
+            "request": {},
+            "response": None,
+            "verification_status": "not_started",
+            "created_at": datetime.now(timezone.utc)
+        },
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc)
+    }
+    await db.references.insert_one(references_doc)
+    
     # Build follow-up items from created slots
     follow_up_items = stage_service.build_follow_up_items(normalized_role, created_slots)
     

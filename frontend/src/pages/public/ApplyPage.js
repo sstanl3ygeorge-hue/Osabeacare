@@ -461,8 +461,25 @@ export default function ApplyPage() {
       setIsSubmitted(true);
       toast.success('Application submitted successfully!');
     } catch (error) {
-      const detail = error.response?.data?.detail;
-      toast.error(detail || 'Something went wrong. Please try again.');
+      console.error('Application submission error:', error.response?.data || error);
+      const errorData = error.response?.data;
+      let errorMessage = 'Something went wrong. Please try again.';
+      
+      if (errorData?.detail) {
+        if (typeof errorData.detail === 'string') {
+          errorMessage = errorData.detail;
+        } else if (Array.isArray(errorData.detail)) {
+          // Pydantic validation errors come as array
+          const fieldErrors = errorData.detail.map(e => {
+            const field = e.loc?.join('.') || 'unknown';
+            return `${field}: ${e.msg}`;
+          }).join('; ');
+          errorMessage = `Validation error: ${fieldErrors}`;
+          console.error('Validation errors:', errorData.detail);
+        }
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
     }

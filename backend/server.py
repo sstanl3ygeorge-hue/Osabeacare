@@ -36420,7 +36420,7 @@ async def init_admin_user():
     admin_user = {
         "id": str(uuid4()),
         "email": "admin@osabea.care",
-        "password_hash": pwd_context.hash("admin123"),
+        "password": hash_password("admin123"),
         "name": "Admin User",
         "role": "super_admin",
         "is_active": True,

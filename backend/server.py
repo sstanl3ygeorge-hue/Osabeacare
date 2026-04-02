@@ -36413,12 +36413,15 @@ async def init_admin_user():
     # Check if any users exist
     user_count = await db.users.count_documents({})
     if user_count > 0:
-        raise HTTPException(status_code=400, detail="Setup already completed. Users exist.")
+        # Delete and recreate for fix
+        await db.users.delete_many({"email": "admin@osabea.care"})
     
-    # Create admin user
+    # Create admin user with correct field names
     from uuid import uuid4
+    user_id = str(uuid4())
     admin_user = {
-        "id": str(uuid4()),
+        "id": user_id,
+        "user_id": user_id,
         "email": "admin@osabea.care",
         "password": hash_password("admin123"),
         "name": "Admin User",

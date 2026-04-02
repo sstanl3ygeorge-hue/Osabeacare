@@ -4183,8 +4183,9 @@ export default function EmployeeProfilePage() {
                         setUploadDialogOpen(true);
                       }}
                       onRequest={(key, title) => {
-                        // Trigger request document dialog
-                        setSelectedRequirement(key);
+                        // Trigger request document dialog with proper requirement object
+                        setRequestingRequirement({ id: key, name: title || key });
+                        setRequestDocMessage('');
                         setRequestDocDialogOpen(true);
                       }}
                       onPreviewFile={(fileObj) => {

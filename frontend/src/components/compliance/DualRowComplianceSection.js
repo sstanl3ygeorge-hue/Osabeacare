@@ -355,7 +355,8 @@ export default function DualRowComplianceSection({
         {isExpanded && (
           <div className="space-y-3 p-3 bg-white border border-t-0 border-gray-200 rounded-b-xl">
             {section.rows.map((row, idx) => {
-              if (row.row_type === 'evidence') {
+              // CV row is evidence type but should use FormRequirementRow for file display
+              if (row.row_type === 'evidence' && row.key !== 'cv') {
                 return (
                   <EvidenceRow
                     key={row.key || idx}
@@ -554,6 +555,8 @@ export default function DualRowComplianceSection({
                       });
                     }}
                     onViewHistory={(reqKey, title) => handleViewHistory(reqKey, title)}
+                    onPreviewFile={onPreviewFile}
+                    onUpload={(reqKey) => onUpload && onUpload(`${reqKey}_evidence`)}
                     isAuditor={isAuditor}
                   />
                 );

@@ -48,6 +48,8 @@ export default function FormRequirementRow({
   onVerify,           // Callback to verify submission
   onReject,           // Callback to reject submission (opens dialog)
   onViewHistory,
+  onPreviewFile,      // Callback to preview a file (for evidence rows like CV)
+  onUpload,           // Callback to upload a file (for evidence rows like CV)
   isAuditor = false
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -71,8 +73,15 @@ export default function FormRequirementRow({
     rejection_reason,
     status,
     status_summary,
-    allowed_actions
+    allowed_actions,
+    // Evidence-type fields (for CV row)
+    has_files,
+    file_count,
+    files
   } = row;
+  
+  // Check if this is an evidence-type row (like CV)
+  const isEvidenceRow = row_type === 'evidence' && has_files !== undefined;
   
   // Get capability config for enhanced info
   const capability = getRequirementCapability(key);
@@ -81,6 +90,13 @@ export default function FormRequirementRow({
   
   // Status color mapping
   const getStatusColor = () => {
+    // For evidence rows, color based on files
+    if (isEvidenceRow) {
+      if (is_verified) return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      if (has_files && file_count > 0) return 'bg-blue-100 text-blue-800 border-blue-200';
+      return 'bg-gray-100 text-gray-600 border-gray-200';
+    }
+    // For form rows
     switch (status) {
       case 'verified':
         return 'bg-emerald-100 text-emerald-800 border-emerald-200';
@@ -115,6 +131,13 @@ export default function FormRequirementRow({
   
   // Status text for badge
   const getStatusText = () => {
+    // For evidence rows, show file count based status
+    if (isEvidenceRow) {
+      if (is_verified) return 'Verified';
+      if (has_files && file_count > 0) return `${file_count} file${file_count !== 1 ? 's' : ''}`;
+      return 'No files';
+    }
+    // For form rows, show form status
     switch (status) {
       case 'verified': return 'Verified';
       case 'rejected': return 'Rejected';
@@ -126,6 +149,10 @@ export default function FormRequirementRow({
   
   // Delivery mode badge
   const getDeliveryBadge = () => {
+    // For evidence rows, show "Evidence" badge
+    if (isEvidenceRow) {
+      return <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">Evidence</Badge>;
+    }
     if (delivery_mode === 'employee_sendable') {
       return <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">Sendable</Badge>;
     }
@@ -269,6 +296,83 @@ export default function FormRequirementRow({
       {/* Expanded Content */}
       {isExpanded && (
         <div className="px-3 pb-3 pt-1 border-t border-gray-100">
+          {/* Evidence Files Section (for CV and other evidence rows) */}
+          {isEvidenceRow && (
+            <div className="mb-3">
+              {has_files && files && files.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Files</p>
+                  {files.map((file, idx) => (
+                    <div 
+                      key={file.id || idx}
+                      className="flex items-center justify-between p-2 bg-gray-50 rounded-lg border border-gray-200"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">
+                            {file.file_name || 'Document'}
+                          </p>
+                          {file.uploaded_at && (
+                            <p className="text-xs text-gray-500">
+                              Uploaded {file.uploaded_at?.slice(0, 10)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {file.verified && (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-700">
+                            <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
+                            Verified
+                          </Badge>
+                        )}
+                        {onPreviewFile && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 text-gray-500 hover:text-blue-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onPreviewFile({
+                                file_url: file.file_url || `/api/employee-documents/${file.id}/file`,
+                                file_name: file.file_name || 'Document'
+                              });
+                            }}
+                            title="View file"
+                            data-testid={`view-file-${key}-${file.id}`}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-center">
+                  <FileText className="h-5 w-5 text-gray-300 mx-auto mb-1" />
+                  <p className="text-sm text-gray-500">No files uploaded</p>
+                </div>
+              )}
+              
+              {/* Evidence Upload Button */}
+              {!isAuditor && onUpload && (
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => { e.stopPropagation(); onUpload(key); }}
+                    data-testid={`upload-file-${key}`}
+                  >
+                    <FileText className="h-4 w-4 mr-1.5" />
+                    Upload
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          
           {/* Submission Details */}
           {has_submission && submission_data && (
             <div className="mb-3 p-2 bg-gray-50 rounded-lg text-sm">

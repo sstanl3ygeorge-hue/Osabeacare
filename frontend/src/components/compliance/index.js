@@ -42,6 +42,10 @@ export { default as RequestStatusBadge, RequestStatusInline } from './RequestSta
 export { default as StageIdentityBadge, STAGE_CONFIGS } from './StageIdentityBadge';
 export { default as ApplicantStageBanner } from './ApplicantStageBanner';
 
+// Simplified Header & Approval Components
+export { default as SimplifiedProfileHeader } from './SimplifiedProfileHeader';
+export { default as RecruitmentApprovalCard } from './RecruitmentApprovalCard';
+
 // Reference Response Drawer (Ticket E)
 export { default as ReferenceResponseDrawer } from './ReferenceResponseDrawer';
 

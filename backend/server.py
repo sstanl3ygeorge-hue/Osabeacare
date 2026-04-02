@@ -21929,6 +21929,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
     form_submission = {
         "id": form_submission_id,
         "employee_id": app_id,
+        "requirement_id": "application_form",  # Required for compliance-file query
         "template_id": "structured_application_form",  # Virtual template ID
         "template_name": "Structured Application Form",
         "form_data": {
@@ -30302,7 +30303,8 @@ async def get_compliance_file(
         has_submission = submission is not None
         status_value = submission.get("status") if submission else None
         is_verified = status_value == "signed_off" or status_value == "verified" or submission.get("verified") if submission else False
-        is_awaiting_review = status_value == "submitted" if submission else False
+        # Public application forms come with "completed" status and need review
+        is_awaiting_review = status_value in ["submitted", "completed"] if submission else False
         is_rejected = status_value == "rejected" if submission else False
         
         # Determine status

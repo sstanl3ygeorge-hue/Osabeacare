@@ -51,3 +51,7 @@ export { default as ReferenceResponseDrawer } from './ReferenceResponseDrawer';
 
 // Agreement Form Drawer (Ticket D)
 export { default as AgreementFormDrawer } from './AgreementFormDrawer';
+
+// Production-Ready Compliance Drawers
+export { default as ComplianceDrawer, DrawerSection, DrawerCard, DrawerEmptyState, DrawerStatusChip } from './ComplianceDrawer';
+export { default as EvidenceManageDrawer } from './EvidenceManageDrawer';

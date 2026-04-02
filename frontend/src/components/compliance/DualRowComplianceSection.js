@@ -13,7 +13,7 @@ import AgreementRow from './AgreementRow';
 import ReferenceRow from './ReferenceRow';
 import FormRequirementRow from './FormRequirementRow';
 import UploadRequirementCard from './UploadRequirementCard';
-import UploadRequirementDrawer from './UploadRequirementDrawer';
+import EvidenceManageDrawer from './EvidenceManageDrawer';
 import RequirementFilesDrawer from './RequirementFilesDrawer';
 import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 import ReferenceResponseDrawer from './ReferenceResponseDrawer';
@@ -684,8 +684,8 @@ export default function DualRowComplianceSection({
         Serializer: {complianceFile.serializer_version}
       </div>
       
-      {/* Ticket C: Shared Upload Drawer for RTW, DBS, Identity, PoA */}
-      <UploadRequirementDrawer
+      {/* Ticket C: Evidence Management Drawer for RTW, DBS, Identity, PoA */}
+      <EvidenceManageDrawer
         isOpen={uploadDrawer.isOpen}
         onClose={closeUploadDrawer}
         employeeId={employeeId}

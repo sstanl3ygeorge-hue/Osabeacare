@@ -28,7 +28,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] UploadRequirementCard.js rewritten for dual-row model
 - [x] DualRowComplianceSection.js created
 - [x] Evidence row (employee uploads) vs Verification row (employer checks)
-- [x] Right to Work, DBS, Identity sections with dual-row
+- [x] Right to Work, DBS, Identity, PoA sections with dual-row
 
 ### Phase 3: Recruitment Record (COMPLETED - Apr 2)
 - [x] Interview Record tracking
@@ -50,7 +50,18 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Certificates tracking
 - [x] 40+ synonym normalization in backend
 
+### Phase 6: Drawer UI Improvements (COMPLETED - Apr 2)
+- [x] ComplianceDrawer.js - Production-ready wrapper
+- [x] EvidenceManageDrawer.js - Evidence-only management
+- [x] Proper backdrop (semi-transparent, blur)
+- [x] Solid white panel with shadow
+- [x] ESC/backdrop close support
+- [x] Evidence vs Verification complete separation
+- [x] Consistent across RTW, DBS, Identity, PoA
+
 ## Key Files
+- `/app/frontend/src/components/compliance/ComplianceDrawer.js` (NEW)
+- `/app/frontend/src/components/compliance/EvidenceManageDrawer.js` (NEW)
 - `/app/frontend/src/components/compliance/UploadRequirementCard.js`
 - `/app/frontend/src/components/compliance/DualRowComplianceSection.js`
 - `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js`
@@ -82,6 +93,36 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] Phase out MongoDB entirely
 - [ ] Production deployment optimizations
 
+## Dual-Row Model Specification
+
+### Evidence Row (Candidate/Applicant Files)
+- Upload evidence
+- View files
+- Manage files (via EvidenceManageDrawer)
+- Request evidence
+- Resend request
+- Delete/supersede evidence
+- View request history
+
+### Verification Row (Admin/Employer Checks)
+- Record check
+- Upload proof of check
+- Update check
+- View proof file
+- View verification history
+
+### Managed by EvidenceManageDrawer (NOT verification):
+- Active Files section
+- Request History section
+- Historical Files section
+- File actions (verify, reject, supersede, move category)
+
+### Verification stays in main card:
+- Method, outcome, checked_by, checked_at
+- Proof of check file card
+- Upload Proof button
+- Record Check / Update Check button
+
 ## Test Credentials
 - Admin: admin@osabea.care / admin123
 - Test Employee: d88335f6-1b18-435a-8086-28af4a583f77
@@ -91,6 +132,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `POST /api/email-requests/{id}/track-click` - Track email CTA clicks
 - `GET /api/employees/{id}/training-matrix` - Get training items and additional items
 - `GET /api/employees/{id}/compliance-requirements` - Get all compliance requirements
+- `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 2, 2026 - Visual proof screenshots completed, email flow verified via API
+April 2, 2026 - Drawer UI improvements completed, Evidence/Verification separation implemented

@@ -744,6 +744,54 @@ export default function EmployeeProfilePage() {
     fetchProposedTrainingItems();
   }, [employeeId, token]);
 
+  // Handle URL parameters from email action links
+  useEffect(() => {
+    const action = searchParams.get('action');
+    const requirement = searchParams.get('requirement');
+    const requestId = searchParams.get('request_id');
+    const emailToken = searchParams.get('token');
+    
+    if (action && employee) {
+      // Track that user clicked the email link
+      if (requestId && emailToken) {
+        trackEmailClick(requestId, emailToken);
+      }
+      
+      // Handle different action types
+      if (action.includes('upload') || action === 'upload_document') {
+        // Set the requirement if provided, then open upload dialog
+        if (requirement) {
+          setSelectedDocType(requirement);
+          setSelectedRequirement(requirement);
+        }
+        setUploadDialogOpen(true);
+        
+        // Clear URL params after handling
+        setSearchParams(prev => {
+          const newParams = new URLSearchParams(prev);
+          newParams.delete('action');
+          newParams.delete('requirement');
+          newParams.delete('request_id');
+          newParams.delete('token');
+          return newParams;
+        });
+      }
+    }
+  }, [searchParams, employee, setSearchParams]);
+
+  // Track email click event
+  const trackEmailClick = async (requestId, emailToken) => {
+    try {
+      await axios.post(
+        `${API}/email-requests/${requestId}/track-click`,
+        { token: emailToken },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch (error) {
+      console.error('Failed to track email click:', error);
+    }
+  };
+
   // Fetch profile photo when employee has one
   useEffect(() => {
     const fetchProfilePhoto = async () => {

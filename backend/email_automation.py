@@ -616,19 +616,78 @@ class EmailRequestService:
         """Send the email via EmailService"""
         from email_service import EmailService, PORTAL_URL
         
-        # Build context
+        # Core compliance requirement names (readable mapping)
+        CORE_REQUIREMENT_NAMES = {
+            "right_to_work": "Right to Work",
+            "identity": "Identity Documents",
+            "dbs": "DBS Certificate",
+            "dbs_certificate": "DBS Certificate",
+            "proof_of_address": "Proof of Address",
+            "cv": "CV / Resume",
+            "application_form": "Application Form",
+            "references": "Employment References",
+            "health_questionnaire": "Health Questionnaire",
+            "training": "Training Records",
+        }
+        
+        CORE_REQUIREMENT_CATEGORIES = {
+            "right_to_work": "Right to Work",
+            "identity": "Identity Verification",
+            "dbs": "DBS Checks",
+            "dbs_certificate": "DBS Checks",
+            "proof_of_address": "Address Verification",
+            "cv": "Recruitment Record",
+            "application_form": "Recruitment Record",
+            "references": "References",
+            "health_questionnaire": "Health & Safety",
+            "training": "Training",
+        }
+        
+        # Build base context
         email_context = context or {}
         email_context["employee_name"] = recipient.get("name", "")
         email_context["first_name"] = recipient.get("first_name", "")
         
+        # CRITICAL: Get document/requirement details for template variables
+        requirement_id = request.requirement_id
+        if requirement_id:
+            # First check core requirement names
+            if requirement_id in CORE_REQUIREMENT_NAMES:
+                email_context["document_name"] = CORE_REQUIREMENT_NAMES[requirement_id]
+                email_context["category"] = CORE_REQUIREMENT_CATEGORIES.get(requirement_id, "Compliance Documents")
+            else:
+                # Try to get document type info from database
+                doc_type = await cls._db.document_types.find_one(
+                    {"id": requirement_id}, 
+                    {"_id": 0, "name": 1, "category": 1}
+                )
+                if doc_type:
+                    email_context["document_name"] = doc_type.get("name", requirement_id)
+                    email_context["category"] = doc_type.get("category", "Compliance Documents")
+                else:
+                    # Fallback: Format requirement_id as readable name
+                    formatted_name = requirement_id.replace("_", " ").title()
+                    email_context["document_name"] = formatted_name
+                    email_context["category"] = "Compliance Documents"
+        else:
+            email_context["document_name"] = "Required Document"
+            email_context["category"] = "Compliance Documents"
+        
         # Build action link with token
         action_type = REQUEST_TYPE_ACTIONS.get(request.request_type, "upload_document")
-        if action_type in ["upload_proof_of_address", "upload_document", "upload_training_certificate"]:
-            path = f"/portal/employees/{request.person_id}?tab=checklist&action={action_type}&token={token}&request_id={request.id}"
-        elif action_type in ["explain_cv_gap", "update_reference"]:
-            path = f"/portal/employees/{request.person_id}?tab=recruitment&action={action_type}&token={token}&request_id={request.id}"
+        
+        # Use correct path based on person type
+        if request.person_type == "applicant":
+            # For applicants, use public upload page
+            path = f"/upload?token={token}&request_id={request.id}"
         else:
-            path = f"/portal/employees/{request.person_id}?action={action_type}&token={token}&request_id={request.id}"
+            # For employees, use portal page with deep-linking to the requirement
+            if action_type in ["upload_proof_of_address", "upload_document", "upload_training_certificate"]:
+                path = f"/portal/employees/{request.person_id}?tab=checklist&action={action_type}&requirement={requirement_id}&token={token}&request_id={request.id}"
+            elif action_type in ["explain_cv_gap", "update_reference"]:
+                path = f"/portal/employees/{request.person_id}?tab=recruitment&action={action_type}&token={token}&request_id={request.id}"
+            else:
+                path = f"/portal/employees/{request.person_id}?action={action_type}&requirement={requirement_id}&token={token}&request_id={request.id}"
         
         email_context["action_link"] = f"{PORTAL_URL}{path}"
         email_context["admin_link"] = f"{PORTAL_URL}/portal/employees/{request.person_id}"

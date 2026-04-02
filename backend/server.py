@@ -32088,6 +32088,25 @@ async def get_employee_document_requests(employee_id: str, user: dict = Depends(
     return requests
 
 
+@api_router.post("/email-requests/{request_id}/track-click")
+async def track_email_click(request_id: str, user: dict = Depends(get_current_user)):
+    """Track that an email action link was clicked."""
+    try:
+        from email_automation import EmailRequestService, EventType
+        result = await EmailRequestService.track_event(
+            request_id=request_id,
+            event_type=EventType.CLICKED,
+            actor_id=user.get('user_id'),
+            actor_type="employee"
+        )
+        return {"status": "tracked", "request_id": request_id}
+    except Exception as e:
+        logger.error(f"Failed to track email click: {e}")
+        return {"status": "error", "detail": str(e)}
+
+
+
+
 # ==================== BULK DOCUMENT REQUESTS ====================
 
 class BulkDocumentRequestInput(BaseModel):

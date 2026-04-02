@@ -79,6 +79,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Added clickable blockers in Recruitment Checks - Each blocker item now scrolls to the relevant compliance section with highlight effect
 - [x] Added "Next Steps" panel - Shows up to 4 actionable items above Recruitment Approval for quick admin navigation
 - [x] Implemented public document upload flow - Email links now use `/upload-document?token=...` route (no login required)
+- [x] Fixed email resend flow - `force_resend` param supersedes old requests, returns clear statuses (sent/resent/duplicate_blocked/error)
+- [x] Fixed compliance card layout - Removed duplicate actions from header, Evidence row has Upload/Request/Manage, Verification row has Upload Proof/Record Check/View Details
 
 ## Prioritized Backlog
 

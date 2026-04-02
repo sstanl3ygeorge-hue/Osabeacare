@@ -293,6 +293,75 @@ export default function EmployeeProfilePage() {
   const [recordCheckDialogOpen, setRecordCheckDialogOpen] = useState(false);
   const [recordCheckType, setRecordCheckType] = useState(null);
   
+  // Refs for scrolling to compliance sections
+  const complianceSectionRef = useRef(null);
+  const trainingSectionRef = useRef(null);
+  
+  // Helper: Map blocker text to section ID and tab
+  const mapBlockerToSection = (blockerText) => {
+    const text = blockerText.toLowerCase();
+    if (text.includes('right to work') || text.includes('rtw')) {
+      return { sectionId: 'section-right_to_work', tab: 'checklist' };
+    }
+    if (text.includes('dbs') || text.includes('disclosure')) {
+      return { sectionId: 'section-dbs', tab: 'checklist' };
+    }
+    if (text.includes('identity') || text.includes('photo id') || text.includes('passport')) {
+      return { sectionId: 'section-identity', tab: 'checklist' };
+    }
+    if (text.includes('address') || text.includes('proof of address') || text.includes('poa')) {
+      return { sectionId: 'section-proof_of_address', tab: 'checklist' };
+    }
+    if (text.includes('training') || text.includes('certificate') || text.includes('qualification')) {
+      return { sectionId: null, tab: 'training' };
+    }
+    if (text.includes('reference')) {
+      return { sectionId: 'section-references', tab: 'checklist' };
+    }
+    if (text.includes('application') || text.includes('form') || text.includes('interview')) {
+      return { sectionId: 'section-recruitment_record', tab: 'checklist' };
+    }
+    if (text.includes('contract') || text.includes('handbook')) {
+      return { sectionId: 'section-agreements', tab: 'checklist' };
+    }
+    // Default to checklist tab
+    return { sectionId: null, tab: 'checklist' };
+  };
+  
+  // Handler: Navigate to blocker section
+  const handleBlockerClick = (blockerText) => {
+    const { sectionId, tab } = mapBlockerToSection(blockerText);
+    
+    // Switch to the correct tab first
+    if (tab !== activeTab) {
+      setActiveTab(tab);
+      // Use timeout to allow tab content to render before scrolling
+      setTimeout(() => {
+        if (sectionId) {
+          const element = document.querySelector(`[data-testid="${sectionId}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Add highlight effect
+            element.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+            setTimeout(() => element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2'), 2000);
+          }
+        } else if (tab === 'training' && trainingSectionRef.current) {
+          trainingSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 150);
+    } else {
+      // Already on correct tab, just scroll
+      if (sectionId) {
+        const element = document.querySelector(`[data-testid="${sectionId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          element.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+          setTimeout(() => element.classList.remove('ring-2', 'ring-primary', 'ring-offset-2'), 2000);
+        }
+      }
+    }
+  };
+  
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
   const fetchRecruitmentStatus = async () => {
     if (!employeeId) return;
@@ -3668,8 +3737,64 @@ export default function EmployeeProfilePage() {
 
       {/* RECRUITMENT APPROVAL PANEL - Show for applicants before tabs */}
       {employee?.person_stage === 'applicant' && !employee?.recruitment_approved && (
-        <div className="mb-6">
-          <RecruitmentApprovalPanel
+        <>
+          {/* NEXT STEPS PANEL - Actionable guidance for admins */}
+          {recruitmentStatus?.blockers?.length > 0 && (
+            <Card className="mb-6 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50" data-testid="next-steps-panel">
+              <CardHeader className="pb-3">
+                <CardTitle className="font-heading text-base flex items-center gap-2 text-blue-800">
+                  <ChevronRight className="h-5 w-5" />
+                  Next Steps
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {recruitmentStatus.blockers.slice(0, 4).map((blocker, idx) => {
+                    const { tab } = mapBlockerToSection(blocker);
+                    const isTraining = tab === 'training';
+                    const isReference = blocker.toLowerCase().includes('reference');
+                    const isDocument = !isTraining && !isReference;
+                    
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleBlockerClick(blocker)}
+                        className="flex items-center gap-3 p-3 rounded-xl bg-white border border-blue-100 hover:border-blue-300 hover:shadow-sm transition-all text-left group"
+                        data-testid={`next-step-${idx}`}
+                      >
+                        <div className={`p-2 rounded-lg ${
+                          isTraining ? 'bg-purple-100 text-purple-600' :
+                          isReference ? 'bg-orange-100 text-orange-600' :
+                          'bg-blue-100 text-blue-600'
+                        }`}>
+                          {isTraining ? <GraduationCap className="h-4 w-4" /> :
+                           isReference ? <UserCheck className="h-4 w-4" /> :
+                           <FileText className="h-4 w-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-slate-700 group-hover:text-blue-700 truncate">
+                            {isDocument ? `Request ${blocker}` : 
+                             isReference ? 'Send Reference Request' :
+                             'Complete Training'}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">{blocker}</p>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-transform" />
+                      </button>
+                    );
+                  })}
+                </div>
+                {recruitmentStatus.blockers.length > 4 && (
+                  <p className="text-xs text-slate-500 mt-3 text-center">
+                    + {recruitmentStatus.blockers.length - 4} more items to complete
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+          
+          <div className="mb-6">
+            <RecruitmentApprovalPanel
             employeeId={employee.id}
             employeeName={`${employee.first_name} ${employee.last_name}`}
             role={employee.role}
@@ -3694,7 +3819,8 @@ export default function EmployeeProfilePage() {
               toast.info(`Navigate to: ${requirementKey.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase())}`);
             }}
           />
-        </div>
+          </div>
+        </>
       )}
 
       {/* WORK READINESS PANEL (GATE 2) - Show for approved employees */}
@@ -4527,7 +4653,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* Training Tab */}
-        <TabsContent value="training">
+        <TabsContent value="training" ref={trainingSectionRef}>
           {/* Audit-Ready Training Matrix - Complete training record with tabs */}
           <AuditReadyTrainingMatrix
             employeeId={employeeId}
@@ -4729,9 +4855,17 @@ export default function EmployeeProfilePage() {
                           {recruitmentStatus.recruitment_complete ? 'Recruitment Checks Complete' : 'Recruitment Checks Incomplete'}
                         </p>
                         {recruitmentStatus.blockers?.length > 0 && (
-                          <ul className="text-sm text-amber-600 mt-1 list-disc list-inside">
+                          <ul className="text-sm mt-2 space-y-1">
                             {recruitmentStatus.blockers.map((blocker, idx) => (
-                              <li key={idx}>{blocker}</li>
+                              <li 
+                                key={idx}
+                                onClick={() => handleBlockerClick(blocker)}
+                                className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-amber-100 transition-colors group"
+                                data-testid={`blocker-item-${idx}`}
+                              >
+                                <ChevronRight className="h-3 w-3 text-amber-500 group-hover:translate-x-0.5 transition-transform" />
+                                <span className="text-amber-700 group-hover:text-amber-800">{blocker}</span>
+                              </li>
                             ))}
                           </ul>
                         )}

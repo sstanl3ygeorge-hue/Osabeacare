@@ -1,78 +1,96 @@
-# Osabea Care Compliance Portal - PRD
+# CareTrust Compliance Portal - PRD
 
 ## Original Problem Statement
-Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuring CQC audit-readiness.
+Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuring CQC audit-readiness. Implement a digital application intake flow, strict Applicant vs Employee separation, a single authoritative 3-tier work readiness logic layer, an NHS-level strict Reference/Referee Integrity workflow, CV extraction, and a Supplementary Training module.
 
-## Core Product Requirements
-- **3-tier work readiness**: NOT_READY, READY_WITH_CONDITIONS, READY_TO_WORK
-- **Dual-Row Evidence/Check Model**: STRICT separation between uploaded evidence (candidate documents) and verification proof (admin check)
+## Core Requirements
+- 3-tier work readiness: NOT_READY, READY_WITH_CONDITIONS, READY_TO_WORK
+- Dual-Row Evidence/Check Model: Clear separation between uploaded evidence and actual employer check/verification outcome
+- System Consolidation: Single source of truth per requirement. Consistent UI across all compliance items
 
-## Current Implementation Status (April 2, 2026)
+## Tech Stack
+- Frontend: React + Tailwind + Shadcn/UI
+- Backend: FastAPI (Python)
+- Database: MongoDB (with Supabase migration in progress)
+- Email: Resend
+- AI: OpenAI GPT-5.2 Vision for CV/Document extraction
+- Auth: JWT-based custom auth
 
-### ✅ Dual-Row Compliance UI - COMPLETE
-For each of: **Right to Work, DBS, Identity, Proof of Address**
+## What's Been Implemented
 
-**Row A - Evidence** (blue border):
-- Upload Evidence button
-- Manage button
-- View Files / Download
-- Shows: file list, upload date, uploaded by, status
+### Phase 1: Core Architecture (COMPLETED)
+- [x] Employee management CRUD
+- [x] 3-tier work readiness engine
+- [x] Compliance requirements tracking
+- [x] Document upload and storage
 
-**Row B - Verification** (green/amber/red border based on status):
-- Upload Verification Proof button
-- Record Check button
-- View Proof / Download Proof buttons
-- Shows: method, checked by, checked at, outcome, notes, proof file
+### Phase 2: Dual-Row Compliance UI (COMPLETED - Apr 2)
+- [x] UploadRequirementCard.js rewritten for dual-row model
+- [x] DualRowComplianceSection.js created
+- [x] Evidence row (employee uploads) vs Verification row (employer checks)
+- [x] Right to Work, DBS, Identity sections with dual-row
 
-### ✅ CV in Recruitment Record - WORKING
-- Shows file with View button when expanded
-- Displays upload date and verified status
+### Phase 3: Recruitment Record (COMPLETED - Apr 2)
+- [x] Interview Record tracking
+- [x] Application Form with hybrid model
+- [x] CV/Resume with evidence verification
+- [x] Recruitment Compliance Checklist
 
-### ⚠️ Application Form in Recruitment Record
-- **Backend fix applied**: Public application now sets `requirement_id: "application_form"` on form_submissions
-- **Status recognition**: Backend recognizes `"completed"` status as `awaiting_review`
-- **Test limitation**: Current test employee was manually created, not via public application
+### Phase 4: Email Automation (COMPLETED - Apr 2)
+- [x] Document request email flow
+- [x] CORE_REQUIREMENT_NAMES mapping for readable placeholders
+- [x] Email template with proper branding
+- [x] Click tracking API
+- [x] URL parameter handling for direct upload links
 
-### Storage Model
-| Type | Category | Storage | Display Location |
-|------|----------|---------|------------------|
-| Candidate document | evidence | employee_documents | Evidence row |
-| Admin verification proof | verification_proof | employee_documents | Verification row |
-| Form submission | form | form_submissions | Form row |
+### Phase 5: Training Matrix (COMPLETED - Apr 2)
+- [x] AuditReadyTrainingMatrix.js with 3 tabs
+- [x] Mandatory training requirements
+- [x] Additional qualifications (non-mandatory)
+- [x] Certificates tracking
+- [x] 40+ synonym normalization in backend
 
-## Files Changed in This Session
-1. `/app/backend/server.py` (Line 21932) - Added `requirement_id: "application_form"` to public application submissions
-2. `/app/backend/server.py` (Line 30307) - Updated `is_awaiting_review` to include `"completed"` status
-3. `/app/frontend/src/components/compliance/UploadRequirementCard.js` - Dual-Row model implementation
-4. `/app/frontend/src/components/compliance/DualRowComplianceSection.js` - Data transformation, CV fix
-5. `/app/frontend/src/components/compliance/FormRequirementRow.js` - Evidence file display support
-6. `/app/frontend/src/components/compliance/SimplifiedProfileHeader.js` - New clean header
-7. `/app/frontend/src/components/compliance/RecruitmentApprovalCard.js` - New approval checklist
+## Key Files
+- `/app/frontend/src/components/compliance/UploadRequirementCard.js`
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js`
+- `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js`
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js`
+- `/app/backend/server.py`
+- `/app/backend/email_automation.py`
+- `/app/backend/email_service.py`
 
-## Test Results (Iteration 117)
-- ✅ RTW Evidence row with Upload/Manage buttons
-- ✅ RTW Verification row with proof file, View/Download buttons
-- ✅ DBS Evidence row with 2 files
-- ✅ DBS Verification row with DBS Update Service method
-- ✅ Identity Evidence/Verification rows
-- ✅ Proof of Address Evidence/Verification rows
-- ✅ CV row shows file with View button
+## Known Issues
+- F811 duplicate function definitions in server.py (technical debt)
+- server.py >38k lines - needs modular split
 
-## Pending Tasks
+## Prioritized Backlog
 
-### P1 - High Priority
-- [ ] Integrate SimplifiedProfileHeader into EmployeeProfilePage
-- [ ] Integrate RecruitmentApprovalCard into EmployeeProfilePage
+### P0 (Critical)
+- [ ] User verification of email in inbox (pending)
+- [ ] GitHub push after verification
+
+### P1 (High)
 - [ ] Employee self-service portal
-- [ ] Supabase Auth integration with RLS policies
+- [ ] Supabase Auth integration and RLS policies
 
-### P2 - Medium Priority
-- [ ] Fix F811 duplicate function definitions in server.py
+### P2 (Medium)
 - [ ] Bulk recurring item creation
-
-### P3 - Low Priority
 - [ ] Split server.py into modular routers
+- [ ] Fix F811 linting errors
 
-## Credentials
+### P3 (Low/Future)
+- [ ] Phase out MongoDB entirely
+- [ ] Production deployment optimizations
+
+## Test Credentials
 - Admin: admin@osabea.care / admin123
-- Test Employee: Olakunle Alonge (OCS-0001, d88335f6-1b18-435a-8086-28af4a583f77)
+- Test Employee: d88335f6-1b18-435a-8086-28af4a583f77
+
+## API Endpoints
+- `POST /api/employees/{id}/request-document?requirement_id={id}` - Send document request email
+- `POST /api/email-requests/{id}/track-click` - Track email CTA clicks
+- `GET /api/employees/{id}/training-matrix` - Get training items and additional items
+- `GET /api/employees/{id}/compliance-requirements` - Get all compliance requirements
+
+## Last Updated
+April 2, 2026 - Visual proof screenshots completed, email flow verified via API

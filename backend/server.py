@@ -34704,7 +34704,7 @@ async def public_upload_document(
 # Automated notifications for compliance and recruitment triggers
 
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')
-PORTAL_URL = os.environ.get('PORTAL_URL', 'https://caretrust-portal.preview.emergentagent.com')
+PORTAL_URL = os.environ.get('PORTAL_URL', 'https://app.osabeacares.co.uk')
 
 # Notification Types Enum
 class NotificationType:

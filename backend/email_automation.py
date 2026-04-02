@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-PORTAL_URL = os.environ.get('PORTAL_URL', 'https://caretrust-portal.preview.emergentagent.com')
+PORTAL_URL = os.environ.get('PORTAL_URL', 'https://app.osabeacares.co.uk')
 
 # Reminder schedule (days after initial send)
 REMINDER_SCHEDULE = {

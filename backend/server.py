@@ -5917,6 +5917,90 @@ class ApplicationDeclarations(BaseModel):
     consents_to_reference_checks: bool  # Must be True
     consents_to_background_checks: bool  # Must be True
     consents_to_data_processing: bool  # Must be True - GDPR
+
+
+# ==================== DBS CHECK MODELS ====================
+# Final DBS section following RTW architecture pattern
+
+class DBSLevel(str, Enum):
+    """DBS certificate levels."""
+    BASIC = "basic"
+    STANDARD = "standard"
+    ENHANCED = "enhanced"
+    ENHANCED_BARRED = "enhanced_barred"  # Enhanced with barred list checks
+
+class DBSCheckMethod(str, Enum):
+    """Supported DBS verification methods."""
+    DBS_CERTIFICATE_REVIEW = "dbs_certificate_review"
+    DBS_UPDATE_SERVICE_CHECK = "dbs_update_service_check"
+    MANUAL_DBS_REVIEW = "manual_dbs_review"
+    OTHER_DOCUMENTED_CHECK = "other_documented_dbs_check"
+
+# Human-friendly labels for DBS methods
+DBS_METHOD_LABELS = {
+    "dbs_certificate_review": "DBS Certificate Reviewed",
+    "dbs_update_service_check": "DBS Update Service Check",
+    "manual_dbs_review": "Manual DBS Review",
+    "other_documented_dbs_check": "Other Documented Verification"
+}
+
+class DBSWorkforce(str, Enum):
+    """Workforce type for DBS checks."""
+    ADULT = "adult"
+    CHILD = "child"
+    ADULT_AND_CHILD = "adult_and_child"
+
+class DBSUpdateServiceStatus(str, Enum):
+    """Update Service status values."""
+    ACTIVE = "active"
+    NOT_REGISTERED = "not_registered"
+    EXPIRED = "expired"
+    UNKNOWN = "unknown"
+
+class DBSResultStatus(str, Enum):
+    """DBS result/clearance status."""
+    CLEAR = "clear"
+    INFORMATION_PRESENT = "information_present"
+    PENDING_REVIEW = "pending_review"
+    INCOMPLETE = "incomplete"
+
+class DBSCheckInput(BaseModel):
+    """Input for recording a DBS verification check."""
+    # Check method and date
+    method: str = Field(..., description="DBS check method (dbs_certificate_review, dbs_update_service_check, etc.)")
+    checked_at: str = Field(..., description="Date check was performed (YYYY-MM-DD)")
+    outcome: str = Field(default="verified", description="Check outcome (verified, failed, follow_up_required)")
+    
+    # Certificate details
+    dbs_level: Optional[str] = Field(None, description="DBS level (basic, standard, enhanced, enhanced_barred)")
+    certificate_number: Optional[str] = Field(None, description="DBS certificate number")
+    certificate_issue_date: Optional[str] = Field(None, description="Certificate issue date (YYYY-MM-DD)")
+    name_on_certificate: Optional[str] = Field(None, description="Name as shown on certificate")
+    workforce: Optional[str] = Field(None, description="Workforce type (adult, child, adult_and_child)")
+    
+    # Update Service specific
+    update_service_status: Optional[str] = Field(None, description="Update Service status (active, not_registered, expired)")
+    last_status_check_date: Optional[str] = Field(None, description="Date of last Update Service status check")
+    
+    # Recheck tracking
+    recheck_required: bool = Field(default=True, description="Whether periodic recheck is required")
+    next_recheck_date: Optional[str] = Field(None, description="Next recheck due date")
+    review_due_at: Optional[str] = Field(None, description="Review due date (alias for next_recheck_date)")
+    
+    # Result details
+    result_status: Optional[str] = Field(None, description="Result status (clear, information_present, pending_review, incomplete)")
+    information_present: bool = Field(default=False, description="Whether certificate shows any information/disclosures")
+    result_summary: Optional[str] = Field(None, description="Brief result summary (e.g., 'Clear / no information')")
+    
+    # Linked evidence/proof
+    evidence_document_id: Optional[str] = Field(None, description="ID of linked evidence file")
+    proof_document_id: Optional[str] = Field(None, description="ID of proof-of-check file")
+    linked_evidence_ids: List[str] = Field(default_factory=list, description="IDs of linked evidence files")
+    
+    # Notes
+    notes: Optional[str] = Field(None, description="Review notes (especially for information_present cases)")
+
+
     
     # Professional registration (if applicable)
     has_professional_registration: bool = False

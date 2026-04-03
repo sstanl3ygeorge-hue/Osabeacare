@@ -14894,13 +14894,30 @@ async def get_form_submissions(
     return submissions
 
 
-@api_router.get("/form-submissions/{submission_id}", response_model=FormSubmissionResponse)
+@api_router.get("/form-submissions/{submission_id}")
 async def get_form_submission(submission_id: str, user: dict = Depends(get_current_user)):
-    """Get a specific form submission"""
+    """
+    Get a specific form submission.
+    
+    NOTE: Application forms (requirement_id='application_form') use form_data field
+    instead of data field, so we normalize the response for compatibility.
+    """
     submission = await db.form_submissions.find_one({"id": submission_id}, {"_id": 0})
     if not submission:
         raise HTTPException(status_code=404, detail="Form submission not found")
-    return FormSubmissionResponse(**submission)
+    
+    # Normalize response: ensure both 'data' and 'form_data' exist for compatibility
+    # Application forms use 'form_data', other forms use 'data'
+    if 'form_data' in submission and 'data' not in submission:
+        submission['data'] = submission['form_data']
+    elif 'data' in submission and 'form_data' not in submission:
+        submission['form_data'] = submission['data']
+    
+    # Ensure form_type exists (application forms may not have it)
+    if 'form_type' not in submission:
+        submission['form_type'] = submission.get('requirement_id', 'unknown')
+    
+    return submission
 
 
 @api_router.put("/form-submissions/{submission_id}", response_model=FormSubmissionResponse)

@@ -25000,7 +25000,7 @@ class CheckRecordService:
     
     @staticmethod
     async def get_current_rtw_check(employee_id: str) -> Optional[dict]:
-        """Get the current RTW check for an employee with resolved user name."""
+        """Get the current RTW check for an employee with resolved user name and computed status."""
         check = await db.rtw_checks.find_one(
             {"employee_id": employee_id, "is_current": True},
             {"_id": 0}
@@ -25016,6 +25016,11 @@ class CheckRecordService:
                 check["checked_by_name"] = name if name else user.get('email', 'Admin')
             else:
                 check["checked_by_name"] = "Admin"
+        
+        # Compute and attach RTW status
+        if check:
+            check["rtw_status"] = CheckRecordService.compute_rtw_status(check)
+        
         return check
     
     @staticmethod
@@ -25026,6 +25031,211 @@ class CheckRecordService:
             {"_id": 0}
         ).sort("created_at", -1).limit(limit).to_list(limit)
         return checks
+    
+    @staticmethod
+    def compute_rtw_status(rtw_check: Optional[dict]) -> dict:
+        """
+        Compute RTW compliance status from saved result fields.
+        
+        Non-breaking, read-only computation layer.
+        
+        Returns:
+            {
+                "status": str,  # continuous, time_limited_valid, follow_up_due_soon, urgent_follow_up, expired, incomplete_result, not_verified
+                "status_label": str,  # Human-readable label
+                "status_color": str,  # green, amber, red, gray
+                "days_until_expiry": int or None,
+                "days_until_followup": int or None,
+                "expiry_date": str or None,
+                "followup_date": str or None,
+                "is_indefinite": bool,
+                "has_restrictions": bool,
+                "alerts": [{"level": "info|warning|urgent|error", "message": str}],
+                "summary_line": str  # One-line summary for page header
+            }
+        """
+        from datetime import datetime, timezone, timedelta
+        
+        result = {
+            "status": "not_verified",
+            "status_label": "Not Verified",
+            "status_color": "gray",
+            "days_until_expiry": None,
+            "days_until_followup": None,
+            "expiry_date": None,
+            "followup_date": None,
+            "is_indefinite": False,
+            "has_restrictions": False,
+            "alerts": [],
+            "summary_line": "Right to Work not verified"
+        }
+        
+        if not rtw_check:
+            return result
+        
+        # Check if verified
+        outcome = rtw_check.get("outcome")
+        if outcome not in ["verified", "follow_up_required"]:
+            result["status"] = "not_verified"
+            result["status_label"] = "Verification Pending" if outcome == "awaiting_review" else "Not Verified"
+            result["status_color"] = "gray"
+            result["summary_line"] = "Right to Work verification pending" if outcome == "awaiting_review" else "Right to Work not verified"
+            return result
+        
+        # Extract key fields
+        permission_end = rtw_check.get("permission_end_date")
+        is_indefinite = rtw_check.get("is_indefinite", False)
+        follow_up_required = rtw_check.get("follow_up_required", False)
+        follow_up_due_at = rtw_check.get("follow_up_due_at")
+        restrictions = rtw_check.get("restrictions")
+        checked_at = rtw_check.get("checked_at")
+        route = rtw_check.get("route") or rtw_check.get("method")
+        
+        result["is_indefinite"] = is_indefinite
+        result["has_restrictions"] = bool(restrictions)
+        result["expiry_date"] = permission_end
+        result["followup_date"] = follow_up_due_at
+        
+        today = datetime.now(timezone.utc).date()
+        
+        # Compute days until expiry
+        if permission_end:
+            try:
+                expiry_date = datetime.fromisoformat(permission_end.replace('Z', '+00:00')).date() if isinstance(permission_end, str) else permission_end
+                days_until_expiry = (expiry_date - today).days
+                result["days_until_expiry"] = days_until_expiry
+            except (ValueError, TypeError):
+                days_until_expiry = None
+        else:
+            days_until_expiry = None
+        
+        # Compute days until follow-up
+        if follow_up_due_at:
+            try:
+                followup_date = datetime.fromisoformat(follow_up_due_at.replace('Z', '+00:00')).date() if isinstance(follow_up_due_at, str) else follow_up_due_at
+                days_until_followup = (followup_date - today).days
+                result["days_until_followup"] = days_until_followup
+            except (ValueError, TypeError):
+                days_until_followup = None
+        else:
+            days_until_followup = None
+        
+        # Determine status
+        if is_indefinite:
+            result["status"] = "continuous"
+            result["status_label"] = "Continuous Right to Work"
+            result["status_color"] = "green"
+            result["summary_line"] = "Right to Work: Indefinite (no expiry)"
+            
+            if restrictions:
+                result["alerts"].append({
+                    "level": "info",
+                    "message": f"Work restrictions apply: {restrictions}"
+                })
+        
+        elif days_until_expiry is not None:
+            if days_until_expiry < 0:
+                # Expired
+                result["status"] = "expired"
+                result["status_label"] = f"Expired ({abs(days_until_expiry)} days ago)"
+                result["status_color"] = "red"
+                result["summary_line"] = f"Right to Work EXPIRED {abs(days_until_expiry)} days ago"
+                result["alerts"].append({
+                    "level": "error",
+                    "message": f"Right to Work permission expired on {permission_end}. Immediate action required."
+                })
+            elif days_until_expiry <= 30:
+                # Urgent - under 30 days
+                result["status"] = "urgent_follow_up"
+                result["status_label"] = f"Expires in {days_until_expiry} days"
+                result["status_color"] = "red"
+                result["summary_line"] = f"Right to Work URGENT: Expires in {days_until_expiry} days"
+                result["alerts"].append({
+                    "level": "urgent",
+                    "message": f"Right to Work expires in {days_until_expiry} days ({permission_end}). Schedule follow-up immediately."
+                })
+            elif days_until_expiry <= 90:
+                # Stronger warning - under 90 days
+                result["status"] = "follow_up_due_soon"
+                result["status_label"] = f"Expires in {days_until_expiry} days"
+                result["status_color"] = "amber"
+                result["summary_line"] = f"Right to Work: Expires in {days_until_expiry} days"
+                result["alerts"].append({
+                    "level": "warning",
+                    "message": f"Right to Work expires in {days_until_expiry} days ({permission_end}). Plan follow-up check."
+                })
+            elif days_until_expiry <= 180:
+                # Warning - under 180 days
+                result["status"] = "follow_up_due_soon"
+                result["status_label"] = f"Valid until {permission_end}"
+                result["status_color"] = "amber"
+                result["summary_line"] = f"Right to Work: Valid until {permission_end}"
+                result["alerts"].append({
+                    "level": "info",
+                    "message": f"Right to Work expires in {days_until_expiry} days ({permission_end})."
+                })
+            else:
+                # Valid - over 180 days
+                result["status"] = "time_limited_valid"
+                result["status_label"] = f"Valid until {permission_end}"
+                result["status_color"] = "green"
+                result["summary_line"] = f"Right to Work: Valid until {permission_end}"
+        
+        else:
+            # No expiry date but not marked indefinite - incomplete result
+            if follow_up_required and follow_up_due_at:
+                # Has follow-up scheduled
+                if days_until_followup is not None and days_until_followup < 0:
+                    result["status"] = "urgent_follow_up"
+                    result["status_label"] = f"Follow-up overdue ({abs(days_until_followup)} days)"
+                    result["status_color"] = "red"
+                    result["summary_line"] = f"Right to Work follow-up OVERDUE by {abs(days_until_followup)} days"
+                    result["alerts"].append({
+                        "level": "error",
+                        "message": f"Follow-up check was due on {follow_up_due_at}. Immediate action required."
+                    })
+                elif days_until_followup is not None and days_until_followup <= 30:
+                    result["status"] = "urgent_follow_up"
+                    result["status_label"] = f"Follow-up due in {days_until_followup} days"
+                    result["status_color"] = "amber"
+                    result["summary_line"] = f"Right to Work: Follow-up due in {days_until_followup} days"
+                    result["alerts"].append({
+                        "level": "warning",
+                        "message": f"Follow-up check due in {days_until_followup} days ({follow_up_due_at})."
+                    })
+                else:
+                    result["status"] = "time_limited_valid"
+                    result["status_label"] = "Verified (follow-up scheduled)"
+                    result["status_color"] = "green"
+                    result["summary_line"] = "Right to Work: Verified"
+            else:
+                # Missing key result data
+                has_route = bool(route)
+                has_checked_at = bool(checked_at)
+                
+                if has_route and has_checked_at:
+                    result["status"] = "time_limited_valid"
+                    result["status_label"] = "Verified"
+                    result["status_color"] = "green"
+                    result["summary_line"] = "Right to Work: Verified"
+                else:
+                    result["status"] = "incomplete_result"
+                    result["status_label"] = "Result Incomplete"
+                    result["status_color"] = "amber"
+                    result["summary_line"] = "Right to Work result incomplete"
+                    result["alerts"].append({
+                        "level": "warning",
+                        "message": "RTW check recorded but missing key result fields. Consider re-recording with complete data."
+                    })
+        
+        # Add restrictions alert if applicable
+        if restrictions and result["status"] not in ["expired", "not_verified"]:
+            result["alerts"].append({
+                "level": "info",
+                "message": f"Work restrictions: {restrictions}"
+            })
+        
+        return result
     
     @staticmethod
     async def record_dbs_check(
@@ -32227,6 +32437,7 @@ async def get_compliance_file(
         # Right to Work - Evidence + Check
         "right_to_work": {
             "title": "Right to Work",
+            "rtw_status": rtw_check.get("rtw_status") if rtw_check else CheckRecordService.compute_rtw_status(None),
             "rows": [
                 build_evidence_row(
                     key="right_to_work_evidence",

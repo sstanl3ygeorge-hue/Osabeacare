@@ -322,6 +322,9 @@ export default function DualRowComplianceSection({
     
     const isExpanded = expandedSections[sectionKey] !== false;
     
+    // Get RTW status for Right to Work section
+    const rtwStatus = sectionKey === 'right_to_work' ? section.rtw_status : null;
+    
     return (
       <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
         <UploadRequirementCard
@@ -339,6 +342,7 @@ export default function DualRowComplianceSection({
           employeeId={employeeId}
           onRefresh={handleRefresh}
           isAuditor={isAuditor}
+          rtwStatus={rtwStatus}
         />
       </div>
     );

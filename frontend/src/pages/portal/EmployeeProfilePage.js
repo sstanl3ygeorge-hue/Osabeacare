@@ -4213,6 +4213,71 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
+              {/* RTW STATUS ALERT - Non-breaking, computed from saved RTW result fields */}
+              {complianceFile?.sections?.right_to_work?.rtw_status && 
+               complianceFile.sections.right_to_work.rtw_status.status !== 'not_verified' &&
+               complianceFile.sections.right_to_work.rtw_status.status !== 'continuous' &&
+               complianceFile.sections.right_to_work.rtw_status.status !== 'time_limited_valid' && (
+                <div className={`mb-6 p-4 rounded-xl border ${
+                  complianceFile.sections.right_to_work.rtw_status.status_color === 'red' 
+                    ? 'bg-red-50 border-red-200' 
+                    : 'bg-amber-50 border-amber-200'
+                }`} data-testid="rtw-status-alert">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'bg-red-100' : 'bg-amber-100'
+                    }`}>
+                      <Shield className={`h-5 w-5 ${
+                        complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'text-red-600' : 'text-amber-600'
+                      }`} />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className={`font-semibold ${
+                        complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'text-red-900' : 'text-amber-900'
+                      }`}>
+                        Right to Work Alert
+                      </h4>
+                      <p className={`text-sm mt-1 font-medium ${
+                        complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'text-red-800' : 'text-amber-800'
+                      }`}>
+                        {complianceFile.sections.right_to_work.rtw_status.summary_line}
+                      </p>
+                      
+                      {/* RTW Alerts */}
+                      {complianceFile.sections.right_to_work.rtw_status.alerts?.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {complianceFile.sections.right_to_work.rtw_status.alerts.map((alert, idx) => (
+                            <p key={idx} className={`text-xs ${
+                              alert.level === 'error' || alert.level === 'urgent' ? 'text-red-700' :
+                              alert.level === 'warning' ? 'text-amber-700' :
+                              'text-gray-600'
+                            }`}>
+                              {alert.message}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                      
+                      {/* Quick Action */}
+                      {complianceFile.sections.right_to_work.rtw_status.status === 'expired' && (
+                        <Button
+                          size="sm"
+                          className="mt-3 bg-red-600 hover:bg-red-700 text-white"
+                          onClick={() => {
+                            setActiveTab('compliance');
+                            setTimeout(() => {
+                              document.querySelector('[data-testid="section-right_to_work"]')?.scrollIntoView({ behavior: 'smooth' });
+                            }, 100);
+                          }}
+                        >
+                          Update Right to Work
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* COMPLIANCE ALERTS - Expiry Warnings (Compact) */}
               {complianceRequirements?.expiry_alerts?.has_alerts && (
                 <div className={`mb-6 p-4 rounded-xl border ${

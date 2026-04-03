@@ -56,7 +56,9 @@ export default function UploadRequirementCard({
   onPreviewFile,
   employeeId,
   onRefresh,
-  isAuditor = false
+  isAuditor = false,
+  // RTW Status - additive, non-breaking prop
+  rtwStatus = null
 }) {
   // eslint-disable-next-line no-unused-vars
   const { token } = useAuth();
@@ -692,6 +694,56 @@ export default function UploadRequirementCard({
                             </div>
                           )}
                         </div>
+                        
+                        {/* RTW STATUS ALERT PANEL - Non-breaking, read-only display */}
+                        {rtwStatus && rtwStatus.status !== 'not_verified' && (
+                          <div className={`p-3 rounded-lg border ${
+                            rtwStatus.status_color === 'green' ? 'bg-green-50 border-green-200' :
+                            rtwStatus.status_color === 'amber' ? 'bg-amber-50 border-amber-200' :
+                            rtwStatus.status_color === 'red' ? 'bg-red-50 border-red-200' :
+                            'bg-gray-50 border-gray-200'
+                          }`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                {rtwStatus.status_color === 'green' && <CheckCircle className="h-4 w-4 text-green-600" />}
+                                {rtwStatus.status_color === 'amber' && <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                                {rtwStatus.status_color === 'red' && <AlertTriangle className="h-4 w-4 text-red-600" />}
+                                <span className={`text-sm font-semibold ${
+                                  rtwStatus.status_color === 'green' ? 'text-green-800' :
+                                  rtwStatus.status_color === 'amber' ? 'text-amber-800' :
+                                  rtwStatus.status_color === 'red' ? 'text-red-800' :
+                                  'text-gray-800'
+                                }`}>
+                                  {rtwStatus.status_label}
+                                </span>
+                              </div>
+                              {rtwStatus.days_until_expiry !== null && rtwStatus.days_until_expiry > 0 && (
+                                <Badge className={`text-[10px] ${
+                                  rtwStatus.days_until_expiry <= 30 ? 'bg-red-100 text-red-700 border-red-200' :
+                                  rtwStatus.days_until_expiry <= 90 ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                                  'bg-green-100 text-green-700 border-green-200'
+                                }`}>
+                                  {rtwStatus.days_until_expiry} days
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            {/* Alerts */}
+                            {rtwStatus.alerts && rtwStatus.alerts.length > 0 && (
+                              <div className="space-y-1">
+                                {rtwStatus.alerts.map((alert, idx) => (
+                                  <p key={idx} className={`text-xs ${
+                                    alert.level === 'error' || alert.level === 'urgent' ? 'text-red-700' :
+                                    alert.level === 'warning' ? 'text-amber-700' :
+                                    'text-gray-600'
+                                  }`}>
+                                    {alert.message}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

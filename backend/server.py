@@ -30618,7 +30618,7 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="right_to_work_evidence",
                     title="Right to Work Evidence",
-                    doc_requirement_keys=["right_to_work_documents", "right_to_work"],
+                    doc_requirement_keys=["right_to_work_documents", "right_to_work", "right_to_work_evidence"],
                     paired_check_key="right_to_work_check"
                 ),
                 build_check_row(
@@ -30640,7 +30640,7 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="dbs_certificate_evidence",
                     title="DBS Certificate Evidence",
-                    doc_requirement_keys=["dbs_certificate", "dbs_check", "dbs"],
+                    doc_requirement_keys=["dbs_certificate", "dbs_check", "dbs", "dbs_evidence", "dbs_certificate_evidence"],
                     paired_check_key="dbs_status_check"
                 ),
                 build_check_row(
@@ -30662,7 +30662,7 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="identity_evidence",
                     title="Identity Evidence",
-                    doc_requirement_keys=["identity_documents", "id_document", "identity"],
+                    doc_requirement_keys=["identity_documents", "id_document", "identity", "identity_evidence"],
                     paired_check_key="identity_verification"
                 ),
                 build_check_row(
@@ -30684,7 +30684,7 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="proof_of_address_evidence",
                     title="Proof of Address Evidence",
-                    doc_requirement_keys=["proof_of_address"],
+                    doc_requirement_keys=["proof_of_address", "proof_of_address_evidence", "address_evidence"],
                     paired_check_key="address_verification"
                 ),
                 build_address_verification_row()

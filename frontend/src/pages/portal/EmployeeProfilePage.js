@@ -3038,44 +3038,62 @@ export default function EmployeeProfilePage() {
                     )}
                   </div>
                   
-                  {/* RTW Status with Expiry - MUST show expiry date clearly */}
+                  {/* RTW Status with Expiry - Dynamic logic based on verification + expiry */}
                   <div className={`p-3 rounded-xl border ${
-                    rtwBlocking || rtwSummary.rtw_status_color === 'red' ? 'border-red-200 bg-red-50' :
-                    rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'border-amber-200 bg-amber-50' :
-                    rtwSummary.rtw_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
+                    rtwSummary.rtw_status_color === 'red' || rtwSummary.status_band === 'expired' ? 'border-red-200 bg-red-50' :
+                    rtwSummary.rtw_status_color === 'amber' || rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'border-amber-200 bg-amber-50' :
+                    rtwSummary.rtw_status_color === 'green' ? 'border-green-200 bg-green-50' : 
+                    rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'border-gray-200 bg-gray-50' : 
+                    'border-blue-200 bg-blue-50'
                   }`} data-testid="rtw-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${
-                        rtwBlocking || rtwSummary.rtw_status_color === 'red' ? 'text-red-600' :
-                        rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'text-amber-600' :
-                        rtwSummary.rtw_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
+                        rtwSummary.rtw_status_color === 'red' || rtwSummary.status_band === 'expired' ? 'text-red-600' :
+                        rtwSummary.rtw_status_color === 'amber' ? 'text-amber-600' :
+                        rtwSummary.rtw_status_color === 'green' ? 'text-green-600' : 
+                        rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'text-gray-500' :
+                        'text-blue-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
-                      {rtwBlocking && <span className="text-xs px-1 py-0.5 bg-red-600 text-white rounded">BLOCKED</span>}
                     </div>
-                    <p className={`text-sm font-medium ${
-                      rtwBlocking || rtwSummary.rtw_status_color === 'red' ? 'text-red-700' :
-                      rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'text-amber-700' :
-                      rtwSummary.rtw_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
-                    }`}>
-                      {rtwSummary.rtw_status_label || 'Unknown'}
-                    </p>
-                    {/* RTW Expiry - prominently displayed */}
-                    {rtwExpiry ? (
-                      <p className={`text-xs mt-1 font-medium ${
-                        rtwSummary.status_band === 'expired' ? 'text-red-600' :
-                        rtwSummary.status_band === 'urgent' ? 'text-amber-600' : 'text-text-muted'
-                      }`}>
-                        {rtwSummary.status_band === 'expired' ? '⚠ Expired: ' : 'Expires: '}
-                        {formatBackendDate(rtwExpiry)}
-                        {rtwExpiryDays !== undefined && rtwExpiryDays !== null && rtwExpiryDays > 0 && (
-                          <span className="ml-1">({rtwExpiryDays}d)</span>
-                        )}
+                    
+                    {/* Dynamic Status Display - No contradictions */}
+                    {!rtwSummary.is_verified ? (
+                      // Not verified = MISSING
+                      <p className="text-sm font-semibold text-gray-700">MISSING</p>
+                    ) : rtwSummary.status_band === 'expired' || rtwSummary.rtw_status_color === 'red' ? (
+                      // Expired
+                      <p className="text-sm font-semibold text-red-700">
+                        EXPIRED • Not valid to work
                       </p>
-                    ) : rtwSummary.permission_type === 'permanent' ? (
-                      <p className="text-xs mt-1 text-green-600 font-medium">Permanent - No Expiry</p>
+                    ) : rtwSummary.is_indefinite || rtwSummary.permission_type === 'permanent' ? (
+                      // Verified + No expiry
+                      <p className="text-sm font-semibold text-green-700">
+                        VERIFIED • No Expiry
+                      </p>
+                    ) : rtwExpiry ? (
+                      // Verified + Has expiry
+                      <p className={`text-sm font-semibold ${
+                        rtwSummary.status_band === 'urgent' ? 'text-amber-700' : 'text-green-700'
+                      }`}>
+                        VERIFIED • Expires {formatBackendDate(rtwExpiry)}
+                      </p>
                     ) : (
-                      <p className="text-xs mt-1 text-text-muted">No expiry set</p>
+                      // Verified but no expiry info
+                      <p className="text-sm font-semibold text-green-700">VERIFIED</p>
+                    )}
+                    
+                    {/* Days countdown for expiring */}
+                    {rtwSummary.is_verified && rtwExpiry && rtwExpiryDays !== undefined && rtwExpiryDays !== null && (
+                      <p className={`text-xs mt-1 font-medium ${
+                        rtwExpiryDays < 0 ? 'text-red-600' :
+                        rtwExpiryDays <= 30 ? 'text-red-600' :
+                        rtwExpiryDays <= 90 ? 'text-amber-600' : 'text-text-muted'
+                      }`}>
+                        {rtwExpiryDays < 0 ? `${Math.abs(rtwExpiryDays)} days overdue` :
+                         rtwExpiryDays === 0 ? 'Expires today' :
+                         `${rtwExpiryDays} days remaining`}
+                      </p>
                     )}
                   </div>
                   

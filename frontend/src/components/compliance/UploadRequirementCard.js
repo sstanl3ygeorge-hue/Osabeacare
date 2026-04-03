@@ -619,10 +619,20 @@ export default function UploadRequirementCard({
                         </div>
                         
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                          {/* Permission Type - NEW */}
+                          {(checkData.permission_type || checkData.document_type) && (
+                            <div className="col-span-2 md:col-span-3">
+                              <p className="text-xs text-text-muted">Permission Type</p>
+                              <p className="font-semibold text-text-primary text-base">
+                                {checkData.permission_type || checkData.document_type || 'Not specified'}
+                              </p>
+                            </div>
+                          )}
+                          
                           {/* Route / Check Type */}
                           {(checkData.route || checkData.method) && (
                             <div>
-                              <p className="text-xs text-text-muted">Route</p>
+                              <p className="text-xs text-text-muted">Verification Method</p>
                               <p className="font-medium text-text-primary">{getMethodDisplay(checkData.route || checkData.method)}</p>
                             </div>
                           )}
@@ -635,11 +645,36 @@ export default function UploadRequirementCard({
                             </div>
                           )}
                           
-                          {/* Permission End / Expiry */}
-                          {checkData.permission_end_date && (
+                          {/* Permission End / Expiry OR No Expiry */}
+                          <div>
+                            <p className="text-xs text-text-muted">Permission Expiry</p>
+                            {checkData.is_indefinite ? (
+                              <p className="font-medium text-green-700 flex items-center gap-1">
+                                <CheckCircle className="h-3 w-3" />
+                                No Expiry (Indefinite)
+                              </p>
+                            ) : checkData.permission_end_date ? (
+                              <p className={`font-medium ${
+                                rtwStatus?.status === 'expired' ? 'text-red-700' :
+                                rtwStatus?.days_until_expiry <= 30 ? 'text-red-600' :
+                                rtwStatus?.days_until_expiry <= 90 ? 'text-amber-600' :
+                                'text-text-primary'
+                              }`}>
+                                {formatBackendDate(checkData.permission_end_date, { format: 'medium' })}
+                                {rtwStatus?.days_until_expiry !== null && rtwStatus?.days_until_expiry > 0 && (
+                                  <span className="text-xs ml-1">({rtwStatus.days_until_expiry}d)</span>
+                                )}
+                              </p>
+                            ) : (
+                              <p className="font-medium text-amber-600">Not specified</p>
+                            )}
+                          </div>
+                          
+                          {/* Share Code */}
+                          {checkData.share_code && (
                             <div>
-                              <p className="text-xs text-text-muted">Permission Expires</p>
-                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.permission_end_date, { format: 'medium' })}</p>
+                              <p className="text-xs text-text-muted">Share Code</p>
+                              <p className="font-medium text-text-primary font-mono text-xs bg-slate-100 px-2 py-1 rounded inline-block">{checkData.share_code}</p>
                             </div>
                           )}
                           
@@ -647,34 +682,71 @@ export default function UploadRequirementCard({
                           {checkData.reference_number && (
                             <div>
                               <p className="text-xs text-text-muted">Reference / PVN</p>
-                              <p className="font-medium text-text-primary font-mono text-xs">{checkData.reference_number}</p>
+                              <p className="font-medium text-text-primary font-mono text-xs bg-slate-100 px-2 py-1 rounded inline-block">{checkData.reference_number}</p>
                             </div>
                           )}
                           
-                          {/* Share Code */}
-                          {checkData.share_code && (
+                          {/* Checked Date */}
+                          {checkData.checked_at && (
                             <div>
-                              <p className="text-xs text-text-muted">Share Code</p>
-                              <p className="font-medium text-text-primary font-mono text-xs">{checkData.share_code}</p>
-                            </div>
-                          )}
-                          
-                          {/* Follow-up Date */}
-                          {checkData.follow_up_due_at && (
-                            <div>
-                              <p className="text-xs text-text-muted">Next Follow-up</p>
-                              <p className="font-medium text-amber-700">{formatBackendDate(checkData.follow_up_due_at, { format: 'medium' })}</p>
+                              <p className="text-xs text-text-muted">Verification Date</p>
+                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.checked_at, { format: 'medium' })}</p>
                             </div>
                           )}
                         </div>
                         
+                        {/* Follow-up Section - Critical for time-limited permissions */}
+                        {(checkData.follow_up_required || checkData.follow_up_due_at) && (
+                          <div className={`p-3 rounded-lg border ${
+                            rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup < 0 ? 'bg-red-50 border-red-200' :
+                            rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup <= 30 ? 'bg-amber-50 border-amber-200' :
+                            'bg-blue-50 border-blue-200'
+                          }`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <Clock className={`h-4 w-4 ${
+                                rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup < 0 ? 'text-red-600' :
+                                rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup <= 30 ? 'text-amber-600' :
+                                'text-blue-600'
+                              }`} />
+                              <span className={`text-xs font-semibold ${
+                                rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup < 0 ? 'text-red-800' :
+                                rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup <= 30 ? 'text-amber-800' :
+                                'text-blue-800'
+                              }`}>
+                                {rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup < 0 ? 'FOLLOW-UP OVERDUE' : 'Follow-up Required'}
+                              </span>
+                            </div>
+                            <p className={`text-sm font-medium ${
+                              rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup < 0 ? 'text-red-700' :
+                              rtwStatus?.days_until_followup !== null && rtwStatus?.days_until_followup <= 30 ? 'text-amber-700' :
+                              'text-blue-700'
+                            }`}>
+                              {checkData.follow_up_due_at ? (
+                                <>
+                                  Due: {formatBackendDate(checkData.follow_up_due_at, { format: 'medium' })}
+                                  {rtwStatus?.days_until_followup !== null && (
+                                    <span className="ml-2">
+                                      ({rtwStatus.days_until_followup < 0 ? `${Math.abs(rtwStatus.days_until_followup)} days overdue` : `${rtwStatus.days_until_followup} days`})
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                'Date not set'
+                              )}
+                            </p>
+                          </div>
+                        )}
+                        
                         {/* Restrictions - Full width */}
                         {checkData.restrictions && (
-                          <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
-                            <p className="text-xs text-amber-800 font-medium mb-1">Work Restrictions</p>
+                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                            <div className="flex items-center gap-2 mb-1">
+                              <AlertTriangle className="h-4 w-4 text-amber-600" />
+                              <span className="text-xs font-semibold text-amber-800">Work Restrictions Apply</span>
+                            </div>
                             <p className="text-sm text-amber-700">{checkData.restrictions}</p>
                             {checkData.hours_limit && (
-                              <p className="text-xs text-amber-600 mt-1">Hours limit: {checkData.hours_limit} per week</p>
+                              <p className="text-xs text-amber-600 mt-1 font-medium">Hours limit: {checkData.hours_limit} per week</p>
                             )}
                           </div>
                         )}
@@ -687,10 +759,10 @@ export default function UploadRequirementCard({
                               <span className="text-xs font-medium text-green-700">Indefinite right to work</span>
                             </div>
                           )}
-                          {checkData.follow_up_required && (
-                            <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
-                              <Clock className="h-3 w-3 text-amber-600" />
-                              <span className="text-xs font-medium text-amber-700">Follow-up required</span>
+                          {checkData.outcome === 'verified' && !checkData.is_indefinite && (
+                            <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-lg">
+                              <Shield className="h-3 w-3 text-blue-600" />
+                              <span className="text-xs font-medium text-blue-700">Time-limited permission</span>
                             </div>
                           )}
                         </div>

@@ -317,6 +317,7 @@ export default function RecordCheckDialog({
     certificate_number: '',
     notes: '',
     // RTW Result Panel fields
+    permission_type: '',  // e.g., British Citizen, Skilled Worker, Pre-Settled Status
     permission_start_date: '',
     permission_end_date: '',
     reference_number: '',
@@ -735,6 +736,7 @@ export default function RecordCheckDialog({
         payload.follow_up_due_at = formData.follow_up_due_at || null;
         
         // RTW Result Panel fields (3-layer model)
+        payload.permission_type = formData.permission_type || null;  // e.g., British Citizen, Skilled Worker
         payload.permission_start_date = formData.permission_start_date || null;
         payload.permission_end_date = formData.permission_end_date || null;
         payload.reference_number = formData.reference_number || null;
@@ -800,6 +802,7 @@ export default function RecordCheckDialog({
       certificate_number: '',
       notes: '',
       // RTW Result Panel fields
+      permission_type: '',
       permission_start_date: '',
       permission_end_date: '',
       reference_number: '',
@@ -1209,6 +1212,21 @@ export default function RecordCheckDialog({
                     AI Extracted
                   </span>
                 )}
+              </div>
+              
+              {/* Permission Type - Full width, prominent */}
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Permission Type *</Label>
+                <Input
+                  value={formData.permission_type}
+                  onChange={(e) => setFormData(prev => ({ ...prev, permission_type: e.target.value }))}
+                  placeholder="e.g., British Citizen, Skilled Worker, Pre-Settled Status"
+                  className="h-9 text-sm rounded-lg"
+                  data-testid="rtw-permission-type"
+                />
+                <p className="text-xs text-text-muted">
+                  The immigration status or visa type (e.g., British Citizen, Skilled Worker Visa, Pre-Settled Status)
+                </p>
               </div>
               
               <div className="grid grid-cols-2 gap-3">

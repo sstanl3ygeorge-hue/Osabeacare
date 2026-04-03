@@ -3239,6 +3239,10 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
         "verification_on_file": False,
         "verification_verified": False,
         
+        # NEW: Status engine fields for Audit Quick View
+        "is_verified": False,  # Has been verified by employer
+        "is_indefinite": False,  # Has indefinite/permanent RTW (no expiry)
+        
         # Safety engine outputs
         "is_blocking": True,
         "blocking_reason": "Right to Work verification missing",
@@ -3362,6 +3366,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
     if summary["documents_on_file"] and summary["verification_on_file"]:
         if summary["documents_verified"] and summary["verification_verified"]:
             summary["rule_applied"] = "fully_verified"
+            summary["is_verified"] = True  # Mark as verified
             
             # Check expiry status for time-limited permission
             days_remaining = summary.get("days_remaining")
@@ -3418,6 +3423,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
                 summary["needs_attention"] = False
                 summary["expiry_status"] = "permanent"
                 summary["permission_type"] = "permanent"  # Ensure permission_type is set
+                summary["is_indefinite"] = True  # Mark as indefinite/permanent
         else:
             # Not verified - BLOCKING (legal requirement)
             summary["rtw_status"] = "pending_verification"
@@ -25378,6 +25384,7 @@ class CheckRecordService:
             "method": data.get("method"),  # home_office_online_check, manual_list_a_check, etc.
             "route": data.get("route"),  # RTW route type
             "document_type": data.get("document_type"),  # Specific document type verified
+            "permission_type": data.get("permission_type"),  # Permission type (e.g., Skilled Worker, British Citizen)
             "checked_at": data.get("checked_at"),
             "checked_by": recorded_by,
             "outcome": data.get("outcome", "awaiting_review"),  # verified, failed, follow_up_required
@@ -29319,6 +29326,7 @@ class RTWCheckInput(BaseModel):
     route: Optional[str] = Field(None, description="RTW route: home_office_online_check, manual_list_a_check, etc.")
     document_type: Optional[str] = Field(None, description="Document type verified")
     source_status_type: Optional[str] = Field(None, description="Status type: share_code, settled_status, etc.")
+    permission_type: Optional[str] = Field(None, description="Permission type: British Citizen, Skilled Worker, Pre-Settled Status, etc.")
     
     # Permission details (for Result Panel)
     permission_start_date: Optional[str] = Field(None, description="Permission start date")

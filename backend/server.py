@@ -29330,6 +29330,23 @@ async def get_compliance_file(
         {"_id": 0}
     ).to_list(200)
     
+    # DIAGNOSTIC: Log what we found
+    logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Fetching documents for employee_id={employee_id}")
+    logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Found {len(documents)} total documents")
+    
+    # Check for public upload documents
+    public_upload_docs = [d for d in documents if d.get('source_type') == 'email_upload_link']
+    logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Found {len(public_upload_docs)} public upload documents")
+    for doc in public_upload_docs:
+        logger.info(f"  Public upload doc: id={doc.get('id')[:12]}..., requirement_id={doc.get('requirement_id')}, status={doc.get('status')}")
+    
+    # Log requirement_id distribution
+    req_counts = {}
+    for d in documents:
+        req_id = d.get('requirement_id', 'NO_REQ_ID')
+        req_counts[req_id] = req_counts.get(req_id, 0) + 1
+    logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Documents by requirement_id: {req_counts}")
+    
     # Get extraction statuses
     doc_ids = [d["id"] for d in documents]
     extractions = {}
@@ -29466,7 +29483,14 @@ async def get_compliance_file(
         # Collect documents from multiple requirement keys
         all_docs = []
         for req_key in doc_requirement_keys:
-            all_docs.extend(docs_by_requirement.get(req_key, []))
+            docs_for_key = docs_by_requirement.get(req_key, [])
+            all_docs.extend(docs_for_key)
+            # DIAGNOSTIC: Log what we're collecting
+            if docs_for_key:
+                logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, req_key={req_key}, found {len(docs_for_key)} docs")
+        
+        # DIAGNOSTIC: Log total collected before filtering
+        logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, total collected={len(all_docs)}, doc_requirement_keys={doc_requirement_keys}")
         
         # Filter out superseded/error documents
         active_docs = [d for d in all_docs if d.get("status") not in [
@@ -29474,6 +29498,11 @@ async def get_compliance_file(
             DocumentStatus.UPLOADED_IN_ERROR.value,
             DocumentStatus.MISFILED.value
         ]]
+        
+        # DIAGNOSTIC: Log after status filter
+        if len(active_docs) != len(all_docs):
+            filtered_out = len(all_docs) - len(active_docs)
+            logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, filtered out {filtered_out} docs by status")
         
         verified_count = len([d for d in active_docs if d.get("verified")])
         awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") not in [DocumentStatus.REJECTED.value]])
@@ -34671,11 +34700,26 @@ async def public_upload_document(
         "updated_at": now
     }
     
-    logger.info(f"Public upload: Creating document record for requirement_id={requirement_id}, person_id={person_id}")
+    # DIAGNOSTIC: Log full document record being inserted
+    logger.info(f"PUBLIC_UPLOAD_DIAGNOSTIC: Inserting document record:")
+    logger.info(f"  document_id={document_id}")
+    logger.info(f"  employee_id={person_id}")
+    logger.info(f"  person_type={person_type}")
+    logger.info(f"  requirement_id={requirement_id}")
+    logger.info(f"  file_url={file_url}")
+    logger.info(f"  status={document_record['status']}")
+    logger.info(f"  source_type={document_record['source_type']}")
+    logger.info(f"  Collection: employee_documents")
     
     await db.employee_documents.insert_one(document_record)
     
-    logger.info(f"Public upload: Document record created with id={document_id}")
+    # DIAGNOSTIC: Verify the record was inserted
+    verify_doc = await db.employee_documents.find_one({"id": document_id}, {"_id": 0, "id": 1, "employee_id": 1, "requirement_id": 1})
+    if verify_doc:
+        logger.info(f"PUBLIC_UPLOAD_DIAGNOSTIC: VERIFIED - Document {document_id} exists in DB")
+        logger.info(f"  Found: employee_id={verify_doc.get('employee_id')}, requirement_id={verify_doc.get('requirement_id')}")
+    else:
+        logger.error(f"PUBLIC_UPLOAD_DIAGNOSTIC: FAILED - Document {document_id} NOT FOUND after insert!")
     
     # Link submission to email request
     if request_id_val:
@@ -34724,6 +34768,71 @@ async def public_upload_document(
             "Your document has been received",
             "Our team will verify it within 2-3 working days",
             "You will be notified once verification is complete"
+        ]
+    }
+
+
+@api_router.get("/public/debug-documents/{person_id}")
+async def debug_person_documents(person_id: str):
+    """
+    PUBLIC DEBUG endpoint - Check what documents exist for a person.
+    Used to verify public uploads are being stored correctly.
+    
+    This endpoint is for debugging only and should be disabled in final production.
+    """
+    # Get person details
+    person = await db.employees.find_one({"id": person_id}, {"_id": 0, "first_name": 1, "last_name": 1, "person_stage": 1, "applicant_reference": 1})
+    if not person:
+        return {"status": "error", "message": "Person not found", "person_id": person_id}
+    
+    # Get all documents for this person
+    all_docs = await db.employee_documents.find(
+        {"employee_id": person_id},
+        {"_id": 0, "id": 1, "requirement_id": 1, "document_type_id": 1, "status": 1, "source_type": 1, "file_url": 1, "uploaded_at": 1, "original_filename": 1}
+    ).to_list(100)
+    
+    # Group by requirement_id
+    by_requirement = {}
+    for doc in all_docs:
+        req_id = doc.get("requirement_id", "NO_REQ_ID")
+        if req_id not in by_requirement:
+            by_requirement[req_id] = []
+        by_requirement[req_id].append(doc)
+    
+    # Check specifically for public uploads
+    public_uploads = [d for d in all_docs if d.get("source_type") == "email_upload_link"]
+    
+    return {
+        "status": "success",
+        "person_id": person_id,
+        "person_name": f"{person.get('first_name', '')} {person.get('last_name', '')}",
+        "person_stage": person.get("person_stage"),
+        "applicant_reference": person.get("applicant_reference"),
+        "total_documents": len(all_docs),
+        "public_upload_documents": len(public_uploads),
+        "documents_by_requirement": {
+            req_id: [
+                {
+                    "id": d.get("id"),
+                    "status": d.get("status"),
+                    "source_type": d.get("source_type"),
+                    "file_url": bool(d.get("file_url")),
+                    "uploaded_at": d.get("uploaded_at"),
+                    "filename": d.get("original_filename")
+                }
+                for d in docs
+            ]
+            for req_id, docs in by_requirement.items()
+        },
+        "public_uploads": [
+            {
+                "id": d.get("id"),
+                "requirement_id": d.get("requirement_id"),
+                "status": d.get("status"),
+                "uploaded_at": d.get("uploaded_at"),
+                "filename": d.get("original_filename")
+            }
+            for d in public_uploads
         ]
     }
 

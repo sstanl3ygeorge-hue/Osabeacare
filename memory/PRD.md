@@ -89,6 +89,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Changed "Upload Proof" to "Record Check"** - Removed standalone "Upload Proof" button from verification row. Proof upload is now part of the RecordCheckDialog workflow which opens when clicking "Record Check".
 - [x] **Implemented System Role Normalization** - Added `system_role` field (HCA/NURSE) for compliance logic. All compliance, training, and readiness logic now uses `system_role` instead of raw string matching. Migration completed for 21 existing employees. Admin endpoints: GET/POST /admin/system-role/status, /migrate, /set-manual.
 - [x] **Evidence Review Workflow (Apr 3)** - Created `EvidenceReviewDialog.js` for Accept/Reject/Mark Uploaded in Error actions on evidence files. Added backend endpoints: POST `/api/employee-documents/{doc_id}/reject`, POST `/api/employee-documents/{doc_id}/mark-uploaded-in-error`. Review button visible on pending evidence files in UploadRequirementCard. "Accept & Record Check" button available for document-heavy requirements (RTW, DBS, Identity, PoA).
+- [x] **Reference Verification Workflow (Apr 3)** - Added employment history mismatch detection (reference vs application, reference vs normalized, response vs declared dates/employer). Added alternative reference path recording with attempt tracking. New endpoint: POST `/api/references/{employee_id}/{ref_num}/record-alternative-path`. UI shows employment mismatch warnings and alternative path section in ReferenceResponseDrawer.
+- [x] **Image Viewer Rotation Controls (Apr 3)** - Added Rotate Left/Right buttons to DocumentPreviewModal for images (JPEG/PNG). Client-side only rotation.
 
 ## Prioritized Backlog
 
@@ -98,12 +100,12 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Restore db.references insertion logic** (DONE - references now appear in Recruitment Record)
 - [x] **Fix fake "Request sent" state on new applicants** (VERIFIED WORKING - frontend correctly shows "not yet requested")
 - [x] **Evidence Review Workflow** (DONE Apr 3) - EvidenceReviewDialog allows Accept/Reject/Mark Uploaded in Error actions on evidence files
+- [x] **Reference Verification Workflow** (DONE Apr 3) - Employment mismatch detection, alternative reference path recording
 
 ### P1 (High)
-- [ ] Reference Verification Workflow ("Verified" checkbox, mismatch warnings)
 - [ ] ID/Document verification stamps ("ORIGINAL VERIFIED" checkbox)
 - [ ] Interview Notes integration
-- [ ] Employment Gap explanation enforcement
+- [ ] Employment Gap explanation enforcement (30 days threshold)
 - [ ] Training Matrix PDF export
 - [ ] Employee self-service portal
 - [ ] Supabase Auth integration and RLS policies
@@ -159,4 +161,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - Evidence Review Workflow implemented (Accept/Reject/Mark Uploaded in Error)
+April 3, 2026 - Reference Verification Workflow with employment mismatch detection and alternative path recording

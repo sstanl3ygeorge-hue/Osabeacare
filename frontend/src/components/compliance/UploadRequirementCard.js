@@ -564,6 +564,51 @@ export default function UploadRequirementCard({
                         <p className="text-sm text-text-primary">{checkData.notes}</p>
                       </div>
                     )}
+                    
+                    {/* RTW Result Details - Only show for RTW checks with result data */}
+                    {key === 'right_to_work' && (checkData.permission_end_date || checkData.reference_number || checkData.share_code || checkData.restrictions || checkData.is_indefinite) && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
+                        <p className="text-xs text-text-muted uppercase tracking-wide font-medium">Right to Work Result</p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                          {checkData.permission_end_date && (
+                            <div>
+                              <p className="text-xs text-text-muted">Permission Expires</p>
+                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.permission_end_date, { format: 'medium' })}</p>
+                            </div>
+                          )}
+                          {checkData.reference_number && (
+                            <div>
+                              <p className="text-xs text-text-muted">Reference</p>
+                              <p className="font-medium text-text-primary font-mono text-xs">{checkData.reference_number}</p>
+                            </div>
+                          )}
+                          {checkData.share_code && (
+                            <div>
+                              <p className="text-xs text-text-muted">Share Code</p>
+                              <p className="font-medium text-text-primary font-mono text-xs">{checkData.share_code}</p>
+                            </div>
+                          )}
+                          {checkData.restrictions && (
+                            <div className="col-span-2">
+                              <p className="text-xs text-text-muted">Restrictions</p>
+                              <p className="font-medium text-amber-700">{checkData.restrictions}</p>
+                            </div>
+                          )}
+                        </div>
+                        {checkData.is_indefinite && (
+                          <div className="flex items-center gap-1 text-green-700">
+                            <CheckCircle className="h-3 w-3" />
+                            <span className="text-xs font-medium">Indefinite right to work</span>
+                          </div>
+                        )}
+                        {checkData.follow_up_required && checkData.follow_up_due_at && (
+                          <div className="flex items-center gap-1 text-amber-700">
+                            <Clock className="h-3 w-3" />
+                            <span className="text-xs font-medium">Follow-up due: {formatBackendDate(checkData.follow_up_due_at, { format: 'medium' })}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* VERIFICATION PROOF FILE SECTION */}

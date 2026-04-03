@@ -302,6 +302,7 @@ export default function RecordCheckDialog({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [formData, setFormData] = useState({
     method: '',
     checked_at: new Date().toISOString().split('T')[0],
@@ -310,8 +311,22 @@ export default function RecordCheckDialog({
     follow_up_due_at: '',
     review_due_at: '',
     certificate_number: '',
-    notes: ''
+    notes: '',
+    // RTW Result Panel fields
+    permission_start_date: '',
+    permission_end_date: '',
+    reference_number: '',
+    share_code: '',
+    restrictions: '',
+    hours_limit: '',
+    is_indefinite: false,
+    follow_up_required: false,
+    document_type: ''
   });
+  
+  // Extraction state for RTW
+  const [extractionResult, setExtractionResult] = useState(null);
+  const [extractionIssues, setExtractionIssues] = useState([]);
   
   // Proof file state - COMPLIANCE CRITICAL
   const [proofFile, setProofFile] = useState(null);
@@ -320,6 +335,9 @@ export default function RecordCheckDialog({
   const fileInputRef = useRef(null);
   
   const { token } = useAuth();
+
+  // Check if RTW check
+  const isRTW = checkType === 'right_to_work_check' || checkType === 'right_to_work';
 
   // Get methods for this check type with fallback to default
   const methods = CHECK_METHODS[checkType] || CHECK_METHODS.default;
@@ -419,9 +437,104 @@ export default function RecordCheckDialog({
     setProofFile(null);
     setUploadedProofId(null);
     setUploadedProofName(null);
+    setExtractionResult(null);
+    setExtractionIssues([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  // Auto-extract RTW fields from proof file using AI Vision
+  const handleAutoExtract = async () => {
+    if (!proofFile || !isRTW) return;
+
+    setIsExtracting(true);
+    setExtractionResult(null);
+    setExtractionIssues([]);
+
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64Data = e.target.result.split(',')[1]; // Remove data:xxx;base64, prefix
+
+        try {
+          const response = await axios.post(
+            `${API}/rtw/extract`,
+            {
+              file_base64: base64Data,
+              file_type: proofFile.type
+            },
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              params: { employee_id: employeeId }
+            }
+          );
+
+          if (response.data?.success && response.data?.extraction) {
+            const { fields, issues } = response.data.extraction;
+            setExtractionResult(fields);
+            setExtractionIssues(issues || []);
+
+            // Auto-populate form fields from extraction
+            setFormData(prev => ({
+              ...prev,
+              permission_start_date: fields.permission_start_date || prev.permission_start_date,
+              permission_end_date: fields.permission_end_date || prev.permission_end_date,
+              reference_number: fields.reference_number || prev.reference_number,
+              share_code: fields.share_code || prev.share_code,
+              restrictions: fields.restrictions || prev.restrictions,
+              hours_limit: fields.hours_limit?.toString() || prev.hours_limit,
+              is_indefinite: fields.is_indefinite ?? prev.is_indefinite,
+              follow_up_required: fields.requires_followup ?? prev.follow_up_required,
+              document_type: fields.document_type || prev.document_type,
+              source_status_type: fields.permission_type ? mapPermissionTypeToStatus(fields.permission_type) : prev.source_status_type
+            }));
+
+            // Check for blockers
+            const blockers = (issues || []).filter(i => i.severity === 'blocker');
+            if (blockers.length > 0) {
+              toast.error(`Extraction found issues: ${blockers[0].detail}`);
+            } else {
+              toast.success('Fields extracted - please review and confirm');
+            }
+          } else {
+            toast.error(response.data?.error || 'Extraction failed');
+          }
+        } catch (err) {
+          console.error('Extraction API error:', err);
+          toast.error(err.response?.data?.detail || 'Failed to extract fields');
+        } finally {
+          setIsExtracting(false);
+        }
+      };
+
+      reader.onerror = () => {
+        toast.error('Failed to read file');
+        setIsExtracting(false);
+      };
+
+      reader.readAsDataURL(proofFile);
+    } catch (err) {
+      console.error('File read error:', err);
+      toast.error('Failed to process file');
+      setIsExtracting(false);
+    }
+  };
+
+  // Map extracted permission type to source_status_type value
+  const mapPermissionTypeToStatus = (permissionType) => {
+    if (!permissionType) return '';
+    const pt = permissionType.toLowerCase();
+    if (pt.includes('settled') && !pt.includes('pre')) return 'settled_status';
+    if (pt.includes('pre-settled') || pt.includes('presettled')) return 'pre_settled_status';
+    if (pt.includes('uk citizen') || pt.includes('british')) return 'uk_citizen';
+    if (pt.includes('irish')) return 'irish_citizen';
+    if (pt.includes('evisa') || pt.includes('digital')) return 'digital_status';
+    if (pt.includes('student')) return 'student_visa';
+    if (pt.includes('work visa')) return 'work_visa';
+    if (pt.includes('brp')) return 'brp_valid';
+    return 'other';
   };
 
   const handleSubmit = async () => {
@@ -483,9 +596,25 @@ export default function RecordCheckDialog({
       };
 
       // Add type-specific fields
-      if (checkType === 'right_to_work_check') {
+      if (checkType === 'right_to_work_check' || checkType === 'right_to_work') {
+        // Core RTW fields
         payload.source_status_type = formData.source_status_type || null;
         payload.follow_up_due_at = formData.follow_up_due_at || null;
+        
+        // RTW Result Panel fields (3-layer model)
+        payload.permission_start_date = formData.permission_start_date || null;
+        payload.permission_end_date = formData.permission_end_date || null;
+        payload.reference_number = formData.reference_number || null;
+        payload.share_code = formData.share_code || null;
+        payload.restrictions = formData.restrictions || null;
+        payload.hours_limit = formData.hours_limit ? parseInt(formData.hours_limit) : null;
+        payload.is_indefinite = formData.is_indefinite || false;
+        payload.follow_up_required = formData.follow_up_required || false;
+        payload.document_type = formData.document_type || null;
+        
+        // Route based on method
+        const methodDef = methods.find(m => m.value === formData.method);
+        payload.route = methodDef?.route || formData.method;
       }
       
       if (checkType === 'dbs_status_check') {
@@ -516,11 +645,23 @@ export default function RecordCheckDialog({
       follow_up_due_at: '',
       review_due_at: '',
       certificate_number: '',
-      notes: ''
+      notes: '',
+      // RTW Result Panel fields
+      permission_start_date: '',
+      permission_end_date: '',
+      reference_number: '',
+      share_code: '',
+      restrictions: '',
+      hours_limit: '',
+      is_indefinite: false,
+      follow_up_required: false,
+      document_type: ''
     });
     setProofFile(null);
     setUploadedProofId(null);
     setUploadedProofName(null);
+    setExtractionResult(null);
+    setExtractionIssues([]);
     if (onClose) onClose();
   };
 
@@ -528,7 +669,7 @@ export default function RecordCheckDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-white sm:max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="bg-white sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
@@ -598,6 +739,63 @@ export default function RecordCheckDialog({
               </div>
             )}
           </div>
+
+          {/* RTW Auto-Extract Button - only shown for RTW checks with a file ready */}
+          {isRTW && hasProof && !uploadedProofId && (
+            <div className="space-y-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleAutoExtract}
+                disabled={isExtracting}
+                className="w-full h-9 text-sm bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
+                data-testid="rtw-auto-extract-btn"
+              >
+                {isExtracting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Extracting fields...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="h-4 w-4 mr-2" />
+                    Auto-Extract RTW Fields
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-text-muted text-center">
+                AI will extract dates, reference numbers, and restrictions from your proof file
+              </p>
+            </div>
+          )}
+
+          {/* Extraction Issues Warning */}
+          {extractionIssues.length > 0 && (
+            <div className="space-y-2">
+              {extractionIssues.filter(i => i.severity === 'blocker').map((issue, idx) => (
+                <div key={idx} className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-red-800">
+                      <p className="font-medium">Blocker: {issue.code.replace(/_/g, ' ')}</p>
+                      <p className="text-xs mt-0.5">{issue.detail}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {extractionIssues.filter(i => i.severity === 'warning').map((issue, idx) => (
+                <div key={idx} className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-amber-800">
+                      <p className="font-medium">Warning: {issue.code.replace(/_/g, ' ')}</p>
+                      <p className="text-xs mt-0.5">{issue.detail}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Method */}
           <div className="space-y-2">
@@ -783,6 +981,139 @@ export default function RecordCheckDialog({
             </div>
           )}
 
+          {/* ============================================== */}
+          {/* RTW RESULT PANEL - Permission Details         */}
+          {/* 3-Layer Model: Evidence -> Verification -> Result */}
+          {/* ============================================== */}
+          {isRTW && (
+            <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-slate-600" />
+                <h4 className="text-sm font-semibold text-slate-800">Right to Work Result</h4>
+                {extractionResult && (
+                  <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                    AI Extracted
+                  </span>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                {/* Permission Start Date */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Permission Start</Label>
+                  <Input
+                    type="date"
+                    value={formData.permission_start_date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, permission_start_date: e.target.value }))}
+                    className="h-8 text-sm rounded-lg"
+                    data-testid="rtw-permission-start"
+                  />
+                </div>
+                
+                {/* Permission End Date */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Permission End / Expiry</Label>
+                  <Input
+                    type="date"
+                    value={formData.permission_end_date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, permission_end_date: e.target.value }))}
+                    className="h-8 text-sm rounded-lg"
+                    data-testid="rtw-permission-end"
+                  />
+                </div>
+                
+                {/* Reference Number */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Reference / PVN Number</Label>
+                  <Input
+                    value={formData.reference_number}
+                    onChange={(e) => setFormData(prev => ({ ...prev, reference_number: e.target.value }))}
+                    placeholder="e.g., PVN123456"
+                    className="h-8 text-sm rounded-lg"
+                    data-testid="rtw-reference-number"
+                  />
+                </div>
+                
+                {/* Share Code */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Share Code</Label>
+                  <Input
+                    value={formData.share_code}
+                    onChange={(e) => setFormData(prev => ({ ...prev, share_code: e.target.value.toUpperCase() }))}
+                    placeholder="e.g., ABC123DEF"
+                    maxLength={9}
+                    className="h-8 text-sm rounded-lg font-mono"
+                    data-testid="rtw-share-code"
+                  />
+                </div>
+              </div>
+              
+              {/* Restrictions */}
+              <div className="space-y-1">
+                <Label className="text-xs">Work Restrictions</Label>
+                <Input
+                  value={formData.restrictions}
+                  onChange={(e) => setFormData(prev => ({ ...prev, restrictions: e.target.value }))}
+                  placeholder="e.g., 20 hours per week during term time"
+                  className="h-8 text-sm rounded-lg"
+                  data-testid="rtw-restrictions"
+                />
+              </div>
+              
+              {/* Hours Limit */}
+              {formData.restrictions && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Hours Limit (per week)</Label>
+                  <Input
+                    type="number"
+                    value={formData.hours_limit}
+                    onChange={(e) => setFormData(prev => ({ ...prev, hours_limit: e.target.value }))}
+                    placeholder="e.g., 20"
+                    min={0}
+                    max={48}
+                    className="h-8 text-sm rounded-lg w-24"
+                    data-testid="rtw-hours-limit"
+                  />
+                </div>
+              )}
+              
+              {/* Checkboxes for status flags */}
+              <div className="flex items-center gap-6 pt-2">
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.is_indefinite}
+                    onChange={(e) => setFormData(prev => ({ ...prev, is_indefinite: e.target.checked }))}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    data-testid="rtw-is-indefinite"
+                  />
+                  <span className="text-slate-700">Indefinite right to work</span>
+                </label>
+                
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.follow_up_required}
+                    onChange={(e) => setFormData(prev => ({ ...prev, follow_up_required: e.target.checked }))}
+                    className="w-4 h-4 rounded border-gray-300 text-amber-500 focus:ring-amber-500"
+                    data-testid="rtw-follow-up-required"
+                  />
+                  <span className="text-slate-700">Follow-up required</span>
+                </label>
+              </div>
+              
+              {/* Auto-calculation hint */}
+              {formData.permission_end_date && !formData.follow_up_due_at && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-xs text-amber-700">
+                    <AlertTriangle className="h-3 w-3 inline mr-1" />
+                    Permission ends {formData.permission_end_date}. Set a follow-up date 28 days before.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* DBS-specific: Certificate Number */}
           {checkType === 'dbs_status_check' && (
             <div className="space-y-2">
@@ -830,7 +1161,7 @@ export default function RecordCheckDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || isUploading || !formData.method || !hasProof}
+            disabled={isSubmitting || isUploading || isExtracting || !formData.method || !hasProof}
             className="bg-primary hover:bg-primary-hover text-white rounded-xl"
             data-testid="record-check-submit"
           >

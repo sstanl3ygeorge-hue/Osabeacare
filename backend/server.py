@@ -24133,6 +24133,150 @@ Return JSON only:
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
     @staticmethod
+    async def _extract_right_to_work(images: List[str], api_key: str, employee_name: str) -> dict:
+        """
+        Extract Right to Work document fields using GPT Vision.
+        
+        Handles:
+        - Home Office Online Check Results (Share Code)
+        - eVisa status screenshots
+        - Passport pages with visa endorsements
+        - BRP cards
+        - Positive Verification Notices (PVN)
+        """
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-rtw-{uuid.uuid4()}",
+                system_message="""You are a UK Right to Work document extraction specialist. You analyze Home Office online check results, eVisa screenshots, passports with visa endorsements, and BRP cards.
+
+Extract the following fields from the document:
+
+CORE FIELDS:
+- holder_name: Full name of the person
+- document_type: Type of document (e.g., "Home Office Online Check Result", "eVisa Screenshot", "UK Passport", "BRP Card", "Positive Verification Notice", "Passport with Visa Endorsement")
+- check_date: Date the check was performed or document was issued (format: YYYY-MM-DD)
+- reference_number: Any reference number, share code, or PVN number
+
+PERMISSION FIELDS:
+- permission_type: Type of immigration permission (e.g., "Settled Status", "Pre-Settled Status", "Student Visa", "Work Visa", "Indefinite Leave to Remain", "Limited Leave to Remain")
+- permission_start_date: Start date of permission if shown (format: YYYY-MM-DD)
+- permission_end_date: End date/expiry of permission if shown (format: YYYY-MM-DD) - IMPORTANT: Only extract if explicitly stated
+- share_code: The 9-character share code if this is a Home Office online check
+
+WORK RESTRICTIONS:
+- work_permitted: Boolean - is work permitted? (true/false)
+- restrictions: Any work restrictions text (e.g., "No work permitted", "20 hours per week during term time", "No recourse to public funds")
+- hours_limit: If there's an hours restriction, extract the number (e.g., 20)
+
+STATUS INDICATORS:
+- is_expired: Boolean - is this document/permission expired based on dates shown?
+- is_indefinite: Boolean - does this grant indefinite/unlimited right to work?
+- requires_followup: Boolean - is follow-up check required before permission expires?
+
+IMPORTANT RULES:
+- Return dates in YYYY-MM-DD format
+- If a field is not found, set it to null
+- Do NOT guess expiry dates - only extract if explicitly shown
+- For UK/Irish passports, is_indefinite should be true
+- For Share Code checks, is_indefinite depends on the status shown
+- Set confidence for each field (0.0-1.0)
+
+Return JSON only:
+{
+  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "check_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "reference_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "permission_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "permission_start_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "permission_end_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "share_code": {"value": "string or null", "confidence": 0.0-1.0},
+  "work_permitted": {"value": true/false/null, "confidence": 0.0-1.0},
+  "restrictions": {"value": "string or null", "confidence": 0.0-1.0},
+  "hours_limit": {"value": number or null, "confidence": 0.0-1.0},
+  "is_expired": {"value": true/false/null, "confidence": 0.0-1.0},
+  "is_indefinite": {"value": true/false/null, "confidence": 0.0-1.0},
+  "requires_followup": {"value": true/false/null, "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text="Extract all Right to Work fields from this document. This is a UK immigration/right to work document. Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value is not None else "not_found",
+                                "confidence": confidence
+                            }
+                        
+                        # Check for name mismatch
+                        extracted_name = fields.get("holder_name")
+                        if extracted_name and employee_name:
+                            if not DocumentExtractionService._check_name_match(extracted_name, employee_name):
+                                issues.append({
+                                    "code": "name_mismatch",
+                                    "detail": f"Document name '{extracted_name}' may not match employee name '{employee_name}'",
+                                    "severity": "warning"
+                                })
+                        
+                        # Check for expired permission
+                        if fields.get("is_expired") is True:
+                            issues.append({
+                                "code": "permission_expired",
+                                "detail": "This document shows expired immigration permission - cannot be used for RTW verification",
+                                "severity": "blocker"
+                            })
+                        
+                        # Check for work restrictions
+                        if fields.get("work_permitted") is False:
+                            issues.append({
+                                "code": "work_not_permitted",
+                                "detail": "This document indicates work is NOT permitted",
+                                "severity": "blocker"
+                            })
+                        
+                        # Follow-up reminder
+                        if fields.get("requires_followup") is True and fields.get("permission_end_date"):
+                            issues.append({
+                                "code": "followup_required",
+                                "detail": f"Time-limited permission - set follow-up before {fields.get('permission_end_date')}",
+                                "severity": "warning"
+                            })
+                        
+                except json.JSONDecodeError:
+                    issues.append({"code": "parse_error", "detail": "Failed to parse AI response", "severity": "warning"})
+        
+        except Exception as e:
+            logger.error(f"RTW extraction error: {e}")
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
     async def _extract_generic(images: List[str], api_key: str, employee_name: str) -> dict:
         """Generic extraction for unclassified documents."""
         fields = {}
@@ -24522,6 +24666,147 @@ async def get_pending_document_extraction_reviews(
     }
 
 
+# ==================== RIGHT TO WORK EXTRACTION ENDPOINT ====================
+# Dedicated endpoint for extracting RTW document fields using AI Vision
+# Used by RecordCheckDialog to auto-populate check form from uploaded proof
+
+class RTWExtractionRequest(BaseModel):
+    """Request model for RTW document extraction."""
+    document_id: Optional[str] = Field(None, description="Document ID to extract from")
+    file_base64: Optional[str] = Field(None, description="Base64 encoded file content for direct extraction")
+    file_type: Optional[str] = Field("image/png", description="MIME type of the file")
+
+@api_router.post("/rtw/extract")
+async def extract_rtw_document(
+    request: RTWExtractionRequest,
+    employee_id: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract Right to Work fields from a document using GPT Vision.
+    
+    This endpoint supports two modes:
+    1. Extract from existing document: Provide `document_id`
+    2. Direct extraction: Provide `file_base64` (for preview before upload)
+    
+    Returns extracted fields that can be used to pre-populate the RTW check form.
+    """
+    try:
+        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="LLM key not configured")
+        
+        images = []
+        employee_name = None
+        
+        if request.document_id:
+            # Mode 1: Extract from existing document
+            doc = await db.employee_documents.find_one({"id": request.document_id}, {"_id": 0})
+            if not doc:
+                # Try finding by file_id in evidence_files
+                doc = await db.employee_documents.find_one(
+                    {"evidence_files.file_id": request.document_id},
+                    {"_id": 0}
+                )
+            
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Get employee name for validation
+            emp_id = doc.get("employee_id") or employee_id
+            if emp_id:
+                emp = await db.employees.find_one({"id": emp_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+            
+            # Get file content - try file_url first, then evidence_files
+            file_url = doc.get("file_url")
+            file_type = doc.get("file_type") or doc.get("content_type") or "image/png"
+            
+            if not file_url and doc.get("evidence_files"):
+                for ef in doc.get("evidence_files", []):
+                    if ef.get("file_id") == request.document_id or ef.get("status") not in ["rejected", "superseded"]:
+                        file_url = ef.get("file_url")
+                        file_type = ef.get("file_type") or file_type
+                        break
+            
+            if not file_url:
+                raise HTTPException(status_code=404, detail="Document file not found")
+            
+            # Download file content
+            if file_url.startswith("/api/"):
+                # Internal URL - use the stored file content if available
+                file_content = doc.get("file_content")
+                if not file_content:
+                    # Try to get from GridFS or blob storage
+                    raise HTTPException(status_code=400, detail="Cannot extract from this document - file content not directly accessible")
+            elif file_url.startswith("data:"):
+                # Base64 data URL
+                _, encoded = file_url.split(",", 1)
+                file_content = base64.b64decode(encoded)
+            else:
+                # External URL - download it
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(file_url)
+                    if resp.status_code != 200:
+                        raise HTTPException(status_code=400, detail="Could not download document file")
+                    file_content = resp.content
+            
+            images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+        
+        elif request.file_base64:
+            # Mode 2: Direct extraction from base64
+            images = [request.file_base64]
+            
+            # Get employee name if employee_id provided
+            if employee_id:
+                emp = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+        
+        else:
+            raise HTTPException(status_code=400, detail="Provide either document_id or file_base64")
+        
+        if not images:
+            raise HTTPException(status_code=400, detail="Could not convert document to images for extraction")
+        
+        # Run RTW extraction
+        result = await DocumentExtractionService._extract_right_to_work(
+            images=images,
+            api_key=api_key,
+            employee_name=employee_name
+        )
+        
+        # Log audit
+        await log_audit_action(user['user_id'], "extract_rtw_document", "rtw_extraction", request.document_id or "direct", {
+            "employee_id": employee_id,
+            "fields_extracted": list(result.get("fields", {}).keys()),
+            "issues_count": len(result.get("issues", []))
+        })
+        
+        return {
+            "success": True,
+            "extraction": {
+                "fields": result.get("fields", {}),
+                "metadata": result.get("metadata", {}),
+                "issues": result.get("issues", [])
+            },
+            "employee_name": employee_name,
+            "document_id": request.document_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"RTW extraction failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "extraction": None
+        }
+
+
 # ==================== REFERENCE INTEGRITY HARDENING ====================
 # Step 7: 3-layer reference truth model for NHS-level compliance
 # 
@@ -24587,13 +24872,39 @@ class CheckRecordService:
             "id": check_id,
             "employee_id": employee_id,
             "check_type": "right_to_work",
-            "method": data.get("method"),  # share_code_online_check, manual_passport_check, etc.
+            
+            # Method and core fields
+            "method": data.get("method"),  # home_office_online_check, manual_list_a_check, etc.
+            "route": data.get("route"),  # RTW route type
+            "document_type": data.get("document_type"),  # Specific document type verified
             "checked_at": data.get("checked_at"),
             "checked_by": recorded_by,
             "outcome": data.get("outcome", "awaiting_review"),  # verified, failed, follow_up_required
-            "source_status_type": data.get("source_status_type"),  # digital_status, passport_endorsement, etc.
+            "source_status_type": data.get("source_status_type"),  # digital_status, settled_status, etc.
+            
+            # Permission details (3-layer Result data)
+            "permission_start_date": data.get("permission_start_date"),
+            "permission_end_date": data.get("permission_end_date"),
+            "is_indefinite": data.get("is_indefinite", False),  # True for UK/Irish citizens
+            
+            # Follow-up tracking
+            "follow_up_required": data.get("follow_up_required", False),
             "follow_up_due_at": data.get("follow_up_due_at"),
+            
+            # Restrictions
+            "restrictions": data.get("restrictions"),
+            "hours_limit": data.get("hours_limit"),
+            
+            # Reference numbers
+            "reference_number": data.get("reference_number"),
+            "share_code": data.get("share_code"),
+            
+            # Linked evidence documents
             "evidence_document_id": data.get("evidence_document_id"),
+            "proof_document_id": data.get("proof_document_id"),
+            "linked_evidence_ids": data.get("linked_evidence_ids", []),
+            
+            # Notes and metadata
             "notes": data.get("notes"),
             "is_current": True,
             "created_at": now,
@@ -28040,6 +28351,7 @@ class RTWCheckInput(BaseModel):
     # Permission details (for Result Panel)
     permission_start_date: Optional[str] = Field(None, description="Permission start date")
     permission_end_date: Optional[str] = Field(None, description="Permission end date / expiry")
+    is_indefinite: bool = Field(False, description="True for UK/Irish citizens with unlimited right to work")
     
     # Follow-up tracking
     follow_up_required: bool = Field(False, description="Whether follow-up is required (time-limited)")

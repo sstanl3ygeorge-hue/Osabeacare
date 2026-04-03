@@ -139,17 +139,51 @@ export default function UploadRequirementCard({
   // Get method display name
   const getMethodDisplay = (method) => {
     const methods = {
-      'share_code_online_check': 'Share Code Online',
-      'manual_passport_check': 'Manual Passport Check',
-      'idsp_check': 'IDSP Check',
+      // RTW Methods
+      'home_office_online_check': 'Home Office Online Check',
+      'manual_passport_uk_irish': 'Manual Check - UK/Irish Passport',
+      'manual_list_a_document': 'Manual Check - List A Document',
+      'manual_list_a_check': 'Manual List A Check',
+      'manual_list_b_group_1': 'Manual Check - List B Group 1',
+      'manual_list_b_group_1_check': 'Manual List B Group 1 Check',
+      'manual_list_b_group_2_ecs': 'Manual Check - List B Group 2 / ECS',
+      'manual_list_b_group_2_check': 'Manual List B Group 2 Check',
+      'idsp_check': 'Digital Verification Service (IDSP)',
+      'digital_verification_service_check': 'Digital Verification Service',
+      'ecs_pvn_check': 'Employer Checking Service (PVN)',
       'ecs_check': 'Employer Checking Service',
-      'update_service_check': 'DBS Update Service',
+      // DBS Methods
+      'update_service_check': 'DBS Update Service Check',
       'manual_certificate_review': 'Manual Certificate Review',
+      // Other Methods
+      'share_code_online_check': 'Share Code Online Check',
+      'manual_passport_check': 'Manual Passport Check',
       'manual_id_verification': 'Manual ID Verification',
       'digital_id_check': 'Digital ID Check',
       'manual_document_check': 'Manual Document Check'
     };
     return methods[method] || method?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';
+  };
+
+  // Get user display name from user ID
+  const getUserDisplayName = (userId, fallbackName) => {
+    // If we have a name already, use it
+    if (fallbackName && !fallbackName.startsWith('user_')) return fallbackName;
+    // If it's a user ID, try to format it nicely or return Admin
+    if (userId && userId.startsWith('user_')) return 'Admin';
+    if (userId) return userId;
+    return fallbackName || 'Unknown';
+  };
+
+  // Get stamp display info
+  const getStampDisplay = (stamp) => {
+    const stamps = {
+      'original_seen': { label: 'ORIGINAL VERIFIED', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+      'copy_verified': { label: 'COPY VERIFIED', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+      'online_check': { label: 'ONLINE VERIFIED', className: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
+      'not_verified': { label: 'NOT VERIFIED', className: 'bg-red-100 text-red-700 border-red-200' }
+    };
+    return stamps[stamp] || { label: stamp?.toUpperCase()?.replace(/_/g, ' '), className: 'bg-gray-100 text-gray-600 border-gray-200' };
   };
 
   // Get outcome display
@@ -254,22 +288,27 @@ export default function UploadRequirementCard({
                               {formatBackendDate(file.uploaded_at, { format: 'medium' })}
                               {file.uploaded_by && ` • ${file.uploaded_by}`}
                             </span>
-                            {/* Verification Stamp Badge */}
-                            {file.verification_stamp && (
-                              <Badge 
-                                className={`text-[9px] px-1.5 py-0 ${
-                                  file.verification_stamp === 'original_seen' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
-                                  file.verification_stamp === 'copy_verified' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                                  file.verification_stamp === 'online_check' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
-                                  'bg-gray-100 text-gray-600 border-gray-200'
-                                }`}
-                                title={`Stamped by ${file.verification_stamp_by_name || 'Unknown'}`}
-                                data-testid={`${key}-stamp-badge-${file.file_id || file.id}`}
-                              >
-                                <Stamp className="h-2 w-2 mr-0.5" />
-                                {file.verification_stamp_audit_text || file.verification_stamp_label || file.verification_stamp}
-                              </Badge>
-                            )}
+                            {/* Verification Stamp Badge - ENHANCED */}
+                            {file.verification_stamp && (() => {
+                              const stampInfo = getStampDisplay(file.verification_stamp);
+                              return (
+                                <div className="flex flex-col">
+                                  <Badge 
+                                    className={`text-[9px] px-1.5 py-0.5 font-semibold ${stampInfo.className}`}
+                                    data-testid={`${key}-stamp-badge-${file.file_id || file.id}`}
+                                  >
+                                    <Stamp className="h-2.5 w-2.5 mr-1" />
+                                    {stampInfo.label}
+                                  </Badge>
+                                  {(file.verification_stamp_by_name || file.verification_stamp_at) && (
+                                    <span className="text-[9px] text-text-muted mt-0.5">
+                                      {file.verification_stamp_by_name && `by ${file.verification_stamp_by_name}`}
+                                      {file.verification_stamp_at && ` • ${formatBackendDate(file.verification_stamp_at, { format: 'short' })}`}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       </div>
@@ -296,18 +335,22 @@ export default function UploadRequirementCard({
                           </Badge>
                         )}
                         
-                        {/* Apply Verification Stamp button */}
+                        {/* Apply Verification Stamp button - show different states */}
                         {!isAuditor && file.verified && (
                           <Button
                             size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                            variant={file.verification_stamp ? "ghost" : "outline"}
+                            className={`h-7 px-2 text-xs ${
+                              file.verification_stamp 
+                                ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' 
+                                : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'
+                            }`}
                             onClick={() => setStampDialog({ isOpen: true, file })}
-                            title="Apply verification stamp"
+                            title={file.verification_stamp ? "Edit verification stamp" : "Apply verification stamp"}
                             data-testid={`${key}-stamp-btn-${file.file_id || file.id}`}
                           >
                             <Stamp className="h-3 w-3 mr-1" />
-                            {file.verification_stamp ? 'Update Stamp' : 'Stamp'}
+                            {file.verification_stamp ? 'Edit Stamp' : 'Stamp'}
                           </Button>
                         )}
                         
@@ -552,7 +595,7 @@ export default function UploadRequirementCard({
                       <div>
                         <p className="text-xs text-text-muted uppercase tracking-wide">Checked By</p>
                         <p className="font-medium text-text-primary">
-                          {checkData.checked_by || 'Admin'}
+                          {getUserDisplayName(checkData.checked_by, checkData.checked_by_name)}
                         </p>
                       </div>
                     </div>
@@ -565,48 +608,90 @@ export default function UploadRequirementCard({
                       </div>
                     )}
                     
-                    {/* RTW Result Details - Only show for RTW checks with result data */}
-                    {key === 'right_to_work' && (checkData.permission_end_date || checkData.reference_number || checkData.share_code || checkData.restrictions || checkData.is_indefinite) && (
-                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-2">
-                        <p className="text-xs text-text-muted uppercase tracking-wide font-medium">Right to Work Result</p>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                    {/* RTW Result Details - COMPREHENSIVE DISPLAY */}
+                    {key === 'right_to_work' && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-slate-600" />
+                          <p className="text-xs text-text-muted uppercase tracking-wide font-semibold">Right to Work Result</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                          {/* Route / Check Type */}
+                          {(checkData.route || checkData.method) && (
+                            <div>
+                              <p className="text-xs text-text-muted">Route</p>
+                              <p className="font-medium text-text-primary">{getMethodDisplay(checkData.route || checkData.method)}</p>
+                            </div>
+                          )}
+                          
+                          {/* Permission Start */}
+                          {checkData.permission_start_date && (
+                            <div>
+                              <p className="text-xs text-text-muted">Permission Start</p>
+                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.permission_start_date, { format: 'medium' })}</p>
+                            </div>
+                          )}
+                          
+                          {/* Permission End / Expiry */}
                           {checkData.permission_end_date && (
                             <div>
                               <p className="text-xs text-text-muted">Permission Expires</p>
                               <p className="font-medium text-text-primary">{formatBackendDate(checkData.permission_end_date, { format: 'medium' })}</p>
                             </div>
                           )}
+                          
+                          {/* Reference Number / PVN */}
                           {checkData.reference_number && (
                             <div>
-                              <p className="text-xs text-text-muted">Reference</p>
+                              <p className="text-xs text-text-muted">Reference / PVN</p>
                               <p className="font-medium text-text-primary font-mono text-xs">{checkData.reference_number}</p>
                             </div>
                           )}
+                          
+                          {/* Share Code */}
                           {checkData.share_code && (
                             <div>
                               <p className="text-xs text-text-muted">Share Code</p>
                               <p className="font-medium text-text-primary font-mono text-xs">{checkData.share_code}</p>
                             </div>
                           )}
-                          {checkData.restrictions && (
-                            <div className="col-span-2">
-                              <p className="text-xs text-text-muted">Restrictions</p>
-                              <p className="font-medium text-amber-700">{checkData.restrictions}</p>
+                          
+                          {/* Follow-up Date */}
+                          {checkData.follow_up_due_at && (
+                            <div>
+                              <p className="text-xs text-text-muted">Next Follow-up</p>
+                              <p className="font-medium text-amber-700">{formatBackendDate(checkData.follow_up_due_at, { format: 'medium' })}</p>
                             </div>
                           )}
                         </div>
-                        {checkData.is_indefinite && (
-                          <div className="flex items-center gap-1 text-green-700">
-                            <CheckCircle className="h-3 w-3" />
-                            <span className="text-xs font-medium">Indefinite right to work</span>
+                        
+                        {/* Restrictions - Full width */}
+                        {checkData.restrictions && (
+                          <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                            <p className="text-xs text-amber-800 font-medium mb-1">Work Restrictions</p>
+                            <p className="text-sm text-amber-700">{checkData.restrictions}</p>
+                            {checkData.hours_limit && (
+                              <p className="text-xs text-amber-600 mt-1">Hours limit: {checkData.hours_limit} per week</p>
+                            )}
                           </div>
                         )}
-                        {checkData.follow_up_required && checkData.follow_up_due_at && (
-                          <div className="flex items-center gap-1 text-amber-700">
-                            <Clock className="h-3 w-3" />
-                            <span className="text-xs font-medium">Follow-up due: {formatBackendDate(checkData.follow_up_due_at, { format: 'medium' })}</span>
-                          </div>
-                        )}
+                        
+                        {/* Status flags */}
+                        <div className="flex flex-wrap gap-2">
+                          {checkData.is_indefinite && (
+                            <div className="flex items-center gap-1 px-2 py-1 bg-green-50 border border-green-200 rounded-lg">
+                              <CheckCircle className="h-3 w-3 text-green-600" />
+                              <span className="text-xs font-medium text-green-700">Indefinite right to work</span>
+                            </div>
+                          )}
+                          {checkData.follow_up_required && (
+                            <div className="flex items-center gap-1 px-2 py-1 bg-amber-50 border border-amber-200 rounded-lg">
+                              <Clock className="h-3 w-3 text-amber-600" />
+                              <span className="text-xs font-medium text-amber-700">Follow-up required</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

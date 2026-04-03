@@ -14920,9 +14920,19 @@ async def apply_verification_stamp(
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Get reviewer name
-    reviewer = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
-    reviewer_name = reviewer.get('name') if reviewer else user.get('email', user['user_id'])
+    # Get reviewer name - try multiple field names
+    reviewer = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    if reviewer:
+        reviewer_name = reviewer.get('name')
+        if not reviewer_name:
+            reviewer_name = f"{reviewer.get('first_name', '')} {reviewer.get('last_name', '')}".strip()
+        if not reviewer_name:
+            reviewer_name = reviewer.get('email', user.get('email', 'Admin'))
+    else:
+        reviewer_name = user.get('email', 'Admin')
     
     stamp_info = VERIFICATION_STAMP_TYPES[payload.stamp_type]
     
@@ -24926,11 +24936,22 @@ class CheckRecordService:
     
     @staticmethod
     async def get_current_rtw_check(employee_id: str) -> Optional[dict]:
-        """Get the current RTW check for an employee."""
+        """Get the current RTW check for an employee with resolved user name."""
         check = await db.rtw_checks.find_one(
             {"employee_id": employee_id, "is_current": True},
             {"_id": 0}
         )
+        if check and check.get("checked_by"):
+            # Resolve checked_by user ID to a human-readable name
+            user = await db.users.find_one(
+                {"id": check["checked_by"]},
+                {"_id": 0, "first_name": 1, "last_name": 1, "email": 1}
+            )
+            if user:
+                name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                check["checked_by_name"] = name if name else user.get('email', 'Admin')
+            else:
+                check["checked_by_name"] = "Admin"
         return check
     
     @staticmethod

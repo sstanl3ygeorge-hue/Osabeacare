@@ -24,6 +24,44 @@ const UPLOAD_RULES = {
 };
 
 /**
+ * Convert method enum values to human-friendly labels
+ */
+const METHOD_LABELS = {
+  // RTW Methods
+  'home_office_online_check': 'Home Office Online Check',
+  'manual_passport_uk_irish': 'Manual Check - UK/Irish Passport',
+  'manual_list_a_document': 'Manual Check - List A Document',
+  'manual_list_a_check': 'Manual List A Check',
+  'manual_list_b_group_1': 'Manual Check - List B Group 1',
+  'manual_list_b_group_1_check': 'Manual List B Group 1 Check',
+  'manual_list_b_group_2_ecs': 'Manual Check - List B Group 2 / ECS',
+  'manual_list_b_group_2_check': 'Manual List B Group 2 Check',
+  'idsp_check': 'Digital Verification Service (IDSP)',
+  'digital_verification_service_check': 'Digital Verification Service',
+  'ecs_pvn_check': 'Employer Checking Service (PVN)',
+  'ecs_check': 'Employer Checking Service',
+  // DBS Methods
+  'update_service_check': 'DBS Update Service Check',
+  'dbs_update_service_check': 'DBS Update Service Check',
+  'dbs_certificate_review': 'DBS Certificate Review',
+  'manual_certificate_review': 'Manual Certificate Review',
+  // Other Methods
+  'share_code_online_check': 'Share Code Online Check',
+  'manual_passport_check': 'Manual Passport Check',
+  'manual_id_verification': 'Manual ID Verification',
+  'digital_id_check': 'Digital ID Check',
+  'manual_document_check': 'Manual Document Check',
+  'original_document_seen': 'Original Document Seen',
+  'certified_copy_verified': 'Certified Copy Verified',
+  'digital_id_verification': 'Digital ID Verification'
+};
+
+function getMethodDisplayLabel(method) {
+  if (!method) return '';
+  return METHOD_LABELS[method] || method.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
  * Derive request lifecycle state from latest request
  */
 function deriveRequestState(latestRequest) {
@@ -110,7 +148,8 @@ function buildUploadSummary({ requirementKey, activeFiles, historicalFiles, late
   if (authoritativeCheck?.status === 'verified') {
     parts.push('Verified');
     if (authoritativeCheck.method) {
-      parts.push(authoritativeCheck.method);
+      // Use human-friendly label instead of raw enum value
+      parts.push(getMethodDisplayLabel(authoritativeCheck.method));
     }
     if (authoritativeCheck.follow_up_date) {
       parts.push(`follow-up ${new Date(authoritativeCheck.follow_up_date).toLocaleDateString()}`);

@@ -8,7 +8,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
-import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle, Info, ExternalLink } from 'lucide-react';
+import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle, Info, ExternalLink, RefreshCw } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -374,8 +374,8 @@ export default function RecordCheckDialog({
     }
   };
 
-  // Handle proof file selection
-  const handleFileSelect = (e) => {
+  // Handle proof file selection - AUTO-EXTRACT for RTW
+  const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -393,6 +393,80 @@ export default function RecordCheckDialog({
     }
 
     setProofFile(file);
+    
+    // AUTO-EXTRACT: Automatically extract RTW fields when proof file is selected
+    if (isRTW) {
+      toast.info('Extracting fields from document...', { duration: 2000 });
+      await extractFieldsFromFile(file);
+    }
+  };
+
+  // Extract RTW fields from a file using AI Vision
+  const extractFieldsFromFile = async (file) => {
+    setIsExtracting(true);
+    setExtractionResult(null);
+    setExtractionIssues([]);
+
+    try {
+      // Convert file to base64
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await axios.post(
+        `${API}/rtw/extract`,
+        {
+          file_base64: base64Data,
+          file_type: file.type
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { employee_id: employeeId }
+        }
+      );
+
+      if (response.data?.success && response.data?.extraction) {
+        const { fields, issues } = response.data.extraction;
+        setExtractionResult(fields);
+        setExtractionIssues(issues || []);
+
+        // Auto-populate form fields from extraction
+        setFormData(prev => ({
+          ...prev,
+          checked_at: fields.check_date || prev.checked_at,
+          permission_start_date: fields.permission_start_date || prev.permission_start_date,
+          permission_end_date: fields.permission_end_date || prev.permission_end_date,
+          reference_number: fields.reference_number || prev.reference_number,
+          share_code: fields.share_code || prev.share_code,
+          restrictions: fields.restrictions || prev.restrictions,
+          hours_limit: fields.hours_limit?.toString() || prev.hours_limit,
+          is_indefinite: fields.is_indefinite ?? prev.is_indefinite,
+          follow_up_required: fields.requires_followup ?? prev.follow_up_required,
+          document_type: fields.document_type || prev.document_type,
+          source_status_type: fields.permission_type ? mapPermissionTypeToStatus(fields.permission_type) : prev.source_status_type
+        }));
+
+        // Check for blockers
+        const blockers = (issues || []).filter(i => i.severity === 'blocker');
+        if (blockers.length > 0) {
+          toast.error(`Issue found: ${blockers[0].detail}`);
+        } else if (Object.keys(fields).some(k => fields[k] !== null)) {
+          toast.success('Fields extracted - please review and confirm before saving');
+        } else {
+          toast.info('Could not extract fields automatically. Please fill in manually.');
+        }
+      } else {
+        toast.info('Could not extract fields automatically. Please fill in manually.');
+      }
+    } catch (err) {
+      console.error('Extraction error:', err);
+      toast.info('Auto-extraction unavailable. Please fill in fields manually.');
+    } finally {
+      setIsExtracting(false);
+    }
   };
 
   // Upload proof file to employee_documents
@@ -444,82 +518,10 @@ export default function RecordCheckDialog({
     }
   };
 
-  // Auto-extract RTW fields from proof file using AI Vision
-  const handleAutoExtract = async () => {
+  // Re-extract RTW fields (manual trigger for retry)
+  const handleReExtract = async () => {
     if (!proofFile || !isRTW) return;
-
-    setIsExtracting(true);
-    setExtractionResult(null);
-    setExtractionIssues([]);
-
-    try {
-      // Convert file to base64
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64Data = e.target.result.split(',')[1]; // Remove data:xxx;base64, prefix
-
-        try {
-          const response = await axios.post(
-            `${API}/rtw/extract`,
-            {
-              file_base64: base64Data,
-              file_type: proofFile.type
-            },
-            {
-              headers: { Authorization: `Bearer ${token}` },
-              params: { employee_id: employeeId }
-            }
-          );
-
-          if (response.data?.success && response.data?.extraction) {
-            const { fields, issues } = response.data.extraction;
-            setExtractionResult(fields);
-            setExtractionIssues(issues || []);
-
-            // Auto-populate form fields from extraction
-            setFormData(prev => ({
-              ...prev,
-              permission_start_date: fields.permission_start_date || prev.permission_start_date,
-              permission_end_date: fields.permission_end_date || prev.permission_end_date,
-              reference_number: fields.reference_number || prev.reference_number,
-              share_code: fields.share_code || prev.share_code,
-              restrictions: fields.restrictions || prev.restrictions,
-              hours_limit: fields.hours_limit?.toString() || prev.hours_limit,
-              is_indefinite: fields.is_indefinite ?? prev.is_indefinite,
-              follow_up_required: fields.requires_followup ?? prev.follow_up_required,
-              document_type: fields.document_type || prev.document_type,
-              source_status_type: fields.permission_type ? mapPermissionTypeToStatus(fields.permission_type) : prev.source_status_type
-            }));
-
-            // Check for blockers
-            const blockers = (issues || []).filter(i => i.severity === 'blocker');
-            if (blockers.length > 0) {
-              toast.error(`Extraction found issues: ${blockers[0].detail}`);
-            } else {
-              toast.success('Fields extracted - please review and confirm');
-            }
-          } else {
-            toast.error(response.data?.error || 'Extraction failed');
-          }
-        } catch (err) {
-          console.error('Extraction API error:', err);
-          toast.error(err.response?.data?.detail || 'Failed to extract fields');
-        } finally {
-          setIsExtracting(false);
-        }
-      };
-
-      reader.onerror = () => {
-        toast.error('Failed to read file');
-        setIsExtracting(false);
-      };
-
-      reader.readAsDataURL(proofFile);
-    } catch (err) {
-      console.error('File read error:', err);
-      toast.error('Failed to process file');
-      setIsExtracting(false);
-    }
+    await extractFieldsFromFile(proofFile);
   };
 
   // Map extracted permission type to source_status_type value
@@ -740,32 +742,53 @@ export default function RecordCheckDialog({
             )}
           </div>
 
-          {/* RTW Auto-Extract Button - only shown for RTW checks with a file ready */}
-          {isRTW && hasProof && !uploadedProofId && (
+          {/* RTW Extraction Status & Re-extract Option */}
+          {isRTW && hasProof && (
             <div className="space-y-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleAutoExtract}
-                disabled={isExtracting}
-                className="w-full h-9 text-sm bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
-                data-testid="rtw-auto-extract-btn"
-              >
-                {isExtracting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Extracting fields...
-                  </>
-                ) : (
-                  <>
-                    <FileText className="h-4 w-4 mr-2" />
-                    Auto-Extract RTW Fields
-                  </>
-                )}
-              </Button>
-              <p className="text-xs text-text-muted text-center">
-                AI will extract dates, reference numbers, and restrictions from your proof file
-              </p>
+              {/* Extraction in progress */}
+              {isExtracting && (
+                <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                  <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
+                  <span className="text-sm text-indigo-700">Extracting fields from document...</span>
+                </div>
+              )}
+              
+              {/* Extraction complete indicator */}
+              {!isExtracting && extractionResult && Object.keys(extractionResult).some(k => extractionResult[k] !== null) && (
+                <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <span className="text-sm text-green-700">Fields extracted - please review below</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleReExtract}
+                    disabled={isExtracting}
+                    className="h-7 px-2 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                    data-testid="rtw-re-extract-btn"
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Re-extract
+                  </Button>
+                </div>
+              )}
+              
+              {/* Manual extract button - only if no extraction yet and not currently extracting */}
+              {!isExtracting && !extractionResult && !uploadedProofId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleReExtract}
+                  disabled={isExtracting}
+                  className="w-full h-9 text-sm bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
+                  data-testid="rtw-auto-extract-btn"
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Extract RTW Fields
+                </Button>
+              )}
             </div>
           )}
 

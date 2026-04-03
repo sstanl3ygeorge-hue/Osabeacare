@@ -24293,6 +24293,280 @@ Return JSON only:
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
     @staticmethod
+    async def _extract_identity_enhanced(images: List[str], api_key: str, employee_name: str, employee_dob: str = None) -> dict:
+        """
+        Enhanced Identity document extraction for the 3-layer Identity model.
+        
+        Extracts fields needed for the Identity Result Panel:
+        - Document type (passport, driving licence, national ID, BRP)
+        - Full name, DOB, document number
+        - Issue and expiry dates
+        - Nationality
+        """
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-identity-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing identity documents.
+
+You may be analyzing:
+1. Passport (UK or international)
+2. Driving Licence (UK photocard)
+3. National ID Card
+4. Biometric Residence Permit (BRP)
+
+Extract the following fields:
+- document_type: Type of document (passport, driving_licence, national_id, brp)
+- full_name_on_document: Full name as shown
+- date_of_birth: DOB (YYYY-MM-DD)
+- document_number: Passport number, licence number, etc.
+- issue_date: Document issue date (YYYY-MM-DD)
+- expiry_date: Document expiry date (YYYY-MM-DD)
+- nationality: Nationality/country code
+- gender: Gender if shown (M/F)
+- place_of_birth: Place of birth if shown
+
+IMPORTANT:
+- Return dates in YYYY-MM-DD format
+- For UK driving licences, the number is on the front
+- For passports, the number is usually in the top right of the data page
+
+Return JSON only:
+{
+  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "full_name_on_document": {"value": "string or null", "confidence": 0.0-1.0},
+  "date_of_birth": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "document_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "nationality": {"value": "string or null", "confidence": 0.0-1.0},
+  "gender": {"value": "string or null", "confidence": 0.0-1.0},
+  "place_of_birth": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text=f"Extract all identity information from this document. {'Expected name: ' + employee_name if employee_name else ''} {'Expected DOB: ' + employee_dob if employee_dob else ''} Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError as e:
+                    logger.error(f"Identity extraction JSON parse error: {e}")
+                    issues.append({"code": "parse_error", "detail": str(e), "severity": "warning"})
+            
+            # Identity-specific validation
+            # Name mismatch check
+            if employee_name and fields.get("full_name_on_document"):
+                extracted_name = fields.get("full_name_on_document", "").lower()
+                expected_parts = employee_name.lower().split()
+                matches = sum(1 for part in expected_parts if part in extracted_name)
+                if matches < len(expected_parts) // 2:
+                    issues.append({
+                        "code": "name_mismatch",
+                        "detail": f"Name on document '{fields.get('full_name_on_document')}' may not match expected '{employee_name}'",
+                        "severity": "warning"
+                    })
+                    fields["name_matches_application"] = False
+                else:
+                    fields["name_matches_application"] = True
+            
+            # DOB mismatch check
+            if employee_dob and fields.get("date_of_birth"):
+                if fields.get("date_of_birth") != employee_dob:
+                    issues.append({
+                        "code": "dob_mismatch",
+                        "detail": f"DOB on document '{fields.get('date_of_birth')}' does not match expected '{employee_dob}'",
+                        "severity": "warning"
+                    })
+                    fields["dob_matches_application"] = False
+                else:
+                    fields["dob_matches_application"] = True
+            
+            # Expiry check
+            if fields.get("expiry_date"):
+                try:
+                    from datetime import datetime, timezone
+                    expiry_dt = datetime.fromisoformat(fields["expiry_date"].replace('Z', '+00:00')).date()
+                    today = datetime.now(timezone.utc).date()
+                    days_until_expiry = (expiry_dt - today).days
+                    
+                    if days_until_expiry < 0:
+                        issues.append({
+                            "code": "document_expired",
+                            "detail": f"Document expired {abs(days_until_expiry)} days ago",
+                            "severity": "error"
+                        })
+                    elif days_until_expiry <= 30:
+                        issues.append({
+                            "code": "document_expiring_soon",
+                            "detail": f"Document expires in {days_until_expiry} days",
+                            "severity": "warning"
+                        })
+                except (ValueError, TypeError):
+                    pass
+        
+        except Exception as e:
+            logger.error(f"Identity extraction error: {e}")
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
+    async def _extract_address_enhanced(images: List[str], api_key: str, employee_name: str, employee_address: dict = None, document_type_hint: str = None) -> dict:
+        """
+        Enhanced Address document extraction for the 3-layer POA model.
+        
+        Extracts fields needed for the Address Result Panel:
+        - Document type (utility_bill, bank_statement, council_tax, etc.)
+        - Issue date
+        - Address details (line1, line2, city, postcode)
+        - Addressee name
+        """
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-address-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing Proof of Address documents.
+
+You may be analyzing:
+1. Utility Bill (gas, electricity, water)
+2. Bank Statement
+3. Council Tax Bill
+4. HMRC Letter
+5. Government Letter
+6. Tenancy Agreement
+7. Mortgage Statement
+
+Extract the following fields:
+- document_type: Type (utility_bill, bank_statement, council_tax, hmrc_letter, government_letter, tenancy_agreement, mortgage_statement, other)
+- issue_date: Document date/statement date (YYYY-MM-DD)
+- addressee_name: Name the document is addressed to
+- address_line1: First line of address (house number, street)
+- address_line2: Second line (if any)
+- city: City/town
+- postcode: UK postcode
+- provider_name: Company/organization name (utility company, bank, council, etc.)
+
+IMPORTANT:
+- Return dates in YYYY-MM-DD format
+- UK postcodes have format like "SW1A 1AA"
+- Look for the statement/bill date, not any transaction dates
+
+Return JSON only:
+{
+  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
+  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "addressee_name": {"value": "string or null", "confidence": 0.0-1.0},
+  "address_line1": {"value": "string or null", "confidence": 0.0-1.0},
+  "address_line2": {"value": "string or null", "confidence": 0.0-1.0},
+  "city": {"value": "string or null", "confidence": 0.0-1.0},
+  "postcode": {"value": "string or null", "confidence": 0.0-1.0},
+  "provider_name": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            context_parts = []
+            if employee_name:
+                context_parts.append(f"Expected addressee: {employee_name}")
+            if employee_address and employee_address.get("postcode"):
+                context_parts.append(f"Expected postcode: {employee_address.get('postcode')}")
+            if document_type_hint:
+                context_parts.append(f"Expected document type: {document_type_hint}")
+            
+            user_message = UserMessage(
+                text=f"Extract address and document information from this proof of address document. {' '.join(context_parts)} Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError as e:
+                    logger.error(f"Address extraction JSON parse error: {e}")
+                    issues.append({"code": "parse_error", "detail": str(e), "severity": "warning"})
+            
+            # Address-specific validation
+            # Address mismatch check
+            if employee_address and fields.get("postcode"):
+                expected_postcode = employee_address.get("postcode", "").replace(" ", "").upper()
+                extracted_postcode = fields.get("postcode", "").replace(" ", "").upper()
+                
+                if expected_postcode and extracted_postcode and expected_postcode != extracted_postcode:
+                    issues.append({
+                        "code": "address_mismatch",
+                        "detail": f"Postcode '{fields.get('postcode')}' does not match expected '{employee_address.get('postcode')}'",
+                        "severity": "warning"
+                    })
+                    fields["address_matches_application"] = False
+                elif expected_postcode and extracted_postcode:
+                    fields["address_matches_application"] = True
+            
+            # Name mismatch check
+            if employee_name and fields.get("addressee_name"):
+                extracted_name = fields.get("addressee_name", "").lower()
+                expected_parts = employee_name.lower().split()
+                matches = sum(1 for part in expected_parts if part in extracted_name)
+                if matches < len(expected_parts) // 2:
+                    issues.append({
+                        "code": "addressee_mismatch",
+                        "detail": f"Addressee '{fields.get('addressee_name')}' may not match expected '{employee_name}'",
+                        "severity": "warning"
+                    })
+        
+        except Exception as e:
+            logger.error(f"Address extraction error: {e}")
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
     async def _extract_rtw(images: List[str], api_key: str, employee_name: str) -> dict:
         """Extract Right to Work document fields."""
         fields = {}
@@ -25423,6 +25697,286 @@ async def extract_dbs_document(
         }
 
 
+# ==================== IDENTITY EXTRACTION ENDPOINT ====================
+
+class IdentityExtractionRequest(BaseModel):
+    """Request model for Identity document extraction."""
+    document_id: Optional[str] = Field(None, description="Document ID to extract from")
+    file_base64: Optional[str] = Field(None, description="Base64 encoded file content for direct extraction")
+    file_type: Optional[str] = Field("image/png", description="MIME type of the file")
+
+@api_router.post("/identity/extract")
+async def extract_identity_document(
+    request: IdentityExtractionRequest,
+    employee_id: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract Identity document fields using GPT Vision.
+    
+    Extracts fields for the Identity Result Panel:
+    - document_type (passport, driving_licence, national_id, brp)
+    - full_name_on_document
+    - date_of_birth
+    - document_number
+    - issue_date
+    - expiry_date
+    - nationality
+    """
+    try:
+        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="LLM key not configured")
+        
+        images = []
+        employee_name = None
+        employee_dob = None
+        
+        if request.document_id:
+            doc = await db.employee_documents.find_one({"id": request.document_id}, {"_id": 0})
+            if not doc:
+                doc = await db.employee_documents.find_one(
+                    {"evidence_files.file_id": request.document_id},
+                    {"_id": 0}
+                )
+            
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            emp_id = doc.get("employee_id") or employee_id
+            if emp_id:
+                emp = await db.employees.find_one({"id": emp_id}, {"_id": 0, "first_name": 1, "last_name": 1, "date_of_birth": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+                    employee_dob = emp.get("date_of_birth")
+            
+            file_url = doc.get("file_url")
+            file_type = doc.get("file_type") or "image/png"
+            
+            if not file_url and doc.get("evidence_files"):
+                for ef in doc.get("evidence_files", []):
+                    if ef.get("file_id") == request.document_id or ef.get("status") not in ["rejected", "superseded"]:
+                        file_url = ef.get("file_url")
+                        file_type = ef.get("file_type") or file_type
+                        break
+            
+            if file_url and file_url.startswith("data:"):
+                _, encoded = file_url.split(",", 1)
+                file_content = base64.b64decode(encoded)
+                images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+            elif file_url:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(file_url)
+                    if resp.status_code == 200:
+                        file_content = resp.content
+                        images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+        
+        elif request.file_base64:
+            if employee_id:
+                emp = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "date_of_birth": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+                    employee_dob = emp.get("date_of_birth")
+            
+            file_type = request.file_type or "image/png"
+            if file_type == "application/pdf" or file_type.endswith("/pdf"):
+                file_content = base64.b64decode(request.file_base64)
+                images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+            else:
+                images = [request.file_base64]
+        
+        else:
+            raise HTTPException(status_code=400, detail="Provide either document_id or file_base64")
+        
+        if not images:
+            raise HTTPException(status_code=400, detail="Could not extract images from document")
+        
+        result = await DocumentExtractionService._extract_identity_enhanced(
+            images=images,
+            api_key=api_key,
+            employee_name=employee_name,
+            employee_dob=employee_dob
+        )
+        
+        await log_audit_action(user['user_id'], "extract_identity_document", "identity_extraction", request.document_id or "direct", {
+            "employee_id": employee_id,
+            "fields_extracted": list(result.get("fields", {}).keys()),
+            "issues_count": len(result.get("issues", []))
+        })
+        
+        return {
+            "success": True,
+            "extraction": {
+                "fields": result.get("fields", {}),
+                "metadata": result.get("metadata", {}),
+                "issues": result.get("issues", [])
+            },
+            "employee_name": employee_name,
+            "document_id": request.document_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Identity extraction failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "extraction": None
+        }
+
+
+# ==================== ADDRESS EXTRACTION ENDPOINT ====================
+
+class AddressExtractionRequest(BaseModel):
+    """Request model for Address document extraction."""
+    document_id: Optional[str] = Field(None, description="Document ID to extract from")
+    file_base64: Optional[str] = Field(None, description="Base64 encoded file content for direct extraction")
+    file_type: Optional[str] = Field("image/png", description="MIME type of the file")
+    document_type: Optional[str] = Field(None, description="POA document type for recency calculation")
+
+@api_router.post("/address/extract")
+async def extract_address_document(
+    request: AddressExtractionRequest,
+    employee_id: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract Proof of Address document fields using GPT Vision.
+    
+    Extracts fields for the Address Result Panel:
+    - document_type (utility_bill, bank_statement, council_tax, etc.)
+    - issue_date
+    - address_line1, address_line2, city, postcode
+    - addressee_name
+    
+    Also computes recency status based on document type and issue date.
+    """
+    try:
+        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="LLM key not configured")
+        
+        images = []
+        employee_name = None
+        employee_address = None
+        
+        if request.document_id:
+            doc = await db.employee_documents.find_one({"id": request.document_id}, {"_id": 0})
+            if not doc:
+                doc = await db.employee_documents.find_one(
+                    {"evidence_files.file_id": request.document_id},
+                    {"_id": 0}
+                )
+            
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            emp_id = doc.get("employee_id") or employee_id
+            if emp_id:
+                emp = await db.employees.find_one({"id": emp_id}, {"_id": 0, "first_name": 1, "last_name": 1, "address_line1": 1, "address_line2": 1, "city": 1, "postcode": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+                    employee_address = {
+                        "line1": emp.get("address_line1"),
+                        "line2": emp.get("address_line2"),
+                        "city": emp.get("city"),
+                        "postcode": emp.get("postcode")
+                    }
+            
+            file_url = doc.get("file_url")
+            file_type = doc.get("file_type") or "image/png"
+            
+            if not file_url and doc.get("evidence_files"):
+                for ef in doc.get("evidence_files", []):
+                    if ef.get("file_id") == request.document_id or ef.get("status") not in ["rejected", "superseded"]:
+                        file_url = ef.get("file_url")
+                        file_type = ef.get("file_type") or file_type
+                        break
+            
+            if file_url and file_url.startswith("data:"):
+                _, encoded = file_url.split(",", 1)
+                file_content = base64.b64decode(encoded)
+                images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+            elif file_url:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(file_url)
+                    if resp.status_code == 200:
+                        file_content = resp.content
+                        images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+        
+        elif request.file_base64:
+            if employee_id:
+                emp = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "address_line1": 1, "address_line2": 1, "city": 1, "postcode": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+                    employee_address = {
+                        "line1": emp.get("address_line1"),
+                        "line2": emp.get("address_line2"),
+                        "city": emp.get("city"),
+                        "postcode": emp.get("postcode")
+                    }
+            
+            file_type = request.file_type or "image/png"
+            if file_type == "application/pdf" or file_type.endswith("/pdf"):
+                file_content = base64.b64decode(request.file_base64)
+                images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+            else:
+                images = [request.file_base64]
+        
+        else:
+            raise HTTPException(status_code=400, detail="Provide either document_id or file_base64")
+        
+        if not images:
+            raise HTTPException(status_code=400, detail="Could not extract images from document")
+        
+        result = await DocumentExtractionService._extract_address_enhanced(
+            images=images,
+            api_key=api_key,
+            employee_name=employee_name,
+            employee_address=employee_address,
+            document_type_hint=request.document_type
+        )
+        
+        # Compute recency status if issue_date was extracted
+        fields = result.get("fields", {})
+        if fields.get("issue_date") and fields.get("document_type"):
+            recency = CheckRecordService._compute_poa_recency(
+                fields.get("document_type"),
+                fields.get("issue_date")
+            )
+            fields["recency_status"] = recency
+        
+        await log_audit_action(user['user_id'], "extract_address_document", "address_extraction", request.document_id or "direct", {
+            "employee_id": employee_id,
+            "fields_extracted": list(result.get("fields", {}).keys()),
+            "issues_count": len(result.get("issues", []))
+        })
+        
+        return {
+            "success": True,
+            "extraction": {
+                "fields": result.get("fields", {}),
+                "metadata": result.get("metadata", {}),
+                "issues": result.get("issues", [])
+            },
+            "employee_name": employee_name,
+            "document_id": request.document_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Address extraction failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "extraction": None
+        }
+
+
 # ==================== REFERENCE INTEGRITY HARDENING ====================
 # Step 7: 3-layer reference truth model for NHS-level compliance
 # 
@@ -26109,17 +26663,24 @@ class CheckRecordService:
         data: dict,
         recorded_by: str
     ) -> dict:
-        """Record an identity verification check."""
-        now = datetime.now(timezone.utc).isoformat()
-        check_id = f"id_ver_{uuid.uuid4().hex[:12]}"
+        """
+        Record an Identity verification check.
         
-        # Supersede previous current
-        previous = await db.identity_verifications.find_one({
+        Identity 3-Layer Model (mirroring RTW/DBS):
+        - Layer 1: Evidence (Passport, Driving License, ID Card)
+        - Layer 2: Verification (original_document_seen, copy_verified, digital_id_verification)
+        - Layer 3: Identity Result (document details, name/DOB match, photo match)
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        check_id = f"id_chk_{uuid.uuid4().hex[:12]}"
+        
+        # Supersede previous current check
+        previous = await db.identity_checks.find_one({
             "employee_id": employee_id,
             "is_current": True
         })
         if previous:
-            await db.identity_verifications.update_one(
+            await db.identity_checks.update_one(
                 {"id": previous["id"]},
                 {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
             )
@@ -26128,11 +26689,32 @@ class CheckRecordService:
             "id": check_id,
             "employee_id": employee_id,
             "check_type": "identity_verification",
-            "method": data.get("method"),  # manual_id_verification, digital_id_check
+            
+            # Method and core fields (Layer 2: Verification)
+            "method": data.get("method"),  # original_document_seen, copy_verified, digital_id_verification
             "checked_at": data.get("checked_at"),
             "checked_by": recorded_by,
             "outcome": data.get("outcome", "awaiting_review"),
+            
+            # Document details (Layer 3: Identity Result)
+            "document_type": data.get("document_type"),  # passport, driving_licence, national_id, brp
+            "full_name_on_document": data.get("full_name_on_document"),
+            "date_of_birth": data.get("date_of_birth"),
+            "document_number": data.get("document_number"),
+            "issue_date": data.get("issue_date"),
+            "expiry_date": data.get("expiry_date"),
+            "nationality": data.get("nationality"),
+            
+            # Verification checks
+            "name_matches_application": data.get("name_matches_application", False),
+            "dob_matches_application": data.get("dob_matches_application", False),
+            "photo_match_confirmed": data.get("photo_match_confirmed", False),
+            
+            # Linked evidence/proof
             "evidence_document_ids": data.get("evidence_document_ids", []),
+            "proof_document_id": data.get("proof_document_id") or data.get("evidence_document_id"),
+            
+            # Notes and metadata
             "notes": data.get("notes"),
             "is_current": True,
             "created_at": now,
@@ -26140,25 +26722,179 @@ class CheckRecordService:
             "record_version": 1
         }
         
-        await db.identity_verifications.insert_one(check_record)
+        await db.identity_checks.insert_one(check_record)
         
-        await log_audit_action(recorded_by, "record_identity_verification", "identity_verifications", check_id, {
+        await log_audit_action(recorded_by, "record_identity_check", "identity_checks", check_id, {
             "employee_id": employee_id,
             "method": data.get("method"),
-            "outcome": data.get("outcome")
+            "outcome": data.get("outcome"),
+            "document_type": data.get("document_type")
         })
         
         check_record.pop("_id", None)
         return check_record
     
     @staticmethod
-    async def get_current_identity_verification(employee_id: str) -> Optional[dict]:
-        """Get current identity verification for an employee."""
-        check = await db.identity_verifications.find_one(
+    async def get_current_identity_check(employee_id: str) -> Optional[dict]:
+        """Get the current Identity check for an employee with resolved user name and computed status."""
+        check = await db.identity_checks.find_one(
             {"employee_id": employee_id, "is_current": True},
             {"_id": 0}
         )
+        
+        if check and check.get("checked_by"):
+            # Resolve checked_by user ID to a human-readable name
+            user = await db.users.find_one(
+                {"id": check["checked_by"]},
+                {"_id": 0, "first_name": 1, "last_name": 1, "email": 1}
+            )
+            if user:
+                name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                check["checked_by_name"] = name if name else user.get('email', 'Admin')
+            else:
+                check["checked_by_name"] = "Admin"
+        
+        # Compute and attach Identity status
+        if check:
+            check["identity_status"] = CheckRecordService.compute_identity_status(check)
+            
+            # Fetch linked evidence document if present
+            if check.get("proof_document_id"):
+                proof_doc = await db.employee_documents.find_one(
+                    {"id": check["proof_document_id"]},
+                    {"_id": 0, "id": 1, "filename": 1, "original_filename": 1, "uploaded_at": 1, "file_type": 1}
+                )
+                if proof_doc:
+                    check["proof_document"] = {
+                        "id": proof_doc.get("id"),
+                        "filename": proof_doc.get("original_filename") or proof_doc.get("filename"),
+                        "uploaded_at": proof_doc.get("uploaded_at"),
+                        "file_type": proof_doc.get("file_type")
+                    }
+        
         return check
+    
+    @staticmethod
+    def compute_identity_status(identity_check: Optional[dict]) -> dict:
+        """
+        Compute Identity compliance status from saved result fields.
+        
+        Non-breaking, read-only computation layer.
+        
+        Returns:
+            {
+                "status": str,  # verified, expired, incomplete, mismatches_found, not_verified
+                "status_label": str,  # Human-readable label
+                "status_color": str,  # green, amber, red, gray
+                "days_until_expiry": int or None,
+                "expiry_date": str or None,
+                "has_mismatches": bool,
+                "alerts": [{"level": "info|warning|urgent|error", "message": str}],
+                "summary_line": str
+            }
+        """
+        from datetime import datetime, timezone
+        
+        result = {
+            "status": "not_verified",
+            "status_label": "Not Verified",
+            "status_color": "gray",
+            "days_until_expiry": None,
+            "expiry_date": None,
+            "has_mismatches": False,
+            "document_type": None,
+            "alerts": [],
+            "summary_line": "Identity not verified"
+        }
+        
+        if not identity_check:
+            return result
+        
+        # Check if verified
+        outcome = identity_check.get("outcome")
+        if outcome not in ["verified", "follow_up_required"]:
+            result["status"] = "not_verified"
+            result["status_label"] = "Verification Pending" if outcome == "awaiting_review" else "Not Verified"
+            result["status_color"] = "gray"
+            result["summary_line"] = "Identity verification pending" if outcome == "awaiting_review" else "Identity not verified"
+            return result
+        
+        # Extract key fields
+        document_type = identity_check.get("document_type")
+        expiry_date = identity_check.get("expiry_date")
+        name_matches = identity_check.get("name_matches_application", False)
+        dob_matches = identity_check.get("dob_matches_application", False)
+        photo_match = identity_check.get("photo_match_confirmed", False)
+        
+        result["document_type"] = document_type
+        result["expiry_date"] = expiry_date
+        
+        today = datetime.now(timezone.utc).date()
+        
+        # Compute days until expiry
+        if expiry_date:
+            try:
+                expiry_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00')).date() if isinstance(expiry_date, str) else expiry_date
+                days_until_expiry = (expiry_dt - today).days
+                result["days_until_expiry"] = days_until_expiry
+            except (ValueError, TypeError):
+                days_until_expiry = None
+        else:
+            days_until_expiry = None
+        
+        # Check for mismatches
+        mismatches = []
+        if not name_matches:
+            mismatches.append("Name does not match application")
+        if not dob_matches:
+            mismatches.append("DOB does not match application")
+        if not photo_match:
+            mismatches.append("Photo match not confirmed")
+        
+        result["has_mismatches"] = len(mismatches) > 0
+        
+        # Determine status based on outcome, expiry, and mismatches
+        doc_label = document_type.replace("_", " ").title() if document_type else "ID Document"
+        
+        if days_until_expiry is not None and days_until_expiry < 0:
+            # Expired document
+            result["status"] = "expired"
+            result["status_label"] = f"Expired ({abs(days_until_expiry)} days ago)"
+            result["status_color"] = "red"
+            result["summary_line"] = f"Identity: {doc_label} EXPIRED"
+            result["alerts"].append({
+                "level": "error",
+                "message": f"Identity document expired on {expiry_date}. New document required."
+            })
+        elif result["has_mismatches"]:
+            # Mismatches found
+            result["status"] = "mismatches_found"
+            result["status_label"] = "Verified - Mismatches"
+            result["status_color"] = "amber"
+            result["summary_line"] = f"Identity: Verified with warnings"
+            for mismatch in mismatches:
+                result["alerts"].append({
+                    "level": "warning",
+                    "message": mismatch
+                })
+        elif days_until_expiry is not None and days_until_expiry <= 30:
+            # Expiring soon
+            result["status"] = "expiring_soon"
+            result["status_label"] = f"Verified - Expires in {days_until_expiry}d"
+            result["status_color"] = "amber"
+            result["summary_line"] = f"Identity: {doc_label} expiring soon"
+            result["alerts"].append({
+                "level": "warning",
+                "message": f"Identity document expires in {days_until_expiry} days ({expiry_date})."
+            })
+        else:
+            # All good
+            result["status"] = "verified"
+            result["status_label"] = f"Verified - {doc_label}"
+            result["status_color"] = "green"
+            result["summary_line"] = f"Identity: {doc_label} verified"
+        
+        return result
     
     @staticmethod
     async def record_address_verification(
@@ -26167,39 +26903,82 @@ class CheckRecordService:
         recorded_by: str
     ) -> dict:
         """
-        Record address verification status.
+        Record a Proof of Address verification check.
         
-        Tracks verified document count (need 2/2 for compliance).
+        POA 3-Layer Model (mirroring RTW/DBS):
+        - Layer 1: Evidence (Utility bills, bank statements, council tax)
+        - Layer 2: Verification (original_document_seen, copy_verified)
+        - Layer 3: Address Result (document count, types, address match, recency)
+        
+        POA requires configurable minimum document count (default: 2).
+        Each document has recency rules based on type.
         """
         now = datetime.now(timezone.utc).isoformat()
-        check_id = f"addr_ver_{uuid.uuid4().hex[:12]}"
+        check_id = f"addr_chk_{uuid.uuid4().hex[:12]}"
         
-        # Get current verified count
-        verified_doc_ids = data.get("verified_document_ids", [])
-        verified_count = len(verified_doc_ids)
-        
-        # Supersede previous current
-        previous = await db.address_verifications.find_one({
+        # Supersede previous current check
+        previous = await db.address_checks.find_one({
             "employee_id": employee_id,
             "is_current": True
         })
         if previous:
-            await db.address_verifications.update_one(
+            await db.address_checks.update_one(
                 {"id": previous["id"]},
                 {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
             )
+        
+        # Process verified documents with recency validation
+        verified_documents = data.get("verified_documents", [])
+        documents_received = len(verified_documents)
+        documents_required = data.get("documents_required_count", 2)
+        
+        # Compute recency status for each document
+        for doc in verified_documents:
+            doc["recency_status"] = CheckRecordService._compute_poa_recency(
+                doc.get("document_type"),
+                doc.get("issue_date")
+            )
+        
+        # Check if all documents are sufficiently recent
+        all_recent = all(
+            doc.get("recency_status", {}).get("status") in ["recent", "borderline"]
+            for doc in verified_documents
+        ) if verified_documents else False
         
         check_record = {
             "id": check_id,
             "employee_id": employee_id,
             "check_type": "address_verification",
-            "verified_document_ids": verified_doc_ids,
-            "verified_count": verified_count,
-            "minimum_required": 2,
-            "meets_requirement": verified_count >= 2,
-            "verified_at": data.get("verified_at"),
-            "verified_by": recorded_by,
-            "recency_policy_passed": data.get("recency_policy_passed", True),
+            
+            # Method and core fields (Layer 2: Verification)
+            "method": data.get("method"),  # original_document_seen, uploaded_copy_reviewed, copy_verified
+            "checked_at": data.get("checked_at"),
+            "checked_by": recorded_by,
+            "outcome": data.get("outcome", "awaiting_review"),
+            
+            # Document count validation (Layer 3: Address Result)
+            "documents_received_count": documents_received,
+            "documents_required_count": documents_required,
+            "meets_document_requirement": documents_received >= documents_required,
+            
+            # Verified documents with type, issue_date, recency_status
+            "verified_documents": verified_documents,
+            
+            # Extracted/confirmed address
+            "extracted_address_line1": data.get("extracted_address_line1"),
+            "extracted_address_line2": data.get("extracted_address_line2"),
+            "extracted_city": data.get("extracted_city"),
+            "extracted_postcode": data.get("extracted_postcode"),
+            
+            # Address verification
+            "address_matches_application": data.get("address_matches_application", False),
+            "all_documents_sufficiently_recent": all_recent,
+            
+            # Linked evidence/proof
+            "evidence_document_ids": data.get("evidence_document_ids", []),
+            "proof_document_id": data.get("proof_document_id"),
+            
+            # Notes and metadata
             "notes": data.get("notes"),
             "is_current": True,
             "created_at": now,
@@ -26207,25 +26986,256 @@ class CheckRecordService:
             "record_version": 1
         }
         
-        await db.address_verifications.insert_one(check_record)
+        await db.address_checks.insert_one(check_record)
         
-        await log_audit_action(recorded_by, "record_address_verification", "address_verifications", check_id, {
+        await log_audit_action(recorded_by, "record_address_check", "address_checks", check_id, {
             "employee_id": employee_id,
-            "verified_count": verified_count,
-            "meets_requirement": verified_count >= 2
+            "method": data.get("method"),
+            "outcome": data.get("outcome"),
+            "documents_received": documents_received,
+            "meets_requirement": documents_received >= documents_required
         })
         
         check_record.pop("_id", None)
         return check_record
     
     @staticmethod
-    async def get_current_address_verification(employee_id: str) -> Optional[dict]:
-        """Get current address verification for an employee."""
-        check = await db.address_verifications.find_one(
+    def _compute_poa_recency(document_type: str, issue_date: str) -> dict:
+        """
+        Compute recency status for a POA document.
+        
+        Rules:
+        - utility_bill / bank_statement: max 3 months
+        - council_tax / HMRC / government: max 6 months
+        - tenancy_agreement: valid if current (no date check)
+        """
+        from datetime import datetime, timezone
+        from dateutil.relativedelta import relativedelta
+        
+        result = {
+            "status": "unknown",
+            "status_label": "Unknown",
+            "days_old": None,
+            "max_age_months": None,
+            "is_valid": False
+        }
+        
+        if not issue_date:
+            result["status"] = "no_date"
+            result["status_label"] = "No issue date"
+            return result
+        
+        # Get max age for document type
+        doc_config = {
+            "utility_bill": 3,
+            "bank_statement": 3,
+            "council_tax": 6,
+            "hmrc_letter": 6,
+            "government_letter": 6,
+            "mortgage_statement": 6,
+            "tenancy_agreement": None,  # No max age - valid if current
+            "other": 3
+        }
+        
+        max_age_months = doc_config.get(document_type, 3)
+        result["max_age_months"] = max_age_months
+        
+        # Tenancy agreement has no date limit
+        if max_age_months is None:
+            result["status"] = "recent"
+            result["status_label"] = "Valid (current agreement)"
+            result["is_valid"] = True
+            return result
+        
+        try:
+            today = datetime.now(timezone.utc).date()
+            issue_dt = datetime.fromisoformat(issue_date.replace('Z', '+00:00')).date() if isinstance(issue_date, str) else issue_date
+            
+            days_old = (today - issue_dt).days
+            result["days_old"] = days_old
+            
+            # Calculate cutoff dates
+            max_cutoff = today - relativedelta(months=max_age_months)
+            borderline_cutoff = today - relativedelta(months=max_age_months - 1)  # 1 month before max
+            
+            if issue_dt >= borderline_cutoff:
+                result["status"] = "recent"
+                result["status_label"] = f"Recent ({days_old}d old)"
+                result["is_valid"] = True
+            elif issue_dt >= max_cutoff:
+                result["status"] = "borderline"
+                result["status_label"] = f"Borderline ({days_old}d old)"
+                result["is_valid"] = True
+            else:
+                result["status"] = "outdated"
+                result["status_label"] = f"Outdated ({days_old}d old)"
+                result["is_valid"] = False
+            
+        except (ValueError, TypeError) as e:
+            result["status"] = "invalid_date"
+            result["status_label"] = f"Invalid date: {issue_date}"
+        
+        return result
+    
+    @staticmethod
+    async def get_current_address_check(employee_id: str) -> Optional[dict]:
+        """Get the current Address check for an employee with resolved user name and computed status."""
+        check = await db.address_checks.find_one(
             {"employee_id": employee_id, "is_current": True},
             {"_id": 0}
         )
+        
+        if check and check.get("checked_by"):
+            # Resolve checked_by user ID to a human-readable name
+            user = await db.users.find_one(
+                {"id": check["checked_by"]},
+                {"_id": 0, "first_name": 1, "last_name": 1, "email": 1}
+            )
+            if user:
+                name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                check["checked_by_name"] = name if name else user.get('email', 'Admin')
+            else:
+                check["checked_by_name"] = "Admin"
+        
+        # Compute and attach Address status
+        if check:
+            check["address_status"] = CheckRecordService.compute_address_status(check)
+            
+            # Fetch linked proof document if present
+            if check.get("proof_document_id"):
+                proof_doc = await db.employee_documents.find_one(
+                    {"id": check["proof_document_id"]},
+                    {"_id": 0, "id": 1, "filename": 1, "original_filename": 1, "uploaded_at": 1, "file_type": 1}
+                )
+                if proof_doc:
+                    check["proof_document"] = {
+                        "id": proof_doc.get("id"),
+                        "filename": proof_doc.get("original_filename") or proof_doc.get("filename"),
+                        "uploaded_at": proof_doc.get("uploaded_at"),
+                        "file_type": proof_doc.get("file_type")
+                    }
+        
         return check
+    
+    @staticmethod
+    def compute_address_status(address_check: Optional[dict]) -> dict:
+        """
+        Compute Address compliance status from saved result fields.
+        
+        Non-breaking, read-only computation layer.
+        
+        Returns:
+            {
+                "status": str,  # verified, partial, outdated_docs, address_mismatch, not_verified
+                "status_label": str,
+                "status_color": str,
+                "documents_received": int,
+                "documents_required": int,
+                "all_recent": bool,
+                "address_matches": bool,
+                "alerts": [{"level": str, "message": str}],
+                "summary_line": str
+            }
+        """
+        result = {
+            "status": "not_verified",
+            "status_label": "Not Verified",
+            "status_color": "gray",
+            "documents_received": 0,
+            "documents_required": 2,
+            "all_recent": False,
+            "address_matches": False,
+            "alerts": [],
+            "summary_line": "Address not verified"
+        }
+        
+        if not address_check:
+            return result
+        
+        # Check if verified
+        outcome = address_check.get("outcome")
+        if outcome not in ["verified", "follow_up_required"]:
+            result["status"] = "not_verified"
+            result["status_label"] = "Verification Pending" if outcome == "awaiting_review" else "Not Verified"
+            result["status_color"] = "gray"
+            result["summary_line"] = "Address verification pending" if outcome == "awaiting_review" else "Address not verified"
+            return result
+        
+        # Extract key fields
+        docs_received = address_check.get("documents_received_count", 0)
+        docs_required = address_check.get("documents_required_count", 2)
+        verified_docs = address_check.get("verified_documents", [])
+        all_recent = address_check.get("all_documents_sufficiently_recent", False)
+        address_matches = address_check.get("address_matches_application", False)
+        
+        result["documents_received"] = docs_received
+        result["documents_required"] = docs_required
+        result["all_recent"] = all_recent
+        result["address_matches"] = address_matches
+        
+        # Check for outdated documents
+        outdated_docs = [
+            doc for doc in verified_docs
+            if doc.get("recency_status", {}).get("status") == "outdated"
+        ]
+        borderline_docs = [
+            doc for doc in verified_docs
+            if doc.get("recency_status", {}).get("status") == "borderline"
+        ]
+        
+        # Determine status
+        if docs_received < docs_required:
+            # Not enough documents
+            result["status"] = "partial"
+            result["status_label"] = f"Partial ({docs_received}/{docs_required} docs)"
+            result["status_color"] = "amber"
+            result["summary_line"] = f"Address: {docs_received}/{docs_required} documents verified"
+            result["alerts"].append({
+                "level": "warning",
+                "message": f"Only {docs_received} of {docs_required} required documents verified."
+            })
+        elif len(outdated_docs) > 0:
+            # Has outdated documents
+            result["status"] = "outdated_docs"
+            result["status_label"] = "Outdated Documents"
+            result["status_color"] = "red"
+            result["summary_line"] = f"Address: Contains outdated documents"
+            for doc in outdated_docs:
+                doc_type = doc.get("document_type", "Document")
+                result["alerts"].append({
+                    "level": "error",
+                    "message": f"{doc_type.replace('_', ' ').title()} is outdated - exceeds recency limit."
+                })
+        elif not address_matches:
+            # Address mismatch
+            result["status"] = "address_mismatch"
+            result["status_label"] = "Verified - Address Mismatch"
+            result["status_color"] = "amber"
+            result["summary_line"] = "Address: Verified with mismatch warning"
+            result["alerts"].append({
+                "level": "warning",
+                "message": "Address on documents does not match application address."
+            })
+        elif len(borderline_docs) > 0:
+            # Has borderline documents (close to expiry)
+            result["status"] = "verified"
+            result["status_label"] = f"Verified ({docs_received} docs)"
+            result["status_color"] = "green"
+            result["summary_line"] = f"Address: {docs_received} documents verified"
+            for doc in borderline_docs:
+                doc_type = doc.get("document_type", "Document")
+                result["alerts"].append({
+                    "level": "info",
+                    "message": f"{doc_type.replace('_', ' ').title()} is approaching recency limit."
+                })
+        else:
+            # All good
+            result["status"] = "verified"
+            result["status_label"] = f"Verified ({docs_received} docs)"
+            result["status_color"] = "green"
+            result["summary_line"] = f"Address: {docs_received} documents verified"
+        
+        return result
 
 
 class AgreementVersionService:
@@ -29465,18 +30475,112 @@ class RTWCheckInput(BaseModel):
 # DBSCheckInput already defined above with comprehensive fields - removed duplicate here
 
 class IdentityCheckInput(BaseModel):
-    """Input for recording an identity verification."""
-    method: str  # CheckMethod value
-    checked_at: str
-    outcome: str  # CheckOutcome value
-    evidence_document_ids: Optional[List[str]] = None
-    notes: Optional[str] = None
+    """
+    Input for recording an Identity verification check.
+    
+    Identity 3-Layer Model (mirroring RTW/DBS):
+    - Layer 1: Evidence (Passport, Driving License, ID Card)
+    - Layer 2: Verification (original_document_seen, copy_verified, digital_id_verification)
+    - Layer 3: Identity Result (document details, name/DOB match, photo match)
+    """
+    # Check method and date (Layer 2: Verification)
+    method: str = Field(..., description="Identity verification method")
+    checked_at: str = Field(..., description="Date check was performed (YYYY-MM-DD)")
+    outcome: str = Field(default="verified", description="Check outcome (verified, failed, follow_up_required)")
+    
+    # Document details (Layer 3: Identity Result)
+    document_type: Optional[str] = Field(None, description="Document type (passport, driving_licence, national_id, brp)")
+    full_name_on_document: Optional[str] = Field(None, description="Full name as shown on document")
+    date_of_birth: Optional[str] = Field(None, description="Date of birth on document (YYYY-MM-DD)")
+    document_number: Optional[str] = Field(None, description="Document number/passport number")
+    issue_date: Optional[str] = Field(None, description="Document issue date (YYYY-MM-DD)")
+    expiry_date: Optional[str] = Field(None, description="Document expiry date (YYYY-MM-DD)")
+    nationality: Optional[str] = Field(None, description="Nationality on document")
+    
+    # Verification checks
+    name_matches_application: bool = Field(default=False, description="Name matches application form")
+    dob_matches_application: bool = Field(default=False, description="DOB matches application form")
+    photo_match_confirmed: bool = Field(default=False, description="Photo matches applicant")
+    
+    # Linked evidence/proof
+    evidence_document_ids: List[str] = Field(default_factory=list, description="IDs of linked evidence files")
+    proof_document_id: Optional[str] = Field(None, description="ID of proof-of-check file")
+    
+    # Notes
+    notes: Optional[str] = Field(None, description="Verification notes (especially for mismatches)")
+
+
+# Human-friendly labels for Identity check methods
+IDENTITY_METHOD_LABELS = {
+    "original_document_seen": "Original Document Seen",
+    "copy_verified": "Copy Verified",
+    "digital_id_verification": "Digital ID Verification",
+    "other_documented_verification": "Other Documented Verification"
+}
+
+
+# POA document types and recency rules
+POA_DOCUMENT_TYPES = {
+    "utility_bill": {"label": "Utility Bill", "max_age_months": 3},
+    "bank_statement": {"label": "Bank Statement", "max_age_months": 3},
+    "council_tax": {"label": "Council Tax Bill", "max_age_months": 6},
+    "hmrc_letter": {"label": "HMRC Letter/Document", "max_age_months": 6},
+    "government_letter": {"label": "Government Letter", "max_age_months": 6},
+    "tenancy_agreement": {"label": "Tenancy Agreement", "max_age_months": None},  # Valid if current
+    "mortgage_statement": {"label": "Mortgage Statement", "max_age_months": 6},
+    "other": {"label": "Other Document", "max_age_months": 3}
+}
+
 
 class AddressVerificationInput(BaseModel):
-    """Input for recording address verification."""
-    verified_document_ids: List[str]
-    verified_at: str
-    notes: Optional[str] = None
+    """
+    Input for recording a Proof of Address verification check.
+    
+    POA 3-Layer Model (mirroring RTW/DBS):
+    - Layer 1: Evidence (Utility bills, bank statements, council tax)
+    - Layer 2: Verification (original_document_seen, copy_verified)
+    - Layer 3: Address Result (document count, types, address match, recency)
+    
+    POA requires configurable minimum document count (default: 2).
+    Each document has recency rules based on type.
+    """
+    # Check method and date (Layer 2: Verification)
+    method: str = Field(..., description="Address verification method")
+    checked_at: str = Field(..., description="Date check was performed (YYYY-MM-DD)")
+    outcome: str = Field(default="verified", description="Check outcome (verified, failed, follow_up_required)")
+    
+    # Document count validation (Layer 3: Address Result)
+    documents_received_count: int = Field(default=0, description="Number of documents received")
+    documents_required_count: int = Field(default=2, description="Minimum documents required (configurable)")
+    
+    # Document details - list of verified documents
+    verified_documents: List[dict] = Field(default_factory=list, description="List of verified documents with type, issue_date, recency_status")
+    
+    # Extracted/confirmed address
+    extracted_address_line1: Optional[str] = Field(None, description="Address line 1 from document")
+    extracted_address_line2: Optional[str] = Field(None, description="Address line 2 from document")
+    extracted_city: Optional[str] = Field(None, description="City from document")
+    extracted_postcode: Optional[str] = Field(None, description="Postcode from document")
+    
+    # Address verification
+    address_matches_application: bool = Field(default=False, description="Address matches application form")
+    all_documents_sufficiently_recent: bool = Field(default=False, description="All documents within recency limits")
+    
+    # Linked evidence/proof
+    evidence_document_ids: List[str] = Field(default_factory=list, description="IDs of linked evidence files")
+    proof_document_id: Optional[str] = Field(None, description="ID of proof-of-check file")
+    
+    # Notes
+    notes: Optional[str] = Field(None, description="Verification notes (especially for address mismatches)")
+
+
+# Human-friendly labels for Address check methods
+ADDRESS_METHOD_LABELS = {
+    "original_document_seen": "Original Document Seen",
+    "uploaded_copy_reviewed": "Uploaded Copy Reviewed",
+    "copy_verified": "Copy Verified",
+    "other_documented_verification": "Other Documented Verification"
+}
 
 class AgreementSendInput(BaseModel):
     """Input for sending an agreement form."""
@@ -30538,11 +31642,18 @@ async def record_identity_check(
     user: dict = Depends(require_manager_or_admin)
 ):
     """
-    Record an identity verification check.
+    Record an Identity verification check.
+    
+    Identity 3-Layer Model:
+    - Layer 1: Evidence (Passport, Driving License, ID Card)
+    - Layer 2: Verification (original_document_seen, copy_verified, digital_id_verification)
+    - Layer 3: Identity Result (document details, name/DOB match, photo match)
     
     Methods:
-    - manual_id_verification: Manual verification of ID documents
-    - digital_id_check: Digital identity verification service
+    - original_document_seen: Physical document seen in person
+    - copy_verified: Copy of document verified
+    - digital_id_verification: Digital ID verification service used
+    - other_documented_verification: Other documented verification method
     """
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
@@ -30562,11 +31673,58 @@ async def get_identity_check(
     employee_id: str,
     user: dict = Depends(get_current_user)
 ):
-    """Get the current identity verification for an employee."""
-    current = await CheckRecordService.get_current_identity_verification(employee_id)
+    """Get the current Identity verification for an employee with computed status."""
+    current = await CheckRecordService.get_current_identity_check(employee_id)
     return {"current": current}
 
 
+@api_router.post("/employees/{employee_id}/address/check")
+async def record_address_check(
+    employee_id: str,
+    data: AddressVerificationInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record a Proof of Address verification check.
+    
+    POA 3-Layer Model:
+    - Layer 1: Evidence (Utility bills, bank statements, council tax)
+    - Layer 2: Verification (original_document_seen, copy_verified)
+    - Layer 3: Address Result (document count, types, address match, recency)
+    
+    Methods:
+    - original_document_seen: Physical documents seen in person
+    - uploaded_copy_reviewed: Uploaded copies reviewed online
+    - copy_verified: Copies verified against originals
+    - other_documented_verification: Other documented verification method
+    
+    POA requires minimum 2 documents (configurable).
+    Each document has recency rules based on type.
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    result = await CheckRecordService.record_address_verification(
+        employee_id=employee_id,
+        data=data.model_dump(),
+        recorded_by=user['user_id']
+    )
+    
+    return result
+
+
+@api_router.get("/employees/{employee_id}/address/check")
+async def get_address_check(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get the current Address verification for an employee with computed status."""
+    current = await CheckRecordService.get_current_address_check(employee_id)
+    return {"current": current}
+
+
+# Keep legacy endpoint for backwards compatibility
 @api_router.post("/employees/{employee_id}/address/verify")
 async def record_address_verification(
     employee_id: str,
@@ -31933,8 +33091,8 @@ async def get_compliance_file(
     # Get check records (Step 11)
     rtw_check = await CheckRecordService.get_current_rtw_check(employee_id)
     dbs_check = await CheckRecordService.get_current_dbs_check(employee_id)
-    identity_check = await CheckRecordService.get_current_identity_verification(employee_id)
-    address_verification = await CheckRecordService.get_current_address_verification(employee_id)
+    identity_check = await CheckRecordService.get_current_identity_check(employee_id)
+    address_check = await CheckRecordService.get_current_address_check(employee_id)
     
     # Get check history counts
     rtw_history = await CheckRecordService.get_rtw_check_history(employee_id, limit=50)
@@ -32459,10 +33617,20 @@ async def get_compliance_file(
     # HELPER: Build Address Verification Row (special case - count-based)
     # =========================================================================
     def build_address_verification_row() -> dict:
-        """Build address verification row with freshness policy (needs 2/2 valid within 12 months)."""
-        has_verification = address_verification is not None
-        verified_count = address_verification.get("verified_count", 0) if has_verification else 0
-        meets_requirement = address_verification.get("meets_requirement", False) if has_verification else False
+        """Build address verification row with freshness policy (needs 2/2 valid within limits)."""
+        has_verification = address_check is not None
+        
+        # Use new 3-layer model fields if available
+        if has_verification:
+            verified_count = address_check.get("documents_received_count", 0)
+            meets_requirement = address_check.get("meets_document_requirement", False)
+            address_status = address_check.get("address_status", {})
+            verified_docs = address_check.get("verified_documents", [])
+        else:
+            verified_count = 0
+            meets_requirement = False
+            address_status = {}
+            verified_docs = []
         
         # Get PoA documents for freshness evaluation
         poa_docs = [d for d in documents if d.get("requirement_id") in ["proof_of_address", "proof_of_address_evidence", "address_proof"]]
@@ -32476,9 +33644,23 @@ async def get_compliance_file(
         unclear_count = poa_freshness.get("unclear_count", 0)
         is_fresh_complete = poa_freshness.get("is_complete", False)
         
-        # Status must consider both verification AND freshness
-        if is_fresh_complete and meets_requirement:
-            status_summary = f"{valid_fresh_count}/2 valid & verified (within 12 months)"
+        # Use computed status from 3-layer model if available
+        if address_status.get("status"):
+            overall_status = address_status.get("status")
+            status_summary = address_status.get("status_label", f"{verified_count}/2 verified")
+            if overall_status == "verified":
+                blocker_text = None
+            elif overall_status == "partial":
+                blocker_text = f"Address: need {2 - verified_count} more document(s)"
+            elif overall_status == "outdated_docs":
+                blocker_text = "Address: Contains outdated documents"
+            elif overall_status == "address_mismatch":
+                blocker_text = "Address: Mismatch with application"
+            else:
+                blocker_text = f"Address: {address_status.get('summary_line', 'Verification needed')}"
+        # Fall back to old logic
+        elif is_fresh_complete and meets_requirement:
+            status_summary = f"{valid_fresh_count}/2 valid & verified (within limits)"
             blocker_text = None
             overall_status = "verified"
         elif valid_fresh_count >= 2 and not meets_requirement:
@@ -32487,7 +33669,7 @@ async def get_compliance_file(
             overall_status = "awaiting_verification"
         elif expired_count > 0 and valid_fresh_count < 2:
             status_summary = f"{valid_fresh_count}/2 valid ({expired_count} expired)"
-            blocker_text = f"PoA: {expired_count} document(s) expired (older than 12 months)"
+            blocker_text = f"PoA: {expired_count} document(s) expired (older than limit)"
             overall_status = "expired"
         elif unclear_count > 0:
             status_summary = f"{valid_fresh_count}/2 valid ({unclear_count} need date review)"
@@ -32514,16 +33696,29 @@ async def get_compliance_file(
             "blocker_text": blocker_text,
             
             "has_check": has_verification,
-            "is_verified": is_fresh_complete and meets_requirement,
+            "is_verified": (overall_status == "verified") or (is_fresh_complete and meets_requirement),
             "check_data": {
-                "id": address_verification.get("id") if has_verification else None,
+                "id": address_check.get("id") if has_verification else None,
                 "verified_count": verified_count,
-                "minimum_required": 2,
+                "minimum_required": address_check.get("documents_required_count", 2) if has_verification else 2,
                 "meets_requirement": meets_requirement,
-                "verified_document_ids": address_verification.get("verified_document_ids", []) if has_verification else [],
-                "verified_at": address_verification.get("verified_at") if has_verification else None,
-                "verified_by": address_verification.get("verified_by") if has_verification else None,
-                "recency_policy_passed": is_fresh_complete
+                "verified_document_ids": address_check.get("evidence_document_ids", []) if has_verification else [],
+                "verified_at": address_check.get("checked_at") if has_verification else None,
+                "verified_by": address_check.get("checked_by") if has_verification else None,
+                "verified_by_name": address_check.get("checked_by_name") if has_verification else None,
+                "recency_policy_passed": address_check.get("all_documents_sufficiently_recent", is_fresh_complete) if has_verification else False,
+                
+                # 3-layer model fields
+                "method": address_check.get("method") if has_verification else None,
+                "outcome": address_check.get("outcome") if has_verification else None,
+                "verified_documents": address_check.get("verified_documents", []) if has_verification else [],
+                "extracted_address_line1": address_check.get("extracted_address_line1") if has_verification else None,
+                "extracted_address_line2": address_check.get("extracted_address_line2") if has_verification else None,
+                "extracted_city": address_check.get("extracted_city") if has_verification else None,
+                "extracted_postcode": address_check.get("extracted_postcode") if has_verification else None,
+                "address_matches_application": address_check.get("address_matches_application", False) if has_verification else False,
+                "address_status": address_check.get("address_status", {}) if has_verification else {},
+                "notes": address_check.get("notes") if has_verification else None
             } if has_verification else None,
             
             # Freshness evaluation (new)
@@ -39970,6 +41165,8 @@ async def init_production():
         # Checks indexes
         await db.rtw_checks.create_index("employee_id")
         await db.dbs_checks.create_index("employee_id")
+        await db.identity_checks.create_index("employee_id")
+        await db.address_checks.create_index("employee_id")
         
         results["indexes"] = "created"
     except Exception as e:

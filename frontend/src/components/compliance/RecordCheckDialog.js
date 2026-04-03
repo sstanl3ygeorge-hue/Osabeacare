@@ -340,7 +340,27 @@ export default function RecordCheckDialog({
     next_recheck_date: '',
     result_status: '',
     information_present: false,
-    result_summary: ''
+    result_summary: '',
+    // Identity Result Panel fields
+    id_document_type: '',
+    id_full_name_on_document: '',
+    id_date_of_birth: '',
+    id_document_number: '',
+    id_issue_date: '',
+    id_expiry_date: '',
+    id_nationality: '',
+    id_name_matches_application: false,
+    id_dob_matches_application: false,
+    id_photo_match_confirmed: false,
+    // Address Result Panel fields
+    address_documents_received_count: 0,
+    address_documents_required_count: 2,
+    address_verified_documents: [],
+    address_extracted_line1: '',
+    address_extracted_line2: '',
+    address_extracted_city: '',
+    address_extracted_postcode: '',
+    address_matches_application: false
   });
   
   // Extraction state for RTW and DBS
@@ -360,6 +380,12 @@ export default function RecordCheckDialog({
   
   // Check if DBS check
   const isDBS = checkType === 'dbs_status_check' || checkType === 'dbs';
+  
+  // Check if Identity check
+  const isIdentity = checkType === 'identity_verification' || checkType === 'identity';
+  
+  // Check if Address check
+  const isAddress = checkType === 'address_verification' || checkType === 'proof_of_address';
 
   // Get methods for this check type with fallback to default
   const methods = CHECK_METHODS[checkType] || CHECK_METHODS.default;
@@ -423,6 +449,12 @@ export default function RecordCheckDialog({
     } else if (isDBS) {
       toast.info('Extracting DBS fields from document...', { duration: 2000 });
       await extractDBSFieldsFromFile(file);
+    } else if (isIdentity) {
+      toast.info('Extracting identity fields from document...', { duration: 2000 });
+      await extractIdentityFieldsFromFile(file);
+    } else if (isAddress) {
+      toast.info('Extracting address fields from document...', { duration: 2000 });
+      await extractAddressFieldsFromFile(file);
     }
   };
 
@@ -505,6 +537,142 @@ export default function RecordCheckDialog({
       }
     } catch (err) {
       console.error('DBS Extraction error:', err);
+      toast.info('Auto-extraction unavailable. Please fill in fields manually.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Extract Identity fields from a file using AI Vision
+  const extractIdentityFieldsFromFile = async (file) => {
+    setIsExtracting(true);
+    setExtractionResult(null);
+    setExtractionIssues([]);
+
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await axios.post(
+        `${API}/identity/extract`,
+        {
+          file_base64: base64Data,
+          file_type: file.type
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { employee_id: employeeId }
+        }
+      );
+
+      if (response.data?.success && response.data?.extraction) {
+        const { fields, issues } = response.data.extraction;
+        setExtractionResult(fields);
+        setExtractionIssues(issues || []);
+        
+        console.log('Identity Extraction result:', { fields, issues });
+
+        setFormData(prev => ({
+          ...prev,
+          id_document_type: fields.document_type || prev.id_document_type,
+          id_full_name_on_document: fields.full_name_on_document || prev.id_full_name_on_document,
+          id_date_of_birth: fields.date_of_birth || prev.id_date_of_birth,
+          id_document_number: fields.document_number || prev.id_document_number,
+          id_issue_date: fields.issue_date || prev.id_issue_date,
+          id_expiry_date: fields.expiry_date || prev.id_expiry_date,
+          id_nationality: fields.nationality || prev.id_nationality,
+          id_name_matches_application: fields.name_matches_application ?? prev.id_name_matches_application,
+          id_dob_matches_application: fields.dob_matches_application ?? prev.id_dob_matches_application
+        }));
+
+        const blockers = (issues || []).filter(i => i.severity === 'blocker');
+        const hasExtractedData = Object.keys(fields).some(k => fields[k] !== null && fields[k] !== undefined);
+        
+        if (blockers.length > 0) {
+          toast.error(`Issue found: ${blockers[0].detail}`);
+        } else if (hasExtractedData) {
+          toast.success('Identity fields extracted - please review and confirm before saving');
+        } else {
+          toast.warning('Could not extract identity data – please fill fields manually', { duration: 5000 });
+        }
+      } else {
+        toast.warning('Could not extract identity data – please fill fields manually', { duration: 5000 });
+      }
+    } catch (err) {
+      console.error('Identity Extraction error:', err);
+      toast.info('Auto-extraction unavailable. Please fill in fields manually.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Extract Address fields from a file using AI Vision
+  const extractAddressFieldsFromFile = async (file) => {
+    setIsExtracting(true);
+    setExtractionResult(null);
+    setExtractionIssues([]);
+
+    try {
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await axios.post(
+        `${API}/address/extract`,
+        {
+          file_base64: base64Data,
+          file_type: file.type
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { employee_id: employeeId }
+        }
+      );
+
+      if (response.data?.success && response.data?.extraction) {
+        const { fields, issues } = response.data.extraction;
+        setExtractionResult(fields);
+        setExtractionIssues(issues || []);
+        
+        console.log('Address Extraction result:', { fields, issues });
+
+        setFormData(prev => ({
+          ...prev,
+          address_extracted_line1: fields.address_line1 || prev.address_extracted_line1,
+          address_extracted_line2: fields.address_line2 || prev.address_extracted_line2,
+          address_extracted_city: fields.city || prev.address_extracted_city,
+          address_extracted_postcode: fields.postcode || prev.address_extracted_postcode,
+          address_matches_application: fields.address_matches_application ?? prev.address_matches_application
+        }));
+
+        const blockers = (issues || []).filter(i => i.severity === 'blocker');
+        const hasExtractedData = Object.keys(fields).some(k => fields[k] !== null && fields[k] !== undefined);
+        
+        if (blockers.length > 0) {
+          toast.error(`Issue found: ${blockers[0].detail}`);
+        } else if (hasExtractedData) {
+          toast.success('Address fields extracted - please review and confirm before saving');
+          // Show recency status if available
+          if (fields.recency_status?.status === 'outdated') {
+            toast.warning(`Document is outdated (${fields.recency_status.days_old} days old)`, { duration: 5000 });
+          } else if (fields.recency_status?.status === 'borderline') {
+            toast.info(`Document is borderline (${fields.recency_status.days_old} days old)`);
+          }
+        } else {
+          toast.warning('Could not extract address data – please fill fields manually', { duration: 5000 });
+        }
+      } else {
+        toast.warning('Could not extract address data – please fill fields manually', { duration: 5000 });
+      }
+    } catch (err) {
+      console.error('Address Extraction error:', err);
       toast.info('Auto-extraction unavailable. Please fill in fields manually.');
     } finally {
       setIsExtracting(false);
@@ -646,13 +814,17 @@ export default function RecordCheckDialog({
     }
   };
 
-  // Re-extract fields (manual trigger for retry) - works for both RTW and DBS
+  // Re-extract fields (manual trigger for retry) - works for RTW, DBS, Identity, and Address
   const handleReExtract = async () => {
     if (!proofFile) return;
     if (isRTW) {
       await extractRTWFieldsFromFile(proofFile);
     } else if (isDBS) {
       await extractDBSFieldsFromFile(proofFile);
+    } else if (isIdentity) {
+      await extractIdentityFieldsFromFile(proofFile);
+    } else if (isAddress) {
+      await extractAddressFieldsFromFile(proofFile);
     }
   };
 
@@ -776,6 +948,36 @@ export default function RecordCheckDialog({
         payload.information_present = formData.information_present || false;
         payload.result_summary = formData.result_summary || null;
       }
+      
+      // Identity check payload
+      if (checkType === 'identity_verification' || checkType === 'identity') {
+        // Identity Result Panel fields (3-layer model)
+        payload.document_type = formData.id_document_type || null;
+        payload.full_name_on_document = formData.id_full_name_on_document || null;
+        payload.date_of_birth = formData.id_date_of_birth || null;
+        payload.document_number = formData.id_document_number || null;
+        payload.issue_date = formData.id_issue_date || null;
+        payload.expiry_date = formData.id_expiry_date || null;
+        payload.nationality = formData.id_nationality || null;
+        payload.name_matches_application = formData.id_name_matches_application || false;
+        payload.dob_matches_application = formData.id_dob_matches_application || false;
+        payload.photo_match_confirmed = formData.id_photo_match_confirmed || false;
+        payload.proof_document_id = proofDocId;
+      }
+      
+      // Address check payload
+      if (checkType === 'address_verification' || checkType === 'proof_of_address') {
+        // Address Result Panel fields (3-layer model)
+        payload.documents_received_count = formData.address_documents_received_count || 0;
+        payload.documents_required_count = formData.address_documents_required_count || 2;
+        payload.verified_documents = formData.address_verified_documents || [];
+        payload.extracted_address_line1 = formData.address_extracted_line1 || null;
+        payload.extracted_address_line2 = formData.address_extracted_line2 || null;
+        payload.extracted_city = formData.address_extracted_city || null;
+        payload.extracted_postcode = formData.address_extracted_postcode || null;
+        payload.address_matches_application = formData.address_matches_application || false;
+        payload.proof_document_id = proofDocId;
+      }
 
       await axios.post(endpoint, payload, {
         headers: { Authorization: `Bearer ${token}` }
@@ -825,7 +1027,27 @@ export default function RecordCheckDialog({
       next_recheck_date: '',
       result_status: '',
       information_present: false,
-      result_summary: ''
+      result_summary: '',
+      // Identity Result Panel fields
+      id_document_type: '',
+      id_full_name_on_document: '',
+      id_date_of_birth: '',
+      id_document_number: '',
+      id_issue_date: '',
+      id_expiry_date: '',
+      id_nationality: '',
+      id_name_matches_application: false,
+      id_dob_matches_application: false,
+      id_photo_match_confirmed: false,
+      // Address Result Panel fields
+      address_documents_received_count: 0,
+      address_documents_required_count: 2,
+      address_verified_documents: [],
+      address_extracted_line1: '',
+      address_extracted_line2: '',
+      address_extracted_city: '',
+      address_extracted_postcode: '',
+      address_matches_application: false
     });
     setProofFile(null);
     setUploadedProofId(null);
@@ -936,14 +1158,16 @@ export default function RecordCheckDialog({
             )}
           </div>
 
-          {/* Extraction Status & Re-extract Option - RTW and DBS */}
-          {(isRTW || isDBS) && hasProof && (
+          {/* Extraction Status & Re-extract Option - RTW, DBS, Identity, and Address */}
+          {(isRTW || isDBS || isIdentity || isAddress) && hasProof && (
             <div className="space-y-2">
               {/* Extraction in progress */}
               {isExtracting && (
                 <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
                   <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                  <span className="text-sm text-indigo-700">Extracting {isRTW ? 'RTW' : 'DBS'} fields from document...</span>
+                  <span className="text-sm text-indigo-700">
+                    Extracting {isRTW ? 'RTW' : isDBS ? 'DBS' : isIdentity ? 'identity' : 'address'} fields from document...
+                  </span>
                 </div>
               )}
               

@@ -338,6 +338,7 @@ export default function DocumentPreviewModal({
             disabled={scale <= 0.5}
             className="h-8 w-8 p-0"
             title="Zoom out"
+            data-testid="image-zoom-out"
           >
             <ZoomOut className="h-4 w-4" />
           </Button>
@@ -353,6 +354,7 @@ export default function DocumentPreviewModal({
             disabled={scale >= 3}
             className="h-8 w-8 p-0"
             title="Zoom in"
+            data-testid="image-zoom-in"
           >
             <ZoomIn className="h-4 w-4" />
           </Button>
@@ -362,9 +364,48 @@ export default function DocumentPreviewModal({
             size="sm"
             onClick={resetZoom}
             className="h-8 px-2"
+            data-testid="image-reset-zoom"
           >
             Reset
           </Button>
+          
+          <div className="h-4 w-px bg-gray-300 mx-1" />
+          
+          {/* Rotate Controls */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRotation(prev => (prev - 90 + 360) % 360)}
+            className="h-8 w-8 p-0"
+            title="Rotate left (-90°)"
+            data-testid="image-rotate-left"
+          >
+            <RotateCw className="h-4 w-4 transform -scale-x-100" />
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setRotation(prev => (prev + 90) % 360)}
+            className="h-8 w-8 p-0"
+            title="Rotate right (+90°)"
+            data-testid="image-rotate-right"
+          >
+            <RotateCw className="h-4 w-4" />
+          </Button>
+          
+          {rotation !== 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRotation(0)}
+              className="h-8 px-2 text-xs text-gray-500"
+              title="Reset rotation"
+              data-testid="image-reset-rotation"
+            >
+              {rotation}°
+            </Button>
+          )}
         </div>
       </div>
       
@@ -373,8 +414,12 @@ export default function DocumentPreviewModal({
         <img
           src={blobUrl}
           alt={fileName}
-          style={{ transform: `scale(${scale})`, transformOrigin: 'center' }}
+          style={{ 
+            transform: `scale(${scale}) rotate(${rotation}deg)`, 
+            transformOrigin: 'center' 
+          }}
           className="max-w-full max-h-full object-contain shadow-lg transition-transform duration-200"
+          data-testid="image-preview"
         />
       </div>
     </div>

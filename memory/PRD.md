@@ -84,13 +84,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Fixed compliance card layout - Removed duplicate actions from header, Evidence row has Upload/Request/Manage, Verification row has Upload Proof/Record Check/View Details
 - [x] **Fixed Application Form viewer** - Created `ApplicationFormViewDrawer.js` to render structured application JSON data without requiring a template. The drawer shows all sections: Personal Details, Employment History, References, Declarations, Health Declaration, Criminal Declaration, Right to Work
 - [x] **Added Application Form PDF export** - `generate_application_form_pdf()` in server.py creates professional PDF from application form data. Export PDF button now works in ApplicationFormViewDrawer
+- [x] **Restored db.references insertion logic** - References submitted via public application now appear in Recruitment Record. Created reference_1_* and reference_2_* fields in employee document + db.references record. Compliance-file endpoint returns status='declared' for new applicants.
+- [x] **Changed "Upload Proof" to "Record Check"** - Removed standalone "Upload Proof" button from verification row. Proof upload is now part of the RecordCheckDialog workflow which opens when clicking "Record Check".
 
 ## Prioritized Backlog
 
 ### P0 (Critical)
 - [x] Fix DuplicateKeyError on application submit (DONE - requires production verification)
 - [x] **Fix Application Form viewer "Form template not found" error** (DONE - ApplicationFormViewDrawer.js created)
-- [ ] Restore db.references insertion logic with error safety
+- [x] **Restore db.references insertion logic** (DONE - references now appear in Recruitment Record)
 - [ ] Verify "Request sent" state displays correctly for new applicants
 
 ### P1 (High)
@@ -148,4 +150,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - Fixed Application Form viewer (P0), added PDF export for application forms
+April 3, 2026 - Restored db.references insertion, changed "Upload Proof" to "Record Check" button, Application Form viewer with PDF export

@@ -436,6 +436,9 @@ export default function RecordCheckDialog({
         const { fields, issues } = response.data.extraction;
         setExtractionResult(fields);
         setExtractionIssues(issues || []);
+        
+        // Log extraction results for debugging
+        console.log('RTW Extraction result:', { fields, issues });
 
         // Auto-populate form fields from extraction
         setFormData(prev => ({
@@ -455,15 +458,30 @@ export default function RecordCheckDialog({
 
         // Check for blockers
         const blockers = (issues || []).filter(i => i.severity === 'blocker');
+        const hasExtractedData = Object.keys(fields).some(k => fields[k] !== null && fields[k] !== undefined);
+        
         if (blockers.length > 0) {
           toast.error(`Issue found: ${blockers[0].detail}`);
-        } else if (Object.keys(fields).some(k => fields[k] !== null)) {
+        } else if (hasExtractedData) {
           toast.success('Fields extracted - please review and confirm before saving');
         } else {
-          toast.info('Could not extract fields automatically. Please fill in manually.');
+          // No data extracted - show warning
+          toast.warning('Could not extract RTW data – please fill fields manually', { duration: 5000 });
+          setExtractionIssues([...issues, {
+            code: 'no_data_extracted',
+            detail: 'No RTW fields could be extracted from this document. Please fill in the form manually.',
+            severity: 'warning'
+          }]);
         }
       } else {
-        toast.info('Could not extract fields automatically. Please fill in manually.');
+        // Extraction failed - show clear fallback message
+        console.warn('RTW Extraction failed:', response.data);
+        toast.warning('Could not extract RTW data – please fill fields manually', { duration: 5000 });
+        setExtractionIssues([{
+          code: 'extraction_failed',
+          detail: response.data?.error || 'Extraction service unavailable. Please fill in the form manually.',
+          severity: 'warning'
+        }]);
       }
     } catch (err) {
       console.error('Extraction error:', err);

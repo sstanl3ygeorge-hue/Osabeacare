@@ -33,6 +33,7 @@ export { default as TrainingSummaryCard } from './TrainingSummaryCard';
 // Phase 4B - Restructured top section components
 export { default as ApprovalStatusPanel } from './ApprovalStatusPanel';
 export { default as NextActionsPanel } from './NextActionsPanel';
+export { default as BatchRequestModal } from './BatchRequestModal';
 
 // Phase D2 - File interaction components
 export { default as RequirementFilesDrawer } from './RequirementFilesDrawer';

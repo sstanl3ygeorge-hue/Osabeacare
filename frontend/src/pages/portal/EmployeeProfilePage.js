@@ -22,7 +22,7 @@ import DocumentExtractionReview from '../../components/documents/DocumentExtract
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
-import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, BatchRequestModal } from '../../components/compliance';
 import ApprovalStatusPanel from '../../components/compliance/ApprovalStatusPanel';
 import NextActionsPanel from '../../components/compliance/NextActionsPanel';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
@@ -2202,23 +2202,33 @@ export default function EmployeeProfilePage() {
     handleRequestDocument(true);
   };
   
-  // Request all missing items for this employee
-  const handleRequestAllMissingItems = async () => {
-    try {
-      const response = await axios.post(
-        `${API}/employees/${employeeId}/request-missing-items`,
-        {},
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.data.requests_created > 0) {
-        toast.success(`${response.data.requests_created} request(s) sent for missing items`);
-      } else {
-        toast.info(response.data.message || 'No missing items to request');
-      }
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to send requests');
+  // State for batch request modal
+  const [batchRequestModalOpen, setBatchRequestModalOpen] = useState(false);
+  const [missingItemsForRequest, setMissingItemsForRequest] = useState([]);
+  
+  // Open batch request modal with missing items
+  const handleRequestAllMissingItems = () => {
+    // Get missing items from compliance requirements
+    const requirements = complianceRequirements?.requirements || [];
+    const missingItems = requirements
+      .filter(req => req.status === 'missing' || req.status === 'not_started' || req.status === 'required')
+      .map(req => ({
+        id: req.id,
+        key: req.id,
+        name: req.name,
+        title: req.name,
+        description: req.description || '',
+        instructions: req.instructions || '',
+        category: req.category || 'document'
+      }));
+    
+    if (missingItems.length === 0) {
+      toast.info('No missing items to request');
+      return;
     }
+    
+    setMissingItemsForRequest(missingItems);
+    setBatchRequestModalOpen(true);
   };
 
   // ========== Send Form via Email Handlers ==========
@@ -7830,6 +7840,20 @@ export default function EmployeeProfilePage() {
           const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
           return evidenceRow?.counts?.verified || 0;
         })()}
+      />
+      
+      {/* Batch Request Modal */}
+      <BatchRequestModal
+        open={batchRequestModalOpen}
+        onClose={() => setBatchRequestModalOpen(false)}
+        employeeId={employeeId}
+        employeeName={`${employee?.first_name || ''} ${employee?.last_name || ''}`.trim()}
+        employeeEmail={employee?.email}
+        missingItems={missingItemsForRequest}
+        onSuccess={() => {
+          fetchCompliance();
+          fetchData();
+        }}
       />
     </div>
   );

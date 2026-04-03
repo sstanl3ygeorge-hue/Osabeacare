@@ -24222,6 +24222,8 @@ Return JSON only:
         metadata = {}
         issues = []
         
+        logger.info(f"RTW Extraction: Starting extraction with {len(images)} image(s), employee_name={employee_name}")
+        
         try:
             chat = LlmChat(
                 api_key=api_key,
@@ -24285,13 +24287,16 @@ Return JSON only:
                 file_contents=[image_content]
             )
             
+            logger.info("RTW Extraction: Sending to LLM...")
             result = await chat.send_message(user_message)
+            logger.info(f"RTW Extraction: LLM response received, length={len(result) if result else 0}")
             
             if result:
                 try:
                     json_match = re.search(r'\{[\s\S]*\}', result)
                     if json_match:
                         data = json.loads(json_match.group())
+                        logger.info(f"RTW Extraction: Parsed {len(data)} fields from response")
                         
                         for field_name, field_data in data.items():
                             if isinstance(field_data, dict):
@@ -24306,6 +24311,9 @@ Return JSON only:
                                 "source_type": "explicit" if value is not None else "not_found",
                                 "confidence": confidence
                             }
+                        
+                        # Log extracted fields for debugging
+                        logger.info(f"RTW Extraction: Extracted fields - permission_start={fields.get('permission_start_date')}, permission_end={fields.get('permission_end_date')}, share_code={fields.get('share_code')}, is_indefinite={fields.get('is_indefinite')}")
                         
                         # Check for name mismatch
                         extracted_name = fields.get("holder_name")
@@ -24340,12 +24348,19 @@ Return JSON only:
                                 "detail": f"Time-limited permission - set follow-up before {fields.get('permission_end_date')}",
                                 "severity": "warning"
                             })
+                    else:
+                        logger.warning(f"RTW Extraction: No JSON found in response: {result[:200]}...")
+                        issues.append({"code": "no_json", "detail": "AI response did not contain valid JSON", "severity": "warning"})
                         
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
+                    logger.error(f"RTW Extraction: JSON decode error - {e}")
                     issues.append({"code": "parse_error", "detail": "Failed to parse AI response", "severity": "warning"})
+            else:
+                logger.warning("RTW Extraction: Empty response from LLM")
+                issues.append({"code": "empty_response", "detail": "No response from extraction service", "severity": "warning"})
         
         except Exception as e:
-            logger.error(f"RTW extraction error: {e}")
+            logger.error(f"RTW extraction error: {e}", exc_info=True)
             issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
@@ -24831,13 +24846,29 @@ async def extract_rtw_document(
         
         elif request.file_base64:
             # Mode 2: Direct extraction from base64
-            images = [request.file_base64]
+            logger.info(f"RTW Extraction: Direct extraction, file_type={request.file_type}")
             
             # Get employee name if employee_id provided
             if employee_id:
                 emp = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
                 if emp:
                     employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+            
+            # If PDF, need to convert to images first
+            file_type = request.file_type or "image/png"
+            if file_type == "application/pdf" or file_type.endswith("/pdf"):
+                logger.info("RTW Extraction: Converting PDF to images")
+                try:
+                    # Decode base64 to bytes
+                    file_content = base64.b64decode(request.file_base64)
+                    images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+                    logger.info(f"RTW Extraction: Converted PDF to {len(images)} images")
+                except Exception as e:
+                    logger.error(f"RTW Extraction: PDF conversion failed - {e}")
+                    raise HTTPException(status_code=400, detail=f"Failed to convert PDF: {str(e)}")
+            else:
+                # Image - use directly
+                images = [request.file_base64]
         
         else:
             raise HTTPException(status_code=400, detail="Provide either document_id or file_base64")
@@ -34026,6 +34057,188 @@ async def request_document_from_employee(
     except Exception as e:
         logger.error(f"Failed to create document request: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class BatchDocumentRequest(BaseModel):
+    """Request model for batch document requests."""
+    requirement_ids: List[str] = Field(..., description="List of requirement IDs to request")
+    requirements: List[dict] = Field(default=[], description="Full requirement details for email")
+    custom_message: Optional[str] = Field(None, description="Custom message to include in email")
+    due_days: int = Field(default=14, description="Days until due date")
+
+
+@api_router.post("/employees/{employee_id}/request-documents/batch")
+async def request_documents_batch(
+    employee_id: str,
+    request: BatchDocumentRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send a SINGLE consolidated email requesting multiple documents.
+    
+    This replaces the old behavior of sending multiple individual emails.
+    Creates one batch request record and sends one email with all requirements.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if not employee.get("email"):
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    if not request.requirement_ids:
+        raise HTTPException(status_code=400, detail="No requirements specified")
+    
+    now = datetime.now(timezone.utc)
+    due_date = now + timedelta(days=request.due_days)
+    
+    # Create a single batch request record
+    batch_request_id = f"batch_req_{uuid.uuid4().hex[:12]}"
+    
+    batch_record = {
+        "id": batch_request_id,
+        "employee_id": employee_id,
+        "request_type": "batch_document_request",
+        "requirement_ids": request.requirement_ids,
+        "requirements": request.requirements,
+        "status": "pending",
+        "created_at": now.isoformat(),
+        "created_by": user['user_id'],
+        "due_date": due_date.isoformat(),
+        "custom_message": request.custom_message,
+        "email_sent": False
+    }
+    
+    await db.email_requests.insert_one(batch_record)
+    
+    # Build consolidated email content
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or "there"
+    
+    requirements_html = ""
+    requirements_text = ""
+    for i, req in enumerate(request.requirements, 1):
+        req_name = req.get('name', req.get('id', 'Document'))
+        req_desc = req.get('description', '')
+        requirements_html += f"""
+        <tr style="border-bottom: 1px solid #e5e7eb;">
+            <td style="padding: 12px; font-weight: 500; color: #1f2937;">{i}. {req_name}</td>
+            <td style="padding: 12px; color: #6b7280;">{req_desc or 'Required document'}</td>
+        </tr>
+        """
+        requirements_text += f"{i}. {req_name}\n   {req_desc or 'Required document'}\n\n"
+    
+    # Get upload portal URL
+    upload_url = f"{os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')}/public/upload/{employee_id}"
+    
+    custom_message_html = ""
+    if request.custom_message:
+        custom_message_html = f"""
+        <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0; color: #92400e; font-weight: 500;">Message from your employer:</p>
+            <p style="margin: 8px 0 0 0; color: #78350f;">{request.custom_message}</p>
+        </div>
+        """
+    
+    email_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #374151; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Documents Required</h1>
+        </div>
+        
+        <div style="background: white; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+            <p style="font-size: 16px; margin-bottom: 20px;">Hi {employee_name},</p>
+            
+            <p>We need you to upload the following documents to complete your compliance file:</p>
+            
+            {custom_message_html}
+            
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background: #f9fafb; border-radius: 8px; overflow: hidden;">
+                <thead>
+                    <tr style="background: #f3f4f6;">
+                        <th style="padding: 12px; text-align: left; color: #4b5563; font-weight: 600;">Document</th>
+                        <th style="padding: 12px; text-align: left; color: #4b5563; font-weight: 600;">Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {requirements_html}
+                </tbody>
+            </table>
+            
+            <p style="color: #6b7280;"><strong>Due by:</strong> {due_date.strftime('%d %B %Y')}</p>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{upload_url}" style="display: inline-block; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+                    Upload Documents
+                </a>
+            </div>
+            
+            <p style="color: #9ca3af; font-size: 14px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                If you have any questions, please contact your manager.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Send email via Resend
+    resend_api_key = os.environ.get("RESEND_API_KEY")
+    email_sent = False
+    
+    if resend_api_key:
+        try:
+            import resend
+            resend.api_key = resend_api_key
+            
+            from_email = os.environ.get("FROM_EMAIL", "compliance@osabea.care")
+            
+            email_response = resend.Emails.send({
+                "from": f"Compliance Team <{from_email}>",
+                "to": [employee['email']],
+                "subject": f"Action Required: {len(request.requirement_ids)} Document(s) Needed",
+                "html": email_html
+            })
+            
+            logger.info(f"Batch request email sent to {employee['email']}: {email_response}")
+            email_sent = True
+            
+        except Exception as e:
+            logger.error(f"Failed to send batch request email: {e}")
+    else:
+        logger.warning("RESEND_API_KEY not configured - email not sent")
+    
+    # Update batch record
+    await db.email_requests.update_one(
+        {"id": batch_request_id},
+        {"$set": {
+            "email_sent": email_sent,
+            "email_sent_at": now.isoformat() if email_sent else None,
+            "status": "sent" if email_sent else "pending"
+        }}
+    )
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "batch_document_request", "employee", employee_id, {
+        "batch_request_id": batch_request_id,
+        "requirement_count": len(request.requirement_ids),
+        "requirement_ids": request.requirement_ids,
+        "email_sent": email_sent,
+        "due_date": due_date.isoformat()
+    })
+    
+    return {
+        "success": True,
+        "batch_request_id": batch_request_id,
+        "requirement_count": len(request.requirement_ids),
+        "email_sent": email_sent,
+        "due_date": due_date.isoformat(),
+        "message": f"Request for {len(request.requirement_ids)} document(s) sent to {employee['email']}" if email_sent else "Request created (email not configured)"
+    }
 
 
 @api_router.post("/employees/{employee_id}/request-missing-items")

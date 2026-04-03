@@ -101,6 +101,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **RTW Expiry/Follow-up Alert Layer (Apr 3)** - Non-breaking, read-only computation from saved RTW result fields. `compute_rtw_status()` returns status (continuous, time_limited_valid, follow_up_due_soon, urgent_follow_up, expired, incomplete_result, not_verified). Thresholds: >180 days green, 90-180 amber, 30-90 amber+warning, <30 red+urgent, expired red+blocker. RTW Status Alert Panel in UploadRequirementCard. Page summary alert for expiring/expired RTW.
 - [x] **Compliance Page Top Restructure (Apr 3)** - Removed redundant panels (Applicant Stage, Not Ready to Work, Blocking Requirements, Compliance Alerts, duplicate buttons). Added ApprovalStatusPanel (single authoritative status block with blockers, actions). Added NextActionsPanel (dynamic clickable action items). Simplified ComplianceActionBar (Upload Evidence, Request Documents only). Focus on FUNCTION: What's blocking? What to do? Where to act?
 - [x] **RTW Extraction Fix + Batch Request (Apr 3)** - Fixed RTW extraction: added PDF-to-image conversion, better logging, clear fallback warning when extraction fails. Batch document request: new `/api/employees/{id}/request-documents/batch` endpoint sends ONE consolidated email. BatchRequestModal with checklist of missing items. Admin selects items, single email sent.
+- [x] **DBS Section Overhaul (Apr 3)** - Complete 3-layer data model mirroring RTW (Evidence → Verification → DBS Result). New fields: dbs_level, certificate_number, certificate_issue_date, name_on_certificate, workforce, update_service_registered, update_service_status, last_status_check_date, update_service_check_result, result_status, information_present, result_summary, recheck_required, next_recheck_date. AI auto-extraction endpoint using GPT-5.2 Vision (`/api/dbs/extract`). DBS Result Panel in RecordCheckDialog. DBS Result Details in UploadRequirementCard. Computed `dbs_status` with status_label, status_color, days_until_recheck, alerts. Important: DBS certificates have NO statutory expiry - recheck dates are policy-based (typically 3 years).
 
 ## Prioritized Backlog
 
@@ -114,8 +115,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **ID/Document Verification Stamps** (DONE Apr 3) - Original seen, Copy verified, Online check, Not verified stamps
 - [x] **Employment Gap Explanation Enforcement** (DONE Apr 3) - 30-day threshold, blocks recruitment approval
 - [x] **Right to Work System Overhaul** (DONE Apr 3) - 3-layer data model with AI extraction
+- [x] **DBS Section Overhaul** (DONE Apr 3) - 3-layer data model mirroring RTW (Evidence → Verification → DBS Result), AI extraction endpoint, computed dbs_status, DBS Result Panel in RecordCheckDialog and UploadRequirementCard
 
 ### P1 (High)
+- [ ] Replicate RTW/DBS 3-layer pattern to Identity and Proof of Address sections
 - [ ] Interview Notes integration
 - [ ] Training Matrix PDF export
 - [ ] Employee self-service portal
@@ -173,6 +176,23 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `POST /api/employees/{id}/right-to-work/check` - Record RTW check with 3-layer result data
 - `GET /api/employees/{id}/right-to-work/check` - Get current RTW check with all fields
 - `POST /api/rtw/extract` - AI extraction of RTW document fields using GPT-5.2 Vision
+- `POST /api/employees/{id}/dbs/check` - Record DBS check with 3-layer result data (NEW Apr 3)
+- `GET /api/employees/{id}/dbs/check` - Get current DBS check with computed dbs_status (NEW Apr 3)
+- `POST /api/dbs/extract` - AI extraction of DBS certificate/Update Service fields using GPT-5.2 Vision (NEW Apr 3)
+
+## DBS Section Overhaul (COMPLETED Apr 3)
+Following the strict 3-layer pattern established by RTW:
+- **Layer 1 (Evidence)**: DBS Certificate or Update Service Screenshot
+- **Layer 2 (Verification)**: dbs_certificate_review or dbs_update_service_check
+- **Layer 3 (DBS Result)**: 
+  - Certificate details: dbs_level, certificate_number, certificate_issue_date, name_on_certificate, workforce
+  - Update Service: update_service_registered, update_service_status, last_status_check_date, update_service_check_result
+  - Result: result_status (clear/information_present/pending_review), information_present flag, result_summary
+  - Recheck tracking: recheck_required, next_recheck_date (policy-based, not statutory)
+- **Computed Status**: `compute_dbs_status()` returns status_label, status_color, days_until_recheck, alerts
+- **AI Extraction**: `/api/dbs/extract` extracts certificate number, level, issue date, name, workforce, Update Service status
+- **Frontend**: RecordCheckDialog.js DBS Result Panel, UploadRequirementCard.js DBS Result Details display
+- **Important**: DBS certificates have NO statutory expiry - recheck dates are internal policy (typically 3 years)
 
 ## Last Updated
-April 3, 2026 - RTW Extraction Fix + Batch Document Request (PDF support, logging, fallback warning, single consolidated email)
+April 3, 2026 - DBS Section Overhaul (3-layer data model, AI extraction, DBS Result Panel, computed status alerts)

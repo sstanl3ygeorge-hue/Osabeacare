@@ -98,8 +98,15 @@ export default function VerificationStampDialog({
 
     setIsSubmitting(true);
     try {
+      // Use file_id (from evidence_files array) or id (from document response)
+      const docId = file.file_id || file.id;
+      if (!docId) {
+        toast.error('Document ID not found');
+        return;
+      }
+      
       await axios.post(
-        `${API}/employee-documents/${file.id}/verification-stamp`,
+        `${API}/employee-documents/${docId}/verification-stamp`,
         {
           stamp_type: selectedStamp,
           notes: notes.trim() || null

@@ -215,8 +215,13 @@ export default function EvidenceManageDrawer({
   };
 
   const handleMarkUploadedInError = async (fileId) => {
-    if (!actionReason.trim()) {
-      toast.error('Please provide a reason');
+    if (!actionReason.trim() || actionReason.trim().length < 10) {
+      toast.error('Please provide a reason (at least 10 characters)');
+      return;
+    }
+    if (!fileId) {
+      toast.error('File ID is missing');
+      closeActionDialog();
       return;
     }
     setIsSubmitting(true);
@@ -230,6 +235,7 @@ export default function EvidenceManageDrawer({
       closeActionDialog();
       refreshAfterMutation();
     } catch (err) {
+      console.error('Mark uploaded in error failed:', err);
       toast.error(err.response?.data?.detail || 'Failed to mark file');
     } finally {
       setIsSubmitting(false);
@@ -237,8 +243,13 @@ export default function EvidenceManageDrawer({
   };
 
   const handleSupersede = async (fileId) => {
-    if (!actionReason.trim()) {
-      toast.error('Please provide a reason');
+    if (!actionReason.trim() || actionReason.trim().length < 10) {
+      toast.error('Please provide a reason (at least 10 characters)');
+      return;
+    }
+    if (!fileId) {
+      toast.error('File ID is missing');
+      closeActionDialog();
       return;
     }
     setIsSubmitting(true);
@@ -252,6 +263,7 @@ export default function EvidenceManageDrawer({
       closeActionDialog();
       refreshAfterMutation();
     } catch (err) {
+      console.error('Supersede failed:', err);
       toast.error(err.response?.data?.detail || 'Failed to supersede file');
     } finally {
       setIsSubmitting(false);
@@ -756,7 +768,12 @@ export default function EvidenceManageDrawer({
             </Button>
             <Button
               onClick={() => {
-                const fileId = actionDialog.file?.file_id;
+                const fileId = actionDialog.file?.file_id || actionDialog.file?.id;
+                if (!fileId) {
+                  toast.error('Cannot perform action: File ID is missing');
+                  closeActionDialog();
+                  return;
+                }
                 if (actionDialog.type === 'uploaded_in_error') handleMarkUploadedInError(fileId);
                 else if (actionDialog.type === 'supersede') handleSupersede(fileId);
                 else if (actionDialog.type === 'move_category') handleMoveCategory(fileId);

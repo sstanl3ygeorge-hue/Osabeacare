@@ -184,7 +184,7 @@ function buildUploadSummary({ requirementKey, activeFiles, historicalFiles, late
       parts.push(`${minRequired - activeCount} more needed`);
     } else {
       if (verifiedCount > 0) {
-        parts.push(`${verifiedCount}/${activeCount} verified`);
+        parts.push(`${verifiedCount}/${activeCount} accepted`);
       } else {
         parts.push(`${activeCount} files`);
       }
@@ -195,7 +195,7 @@ function buildUploadSummary({ requirementKey, activeFiles, historicalFiles, late
   } else {
     // Single file requirement
     if (verifiedCount > 0) {
-      parts.push(`${verifiedCount} verified`);
+      parts.push(`${verifiedCount} accepted`);
     } else {
       parts.push(`${activeCount} file${activeCount !== 1 ? 's' : ''}`);
     }

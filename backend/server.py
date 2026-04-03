@@ -14959,6 +14959,70 @@ async def apply_verification_stamp(
     return EmployeeDocumentResponse(**updated_doc)
 
 
+@api_router.delete("/employee-documents/{doc_id}/verification-stamp")
+async def remove_verification_stamp(
+    doc_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Remove a verification stamp from an evidence document.
+    
+    Audit trail:
+    - Records who removed the stamp and when
+    - Records the previous stamp type for compliance tracking
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    previous_stamp = doc.get("verification_stamp")
+    if not previous_stamp:
+        raise HTTPException(status_code=400, detail="Document has no verification stamp to remove")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get remover name
+    remover = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    if remover:
+        remover_name = remover.get('name')
+        if not remover_name:
+            remover_name = f"{remover.get('first_name', '')} {remover.get('last_name', '')}".strip()
+        if not remover_name:
+            remover_name = remover.get('email', user.get('email', 'Admin'))
+    else:
+        remover_name = user.get('email', 'Admin')
+    
+    # Clear all stamp fields
+    update_data = {
+        "verification_stamp": None,
+        "verification_stamp_label": None,
+        "verification_stamp_audit_text": None,
+        "verification_stamp_badge_color": None,
+        "verification_stamp_notes": None,
+        "verification_stamp_by": None,
+        "verification_stamp_by_name": None,
+        "verification_stamp_at": None,
+        # Track removal for audit
+        "verification_stamp_removed_at": now,
+        "verification_stamp_removed_by": user['user_id'],
+        "verification_stamp_removed_by_name": remover_name,
+        "previous_verification_stamp": previous_stamp
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    await log_audit_action(user['user_id'], "remove_verification_stamp", "employee_document", doc_id, {
+        "previous_stamp_type": previous_stamp,
+        "removed_by_name": remover_name,
+        "requirement_id": doc.get('requirement_id')
+    })
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    return EmployeeDocumentResponse(**updated_doc)
+
+
 @api_router.get("/verification-stamp-types")
 async def get_verification_stamp_types():
     """Return available verification stamp types."""

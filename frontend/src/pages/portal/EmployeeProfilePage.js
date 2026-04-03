@@ -7840,6 +7840,32 @@ export default function EmployeeProfilePage() {
           fetchData();
           fetchCompliance();
         }}
+        // Evidence status props - computed from complianceFile
+        hasAcceptedEvidence={(() => {
+          if (!complianceFile || !recordCheckType) return false;
+          const sectionKey = recordCheckType?.replace('_check', '').replace('_verification', '');
+          const section = complianceFile?.requirements?.[sectionKey];
+          if (!section?.rows) return false;
+          const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
+          return (evidenceRow?.counts?.verified || 0) > 0;
+        })()}
+        hasStampedEvidence={(() => {
+          if (!complianceFile || !recordCheckType) return false;
+          const sectionKey = recordCheckType?.replace('_check', '').replace('_verification', '');
+          const section = complianceFile?.requirements?.[sectionKey];
+          if (!section?.rows) return false;
+          const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
+          const docs = evidenceRow?.documents_preview || [];
+          return docs.some(d => d.verification_stamp);
+        })()}
+        acceptedEvidenceCount={(() => {
+          if (!complianceFile || !recordCheckType) return 0;
+          const sectionKey = recordCheckType?.replace('_check', '').replace('_verification', '');
+          const section = complianceFile?.requirements?.[sectionKey];
+          if (!section?.rows) return 0;
+          const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
+          return evidenceRow?.counts?.verified || 0;
+        })()}
       />
     </div>
   );

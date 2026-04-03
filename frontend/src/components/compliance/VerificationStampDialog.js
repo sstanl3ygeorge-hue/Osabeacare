@@ -22,7 +22,8 @@ import {
   Globe,
   Loader2,
   Stamp,
-  ExternalLink
+  ExternalLink,
+  Trash2
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -53,6 +54,7 @@ export default function VerificationStampDialog({
   const [selectedStamp, setSelectedStamp] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
 
   // Verification stamp options
   const STAMP_OPTIONS = [
@@ -136,6 +138,38 @@ export default function VerificationStampDialog({
     setSelectedStamp('');
     setNotes('');
     onClose();
+  };
+
+  // Remove existing stamp
+  const handleRemoveStamp = async () => {
+    const docId = file.file_id || file.id;
+    if (!docId) {
+      toast.error('Document ID not found');
+      return;
+    }
+
+    setIsRemoving(true);
+    try {
+      await axios.delete(
+        `${API}/employee-documents/${docId}/verification-stamp`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      toast.success('Verification stamp removed');
+      
+      if (onStampApplied) {
+        onStampApplied(null); // Signal removal
+      }
+      
+      handleClose();
+    } catch (err) {
+      console.error('Error removing verification stamp:', err);
+      toast.error(err.response?.data?.detail || 'Failed to remove verification stamp');
+    } finally {
+      setIsRemoving(false);
+    }
   };
 
   const handlePreview = () => {
@@ -280,28 +314,50 @@ export default function VerificationStampDialog({
         </div>
 
         <DialogFooter className="flex gap-2">
+          {/* Remove Stamp button - only show if stamp exists */}
+          {existingStamp && (
+            <Button
+              variant="outline"
+              onClick={handleRemoveStamp}
+              disabled={isSubmitting || isRemoving}
+              className="text-red-600 border-red-200 hover:bg-red-50 mr-auto"
+              data-testid="remove-stamp-btn"
+            >
+              {isRemoving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Remove Stamp
+                </>
+              )}
+            </Button>
+          )}
           <Button
             variant="outline"
             onClick={handleClose}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isRemoving}
           >
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !selectedStamp}
+            disabled={isSubmitting || isRemoving || !selectedStamp}
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
             data-testid="apply-stamp-btn"
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Applying...
+                {existingStamp ? 'Updating...' : 'Applying...'}
               </>
             ) : (
               <>
                 <Stamp className="h-4 w-4 mr-2" />
-                Apply Stamp
+                {existingStamp ? 'Update Stamp' : 'Apply Stamp'}
               </>
             )}
           </Button>

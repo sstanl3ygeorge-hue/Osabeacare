@@ -298,7 +298,11 @@ export default function RecordCheckDialog({
   onClose,
   employeeId,
   checkType,
-  onComplete
+  onComplete,
+  // Evidence status props for validation
+  hasAcceptedEvidence = false,
+  hasStampedEvidence = false,
+  acceptedEvidenceCount = 0
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -683,6 +687,32 @@ export default function RecordCheckDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
+          {/* EVIDENCE WARNING - Show if no accepted evidence */}
+          {!hasAcceptedEvidence && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-red-800">
+                  <p className="font-medium">No accepted evidence</p>
+                  <p className="text-xs mt-0.5">You should accept at least one evidence file before recording the verification check.</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* STAMP WARNING - Show if evidence accepted but not stamped */}
+          {hasAcceptedEvidence && !hasStampedEvidence && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="flex items-start gap-2">
+                <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div className="text-sm text-amber-800">
+                  <p className="font-medium">No stamped evidence</p>
+                  <p className="text-xs mt-0.5">Consider applying a verification stamp (Original Seen, Copy Verified, etc.) to accepted evidence files for audit trail.</p>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {/* COMPLIANCE ALERT */}
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
             <div className="flex items-start gap-2">

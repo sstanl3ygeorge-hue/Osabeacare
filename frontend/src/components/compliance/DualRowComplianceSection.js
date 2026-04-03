@@ -223,8 +223,23 @@ export default function DualRowComplianceSection({
       uploaded_at: doc.uploaded_at,
       uploaded_by: doc.uploaded_by,
       verified: doc.verified || false,
+      verified_by: doc.verified_by,
+      verified_by_name: doc.verified_by_name,
+      verified_at: doc.verified_at,
       status: doc.status || 'active',
-      extraction_status: doc.extraction_status ? { status: doc.extraction_status } : null
+      extraction_status: doc.extraction_status,
+      // Verification stamp fields - CRITICAL for stamp UI
+      verification_stamp: doc.verification_stamp,
+      verification_stamp_label: doc.verification_stamp_label,
+      verification_stamp_audit_text: doc.verification_stamp_audit_text,
+      verification_stamp_badge_color: doc.verification_stamp_badge_color,
+      verification_stamp_by_name: doc.verification_stamp_by_name,
+      verification_stamp_at: doc.verification_stamp_at,
+      // Rejection fields
+      rejected_by: doc.rejected_by,
+      rejected_by_name: doc.rejected_by_name,
+      rejected_at: doc.rejected_at,
+      rejection_reason: doc.rejection_reason
     }));
     
     // Add freshness data for PoA files

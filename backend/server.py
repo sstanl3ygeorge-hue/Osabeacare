@@ -26616,6 +26616,168 @@ async def get_normalized_references(
             "override_at": employee.get(f"{prefix}override_at"),
         }
         
+        # =====================================================================
+        # 4b. EMPLOYMENT HISTORY MISMATCH DETECTION
+        # Compare reference dates/employer against declared employment history
+        # =====================================================================
+        employment_mismatches = []
+        
+        # Get declared reference employment dates
+        ref_employer = (declared_referee.get("organisation") or "").lower().strip()
+        ref_start = declared_referee.get("employment_start")
+        ref_end = declared_referee.get("employment_end")
+        
+        # Also get response employment dates if available
+        resp_employer = (response.get("organisation") or "").lower().strip() if has_response else None
+        resp_start = response.get("employment_start") if has_response else None
+        resp_end = response.get("employment_end") if has_response else None
+        
+        # Get employment history from application form (form_data)
+        form_submissions = employee.get("form_submissions", [])
+        app_employment_history = []
+        for sub in form_submissions if isinstance(form_submissions, list) else []:
+            if isinstance(sub, dict):
+                fd = sub.get("form_data") or sub.get("data") or {}
+                if isinstance(fd, dict) and fd.get("employment_history"):
+                    app_employment_history = fd.get("employment_history", [])
+                    break
+        
+        # Also check employee.employment_history (normalized record)
+        normalized_employment_history = employee.get("employment_history", [])
+        
+        def find_matching_employment(employer_name: str, history: list) -> dict:
+            """Find employment record matching the employer name."""
+            if not employer_name or not history:
+                return None
+            employer_lower = employer_name.lower().strip()
+            for emp in history:
+                if isinstance(emp, dict):
+                    emp_employer = (emp.get("employer") or emp.get("company") or emp.get("employer_name") or "").lower().strip()
+                    # Partial match acceptable
+                    if emp_employer and (employer_lower in emp_employer or emp_employer in employer_lower):
+                        return emp
+            return None
+        
+        def dates_match(date1: str, date2: str, tolerance_days: int = 30) -> bool:
+            """Check if two dates match within tolerance."""
+            if not date1 or not date2:
+                return True  # Can't compare if missing
+            try:
+                from datetime import datetime as dt
+                # Handle various date formats
+                for fmt in ["%Y-%m-%d", "%Y-%m", "%d/%m/%Y", "%m/%d/%Y"]:
+                    try:
+                        d1 = dt.strptime(date1[:10], fmt)
+                        break
+                    except:
+                        continue
+                else:
+                    return True  # Can't parse date1
+                
+                for fmt in ["%Y-%m-%d", "%Y-%m", "%d/%m/%Y", "%m/%d/%Y"]:
+                    try:
+                        d2 = dt.strptime(date2[:10], fmt)
+                        break
+                    except:
+                        continue
+                else:
+                    return True  # Can't parse date2
+                
+                return abs((d1 - d2).days) <= tolerance_days
+            except:
+                return True  # Error parsing, assume match
+        
+        # 1. Compare reference vs application form employment history
+        if ref_employer and app_employment_history:
+            matching_app_emp = find_matching_employment(ref_employer, app_employment_history)
+            if matching_app_emp:
+                app_start = matching_app_emp.get("start_date") or matching_app_emp.get("from_date")
+                app_end = matching_app_emp.get("end_date") or matching_app_emp.get("to_date")
+                
+                if ref_start and app_start and not dates_match(ref_start, app_start):
+                    employment_mismatches.append({
+                        "type": "reference_vs_application",
+                        "field": "start_date",
+                        "reference_value": ref_start,
+                        "application_value": app_start,
+                        "employer": ref_employer,
+                        "message": f"Reference start date ({ref_start}) differs from application ({app_start})"
+                    })
+                
+                if ref_end and app_end and not dates_match(ref_end, app_end):
+                    employment_mismatches.append({
+                        "type": "reference_vs_application",
+                        "field": "end_date",
+                        "reference_value": ref_end,
+                        "application_value": app_end,
+                        "employer": ref_employer,
+                        "message": f"Reference end date ({ref_end}) differs from application ({app_end})"
+                    })
+            elif ref_employer:
+                # Employer not found in application employment history
+                employment_mismatches.append({
+                    "type": "reference_vs_application",
+                    "field": "employer",
+                    "reference_value": ref_employer,
+                    "application_value": None,
+                    "employer": ref_employer,
+                    "message": f"Reference employer '{ref_employer}' not found in application employment history"
+                })
+        
+        # 2. Compare reference vs normalized employment history (if exists and different source)
+        if ref_employer and normalized_employment_history and normalized_employment_history != app_employment_history:
+            matching_norm_emp = find_matching_employment(ref_employer, normalized_employment_history)
+            if matching_norm_emp:
+                norm_start = matching_norm_emp.get("start_date") or matching_norm_emp.get("from_date")
+                norm_end = matching_norm_emp.get("end_date") or matching_norm_emp.get("to_date")
+                
+                if ref_start and norm_start and not dates_match(ref_start, norm_start):
+                    employment_mismatches.append({
+                        "type": "reference_vs_normalized",
+                        "field": "start_date",
+                        "reference_value": ref_start,
+                        "normalized_value": norm_start,
+                        "employer": ref_employer,
+                        "message": f"Reference start date ({ref_start}) differs from employment record ({norm_start})"
+                    })
+        
+        # 3. Compare response vs declared reference (if response has employment dates)
+        if has_response and resp_employer:
+            if ref_employer and resp_employer and ref_employer != resp_employer:
+                if not (ref_employer in resp_employer or resp_employer in ref_employer):
+                    employment_mismatches.append({
+                        "type": "response_vs_declared",
+                        "field": "employer",
+                        "declared_value": ref_employer,
+                        "response_value": resp_employer,
+                        "employer": ref_employer,
+                        "message": f"Response employer '{resp_employer}' differs from declared '{ref_employer}'"
+                    })
+            
+            if ref_start and resp_start and not dates_match(ref_start, resp_start):
+                employment_mismatches.append({
+                    "type": "response_vs_declared",
+                    "field": "start_date",
+                    "declared_value": ref_start,
+                    "response_value": resp_start,
+                    "employer": ref_employer or resp_employer,
+                    "message": f"Response start date ({resp_start}) differs from declared ({ref_start})"
+                })
+            
+            if ref_end and resp_end and not dates_match(ref_end, resp_end):
+                employment_mismatches.append({
+                    "type": "response_vs_declared",
+                    "field": "end_date",
+                    "declared_value": ref_end,
+                    "response_value": resp_end,
+                    "employer": ref_employer or resp_employer,
+                    "message": f"Response end date ({resp_end}) differs from declared ({ref_end})"
+                })
+        
+        # Add employment mismatches to integrity
+        integrity["employment_mismatches"] = employment_mismatches
+        integrity["has_employment_mismatch"] = len(employment_mismatches) > 0
+        
         # 5. VERIFICATION OUTCOME
         verified = employee.get(f"{prefix}verified", False)
         rejected = employee.get(f"{prefix}rejected", False)
@@ -26724,6 +26886,10 @@ async def get_normalized_references(
         if has_declared:
             allowed_actions.append("change_referee")
         
+        # Record Alternative Path - when original referee unresponsive
+        if verification_status in ["sent", "viewed", "rejected"] or (integrity.get("mismatch_detected") and not integrity.get("override_applied")):
+            allowed_actions.append("record_alternative_path")
+        
         # View history always available
         allowed_actions.append("view_history")
         
@@ -26749,18 +26915,29 @@ async def get_normalized_references(
             blocker_text = f"Reference {ref_num} has unresolved mismatch"
             blocks_approval = True
         
+        # Alternative Reference Path tracking
+        alternative_path = {
+            "is_alternative": employee.get(f"{prefix}is_alternative_reference", False),
+            "original_referee_attempts": employee.get(f"{prefix}original_referee_attempts", []),
+            "alternative_reason": employee.get(f"{prefix}alternative_reason"),
+            "alternative_source": employee.get(f"{prefix}alternative_source"),
+            "alternative_recorded_at": employee.get(f"{prefix}alternative_recorded_at"),
+            "alternative_recorded_by": employee.get(f"{prefix}alternative_recorded_by"),
+        }
+        
         return {
             "reference_number": ref_num,
             "requirement_key": f"reference_{ref_num}",
             "label": f"Reference {ref_num}",
             "applicant_name": applicant_name,
             
-            # 5 sections of truth
+            # 5 sections of truth (now 6 with alternative path)
             "declared_referee": declared_referee if has_declared else None,
             "request": request,
             "response": response if has_response else {"exists": False, "source": None},
             "integrity": integrity,
             "verification": verification,
+            "alternative_path": alternative_path if alternative_path.get("is_alternative") or alternative_path.get("original_referee_attempts") else None,
             
             # UI helpers
             "summary_text": summary_text,
@@ -26953,6 +27130,79 @@ async def reset_reference(
         "message": f"Reference {ref_num} has been reset to not_started state.",
         "reference_num": ref_num,
         "previous_state": old_state
+    }
+
+
+class RecordAlternativePathRequest(BaseModel):
+    """Request model for recording alternative reference path."""
+    original_referee_attempts: List[dict] = Field(..., description="List of attempts made to contact original referee")
+    alternative_reason: str = Field(..., min_length=20, description="Why alternative path was needed")
+    alternative_source: str = Field(..., description="Source of alternative reference (e.g., 'Different employer', 'HR department')")
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/record-alternative-path")
+async def record_alternative_reference_path(
+    employee_id: str,
+    ref_num: int,
+    request: RecordAlternativePathRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Record an alternative reference path when original referee is unresponsive.
+    
+    Use when:
+    - Original referee did not respond after multiple attempts
+    - Need to document the attempts made
+    - Using an alternative reference source
+    
+    Audit trail requirements:
+    - Document all attempts to reach original referee (dates, methods)
+    - Record reason for alternative path
+    - Record source of alternative reference
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Validate attempts have required fields
+    for attempt in request.original_referee_attempts:
+        if not attempt.get("date") or not attempt.get("method"):
+            raise HTTPException(
+                status_code=400, 
+                detail="Each attempt must have 'date' and 'method' fields"
+            )
+    
+    # Record alternative path
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}is_alternative_reference": True,
+            f"{prefix}original_referee_attempts": request.original_referee_attempts,
+            f"{prefix}alternative_reason": request.alternative_reason.strip(),
+            f"{prefix}alternative_source": request.alternative_source.strip(),
+            f"{prefix}alternative_recorded_at": now,
+            f"{prefix}alternative_recorded_by": user['user_id'],
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "record_alternative_reference_path", "employee", employee_id, {
+        "reference_num": ref_num,
+        "attempts_count": len(request.original_referee_attempts),
+        "alternative_reason": request.alternative_reason.strip(),
+        "alternative_source": request.alternative_source.strip()
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Alternative reference path recorded for Reference {ref_num}. Audit trail preserved.",
+        "reference_num": ref_num,
+        "attempts_recorded": len(request.original_referee_attempts)
     }
 
 

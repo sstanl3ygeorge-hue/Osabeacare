@@ -99,6 +99,12 @@ export default function ReferenceResponseDrawer({
   const [showReplacementForm, setShowReplacementForm] = useState(false);
   const [showResetForm, setShowResetForm] = useState(false);
   const [showChangeRefereeForm, setShowChangeRefereeForm] = useState(false);
+  const [showAlternativePathForm, setShowAlternativePathForm] = useState(false);
+  const [alternativePathData, setAlternativePathData] = useState({
+    attempts: [{ date: '', method: '', notes: '' }],
+    reason: '',
+    source: ''
+  });
   const [changeRefereeData, setChangeRefereeData] = useState({
     name: '',
     job_title: '',
@@ -293,6 +299,81 @@ export default function ReferenceResponseDrawer({
     }
   };
 
+  // Handle record alternative reference path
+  const handleRecordAlternativePath = async () => {
+    if (!alternativePathData.reason || alternativePathData.reason.trim().length < 20) {
+      toast.error('Please provide a detailed reason (min 20 characters)');
+      return;
+    }
+    if (!alternativePathData.source || alternativePathData.source.trim().length < 5) {
+      toast.error('Please specify the alternative reference source');
+      return;
+    }
+    
+    // Validate attempts
+    const validAttempts = alternativePathData.attempts.filter(a => a.date && a.method);
+    if (validAttempts.length === 0) {
+      toast.error('Please record at least one attempt to contact the original referee');
+      return;
+    }
+    
+    setActionLoading('alternative_path');
+    try {
+      await axios.post(
+        `${API}/references/${employeeId}/${referenceNum}/record-alternative-path`,
+        {
+          original_referee_attempts: validAttempts.map(a => ({
+            date: a.date,
+            method: a.method,
+            notes: a.notes || ''
+          })),
+          alternative_reason: alternativePathData.reason.trim(),
+          alternative_source: alternativePathData.source.trim()
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`Alternative reference path recorded for Reference ${referenceNum}`);
+      setShowAlternativePathForm(false);
+      setAlternativePathData({
+        attempts: [{ date: '', method: '', notes: '' }],
+        reason: '',
+        source: ''
+      });
+      fetchReferenceData();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to record alternative path');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Add attempt to alternative path form
+  const addAttempt = () => {
+    setAlternativePathData(prev => ({
+      ...prev,
+      attempts: [...prev.attempts, { date: '', method: '', notes: '' }]
+    }));
+  };
+
+  // Remove attempt from alternative path form
+  const removeAttempt = (index) => {
+    if (alternativePathData.attempts.length > 1) {
+      setAlternativePathData(prev => ({
+        ...prev,
+        attempts: prev.attempts.filter((_, i) => i !== index)
+      }));
+    }
+  };
+
+  // Update attempt in alternative path form
+  const updateAttempt = (index, field, value) => {
+    setAlternativePathData(prev => ({
+      ...prev,
+      attempts: prev.attempts.map((a, i) => i === index ? { ...a, [field]: value } : a)
+    }));
+  };
+
   if (!isOpen) return null;
 
   const { 
@@ -301,6 +382,7 @@ export default function ReferenceResponseDrawer({
     response, 
     integrity, 
     verification,
+    alternative_path,
     lifecycle_status,
     summary_text,
     allowed_actions = [],
@@ -676,6 +758,39 @@ export default function ReferenceResponseDrawer({
                               <li key={i}>{reason}</li>
                             ))}
                           </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Employment History Mismatch Warning */}
+                  {integrity?.employment_mismatches?.length > 0 && (
+                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg" data-testid="employment-mismatch-warning">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-orange-600 mt-0.5 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-orange-800">Employment History Discrepancy</p>
+                          <p className="text-xs text-orange-600 mt-1 mb-2">
+                            Reference dates/employer don't match employment records. Please review.
+                          </p>
+                          <div className="space-y-2">
+                            {integrity.employment_mismatches.map((mismatch, i) => (
+                              <div key={i} className="p-2 bg-white rounded border border-orange-100">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Badge className="text-[10px] bg-orange-100 text-orange-700 border-orange-200">
+                                    {mismatch.type === 'reference_vs_application' ? 'Ref vs App' : 
+                                     mismatch.type === 'reference_vs_normalized' ? 'Ref vs Record' :
+                                     mismatch.type === 'response_vs_declared' ? 'Response vs Declared' : 'Mismatch'}
+                                  </Badge>
+                                  <span className="text-xs text-orange-700 font-medium">{mismatch.field}</span>
+                                </div>
+                                <p className="text-xs text-gray-700">{mismatch.message}</p>
+                                {mismatch.employer && (
+                                  <p className="text-xs text-gray-500 mt-1">Employer: {mismatch.employer}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1130,6 +1245,223 @@ export default function ReferenceResponseDrawer({
                 )}
               </div>
             </Section>
+
+            {/* ===== SECTION 6: ALTERNATIVE REFERENCE PATH ===== */}
+            {(alternative_path?.is_alternative || allowed_actions.includes('record_alternative_path')) && (
+              <Section 
+                title="Alternative Reference Path" 
+                icon={History}
+                defaultOpen={alternative_path?.is_alternative}
+                badge={alternative_path?.is_alternative ? 'Alternative' : 'Available'}
+                badgeColor={alternative_path?.is_alternative ? 'blue' : 'gray'}
+              >
+                <div className="space-y-4">
+                  {/* Show recorded alternative path */}
+                  {alternative_path?.is_alternative && (
+                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-blue-100 rounded-full">
+                          <History className="h-5 w-5 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium text-blue-800">Alternative Reference Used</p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            <strong>Source:</strong> {alternative_path.alternative_source}
+                          </p>
+                          <p className="text-sm text-blue-700 mt-1">
+                            <strong>Reason:</strong> {alternative_path.alternative_reason}
+                          </p>
+                          {alternative_path.alternative_recorded_by && (
+                            <p className="text-xs text-blue-600 mt-2">
+                              Recorded by {alternative_path.alternative_recorded_by} 
+                              {alternative_path.alternative_recorded_at && ` on ${formatBackendDate(alternative_path.alternative_recorded_at, { format: 'short' })}`}
+                            </p>
+                          )}
+                          
+                          {/* Attempts made to original referee */}
+                          {alternative_path.original_referee_attempts?.length > 0 && (
+                            <div className="mt-3 pt-3 border-t border-blue-200">
+                              <p className="text-xs font-medium text-blue-800 mb-2">Attempts to Contact Original Referee</p>
+                              <div className="space-y-2">
+                                {alternative_path.original_referee_attempts.map((attempt, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-xs text-blue-700">
+                                    <span className="font-medium">{attempt.date}</span>
+                                    <span>•</span>
+                                    <span>{attempt.method}</span>
+                                    {attempt.notes && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-blue-600">{attempt.notes}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Record Alternative Path Form */}
+                  {!isAuditor && !alternative_path?.is_alternative && allowed_actions.includes('record_alternative_path') && (
+                    <div>
+                      {!showAlternativePathForm ? (
+                        <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                          <p className="text-sm text-gray-600 mb-3">
+                            If the original referee is unresponsive after multiple attempts, you can record an alternative reference path.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowAlternativePathForm(true)}
+                            className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                            data-testid="show-alternative-path-form-btn"
+                          >
+                            <History className="h-4 w-4 mr-1" />
+                            Record Alternative Path
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-4">
+                          <div>
+                            <p className="text-sm font-medium text-blue-800 mb-1">Record Alternative Reference Path</p>
+                            <p className="text-xs text-blue-600">
+                              Document attempts to contact the original referee and record the alternative reference source.
+                            </p>
+                          </div>
+
+                          {/* Attempts Section */}
+                          <div className="space-y-3">
+                            <Label className="text-xs font-medium text-blue-800">Attempts to Contact Original Referee *</Label>
+                            {alternativePathData.attempts.map((attempt, i) => (
+                              <div key={i} className="p-3 bg-white border border-blue-200 rounded-lg space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-gray-600">Attempt {i + 1}</span>
+                                  {alternativePathData.attempts.length > 1 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => removeAttempt(i)}
+                                      className="h-6 px-2 text-red-500 hover:text-red-600"
+                                    >
+                                      Remove
+                                    </Button>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <Label className="text-xs">Date *</Label>
+                                    <Input
+                                      type="date"
+                                      value={attempt.date}
+                                      onChange={(e) => updateAttempt(i, 'date', e.target.value)}
+                                      className="h-8 text-sm"
+                                      data-testid={`attempt-date-${i}`}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label className="text-xs">Method *</Label>
+                                    <select
+                                      value={attempt.method}
+                                      onChange={(e) => updateAttempt(i, 'method', e.target.value)}
+                                      className="w-full h-8 text-sm border border-gray-200 rounded-md px-2"
+                                      data-testid={`attempt-method-${i}`}
+                                    >
+                                      <option value="">Select method...</option>
+                                      <option value="Email">Email</option>
+                                      <option value="Phone call">Phone call</option>
+                                      <option value="Letter">Letter</option>
+                                      <option value="Text message">Text message</option>
+                                      <option value="In-person visit">In-person visit</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Notes (optional)</Label>
+                                  <Input
+                                    value={attempt.notes}
+                                    onChange={(e) => updateAttempt(i, 'notes', e.target.value)}
+                                    placeholder="e.g., No response, voicemail left, etc."
+                                    className="h-8 text-sm"
+                                    data-testid={`attempt-notes-${i}`}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={addAttempt}
+                              className="text-blue-600 border-blue-300 hover:bg-blue-100"
+                              data-testid="add-attempt-btn"
+                            >
+                              + Add Another Attempt
+                            </Button>
+                          </div>
+
+                          {/* Alternative Source */}
+                          <div>
+                            <Label className="text-xs font-medium text-blue-800">Alternative Reference Source *</Label>
+                            <Input
+                              value={alternativePathData.source}
+                              onChange={(e) => setAlternativePathData(prev => ({ ...prev, source: e.target.value }))}
+                              placeholder="e.g., Different employer, HR department, etc."
+                              className="h-9 mt-1"
+                              data-testid="alternative-source-input"
+                            />
+                          </div>
+
+                          {/* Reason */}
+                          <div>
+                            <Label className="text-xs font-medium text-blue-800">Reason for Alternative Path *</Label>
+                            <Textarea
+                              value={alternativePathData.reason}
+                              onChange={(e) => setAlternativePathData(prev => ({ ...prev, reason: e.target.value }))}
+                              placeholder="Explain why the alternative reference path was needed (min 20 characters)..."
+                              className="min-h-[80px] mt-1"
+                              data-testid="alternative-reason-input"
+                            />
+                            {alternativePathData.reason.length > 0 && alternativePathData.reason.length < 20 && (
+                              <p className="text-xs text-amber-600 mt-1">Minimum 20 characters required</p>
+                            )}
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex gap-2 pt-2">
+                            <Button
+                              size="sm"
+                              onClick={handleRecordAlternativePath}
+                              disabled={actionLoading === 'alternative_path'}
+                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                              data-testid="confirm-alternative-path-btn"
+                            >
+                              {actionLoading === 'alternative_path' ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                              Record Alternative Path
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setShowAlternativePathForm(false);
+                                setAlternativePathData({
+                                  attempts: [{ date: '', method: '', notes: '' }],
+                                  reason: '',
+                                  source: ''
+                                });
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Section>
+            )}
           </div>
         )}
       </div>

@@ -22,9 +22,7 @@ import DocumentExtractionReview from '../../components/documents/DocumentExtract
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
-import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, BatchRequestModal } from '../../components/compliance';
-import ApprovalStatusPanel from '../../components/compliance/ApprovalStatusPanel';
-import NextActionsPanel from '../../components/compliance/NextActionsPanel';
+import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
@@ -2201,35 +2199,6 @@ export default function EmployeeProfilePage() {
   const handleResendRequest = () => {
     handleRequestDocument(true);
   };
-  
-  // State for batch request modal
-  const [batchRequestModalOpen, setBatchRequestModalOpen] = useState(false);
-  const [missingItemsForRequest, setMissingItemsForRequest] = useState([]);
-  
-  // Open batch request modal with missing items
-  const handleRequestAllMissingItems = () => {
-    // Get missing items from compliance requirements
-    const requirements = complianceRequirements?.requirements || [];
-    const missingItems = requirements
-      .filter(req => req.status === 'missing' || req.status === 'not_started' || req.status === 'required')
-      .map(req => ({
-        id: req.id,
-        key: req.id,
-        name: req.name,
-        title: req.name,
-        description: req.description || '',
-        instructions: req.instructions || '',
-        category: req.category || 'document'
-      }));
-    
-    if (missingItems.length === 0) {
-      toast.info('No missing items to request');
-      return;
-    }
-    
-    setMissingItemsForRequest(missingItems);
-    setBatchRequestModalOpen(true);
-  };
 
   // ========== Send Form via Email Handlers ==========
   
@@ -3277,166 +3246,12 @@ export default function EmployeeProfilePage() {
             })()}
           </div>
 
+          {/* Note: Global Upload Document button removed. */}
+          {/* All upload actions now live INSIDE each compliance requirement card. */}
+          {/* Workflow: See issue → Scroll to section → Upload/Request/Verify there. */}
+
           {!isAuditor() && (
             <div className="flex flex-wrap gap-3 mt-6">
-              <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="upload-doc-btn">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Upload Document
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle className="font-heading">Upload Document</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleUploadDocument} className="space-y-4 mt-4">
-                    <div className="space-y-2">
-                      <Label>Compliance Requirement</Label>
-                      <Select value={selectedRequirement} onValueChange={setSelectedRequirement}>
-                        <SelectTrigger className="rounded-xl" data-testid="requirement-select">
-                          <SelectValue placeholder="Select requirement to upload for" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[300px]">
-                          {/* Group requirements by type for clarity */}
-                          {complianceRequirements?.requirements && (
-                            <>
-                              {/* Documents (employee-submitted) */}
-                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50">Documents</div>
-                              {complianceRequirements.requirements
-                                .filter(req => req.type === 'document' && req.source === 'employee')
-                                .map((req) => (
-                                  <SelectItem key={req.id} value={req.id}>
-                                    <div className="flex items-center gap-2">
-                                      <span className={`w-2 h-2 rounded-full ${
-                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
-                                      }`} />
-                                      {req.name}
-                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              
-                              {/* Internal Checks */}
-                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50 mt-1">Internal Checks</div>
-                              {complianceRequirements.requirements
-                                .filter(req => req.type === 'document' && req.source === 'internal')
-                                .map((req) => (
-                                  <SelectItem key={req.id} value={req.id}>
-                                    <div className="flex items-center gap-2">
-                                      <span className={`w-2 h-2 rounded-full ${
-                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
-                                      }`} />
-                                      {req.name}
-                                      <span className="text-[10px] bg-purple-100 text-purple-700 px-1 rounded">Internal</span>
-                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              
-                              {/* Forms */}
-                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50 mt-1">Forms</div>
-                              {complianceRequirements.requirements
-                                .filter(req => req.type === 'form-generated')
-                                .map((req) => (
-                                  <SelectItem key={req.id} value={req.id}>
-                                    <div className="flex items-center gap-2">
-                                      <span className={`w-2 h-2 rounded-full ${
-                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
-                                      }`} />
-                                      {req.name}
-                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                              
-                              {/* Training */}
-                              <div className="px-2 py-1.5 text-xs font-semibold text-text-muted bg-gray-50 mt-1">Training Certificates</div>
-                              {complianceRequirements.requirements
-                                .filter(req => req.type === 'training')
-                                .map((req) => (
-                                  <SelectItem key={req.id} value={req.id}>
-                                    <div className="flex items-center gap-2">
-                                      <span className={`w-2 h-2 rounded-full ${
-                                        req.has_evidence ? 'bg-success' : 'bg-gray-300'
-                                      }`} />
-                                      {req.name}
-                                      {req.evidence_count > 0 && <span className="text-xs text-text-muted">({req.evidence_count})</span>}
-                                    </div>
-                                  </SelectItem>
-                                ))}
-                            </>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {selectedRequirement && (() => {
-                        const selectedReq = complianceRequirements?.requirements?.find(r => r.id === selectedRequirement);
-                        if (selectedReq?.document_count > 0 && !selectedReq?.allow_multiple_files) {
-                          return (
-                            <p className="text-xs text-warning flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3" />
-                              This will replace the existing document
-                            </p>
-                          );
-                        }
-                        if (selectedReq?.allow_multiple_files) {
-                          return (
-                            <p className="text-xs text-info flex items-center gap-1">
-                              This requirement accepts multiple files
-                            </p>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                    {/* Document Label for multi-file requirements */}
-                    {selectedRequirement && complianceRequirements?.requirements?.find(r => r.id === selectedRequirement)?.allow_multiple_files && (
-                      <div className="space-y-2">
-                        <Label>Document Label (optional)</Label>
-                        <Input
-                          type="text"
-                          placeholder="e.g., Passport Front, Visa, BRP Card"
-                          value={documentLabel || ''}
-                          onChange={(e) => setDocumentLabel(e.target.value)}
-                          className="rounded-xl"
-                          data-testid="doc-label-input"
-                        />
-                        <p className="text-xs text-text-muted">
-                          Give this file a descriptive name to help identify it.
-                        </p>
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <Label>File</Label>
-                      <FileUploaderInline
-                        onFileSelect={(file) => setUploadFile(file)}
-                        selectedFile={uploadFile}
-                        onClear={() => setUploadFile(null)}
-                        placeholder="Drop file here or click to browse"
-                        data-testid="doc-file-input"
-                      />
-                      <p className="text-xs text-text-muted">
-                        Upload a clear copy of the document. PDF, JPG, PNG accepted (max 10MB).
-                      </p>
-                    </div>
-                    <div className="flex justify-end gap-3 pt-4">
-                      <Button type="button" variant="outline" onClick={() => { setUploadDialogOpen(false); setSelectedRequirement(''); setDocumentLabel(''); }} className="rounded-xl">
-                        Cancel
-                      </Button>
-                      <Button type="submit" disabled={isUploading || !selectedRequirement} className="bg-primary hover:bg-primary-hover text-white rounded-xl" data-testid="upload-submit">
-                        {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Upload'}
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
-
-              {/* Note: Bulk Upload functionality removed from individual employee profile.
-                  Bulk operations should be done from the bulk actions screen. */}
-
-              {/* Generate Forms Dropdown - Hidden for Audit Mode */}
-              {/* Forms system hidden from UI. Backend retained for data integrity. */}
-
               {/* Generate Blank Forms Dialog */}
               <Dialog open={generateFormsOpen} onOpenChange={setGenerateFormsOpen}>
                 <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col bg-white">
@@ -3785,60 +3600,7 @@ export default function EmployeeProfilePage() {
       {/* RECRUITMENT APPROVAL PANEL - Show for applicants before tabs */}
       {employee?.person_stage === 'applicant' && !employee?.recruitment_approved && (
         <>
-          {/* NEXT STEPS PANEL - Actionable guidance for admins */}
-          {recruitmentStatus?.blockers?.length > 0 && (
-            <Card className="mb-6 border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50" data-testid="next-steps-panel">
-              <CardHeader className="pb-3">
-                <CardTitle className="font-heading text-base flex items-center gap-2 text-blue-800">
-                  <ChevronRight className="h-5 w-5" />
-                  Next Steps
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {recruitmentStatus.blockers.slice(0, 4).map((blocker, idx) => {
-                    const { tab } = mapBlockerToSection(blocker);
-                    const isTraining = tab === 'training';
-                    const isReference = blocker.toLowerCase().includes('reference');
-                    const isDocument = !isTraining && !isReference;
-                    
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => handleBlockerClick(blocker)}
-                        className="flex items-center gap-3 p-3 rounded-xl bg-white border border-blue-100 hover:border-blue-300 hover:shadow-sm transition-all text-left group"
-                        data-testid={`next-step-${idx}`}
-                      >
-                        <div className={`p-2 rounded-lg ${
-                          isTraining ? 'bg-purple-100 text-purple-600' :
-                          isReference ? 'bg-orange-100 text-orange-600' :
-                          'bg-blue-100 text-blue-600'
-                        }`}>
-                          {isTraining ? <GraduationCap className="h-4 w-4" /> :
-                           isReference ? <UserCheck className="h-4 w-4" /> :
-                           <FileText className="h-4 w-4" />}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-slate-700 group-hover:text-blue-700 truncate">
-                            {isDocument ? `Request ${blocker}` : 
-                             isReference ? 'Send Reference Request' :
-                             'Complete Training'}
-                          </p>
-                          <p className="text-xs text-slate-500 truncate">{blocker}</p>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-transform" />
-                      </button>
-                    );
-                  })}
-                </div>
-                {recruitmentStatus.blockers.length > 4 && (
-                  <p className="text-xs text-slate-500 mt-3 text-center">
-                    + {recruitmentStatus.blockers.length - 4} more items to complete
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          )}
+          {/* Next Steps Panel REMOVED - All actions now inside compliance requirement cards */}
           
           <div className="mb-6">
             <RecruitmentApprovalPanel
@@ -4146,113 +3908,10 @@ export default function EmployeeProfilePage() {
             </CardHeader>
             <CardContent>
               {/* ============================================== */}
-              {/* RESTRUCTURED TOP SECTION - Function over form */}
+              {/* COMPLIANCE FILE - Linear Workflow                */}
+              {/* All actions live INSIDE each requirement card    */}
+              {/* No global actions - see issue → scroll → fix     */}
               {/* ============================================== */}
-              
-              {/* 1. APPROVAL STATUS PANEL - Single authoritative block */}
-              <ApprovalStatusPanel
-                isReady={complianceRequirements?.work_readiness_3tier?.status === 'READY_TO_WORK'}
-                blockers={complianceRequirements?.work_readiness_3tier?.reasons || []}
-                pendingReviewCount={complianceFile?.summary?.pending_review || complianceRequirements?.summary?.awaiting_review || 0}
-                missingCount={complianceRequirements?.summary?.missing || 0}
-                isApplicant={employee?.person_stage === 'applicant'}
-                canApprove={isRecruitmentView && !isAuditor() && !employee?.recruitment_approved}
-                isApproving={false}
-                onReviewPending={() => {
-                  // Scroll to first pending item
-                  const pendingSection = document.querySelector('[data-status="pending"]');
-                  if (pendingSection) {
-                    pendingSection.scrollIntoView({ behavior: 'smooth' });
-                  } else {
-                    toast.info('No items pending review');
-                  }
-                }}
-                onRequestMissing={handleRequestAllMissingItems}
-                onRecordVerification={() => {
-                  // Open check dialog with default to RTW
-                  setRecordCheckType('right_to_work_check');
-                  setRecordCheckDialogOpen(true);
-                }}
-                onApprove={() => {
-                  // Navigate to recruitment tab for approval
-                  setActiveTab('recruitment');
-                }}
-                onBlockerClick={(blocker) => {
-                  const blockerText = typeof blocker === 'string' ? blocker : blocker.message || blocker.code;
-                  handleBlockerClick(blockerText);
-                }}
-                employeeName={`${employee?.first_name || ''} ${employee?.last_name || ''}`.trim()}
-              />
-              
-              {/* 2. NEXT ACTIONS PANEL - Dynamic, clickable */}
-              <NextActionsPanel
-                actions={(() => {
-                  const actions = [];
-                  
-                  // Add RTW expiry alert as action
-                  const rtwStatus = complianceFile?.sections?.right_to_work?.rtw_status;
-                  if (rtwStatus && ['expired', 'urgent_follow_up', 'follow_up_due_soon'].includes(rtwStatus.status)) {
-                    actions.push({
-                      id: 'rtw_expiry',
-                      type: 'rtw',
-                      label: rtwStatus.status === 'expired' ? 'Update Expired RTW' : 'RTW Expiring Soon',
-                      description: rtwStatus.summary_line,
-                      sectionKey: 'right_to_work',
-                      priority: rtwStatus.status === 'expired' ? 4 : 3,
-                      onClick: () => {
-                        document.querySelector('[data-testid="section-right_to_work"]')?.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    });
-                  }
-                  
-                  // Add blockers as actions
-                  const blockers = complianceRequirements?.work_readiness_3tier?.reasons || [];
-                  blockers.slice(0, 3).forEach((blocker, idx) => {
-                    const blockerText = typeof blocker === 'string' ? blocker : blocker.message || blocker.code;
-                    const isTraining = blockerText.toLowerCase().includes('training');
-                    const isReference = blockerText.toLowerCase().includes('reference');
-                    
-                    actions.push({
-                      id: `blocker_${idx}`,
-                      type: isTraining ? 'training' : isReference ? 'reference' : 'upload',
-                      label: blockerText,
-                      description: blocker.type === 'hard_block' ? 'Required' : 'Recommended',
-                      sectionKey: mapBlockerToSection(blockerText).section,
-                      priority: blocker.type === 'hard_block' ? 3 : 2,
-                      onClick: () => handleBlockerClick(blockerText)
-                    });
-                  });
-                  
-                  // Add pending reviews
-                  if ((complianceFile?.summary?.pending_review || 0) > 0) {
-                    actions.push({
-                      id: 'pending_review',
-                      type: 'review',
-                      label: `Review Pending Evidence`,
-                      description: `${complianceFile?.summary?.pending_review || 0} item(s) awaiting review`,
-                      priority: 2,
-                      onClick: () => {
-                        const pendingSection = document.querySelector('[data-status="pending"]');
-                        pendingSection?.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    });
-                  }
-                  
-                  return actions;
-                })()}
-                maxActions={5}
-              />
-              
-              {/* 3. COMPLIANCE FILE TOOLBAR - Simplified */}
-              <ComplianceActionBar
-                onUploadEvidence={() => setUploadDialogOpen(true)}
-                onRequestMissing={handleRequestAllMissingItems}
-                onExport={handleExportComplianceFile}
-                missingCount={complianceRequirements?.summary?.missing || 0}
-                hasEmail={!!employee?.email}
-                isAuditor={isAuditor()}
-                isExporting={isExporting}
-              />
 
               {/* Conditional Items - Keep minimal info about items not required */}
               {complianceRequirements?.conditional_not_required?.length > 0 && (
@@ -4401,7 +4060,6 @@ export default function EmployeeProfilePage() {
                           ?.filter(r => r.status === 'missing' || r.status === 'not_uploaded')
                           .map(r => ({ message: r.name, name: r.name, row_key: r.key })) || []
                       }
-                      onRequestAll={handleRequestAllMissingItems}
                       onNavigateToItem={(item) => {
                         // Navigate to the relevant section
                         if (item.section === 'training' || item.row_key?.includes('training')) {
@@ -7840,20 +7498,6 @@ export default function EmployeeProfilePage() {
           const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
           return evidenceRow?.counts?.verified || 0;
         })()}
-      />
-      
-      {/* Batch Request Modal */}
-      <BatchRequestModal
-        open={batchRequestModalOpen}
-        onClose={() => setBatchRequestModalOpen(false)}
-        employeeId={employeeId}
-        employeeName={`${employee?.first_name || ''} ${employee?.last_name || ''}`.trim()}
-        employeeEmail={employee?.email}
-        missingItems={missingItemsForRequest}
-        onSuccess={() => {
-          fetchCompliance();
-          fetchData();
-        }}
       />
     </div>
   );

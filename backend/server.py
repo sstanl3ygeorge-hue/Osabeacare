@@ -30611,7 +30611,7 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="dbs_certificate_evidence",
                     title="DBS Certificate Evidence",
-                    doc_requirement_keys=["dbs_certificate", "dbs_check"],
+                    doc_requirement_keys=["dbs_certificate", "dbs_check", "dbs"],
                     paired_check_key="dbs_status_check"
                 ),
                 build_check_row(
@@ -30633,7 +30633,7 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="identity_evidence",
                     title="Identity Evidence",
-                    doc_requirement_keys=["identity_documents", "id_document"],
+                    doc_requirement_keys=["identity_documents", "id_document", "identity"],
                     paired_check_key="identity_verification"
                 ),
                 build_check_row(

@@ -86,6 +86,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Added Application Form PDF export** - `generate_application_form_pdf()` in server.py creates professional PDF from application form data. Export PDF button now works in ApplicationFormViewDrawer. Fixed `generate_form_pdf` to also read `requirement_id` as fallback for `form_type`.
 - [x] **Restored db.references insertion logic** - References submitted via public application now appear in Recruitment Record. Created reference_1_* and reference_2_* fields in employee document + db.references record. Compliance-file endpoint returns status='declared' for new applicants.
 - [x] **Changed "Upload Proof" to "Record Check"** - Removed standalone "Upload Proof" button from verification row. Proof upload is now part of the RecordCheckDialog workflow which opens when clicking "Record Check".
+- [x] **Implemented System Role Normalization** - Added `system_role` field (HCA/NURSE) for compliance logic. All compliance, training, and readiness logic now uses `system_role` instead of raw string matching. Migration completed for 21 existing employees. Admin endpoints: GET/POST /admin/system-role/status, /migrate, /set-manual.
 
 ## Prioritized Backlog
 
@@ -150,4 +151,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - Restored db.references insertion, changed "Upload Proof" to "Record Check" button, Application Form viewer with PDF export
+April 3, 2026 - Implemented system_role normalization (HCA/NURSE), migrated 21 existing employees, Application Form viewer fix

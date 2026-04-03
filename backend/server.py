@@ -149,6 +149,118 @@ def _init_scope_constants():
 _init_scope_constants()
 
 
+# ==================== SYSTEM ROLE NORMALIZATION ====================
+# Maps human-readable roles to standardized system roles for compliance logic
+# 
+# IMPORTANT: All compliance, training, and readiness logic MUST use system_role
+# NOT the raw role field. Raw role is for display only.
+
+class SystemRole:
+    """Standardized system roles for compliance logic"""
+    HCA = "HCA"      # Healthcare Assistant - general care workers
+    NURSE = "NURSE"  # Registered Nurses - requires NMC registration
+    UNKNOWN = "UNKNOWN"  # Unmapped roles - flagged for review
+
+# Role to system_role mapping
+# Keys are LOWERCASE for case-insensitive matching
+SYSTEM_ROLE_MAP = {
+    # HCA roles - with spaces
+    "care assistant": SystemRole.HCA,
+    "senior care assistant": SystemRole.HCA,
+    "support worker": SystemRole.HCA,
+    "healthcare assistant": SystemRole.HCA,
+    "live-in carer": SystemRole.HCA,
+    "night carer": SystemRole.HCA,
+    "team leader": SystemRole.HCA,
+    # HCA roles - with underscores (legacy format)
+    "care_assistant": SystemRole.HCA,
+    "senior_care_assistant": SystemRole.HCA,
+    "support_worker": SystemRole.HCA,
+    "healthcare_assistant": SystemRole.HCA,
+    "live_in_carer": SystemRole.HCA,
+    "night_carer": SystemRole.HCA,
+    "team_leader": SystemRole.HCA,
+    # NURSE roles
+    "nurse": SystemRole.NURSE,
+    "registered nurse": SystemRole.NURSE,
+    "registered_nurse": SystemRole.NURSE,
+}
+
+# Roles that should NOT automatically inherit HCA compliance
+# These require explicit review before mapping
+ROLES_REQUIRING_REVIEW = {
+    "care coordinator",
+    "administrator",
+    "manager",
+    "office staff",
+}
+
+
+def normalize_to_system_role(role: str) -> str:
+    """
+    Normalize a human-readable role to a system role.
+    
+    Args:
+        role: The raw role string (e.g., "Care Assistant", "Nurse")
+    
+    Returns:
+        SystemRole constant (HCA, NURSE, or UNKNOWN)
+    
+    IMPORTANT: This function logs unmapped roles for review.
+    Do not silently guess - flag for manual review.
+    """
+    if not role:
+        logger.warning(f"[ROLE_NORMALIZATION] Empty role provided, returning UNKNOWN")
+        return SystemRole.UNKNOWN
+    
+    role_lower = role.strip().lower()
+    
+    # Check direct mapping
+    if role_lower in SYSTEM_ROLE_MAP:
+        return SYSTEM_ROLE_MAP[role_lower]
+    
+    # Check if role requires explicit review
+    if role_lower in ROLES_REQUIRING_REVIEW:
+        logger.warning(f"[ROLE_NORMALIZATION] Role '{role}' requires review - not auto-mapped")
+        return SystemRole.UNKNOWN
+    
+    # Log unmapped role for review
+    logger.warning(f"[ROLE_NORMALIZATION] Unmapped role: '{role}' - returning UNKNOWN")
+    return SystemRole.UNKNOWN
+
+
+def get_system_role_for_employee(employee: dict) -> str:
+    """
+    Get the system_role for an employee, with fallback to normalized role.
+    
+    Priority:
+    1. Use existing system_role if set
+    2. Normalize from role field
+    
+    Args:
+        employee: Employee document dict
+    
+    Returns:
+        SystemRole constant
+    """
+    # If system_role already set, use it
+    if employee.get("system_role"):
+        return employee["system_role"]
+    
+    # Otherwise normalize from role
+    return normalize_to_system_role(employee.get("role", ""))
+
+
+def is_nurse_role(system_role: str) -> bool:
+    """Check if system_role is NURSE - use instead of string matching"""
+    return system_role == SystemRole.NURSE
+
+
+def is_hca_role(system_role: str) -> bool:
+    """Check if system_role is HCA - use instead of string matching"""
+    return system_role == SystemRole.HCA
+
+
 def _is_applicant_status(status: str) -> bool:
     return status in _APPLICANT_STATUSES
 
@@ -1028,8 +1140,9 @@ async def get_required_training_for_employee(employee_id: str, role: str) -> Lis
     # Phase 1: Return existing behavior exactly
     items = MANDATORY_ITEMS["training"].copy()
     
-    # Add nurse-specific training if applicable
-    if role and "nurse" in role.lower():
+    # Add nurse-specific training if applicable (use system_role for compliance logic)
+    system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
+    if is_nurse_role(system_role):
         nurse_training = [i for i in MANDATORY_ITEMS["nurse_specific"] if i.get("type") == "training"]
         items.extend(nurse_training)
     
@@ -1184,8 +1297,9 @@ def get_mandatory_items_for_role(role: str) -> List[dict]:
     """Get all mandatory items for a specific role, sorted by priority"""
     items = MANDATORY_ITEMS["base"].copy() + MANDATORY_ITEMS["training"].copy()
     
-    # Add nurse-specific items
-    if role and "nurse" in role.lower():
+    # Add nurse-specific items (use system_role for compliance logic)
+    system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
+    if is_nurse_role(system_role):
         items.extend(MANDATORY_ITEMS["nurse_specific"])
     
     # Sort by priority_order (mandatory items first, then required_soon, then secondary)
@@ -1197,8 +1311,9 @@ def get_work_ready_items_for_role(role: str) -> set:
     """Get the set of requirement IDs that are mandatory for work readiness (Start Status)"""
     work_ready = WORK_READY_REQUIREMENTS.copy()
     
-    # Add nurse-specific mandatory item
-    if role and "nurse" in role.lower():
+    # Add nurse-specific mandatory item (use system_role for compliance logic)
+    system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
+    if is_nurse_role(system_role):
         work_ready.add("nmc_registration")
     
     return work_ready
@@ -1213,7 +1328,9 @@ def get_recruitment_file_items() -> set:
 def get_competency_health_items(role: str) -> set:
     """Get the set of requirement IDs for competency & health"""
     items = {"health_screening", "induction", "bls"}
-    if role and "nurse" in role.lower():
+    # Use system_role for compliance logic
+    system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
+    if is_nurse_role(system_role):
         items.add("clinical_competency")
         items.add("medication_competency")
     return items
@@ -3438,8 +3555,9 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
     }, {"_id": 0}).to_list(100)
     
     # Get requirements from MANDATORY_ITEMS (single source of truth for requirements)
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1, "system_role": 1})
     role = employee.get("role", "care_worker") if employee else "care_worker"
+    system_role = get_system_role_for_employee(employee) if employee else SystemRole.HCA
     
     # Build set of required training IDs from MANDATORY_ITEMS
     required_training_ids = set()
@@ -3447,8 +3565,8 @@ async def get_employee_training_safety_summary(employee_id: str) -> dict:
     
     # Get training items from MANDATORY_ITEMS (source of truth)
     training_items = MANDATORY_ITEMS.get("training", [])
-    # Add nurse-specific training if applicable
-    if role and "nurse" in role.lower():
+    # Add nurse-specific training if applicable (use system_role for compliance logic)
+    if is_nurse_role(system_role):
         training_items = training_items + [i for i in MANDATORY_ITEMS.get("nurse_specific", []) if i.get("type") == "training"]
     
     for item in training_items:
@@ -22248,6 +22366,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
         # Role & availability
         "role_applied_raw": form.role_applied,  # Original input
         "role": normalize_role(form.role_applied),  # Normalized canonical role
+        "system_role": normalize_to_system_role(form.role_applied),  # Compliance system role (HCA/NURSE)
         "assignment": "Unassigned",
         "availability": form.availability,
         "earliest_start_date": form.earliest_start_date,
@@ -37685,6 +37804,182 @@ async def get_training_catalogue_status(user: dict = Depends(require_admin)):
             "ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS": ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS
         },
         "behavior": "UNCHANGED - compliance calculation uses MANDATORY_ITEMS only"
+    }
+
+
+# ==================== SYSTEM ROLE MIGRATION ====================
+
+@api_router.get("/admin/system-role/status")
+async def get_system_role_status(user: dict = Depends(require_admin)):
+    """
+    Check system_role migration status for all employees.
+    Returns counts of migrated, unmigrated, and unmapped roles.
+    """
+    # Count employees with and without system_role
+    total_employees = await db.employees.count_documents({})
+    with_system_role = await db.employees.count_documents({"system_role": {"$exists": True, "$ne": None}})
+    without_system_role = await db.employees.count_documents({
+        "$or": [
+            {"system_role": {"$exists": False}},
+            {"system_role": None}
+        ]
+    })
+    
+    # Count by system_role
+    hca_count = await db.employees.count_documents({"system_role": SystemRole.HCA})
+    nurse_count = await db.employees.count_documents({"system_role": SystemRole.NURSE})
+    unknown_count = await db.employees.count_documents({"system_role": SystemRole.UNKNOWN})
+    
+    # Find unmapped roles (distinct roles without system_role)
+    pipeline = [
+        {"$match": {"$or": [{"system_role": {"$exists": False}}, {"system_role": None}]}},
+        {"$group": {"_id": "$role", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    unmapped_roles = await db.employees.aggregate(pipeline).to_list(100)
+    
+    return {
+        "migration_status": {
+            "total_employees": total_employees,
+            "with_system_role": with_system_role,
+            "without_system_role": without_system_role,
+            "migration_complete": without_system_role == 0
+        },
+        "system_role_distribution": {
+            "HCA": hca_count,
+            "NURSE": nurse_count,
+            "UNKNOWN": unknown_count
+        },
+        "unmapped_roles_requiring_migration": unmapped_roles,
+        "role_mapping_reference": dict(SYSTEM_ROLE_MAP),
+        "roles_requiring_review": list(ROLES_REQUIRING_REVIEW)
+    }
+
+
+@api_router.post("/admin/system-role/migrate")
+async def migrate_system_roles(
+    dry_run: bool = Query(True, description="If true, only preview changes without applying"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Migrate existing employees to set system_role based on their role field.
+    
+    This ensures all compliance logic uses system_role consistently.
+    
+    Args:
+        dry_run: If true, preview changes only. Set to false to apply.
+    
+    Returns:
+        Migration summary with counts and any unmapped roles.
+    """
+    # Find all employees without system_role
+    employees_to_migrate = await db.employees.find({
+        "$or": [
+            {"system_role": {"$exists": False}},
+            {"system_role": None}
+        ]
+    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "email": 1}).to_list(None)
+    
+    results = {
+        "total_to_migrate": len(employees_to_migrate),
+        "dry_run": dry_run,
+        "migrated": [],
+        "unmapped_roles": [],
+        "errors": []
+    }
+    
+    migrated_count = 0
+    unknown_count = 0
+    
+    for emp in employees_to_migrate:
+        emp_id = emp.get("id")
+        role = emp.get("role", "")
+        system_role = normalize_to_system_role(role)
+        
+        migration_record = {
+            "employee_id": emp_id,
+            "name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+            "role": role,
+            "system_role": system_role
+        }
+        
+        if system_role == SystemRole.UNKNOWN:
+            unknown_count += 1
+            results["unmapped_roles"].append({
+                **migration_record,
+                "warning": "Role could not be mapped - requires manual review"
+            })
+        else:
+            results["migrated"].append(migration_record)
+        
+        if not dry_run:
+            try:
+                await db.employees.update_one(
+                    {"id": emp_id},
+                    {"$set": {"system_role": system_role}}
+                )
+                migrated_count += 1
+            except Exception as e:
+                results["errors"].append({
+                    "employee_id": emp_id,
+                    "error": str(e)
+                })
+    
+    results["summary"] = {
+        "successfully_mapped": len(results["migrated"]),
+        "unmapped_unknown": unknown_count,
+        "errors": len(results["errors"])
+    }
+    
+    if dry_run:
+        results["message"] = "DRY RUN - No changes applied. Set dry_run=false to apply migration."
+    else:
+        results["message"] = f"Migration complete. {migrated_count} employees updated."
+        logger.info(f"[SYSTEM_ROLE_MIGRATION] Completed: {migrated_count} employees migrated, {unknown_count} unmapped")
+    
+    return results
+
+
+@api_router.post("/admin/system-role/set-manual")
+async def set_manual_system_role(
+    employee_id: str = Query(..., description="Employee ID"),
+    system_role: str = Query(..., description="System role to set (HCA, NURSE)"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Manually set system_role for a specific employee.
+    
+    Use this for employees with roles that couldn't be auto-mapped.
+    """
+    # Validate system_role
+    valid_roles = {SystemRole.HCA, SystemRole.NURSE, SystemRole.UNKNOWN}
+    if system_role not in valid_roles:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid system_role. Must be one of: {valid_roles}"
+        )
+    
+    # Find employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "role": 1, "system_role": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    old_system_role = employee.get("system_role")
+    
+    # Update
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {"system_role": system_role}}
+    )
+    
+    logger.info(f"[SYSTEM_ROLE_MANUAL] Employee {employee_id}: {old_system_role} -> {system_role} (by {user.get('email')})")
+    
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "role": employee.get("role"),
+        "old_system_role": old_system_role,
+        "new_system_role": system_role
     }
 
 

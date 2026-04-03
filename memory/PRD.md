@@ -118,7 +118,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **DBS Section Overhaul** (DONE Apr 3) - 3-layer data model mirroring RTW (Evidence → Verification → DBS Result), AI extraction endpoint, computed dbs_status, DBS Result Panel in RecordCheckDialog and UploadRequirementCard
 
 ### P1 (High)
-- [ ] Replicate RTW/DBS 3-layer pattern to Identity and Proof of Address sections
+- [x] **Replicate RTW/DBS 3-layer pattern to Identity and Proof of Address sections** (DONE Apr 3) - Unified Compliance Rule Engine Phase 1 implemented
 - [ ] Interview Notes integration
 - [ ] Training Matrix PDF export
 - [ ] Employee self-service portal
@@ -195,4 +195,43 @@ Following the strict 3-layer pattern established by RTW:
 - **Important**: DBS certificates have NO statutory expiry - recheck dates are internal policy (typically 3 years)
 
 ## Last Updated
-April 3, 2026 - DBS Section Overhaul (3-layer data model, AI extraction, DBS Result Panel, computed status alerts)
+April 3, 2026 - Unified Compliance Rule Engine Phase 1 (Identity & POA 3-layer pattern)
+
+## Unified Compliance Rule Engine (COMPLETED Apr 3)
+Created `/backend/compliance_engine/` module as the single source of truth for all compliance logic:
+
+### Module Structure
+- **models.py**: Shared Pydantic models (RequirementType, Evidence, Verification, StructuredResult, RequirementSummary, ComplianceSummary)
+- **rule_packs.py**: Requirement-specific rule packs (RTWRulePack, DBSRulePack, IdentityRulePack, POARulePack) with:
+  - Required/optional fields
+  - Method labels
+  - Status computation with expiry/recheck thresholds
+  - Alert generation
+- **engine.py**: Core services:
+  - EvidenceService: Evidence lifecycle management
+  - VerificationService: Check record management  
+  - ResultService: Structured result validation
+  - StatusEngine: Requirement summary computation
+  - BlockerEngine: Work readiness blocker aggregation
+  - ComplianceEngine: Main orchestrator
+- **labels.py**: Centralized human-readable labels for all statuses, methods, outcomes
+
+### Identity Section Enhancements
+- Backend fields: document_type, full_name_on_document, date_of_birth, document_number, issue_date, expiry_date, nationality, name_matches_application, dob_matches_application, photo_match_confirmed
+- Computed identity_status with days_until_expiry, alerts
+- Frontend Identity Result Details panel showing all fields with verification checks badges
+
+### Proof of Address Section Enhancements  
+- Backend fields: documents_received_count, documents_required_count, verified_documents (array), extracted_address_line1/2/city/postcode, address_matches_application, all_documents_sufficiently_recent
+- Document recency limits: Utility bill (3 months), Bank statement (3 months), Council tax (6 months)
+- Computed address_status with alerts
+- Frontend Address Verification Result panel showing verified address, individual documents with Valid/Invalid badges
+
+### Key Files
+- `/app/backend/compliance_engine/__init__.py`
+- `/app/backend/compliance_engine/models.py`
+- `/app/backend/compliance_engine/rule_packs.py`
+- `/app/backend/compliance_engine/engine.py`
+- `/app/backend/compliance_engine/labels.py`
+- `/app/frontend/src/components/compliance/UploadRequirementCard.js` (Identity/POA Result panels)
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js` (Check transformation)

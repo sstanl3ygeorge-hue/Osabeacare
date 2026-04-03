@@ -4136,6 +4136,16 @@ class EmployeeDocumentResponse(BaseModel):
     requirement_id: Optional[str] = None  # Links to MANDATORY_ITEMS id
     requirement_name: Optional[str] = None
     document_label: Optional[str] = None  # e.g., "Passport Front", "Visa"
+    # Rejection fields (from Evidence Review)
+    rejected_by: Optional[str] = None
+    rejected_by_name: Optional[str] = None
+    rejected_at: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    # Uploaded in error fields (from Evidence Review)
+    marked_in_error_by: Optional[str] = None
+    marked_in_error_by_name: Optional[str] = None
+    marked_in_error_at: Optional[str] = None
+    marked_in_error_reason: Optional[str] = None
 
 
 # ============================================================================

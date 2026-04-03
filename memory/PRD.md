@@ -62,6 +62,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ## Key Files
 - `/app/frontend/src/components/compliance/ComplianceDrawer.js` (NEW)
 - `/app/frontend/src/components/compliance/EvidenceManageDrawer.js` (NEW)
+- `/app/frontend/src/components/compliance/EvidenceReviewDialog.js` (NEW - Apr 3) - Accept/Reject/Mark in Error for evidence files
 - `/app/frontend/src/components/compliance/ApplicationFormViewDrawer.js` (NEW - Apr 3) - Read-only viewer for structured application forms
 - `/app/frontend/src/components/compliance/UploadRequirementCard.js`
 - `/app/frontend/src/components/compliance/DualRowComplianceSection.js`
@@ -87,6 +88,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Restored db.references insertion logic** - References submitted via public application now appear in Recruitment Record. Created reference_1_* and reference_2_* fields in employee document + db.references record. Compliance-file endpoint returns status='declared' for new applicants.
 - [x] **Changed "Upload Proof" to "Record Check"** - Removed standalone "Upload Proof" button from verification row. Proof upload is now part of the RecordCheckDialog workflow which opens when clicking "Record Check".
 - [x] **Implemented System Role Normalization** - Added `system_role` field (HCA/NURSE) for compliance logic. All compliance, training, and readiness logic now uses `system_role` instead of raw string matching. Migration completed for 21 existing employees. Admin endpoints: GET/POST /admin/system-role/status, /migrate, /set-manual.
+- [x] **Evidence Review Workflow (Apr 3)** - Created `EvidenceReviewDialog.js` for Accept/Reject/Mark Uploaded in Error actions on evidence files. Added backend endpoints: POST `/api/employee-documents/{doc_id}/reject`, POST `/api/employee-documents/{doc_id}/mark-uploaded-in-error`. Review button visible on pending evidence files in UploadRequirementCard. "Accept & Record Check" button available for document-heavy requirements (RTW, DBS, Identity, PoA).
 
 ## Prioritized Backlog
 
@@ -95,8 +97,14 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Fix Application Form viewer "Form template not found" error** (DONE - ApplicationFormViewDrawer.js created)
 - [x] **Restore db.references insertion logic** (DONE - references now appear in Recruitment Record)
 - [x] **Fix fake "Request sent" state on new applicants** (VERIFIED WORKING - frontend correctly shows "not yet requested")
+- [x] **Evidence Review Workflow** (DONE Apr 3) - EvidenceReviewDialog allows Accept/Reject/Mark Uploaded in Error actions on evidence files
 
 ### P1 (High)
+- [ ] Reference Verification Workflow ("Verified" checkbox, mismatch warnings)
+- [ ] ID/Document verification stamps ("ORIGINAL VERIFIED" checkbox)
+- [ ] Interview Notes integration
+- [ ] Employment Gap explanation enforcement
+- [ ] Training Matrix PDF export
 - [ ] Employee self-service portal
 - [ ] Supabase Auth integration and RLS policies
 
@@ -151,4 +159,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - Implemented system_role normalization (HCA/NURSE), migrated 21 existing employees, Application Form viewer fix
+April 3, 2026 - Evidence Review Workflow implemented (Accept/Reject/Mark Uploaded in Error)

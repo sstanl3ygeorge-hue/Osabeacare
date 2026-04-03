@@ -97,6 +97,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Right to Work Compliance Strengthening (Apr 3)** - Share Code as primary method with GOV.UK guidance. BRP warnings about expiry. Dynamic guidance in RecordCheckDialog. Proof upload enforced for online check methods. Public upload page shows Share Code guidance.
 - [x] **Right to Work System Overhaul (Apr 3)** - Complete 3-layer data model (Evidence → Verification → Result). New fields: permission_start_date, permission_end_date, reference_number, share_code, restrictions, hours_limit, is_indefinite, follow_up_required, route, document_type. AI auto-extraction endpoint using GPT-5.2 Vision (`/api/rtw/extract`). RTW Result Panel in RecordCheckDialog. Lifecycle state labels on UploadRequirementCard.
 - [x] **RTW Workflow Tightening (Apr 3)** - Auto-extract RTW fields when proof file uploaded. Human-friendly method labels (METHOD_LABELS mapping). Resolve checked_by to user name. Enhanced stamp badge with stamper name/date. Edit Stamp button when stamp exists. Fixed stamp document ID lookup.
+- [x] **RTW Stamp State Fix (Apr 3)** - Fixed stamp fields not passing through DualRowComplianceSection.transformToUploadSurface. Added Remove Stamp endpoint (DELETE `/api/employee-documents/{doc_id}/verification-stamp`). Evidence summary now says "accepted" instead of "verified". RecordCheckDialog warns if no accepted/stamped evidence before recording check.
 
 ## Prioritized Backlog
 
@@ -171,4 +172,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `POST /api/rtw/extract` - AI extraction of RTW document fields using GPT-5.2 Vision
 
 ## Last Updated
-April 3, 2026 - RTW Workflow Tightening (auto-extract on upload, human-friendly labels, stamp UX fix, checked_by name resolution)
+April 3, 2026 - RTW Stamp State Fix (stamp field passthrough, Remove Stamp, accepted wording, evidence warnings)

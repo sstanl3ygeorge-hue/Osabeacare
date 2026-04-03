@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
@@ -8,7 +8,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
-import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle, Info, ExternalLink } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -17,25 +17,27 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // Organized by requirement type for requirement-aware dropdowns
 
 const CHECK_METHODS = {
-  // Right to Work verification methods
+  // Right to Work verification methods - UK GOVERNMENT COMPLIANT
   right_to_work: [
-    { value: 'original_seen', label: 'Original document seen in person' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'home_office_online', label: 'Home Office online check' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'share_code_check', label: 'Share Code verification' },
-    { value: 'ecs_check', label: 'Employer Checking Service' },
+    { value: 'share_code_check', label: 'Share Code verification (GOV.UK)', recommended: true },
+    { value: 'home_office_online', label: 'Home Office online check', recommended: true },
+    { value: 'ecs_check', label: 'Employer Checking Service (ECS)' },
     { value: 'idsp_check', label: 'IDSP (Identity Service Provider) check' },
+    { value: 'original_passport_uk_irish', label: 'UK/Irish Passport - Original seen' },
+    { value: 'original_birth_cert_ni', label: 'Birth Certificate + NI proof - Original seen' },
+    { value: 'brp_with_online_check', label: 'BRP + Online verification' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
     { value: 'other', label: 'Other documented verification' }
   ],
   right_to_work_check: [
-    { value: 'original_seen', label: 'Original document seen in person' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'home_office_online', label: 'Home Office online check' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'share_code_check', label: 'Share Code verification' },
-    { value: 'ecs_check', label: 'Employer Checking Service' },
+    { value: 'share_code_check', label: 'Share Code verification (GOV.UK)', recommended: true },
+    { value: 'home_office_online', label: 'Home Office online check', recommended: true },
+    { value: 'ecs_check', label: 'Employer Checking Service (ECS)' },
     { value: 'idsp_check', label: 'IDSP (Identity Service Provider) check' },
+    { value: 'original_passport_uk_irish', label: 'UK/Irish Passport - Original seen' },
+    { value: 'original_birth_cert_ni', label: 'Birth Certificate + NI proof - Original seen' },
+    { value: 'brp_with_online_check', label: 'BRP + Online verification' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
     { value: 'other', label: 'Other documented verification' }
   ],
   
@@ -133,13 +135,130 @@ const CHECK_OUTCOMES = [
 ];
 
 const SOURCE_STATUS_TYPES = [
+  { value: 'share_code', label: 'Share Code Check Result' },
   { value: 'digital_status', label: 'Digital Status (eVisa)' },
-  { value: 'settled_status', label: 'Settled Status' },
-  { value: 'pre_settled_status', label: 'Pre-Settled Status' },
+  { value: 'settled_status', label: 'Settled Status (EU Settlement Scheme)' },
+  { value: 'pre_settled_status', label: 'Pre-Settled Status (EU Settlement Scheme)' },
+  { value: 'uk_citizen', label: 'UK Citizen (Passport/Birth Certificate)' },
+  { value: 'irish_citizen', label: 'Irish Citizen' },
+  { value: 'brp_valid', label: 'BRP - Valid (with online check)' },
+  { value: 'brp_expired', label: 'BRP - Expired (online check required)' },
   { value: 'passport_endorsement', label: 'Passport Endorsement' },
-  { value: 'irish_passport', label: 'Irish Passport' },
+  { value: 'work_visa', label: 'Work Visa' },
+  { value: 'student_visa', label: 'Student Visa (with work permission)' },
   { value: 'other', label: 'Other' }
 ];
+
+// RTW-SPECIFIC GUIDANCE based on verification method
+const RTW_METHOD_GUIDANCE = {
+  share_code_check: {
+    title: 'Share Code Verification',
+    guidance: 'You MUST verify this online via GOV.UK using the applicant\'s share code.',
+    steps: [
+      'Ask applicant for their 9-character share code',
+      'Visit gov.uk/view-right-to-work',
+      'Enter share code and applicant\'s date of birth',
+      'Save/screenshot the result as proof'
+    ],
+    proofRequired: true,
+    proofLabel: 'Home Office check result (screenshot/PDF)',
+    link: 'https://www.gov.uk/view-right-to-work',
+    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
+  },
+  home_office_online: {
+    title: 'Home Office Online Check',
+    guidance: 'Complete the online check via GOV.UK Employer Checking Service.',
+    steps: [
+      'Visit gov.uk/employee-immigration-employment-status',
+      'Enter employee details as prompted',
+      'Save/screenshot the positive verification notice'
+    ],
+    proofRequired: true,
+    proofLabel: 'Home Office verification result (screenshot/PDF)',
+    link: 'https://www.gov.uk/employee-immigration-employment-status',
+    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
+  },
+  ecs_check: {
+    title: 'Employer Checking Service',
+    guidance: 'Use when applicant cannot provide documents or share code.',
+    steps: [
+      'Submit request via ECS',
+      'Wait for Home Office response',
+      'Record the Positive Verification Notice'
+    ],
+    proofRequired: true,
+    proofLabel: 'Positive Verification Notice',
+    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200'
+  },
+  original_passport_uk_irish: {
+    title: 'UK/Irish Passport Check',
+    guidance: 'Valid for UK/Irish citizens only. Verify the original passport in person.',
+    steps: [
+      'Check passport is genuine and valid',
+      'Verify photo matches the applicant',
+      'Record passport number and expiry date',
+      'Apply "Original Document Seen" stamp'
+    ],
+    proofRequired: false,
+    stampRequired: true,
+    stampType: 'original_seen',
+    badgeColor: 'bg-green-100 text-green-800 border-green-200'
+  },
+  original_birth_cert_ni: {
+    title: 'Birth Certificate + NI Proof',
+    guidance: 'Valid for UK citizens born in UK. Requires BOTH documents.',
+    steps: [
+      'Check full birth certificate (not short form)',
+      'Verify National Insurance number proof',
+      'Both documents must show same name',
+      'Apply "Original Document Seen" stamp'
+    ],
+    proofRequired: false,
+    stampRequired: true,
+    stampType: 'original_seen',
+    badgeColor: 'bg-green-100 text-green-800 border-green-200'
+  },
+  brp_with_online_check: {
+    title: 'BRP + Online Verification',
+    guidance: 'BRP alone is NOT sufficient. You MUST complete an online check.',
+    warning: 'Expired BRP is not valid. Use Share Code check instead.',
+    steps: [
+      'Note: BRP cards are being phased out',
+      'Check BRP expiry date - if expired, use Share Code',
+      'Complete online check via GOV.UK',
+      'Save screenshot of online check result'
+    ],
+    proofRequired: true,
+    proofLabel: 'Online check result (screenshot/PDF)',
+    link: 'https://www.gov.uk/view-right-to-work',
+    badgeColor: 'bg-amber-100 text-amber-800 border-amber-200'
+  },
+  idsp_check: {
+    title: 'IDSP Check',
+    guidance: 'Use an accredited Identity Service Provider for digital verification.',
+    steps: [
+      'Use an accredited IDSP',
+      'Follow their verification process',
+      'Retain the verification certificate'
+    ],
+    proofRequired: true,
+    proofLabel: 'IDSP verification certificate',
+    badgeColor: 'bg-purple-100 text-purple-800 border-purple-200'
+  },
+  certified_copy: {
+    title: 'Certified Copy',
+    guidance: 'Only valid for specific document types. Original is preferred.',
+    steps: [
+      'Verify certification is from an authorized person',
+      'Check certification date is recent',
+      'Ensure full document is visible'
+    ],
+    proofRequired: false,
+    stampRequired: true,
+    stampType: 'copy_verified',
+    badgeColor: 'bg-gray-100 text-gray-800 border-gray-200'
+  }
+};
 
 // Map check types to requirement IDs for proof file storage
 const CHECK_TYPE_TO_REQUIREMENT = {
@@ -294,9 +413,24 @@ export default function RecordCheckDialog({
       return;
     }
 
+    // RTW-SPECIFIC VALIDATION: Enforce proof upload for online check methods
+    const isRTW = checkType === 'right_to_work_check' || checkType === 'right_to_work';
+    const onlineCheckMethods = ['share_code_check', 'home_office_online', 'ecs_check', 'brp_with_online_check', 'idsp_check'];
+    const requiresOnlineProof = isRTW && onlineCheckMethods.includes(formData.method);
+    
     // COMPLIANCE-CRITICAL: Require proof file
     if (!proofFile && !uploadedProofId) {
-      toast.error('Upload proof of check before saving. This is required for compliance.');
+      if (requiresOnlineProof) {
+        toast.error('Online verification methods require proof upload (screenshot/PDF of check result). This is a legal requirement.');
+      } else {
+        toast.error('Upload proof of check before saving. This is required for compliance.');
+      }
+      return;
+    }
+    
+    // RTW-SPECIFIC: Warn if BRP method without online check confirmation
+    if (isRTW && formData.method === 'brp_with_online_check' && formData.source_status_type === 'brp_expired') {
+      toast.error('Expired BRP is not valid. Please use Share Code verification instead.');
       return;
     }
 
@@ -451,12 +585,107 @@ export default function RecordCheckDialog({
               <SelectContent>
                 {methods.map(method => (
                   <SelectItem key={method.value} value={method.value}>
-                    {method.label}
+                    <span className="flex items-center gap-2">
+                      {method.label}
+                      {method.recommended && (
+                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Recommended</span>
+                      )}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
+          {/* RTW-SPECIFIC GUIDANCE BOX - Shows method-specific instructions */}
+          {(checkType === 'right_to_work_check' || checkType === 'right_to_work') && formData.method && RTW_METHOD_GUIDANCE[formData.method] && (
+            <div className={`p-4 rounded-lg border ${RTW_METHOD_GUIDANCE[formData.method].badgeColor || 'bg-blue-50 border-blue-200'}`}>
+              <div className="space-y-3">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-sm">{RTW_METHOD_GUIDANCE[formData.method].title}</p>
+                    <p className="text-xs mt-1">{RTW_METHOD_GUIDANCE[formData.method].guidance}</p>
+                  </div>
+                </div>
+                
+                {/* Warning (e.g., BRP expiry) */}
+                {RTW_METHOD_GUIDANCE[formData.method].warning && (
+                  <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs text-red-700 font-medium">{RTW_METHOD_GUIDANCE[formData.method].warning}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Steps */}
+                {RTW_METHOD_GUIDANCE[formData.method].steps && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium">Steps:</p>
+                    <ol className="text-xs space-y-1 list-decimal list-inside">
+                      {RTW_METHOD_GUIDANCE[formData.method].steps.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                
+                {/* GOV.UK Link */}
+                {RTW_METHOD_GUIDANCE[formData.method].link && (
+                  <a 
+                    href={RTW_METHOD_GUIDANCE[formData.method].link} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-700 hover:text-blue-900 font-medium"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Open GOV.UK verification page
+                  </a>
+                )}
+                
+                {/* Proof requirement indicator */}
+                {RTW_METHOD_GUIDANCE[formData.method].proofRequired && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-current/10">
+                    <Upload className="h-3 w-3" />
+                    <span className="text-xs font-medium">
+                      Required proof: {RTW_METHOD_GUIDANCE[formData.method].proofLabel}
+                    </span>
+                  </div>
+                )}
+                
+                {/* Stamp requirement indicator */}
+                {RTW_METHOD_GUIDANCE[formData.method].stampRequired && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-current/10">
+                    <CheckCircle className="h-3 w-3" />
+                    <span className="text-xs font-medium">
+                      Apply verification stamp: "{RTW_METHOD_GUIDANCE[formData.method].stampType === 'original_seen' ? 'Original Document Seen' : 'Copy Verified'}"
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* BRP CONFIRMATION PROMPT - Shows when BRP method is selected */}
+          {(checkType === 'right_to_work_check' || checkType === 'right_to_work') && formData.method === 'brp_with_online_check' && (
+            <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">BRP Verification Confirmation</p>
+                  <p className="text-xs text-amber-700 mt-1">
+                    Before proceeding, confirm you have completed the online check:
+                  </p>
+                  <ul className="text-xs text-amber-700 mt-2 space-y-1 list-disc list-inside">
+                    <li>Have you verified this BRP online via GOV.UK?</li>
+                    <li>Is the BRP still within its validity period?</li>
+                    <li>Do you have a screenshot of the online check result?</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Checked At */}
           <div className="space-y-2">

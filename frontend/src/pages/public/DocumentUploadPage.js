@@ -242,6 +242,31 @@ export default function DocumentUploadPage() {
           </CardHeader>
           
           <CardContent className="space-y-6">
+            {/* RTW-SPECIFIC SHARE CODE GUIDANCE */}
+            {(tokenData?.requirement_key === 'right_to_work' || tokenData?.requirement_name?.toLowerCase().includes('right to work')) && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <Shield className="h-4 w-4 text-indigo-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-indigo-800">Recommended: Use Share Code</p>
+                    <p className="text-xs text-indigo-700 mt-1">
+                      If you have the right to work in the UK, the easiest way to prove this is using a <strong>Share Code</strong> from GOV.UK.
+                    </p>
+                    <ul className="text-xs text-indigo-700 mt-2 space-y-1 list-disc list-inside">
+                      <li>Visit <a href="https://www.gov.uk/prove-right-to-work" target="_blank" rel="noopener noreferrer" className="underline font-medium">gov.uk/prove-right-to-work</a></li>
+                      <li>Sign in and get your 9-character Share Code</li>
+                      <li>Share this code with your employer</li>
+                    </ul>
+                    <p className="text-xs text-indigo-600 mt-2 italic">
+                      If you're a UK or Irish citizen, uploading your passport is sufficient.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {/* Instructions */}
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
               <p className="text-sm text-blue-800">

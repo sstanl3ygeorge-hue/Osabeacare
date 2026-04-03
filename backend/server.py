@@ -15378,6 +15378,294 @@ async def generate_staff_health_pdf(submission_data: dict, employee_data: dict, 
     return buffer.getvalue()
 
 
+async def generate_application_form_pdf(submission_data: dict, employee_data: dict) -> bytes:
+    """
+    Generate a PDF from a structured application form submission.
+    Creates a professional PDF with all application sections.
+    
+    Args:
+        submission_data: The structured form data (form_data/data field)
+        employee_data: Employee profile data for header info
+    
+    Returns:
+        bytes: The generated PDF content
+    """
+    buffer = io.BytesIO()
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    # Styles
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'ApplicationTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        textColor=colors.HexColor('#0F766E'),
+        alignment=TA_CENTER,
+        spaceAfter=10*mm
+    )
+    
+    section_style = ParagraphStyle(
+        'SectionHeader',
+        parent=styles['Heading2'],
+        fontSize=12,
+        textColor=colors.white,
+        backColor=colors.HexColor('#0F766E'),
+        spaceBefore=8*mm,
+        spaceAfter=4*mm,
+        leftIndent=-5*mm,
+        rightIndent=-5*mm,
+        borderPadding=(3*mm, 5*mm, 3*mm, 5*mm)
+    )
+    
+    label_style = ParagraphStyle(
+        'FieldLabel',
+        parent=styles['Normal'],
+        fontSize=9,
+        textColor=colors.HexColor('#666666'),
+        fontName='Helvetica-Bold'
+    )
+    
+    value_style = ParagraphStyle(
+        'FieldValue',
+        parent=styles['Normal'],
+        fontSize=10,
+        textColor=colors.HexColor('#000000')
+    )
+    
+    subsection_style = ParagraphStyle(
+        'SubsectionHeader',
+        parent=styles['Heading3'],
+        fontSize=10,
+        textColor=colors.HexColor('#0F766E'),
+        spaceBefore=4*mm,
+        spaceAfter=2*mm
+    )
+    
+    story = []
+    
+    # Helper function to add a field row
+    def add_field(label: str, value, story_list):
+        if value is None or value == '':
+            return
+        if isinstance(value, bool):
+            value = 'Yes' if value else 'No'
+        story_list.append(Paragraph(f"<b>{label}:</b> {value}", value_style))
+        story_list.append(Spacer(1, 2*mm))
+    
+    # Header
+    story.append(Paragraph("Osabea Healthcare Solutions", ParagraphStyle('CompanyName', fontSize=14, textColor=colors.HexColor('#0F766E'), alignment=TA_CENTER)))
+    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph("Application Form", title_style))
+    
+    # Status banner
+    status = submission_data.get('_status', 'submitted')
+    status_color = colors.HexColor('#059669') if status == 'verified' else colors.HexColor('#D97706') if status == 'submitted' else colors.HexColor('#DC2626')
+    status_text = 'VERIFIED' if status == 'verified' else 'AWAITING REVIEW' if status == 'submitted' else status.upper()
+    story.append(Paragraph(f"<font color='#{status_color.hexval()[2:]}'><b>Status: {status_text}</b></font>", ParagraphStyle('Status', fontSize=10, alignment=TA_CENTER)))
+    story.append(Spacer(1, 5*mm))
+    
+    # PERSONAL DETAILS
+    story.append(Paragraph("Personal Details", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    full_name = ' '.join(filter(None, [
+        submission_data.get('title', ''),
+        submission_data.get('first_name', ''),
+        submission_data.get('middle_name', ''),
+        submission_data.get('last_name', '')
+    ]))
+    add_field('Full Name', full_name, story)
+    add_field('Preferred Name', submission_data.get('preferred_name'), story)
+    add_field('Date of Birth', submission_data.get('date_of_birth'), story)
+    add_field('National Insurance Number', submission_data.get('national_insurance'), story)
+    add_field('Email', submission_data.get('email'), story)
+    add_field('Phone', submission_data.get('phone'), story)
+    
+    address_parts = [
+        submission_data.get('address_line_1', ''),
+        submission_data.get('address_line_2', ''),
+        submission_data.get('city', ''),
+        submission_data.get('county', ''),
+        submission_data.get('postcode', '')
+    ]
+    address = ', '.join(filter(None, address_parts))
+    add_field('Address', address, story)
+    add_field('Years at Current Address', submission_data.get('years_at_current_address'), story)
+    
+    story.append(Spacer(1, 3*mm))
+    story.append(Paragraph("Role & Availability", subsection_style))
+    add_field('Role Applied For', submission_data.get('role_applied'), story)
+    add_field('Availability', submission_data.get('availability'), story)
+    add_field('Earliest Start Date', submission_data.get('earliest_start_date'), story)
+    add_field('Has Driving Licence', submission_data.get('has_driving_licence'), story)
+    add_field('Has Own Transport', submission_data.get('has_own_transport'), story)
+    
+    # EMPLOYMENT HISTORY
+    story.append(Paragraph("Employment History", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    employment_history = submission_data.get('employment_history', [])
+    if employment_history:
+        for idx, emp in enumerate(employment_history, 1):
+            story.append(Paragraph(f"<b>Employment {idx}: {emp.get('job_title', 'N/A')} at {emp.get('employer_name', 'N/A')}</b>", subsection_style))
+            period = f"{emp.get('start_date', 'N/A')} - {'Present' if emp.get('is_current') else emp.get('end_date', 'N/A')}"
+            add_field('Period', period, story)
+            add_field('Duties', emp.get('duties'), story)
+            if not emp.get('is_current'):
+                add_field('Reason for Leaving', emp.get('reason_for_leaving'), story)
+            add_field('Employer Address', emp.get('employer_address'), story)
+            add_field('Employer Phone', emp.get('employer_phone'), story)
+            add_field('Can Contact Employer', emp.get('can_contact'), story)
+            story.append(Spacer(1, 2*mm))
+    else:
+        story.append(Paragraph("No employment history provided", value_style))
+    
+    if submission_data.get('has_employment_gaps'):
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph("<b>Employment Gaps Declared</b>", label_style))
+        add_field('Gap Explanation', submission_data.get('employment_gap_explanation'), story)
+    
+    # REFERENCES
+    story.append(Paragraph("References", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    references = submission_data.get('references', [])
+    if references:
+        for idx, ref in enumerate(references, 1):
+            story.append(Paragraph(f"<b>Reference {idx}: {ref.get('referee_name', 'N/A')}</b>", subsection_style))
+            add_field('Job Title', ref.get('referee_job_title'), story)
+            add_field('Organisation', ref.get('referee_organisation'), story)
+            add_field('Email', ref.get('referee_email'), story)
+            add_field('Phone', ref.get('referee_phone'), story)
+            add_field('Relationship', ref.get('relationship'), story)
+            add_field('Years Known', ref.get('years_known'), story)
+            add_field('Professional Reference', ref.get('is_professional'), story)
+            add_field('Can Contact Before Offer', ref.get('can_contact_before_offer'), story)
+            story.append(Spacer(1, 2*mm))
+    else:
+        story.append(Paragraph("No references provided", value_style))
+    
+    # DECLARATIONS
+    story.append(Paragraph("Declarations & Consent", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    declarations = submission_data.get('declarations', {})
+    add_field('Information Accurate', declarations.get('information_accurate'), story)
+    add_field('Understands False Info Consequences', declarations.get('understands_false_info_consequences'), story)
+    add_field('Consents to Reference Checks', declarations.get('consents_to_reference_checks'), story)
+    add_field('Consents to Background Checks', declarations.get('consents_to_background_checks'), story)
+    add_field('Consents to Data Processing (GDPR)', declarations.get('consents_to_data_processing'), story)
+    
+    if declarations.get('has_professional_registration'):
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph("Professional Registration", subsection_style))
+        add_field('Registration Body', declarations.get('registration_body'), story)
+        add_field('Registration Number', declarations.get('registration_number'), story)
+        add_field('Registration Expiry', declarations.get('registration_expiry'), story)
+    
+    add_field('Has Disciplinary History', declarations.get('has_disciplinary_history'), story)
+    if declarations.get('has_disciplinary_history'):
+        add_field('Disciplinary Details', declarations.get('disciplinary_details'), story)
+    add_field('Previously Worked for NHS', declarations.get('previously_worked_nhs'), story)
+    
+    # HEALTH DECLARATION
+    story.append(Paragraph("Health Declaration", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    health = submission_data.get('health_declaration', {})
+    add_field('Can Perform Physical Tasks', health.get('can_perform_physical_tasks'), story)
+    add_field('Has Back Problems', health.get('has_back_problems'), story)
+    add_field('Has Mobility Issues', health.get('has_mobility_issues'), story)
+    add_field('Had Recent Infectious Illness', health.get('had_recent_infectious_illness'), story)
+    if health.get('had_recent_infectious_illness'):
+        add_field('Illness Details', health.get('infectious_illness_details'), story)
+    
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph("Vaccinations", subsection_style))
+    add_field('Hepatitis B Vaccinated', health.get('hepatitis_b_vaccinated'), story)
+    add_field('Flu Vaccinated', health.get('flu_vaccinated'), story)
+    add_field('COVID-19 Vaccinated', health.get('covid_vaccinated'), story)
+    
+    add_field('Has Condition Affecting Work', health.get('has_condition_affecting_work'), story)
+    if health.get('has_condition_affecting_work'):
+        add_field('Condition Details', health.get('condition_details'), story)
+    add_field('Requires Reasonable Adjustments', health.get('requires_reasonable_adjustments'), story)
+    if health.get('requires_reasonable_adjustments'):
+        add_field('Adjustment Details', health.get('adjustment_details'), story)
+    add_field('Health Declaration Accurate', health.get('health_declaration_accurate'), story)
+    
+    # CRIMINAL DECLARATION
+    story.append(Paragraph("Criminal Declaration", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    criminal = submission_data.get('criminal_declaration', {})
+    add_field('Has Criminal Convictions', criminal.get('has_criminal_convictions'), story)
+    if criminal.get('has_criminal_convictions'):
+        add_field('Conviction Details', criminal.get('conviction_details'), story)
+    add_field('Has Pending Charges', criminal.get('has_pending_charges'), story)
+    if criminal.get('has_pending_charges'):
+        add_field('Pending Charges Details', criminal.get('pending_charges_details'), story)
+    add_field('Has Cautions/Warnings', criminal.get('has_cautions_warnings'), story)
+    if criminal.get('has_cautions_warnings'):
+        add_field('Cautions Details', criminal.get('cautions_details'), story)
+    add_field('Understands DBS Required', criminal.get('understands_dbs_required'), story)
+    add_field('Consents to DBS Check', criminal.get('consents_to_dbs_check'), story)
+    
+    # RIGHT TO WORK
+    story.append(Paragraph("Right to Work", section_style))
+    story.append(Spacer(1, 3*mm))
+    
+    rtw = submission_data.get('right_to_work', {})
+    add_field('Has Right to Work in UK', rtw.get('has_right_to_work_uk'), story)
+    add_field('Citizenship Status', rtw.get('citizenship_status'), story)
+    if rtw.get('visa_type'):
+        add_field('Visa Type', rtw.get('visa_type'), story)
+    if rtw.get('visa_expiry'):
+        add_field('Visa Expiry', rtw.get('visa_expiry'), story)
+    if rtw.get('share_code'):
+        add_field('Share Code', rtw.get('share_code'), story)
+    add_field('Requires Sponsorship', rtw.get('requires_sponsorship'), story)
+    
+    # ADDITIONAL INFO
+    if submission_data.get('how_heard') or submission_data.get('additional_info'):
+        story.append(Paragraph("Additional Information", section_style))
+        story.append(Spacer(1, 3*mm))
+        add_field('How Heard About Us', submission_data.get('how_heard'), story)
+        add_field('Additional Information', submission_data.get('additional_info'), story)
+    
+    # Footer
+    story.append(Spacer(1, 10*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#E0E0E0')))
+    story.append(Spacer(1, 3*mm))
+    
+    submitted_at = submission_data.get('_submitted_at', '')
+    if submitted_at:
+        try:
+            dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+            submitted_at = dt.strftime('%d/%m/%Y at %H:%M')
+        except:
+            pass
+    
+    footer_text = f"Generated from Osabea Compliance Portal | Application submitted: {submitted_at}"
+    story.append(Paragraph(footer_text, ParagraphStyle('Footer', fontSize=8, textColor=colors.HexColor('#888888'), alignment=TA_CENTER)))
+    
+    # Build PDF
+    doc.build(story)
+    
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 @api_router.get("/pdf-templates")
 async def list_pdf_templates(
     form_type: Optional[str] = None,
@@ -15543,17 +15831,20 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
     elif form_type in PDF_FIELD_MAPPINGS:
         mapping_config = PDF_FIELD_MAPPINGS[form_type]
     
-    if not mapping_config:
+    # Application forms have their own dedicated generator - no mapping required
+    if form_type != "application_form" and not mapping_config:
         raise HTTPException(status_code=400, detail=f"No PDF mapping configured for form type: {form_type}")
     
     # Prepare submission data with metadata
-    submission_data = submission.get("data", {})
+    submission_data = submission.get("data", {}) or submission.get("form_data", {})
     submission_data["_submitted_at"] = submission.get("submitted_at", "")
     submission_data["_verified"] = submission.get("verified", False)
     submission_data["_status"] = submission.get("status", "submitted")
     
     # Generate PDF based on form type
-    if form_type == "staff_health_questionnaire":
+    if form_type == "application_form":
+        pdf_bytes = await generate_application_form_pdf(submission_data, employee)
+    elif form_type == "staff_health_questionnaire":
         pdf_bytes = await generate_staff_health_pdf(submission_data, employee, mapping_config)
     else:
         # Generic PDF generation for other form types (can be extended)

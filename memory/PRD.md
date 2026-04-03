@@ -62,6 +62,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ## Key Files
 - `/app/frontend/src/components/compliance/ComplianceDrawer.js` (NEW)
 - `/app/frontend/src/components/compliance/EvidenceManageDrawer.js` (NEW)
+- `/app/frontend/src/components/compliance/ApplicationFormViewDrawer.js` (NEW - Apr 3) - Read-only viewer for structured application forms
 - `/app/frontend/src/components/compliance/UploadRequirementCard.js`
 - `/app/frontend/src/components/compliance/DualRowComplianceSection.js`
 - `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js`
@@ -74,18 +75,21 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - F811 duplicate function definitions in server.py (technical debt)
 - server.py >38k lines - needs modular split
 
-## Recent Fixes (Apr 2, 2026)
+## Recent Fixes (Apr 2-3, 2026)
 - [x] Fixed DuplicateKeyError on public application submission - MongoDB unique index on `employee_code` was rejecting multiple `null` values. Now generating unique `APPLICANT-{uuid}` codes for applicants.
 - [x] Added clickable blockers in Recruitment Checks - Each blocker item now scrolls to the relevant compliance section with highlight effect
 - [x] Added "Next Steps" panel - Shows up to 4 actionable items above Recruitment Approval for quick admin navigation
 - [x] Implemented public document upload flow - Email links now use `/upload-document?token=...` route (no login required)
 - [x] Fixed email resend flow - `force_resend` param supersedes old requests, returns clear statuses (sent/resent/duplicate_blocked/error)
 - [x] Fixed compliance card layout - Removed duplicate actions from header, Evidence row has Upload/Request/Manage, Verification row has Upload Proof/Record Check/View Details
+- [x] **Fixed Application Form viewer** - Created `ApplicationFormViewDrawer.js` to render structured application JSON data without requiring a template. The drawer shows all sections: Personal Details, Employment History, References, Declarations, Health Declaration, Criminal Declaration, Right to Work
+- [x] **Added Application Form PDF export** - `generate_application_form_pdf()` in server.py creates professional PDF from application form data. Export PDF button now works in ApplicationFormViewDrawer
 
 ## Prioritized Backlog
 
 ### P0 (Critical)
 - [x] Fix DuplicateKeyError on application submit (DONE - requires production verification)
+- [x] **Fix Application Form viewer "Form template not found" error** (DONE - ApplicationFormViewDrawer.js created)
 - [ ] Restore db.references insertion logic with error safety
 - [ ] Verify "Request sent" state displays correctly for new applicants
 
@@ -144,4 +148,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 2, 2026 - Drawer UI improvements completed, Evidence/Verification separation implemented
+April 3, 2026 - Fixed Application Form viewer (P0), added PDF export for application forms

@@ -95,6 +95,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Employment Gap Explanation Enforcement (Apr 3)** - 30-day threshold. Gaps over 30 days flagged for explanation. Full workflow: pending → explained → verified/rejected/needs_more_info. Unexplained/unverified gaps block recruitment approval. EmploymentGapPanel displays in Compliance File with status badges and action buttons.
 - [x] **Evidence Workflow State Model Fix (Apr 3)** - Fixed critical bug where accepted/verified files disappeared from main card. Root cause: Frontend only included 'active'/'uploaded' as active statuses, missing 'approved'. Now standardized: ACTIVE_STATUSES = ['active', 'uploaded', 'approved', 'pending_review', 'under_review', 'verified'], EXCLUDED_STATUSES = ['rejected', 'uploaded_in_error', 'superseded', 'misfiled']. Main card and Manage drawer now consistent.
 - [x] **Right to Work Compliance Strengthening (Apr 3)** - Share Code as primary method with GOV.UK guidance. BRP warnings about expiry. Dynamic guidance in RecordCheckDialog. Proof upload enforced for online check methods. Public upload page shows Share Code guidance.
+- [x] **Right to Work System Overhaul (Apr 3)** - Complete 3-layer data model (Evidence → Verification → Result). New fields: permission_start_date, permission_end_date, reference_number, share_code, restrictions, hours_limit, is_indefinite, follow_up_required, route, document_type. AI auto-extraction endpoint using GPT-5.2 Vision (`/api/rtw/extract`). RTW Result Panel in RecordCheckDialog. Lifecycle state labels on UploadRequirementCard.
 
 ## Prioritized Backlog
 
@@ -107,6 +108,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Reference Verification Workflow** (DONE Apr 3) - Employment mismatch detection, alternative reference path recording
 - [x] **ID/Document Verification Stamps** (DONE Apr 3) - Original seen, Copy verified, Online check, Not verified stamps
 - [x] **Employment Gap Explanation Enforcement** (DONE Apr 3) - 30-day threshold, blocks recruitment approval
+- [x] **Right to Work System Overhaul** (DONE Apr 3) - 3-layer data model with AI extraction
 
 ### P1 (High)
 - [ ] Interview Notes integration
@@ -163,6 +165,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/training-matrix` - Get training items and additional items
 - `GET /api/employees/{id}/compliance-requirements` - Get all compliance requirements
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
+- `POST /api/employees/{id}/right-to-work/check` - Record RTW check with 3-layer result data
+- `GET /api/employees/{id}/right-to-work/check` - Get current RTW check with all fields
+- `POST /api/rtw/extract` - AI extraction of RTW document fields using GPT-5.2 Vision
 
 ## Last Updated
-April 3, 2026 - Right to Work compliance strengthening (Share Code, BRP warnings, proof enforcement)
+April 3, 2026 - Right to Work System Overhaul (3-layer data model, AI extraction, RTW Result Panel)

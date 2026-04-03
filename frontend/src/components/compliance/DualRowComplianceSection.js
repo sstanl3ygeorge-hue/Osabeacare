@@ -19,6 +19,7 @@ import RequirementHistoryDrawer from './RequirementHistoryDrawer';
 import ReferenceResponseDrawer from './ReferenceResponseDrawer';
 import AgreementFormDrawer from './AgreementFormDrawer';
 import FormSubmissionDrawer from './FormSubmissionDrawer';
+import ApplicationFormViewDrawer from './ApplicationFormViewDrawer';
 import RejectFormDialog from './RejectFormDialog';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
@@ -112,6 +113,12 @@ export default function DualRowComplianceSection({
     submissionId: null,
     agreementKey: null,
     agreementTitle: null
+  });
+  
+  // Application Form viewer drawer state (separate from template-based forms)
+  const [applicationFormDrawer, setApplicationFormDrawer] = useState({
+    isOpen: false,
+    submissionId: null
   });
   
   // Reject form dialog state
@@ -493,13 +500,22 @@ export default function DualRowComplianceSection({
                       });
                     }}
                     onViewSubmission={(formKey, formType, submissionId) => {
-                      setFormDrawer({
-                        isOpen: true,
-                        formKey,
-                        formType,
-                        submissionId,
-                        mode: 'view'
-                      });
+                      // SPECIAL CASE: Application forms use a dedicated viewer
+                      // because they don't have a template in FORM_BASED_REQUIREMENTS
+                      if (formKey === 'application_form') {
+                        setApplicationFormDrawer({
+                          isOpen: true,
+                          submissionId
+                        });
+                      } else {
+                        setFormDrawer({
+                          isOpen: true,
+                          formKey,
+                          formType,
+                          submissionId,
+                          mode: 'view'
+                        });
+                      }
                     }}
                     onSendForm={async (formKey, empId, empEmail) => {
                       try {
@@ -783,6 +799,39 @@ export default function DualRowComplianceSection({
             formKey: formDrawer.formKey
           });
         }}
+      />
+      
+      {/* Application Form View Drawer - Special case for structured application submissions */}
+      <ApplicationFormViewDrawer
+        isOpen={applicationFormDrawer.isOpen}
+        onClose={() => setApplicationFormDrawer({ isOpen: false, submissionId: null })}
+        employeeId={employeeId}
+        employeeName={employeeName}
+        submissionId={applicationFormDrawer.submissionId}
+        onVerify={async (submissionId) => {
+          try {
+            await axios.post(
+              `${API}/form-submissions/${submissionId}/verify`,
+              {},
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
+            toast.success('Application form verified successfully');
+            handleRefresh();
+            setApplicationFormDrawer({ isOpen: false, submissionId: null });
+          } catch (err) {
+            toast.error(err.response?.data?.detail || 'Failed to verify application');
+          }
+        }}
+        onReject={(submissionId) => {
+          setRejectDialog({
+            isOpen: true,
+            submissionId,
+            formName: 'Application Form',
+            formKey: 'application_form'
+          });
+          setApplicationFormDrawer({ isOpen: false, submissionId: null });
+        }}
+        onRefresh={handleRefresh}
       />
       
       {/* Reject Form Dialog */}

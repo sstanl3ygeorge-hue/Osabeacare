@@ -23,6 +23,8 @@ import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
 import { DualRowComplianceSection, RecordCheckDialog, ComplianceActionBar, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner } from '../../components/compliance';
+import ApprovalStatusPanel from '../../components/compliance/ApprovalStatusPanel';
+import NextActionsPanel from '../../components/compliance/NextActionsPanel';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
@@ -4133,14 +4135,108 @@ export default function EmployeeProfilePage() {
               </div>
             </CardHeader>
             <CardContent>
-              {/* TOP ACTION BAR - Phase 4A */}
+              {/* ============================================== */}
+              {/* RESTRUCTURED TOP SECTION - Function over form */}
+              {/* ============================================== */}
+              
+              {/* 1. APPROVAL STATUS PANEL - Single authoritative block */}
+              <ApprovalStatusPanel
+                isReady={complianceRequirements?.work_readiness_3tier?.status === 'READY_TO_WORK'}
+                blockers={complianceRequirements?.work_readiness_3tier?.reasons || []}
+                pendingReviewCount={complianceFile?.summary?.pending_review || complianceRequirements?.summary?.awaiting_review || 0}
+                missingCount={complianceRequirements?.summary?.missing || 0}
+                isApplicant={employee?.person_stage === 'applicant'}
+                canApprove={isRecruitmentView && !isAuditor() && !employee?.recruitment_approved}
+                isApproving={false}
+                onReviewPending={() => {
+                  // Scroll to first pending item
+                  const pendingSection = document.querySelector('[data-status="pending"]');
+                  if (pendingSection) {
+                    pendingSection.scrollIntoView({ behavior: 'smooth' });
+                  } else {
+                    toast.info('No items pending review');
+                  }
+                }}
+                onRequestMissing={handleRequestAllMissingItems}
+                onRecordVerification={() => {
+                  // Open check dialog with default to RTW
+                  setRecordCheckType('right_to_work_check');
+                  setRecordCheckDialogOpen(true);
+                }}
+                onApprove={() => {
+                  // Navigate to recruitment tab for approval
+                  setActiveTab('recruitment');
+                }}
+                onBlockerClick={(blocker) => {
+                  const blockerText = typeof blocker === 'string' ? blocker : blocker.message || blocker.code;
+                  handleBlockerClick(blockerText);
+                }}
+                employeeName={`${employee?.first_name || ''} ${employee?.last_name || ''}`.trim()}
+              />
+              
+              {/* 2. NEXT ACTIONS PANEL - Dynamic, clickable */}
+              <NextActionsPanel
+                actions={(() => {
+                  const actions = [];
+                  
+                  // Add RTW expiry alert as action
+                  const rtwStatus = complianceFile?.sections?.right_to_work?.rtw_status;
+                  if (rtwStatus && ['expired', 'urgent_follow_up', 'follow_up_due_soon'].includes(rtwStatus.status)) {
+                    actions.push({
+                      id: 'rtw_expiry',
+                      type: 'rtw',
+                      label: rtwStatus.status === 'expired' ? 'Update Expired RTW' : 'RTW Expiring Soon',
+                      description: rtwStatus.summary_line,
+                      sectionKey: 'right_to_work',
+                      priority: rtwStatus.status === 'expired' ? 4 : 3,
+                      onClick: () => {
+                        document.querySelector('[data-testid="section-right_to_work"]')?.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    });
+                  }
+                  
+                  // Add blockers as actions
+                  const blockers = complianceRequirements?.work_readiness_3tier?.reasons || [];
+                  blockers.slice(0, 3).forEach((blocker, idx) => {
+                    const blockerText = typeof blocker === 'string' ? blocker : blocker.message || blocker.code;
+                    const isTraining = blockerText.toLowerCase().includes('training');
+                    const isReference = blockerText.toLowerCase().includes('reference');
+                    
+                    actions.push({
+                      id: `blocker_${idx}`,
+                      type: isTraining ? 'training' : isReference ? 'reference' : 'upload',
+                      label: blockerText,
+                      description: blocker.type === 'hard_block' ? 'Required' : 'Recommended',
+                      sectionKey: mapBlockerToSection(blockerText).section,
+                      priority: blocker.type === 'hard_block' ? 3 : 2,
+                      onClick: () => handleBlockerClick(blockerText)
+                    });
+                  });
+                  
+                  // Add pending reviews
+                  if ((complianceFile?.summary?.pending_review || 0) > 0) {
+                    actions.push({
+                      id: 'pending_review',
+                      type: 'review',
+                      label: `Review Pending Evidence`,
+                      description: `${complianceFile?.summary?.pending_review || 0} item(s) awaiting review`,
+                      priority: 2,
+                      onClick: () => {
+                        const pendingSection = document.querySelector('[data-status="pending"]');
+                        pendingSection?.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    });
+                  }
+                  
+                  return actions;
+                })()}
+                maxActions={5}
+              />
+              
+              {/* 3. COMPLIANCE FILE TOOLBAR - Simplified */}
               <ComplianceActionBar
                 onUploadEvidence={() => setUploadDialogOpen(true)}
                 onRequestMissing={handleRequestAllMissingItems}
-                onEnterCheck={(checkType) => {
-                  setRecordCheckType(checkType);
-                  setRecordCheckDialogOpen(true);
-                }}
                 onExport={handleExportComplianceFile}
                 missingCount={complianceRequirements?.summary?.missing || 0}
                 hasEmail={!!employee?.email}
@@ -4148,204 +4244,7 @@ export default function EmployeeProfilePage() {
                 isExporting={isExporting}
               />
 
-              {/* APPLICANT STAGE BANNER - Show when person is still in recruitment pipeline */}
-              {employee?.person_stage === 'applicant' && (
-                <ApplicantStageBanner
-                  employeeName={`${employee.first_name} ${employee.last_name}`}
-                  status={employee.status}
-                  canApprove={isRecruitmentView && !isAuditor()}
-                  onApprove={() => {
-                    // Navigate to recruitment tab where approval action exists
-                    setActiveTab('recruitment');
-                    toast.info('Review all requirements below, then use "Approve Recruitment" action.');
-                  }}
-                />
-              )}
-
-              {/* COMPACT STATUS PANEL - Work readiness from 3-tier engine */}
-              {complianceRequirements?.work_readiness_3tier && complianceRequirements.work_readiness_3tier.status !== 'READY_TO_WORK' && (
-                <div className={`mb-6 p-4 rounded-xl border ${
-                  complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-50 border-amber-200' :
-                  'bg-red-50 border-red-200'
-                }`}>
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
-                      complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-600' : 'text-red-600'
-                    }`} />
-                    <div className="flex-1">
-                      <h4 className={`font-semibold ${
-                        complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-900' : 'text-red-900'
-                      }`}>
-                        {complianceRequirements.work_readiness_3tier.status === 'NOT_READY' 
-                          ? 'Not Ready to Work' 
-                          : 'Ready with Conditions'}
-                      </h4>
-                      <p className={`text-sm mt-1 ${
-                        complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'text-amber-800' : 'text-red-800'
-                      }`}>
-                        {complianceRequirements.work_readiness_3tier.status === 'NOT_READY' 
-                          ? 'Required items must be resolved before work can be assigned.' 
-                          : 'Can work with conditions. Some items need attention.'}
-                      </p>
-                      
-                      {/* Blocking Reasons - Compact */}
-                      {complianceRequirements.work_readiness_3tier.reasons?.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {complianceRequirements.work_readiness_3tier.reasons.slice(0, 4).map((reason, idx) => (
-                            <span 
-                              key={idx} 
-                              className={`text-xs px-2 py-1 rounded ${
-                                reason.type === 'hard_block' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                              }`}
-                            >
-                              {reason.message}
-                            </span>
-                          ))}
-                          {complianceRequirements.work_readiness_3tier.reasons.length > 4 && (
-                            <span className="text-xs text-gray-500">
-                              +{complianceRequirements.work_readiness_3tier.reasons.length - 4} more
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* RTW STATUS ALERT - Non-breaking, computed from saved RTW result fields */}
-              {complianceFile?.sections?.right_to_work?.rtw_status && 
-               complianceFile.sections.right_to_work.rtw_status.status !== 'not_verified' &&
-               complianceFile.sections.right_to_work.rtw_status.status !== 'continuous' &&
-               complianceFile.sections.right_to_work.rtw_status.status !== 'time_limited_valid' && (
-                <div className={`mb-6 p-4 rounded-xl border ${
-                  complianceFile.sections.right_to_work.rtw_status.status_color === 'red' 
-                    ? 'bg-red-50 border-red-200' 
-                    : 'bg-amber-50 border-amber-200'
-                }`} data-testid="rtw-status-alert">
-                  <div className="flex items-start gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'bg-red-100' : 'bg-amber-100'
-                    }`}>
-                      <Shield className={`h-5 w-5 ${
-                        complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'text-red-600' : 'text-amber-600'
-                      }`} />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className={`font-semibold ${
-                        complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'text-red-900' : 'text-amber-900'
-                      }`}>
-                        Right to Work Alert
-                      </h4>
-                      <p className={`text-sm mt-1 font-medium ${
-                        complianceFile.sections.right_to_work.rtw_status.status_color === 'red' ? 'text-red-800' : 'text-amber-800'
-                      }`}>
-                        {complianceFile.sections.right_to_work.rtw_status.summary_line}
-                      </p>
-                      
-                      {/* RTW Alerts */}
-                      {complianceFile.sections.right_to_work.rtw_status.alerts?.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {complianceFile.sections.right_to_work.rtw_status.alerts.map((alert, idx) => (
-                            <p key={idx} className={`text-xs ${
-                              alert.level === 'error' || alert.level === 'urgent' ? 'text-red-700' :
-                              alert.level === 'warning' ? 'text-amber-700' :
-                              'text-gray-600'
-                            }`}>
-                              {alert.message}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {/* Quick Action */}
-                      {complianceFile.sections.right_to_work.rtw_status.status === 'expired' && (
-                        <Button
-                          size="sm"
-                          className="mt-3 bg-red-600 hover:bg-red-700 text-white"
-                          onClick={() => {
-                            setActiveTab('compliance');
-                            setTimeout(() => {
-                              document.querySelector('[data-testid="section-right_to_work"]')?.scrollIntoView({ behavior: 'smooth' });
-                            }, 100);
-                          }}
-                        >
-                          Update Right to Work
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* COMPLIANCE ALERTS - Expiry Warnings (Compact) */}
-              {complianceRequirements?.expiry_alerts?.has_alerts && (
-                <div className={`mb-6 p-4 rounded-xl border ${
-                  complianceRequirements.expiry_alerts.expired_count > 0 
-                    ? 'bg-red-50 border-red-200' 
-                    : 'bg-amber-50 border-amber-200'
-                }`}>
-                  <div className="flex items-start gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      complianceRequirements.expiry_alerts.expired_count > 0 ? 'bg-red-100' : 'bg-amber-100'
-                    }`}>
-                      <Clock className={`h-5 w-5 ${
-                        complianceRequirements.expiry_alerts.expired_count > 0 ? 'text-red-600' : 'text-amber-600'
-                      }`} />
-                    </div>
-                    <div className="flex-1">
-                      <h4 className={`font-semibold ${
-                        complianceRequirements.expiry_alerts.expired_count > 0 ? 'text-red-900' : 'text-amber-900'
-                      }`}>
-                        Compliance Alerts
-                      </h4>
-                      <p className={`text-sm mt-1 ${
-                        complianceRequirements.expiry_alerts.expired_count > 0 ? 'text-red-800' : 'text-amber-800'
-                      }`}>
-                        {complianceRequirements.expiry_alerts.expired_count > 0 && (
-                          <span className="font-medium">{complianceRequirements.expiry_alerts.expired_count} item{complianceRequirements.expiry_alerts.expired_count !== 1 ? 's' : ''} expired</span>
-                        )}
-                        {complianceRequirements.expiry_alerts.expired_count > 0 && complianceRequirements.expiry_alerts.expiring_soon_count > 0 && ' · '}
-                        {complianceRequirements.expiry_alerts.expiring_soon_count > 0 && (
-                          <span>{complianceRequirements.expiry_alerts.expiring_soon_count} item{complianceRequirements.expiry_alerts.expiring_soon_count !== 1 ? 's' : ''} expiring soon</span>
-                        )}
-                      </p>
-                      
-                      {/* Expired Items */}
-                      {complianceRequirements.expiry_alerts.expired?.length > 0 && (
-                        <div className="mt-2">
-                          <p className="text-xs font-medium text-red-900">Expired:</p>
-                          <ul className="mt-1 space-y-0.5">
-                            {complianceRequirements.expiry_alerts.expired.map((item, idx) => (
-                              <li key={idx} className="text-xs text-red-800 flex items-center gap-1">
-                                <span className="w-1 h-1 rounded-full bg-red-500"></span>
-                                {item.name} — expired {item.days_overdue} day{item.days_overdue !== 1 ? 's' : ''} ago
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      
-                      {/* Expiring Soon Items */}
-                      {complianceRequirements.expiry_alerts.expiring_soon?.length > 0 && (
-                        <div className="mt-2">
-                          <p className="text-xs font-medium text-amber-900">Expiring Soon:</p>
-                          <ul className="mt-1 space-y-0.5">
-                            {complianceRequirements.expiry_alerts.expiring_soon.map((item, idx) => (
-                              <li key={idx} className="text-xs text-amber-800 flex items-center gap-1">
-                                <span className="w-1 h-1 rounded-full bg-amber-500"></span>
-                                {item.name} — expires in {item.days_until_expiry} day{item.days_until_expiry !== 1 ? 's' : ''}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* CONDITIONAL ITEMS INFO - Show items not required due to existing evidence */}
+              {/* Conditional Items - Keep minimal info about items not required */}
               {complianceRequirements?.conditional_not_required?.length > 0 && (
                 <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
                   <div className="flex items-start gap-2">

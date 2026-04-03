@@ -30,6 +30,10 @@ export { default as ComplianceActionBar } from './ComplianceActionBar';
 export { default as WhatsNeededPanel } from './WhatsNeededPanel';
 export { default as TrainingSummaryCard } from './TrainingSummaryCard';
 
+// Phase 4B - Restructured top section components
+export { default as ApprovalStatusPanel } from './ApprovalStatusPanel';
+export { default as NextActionsPanel } from './NextActionsPanel';
+
 // Phase D2 - File interaction components
 export { default as RequirementFilesDrawer } from './RequirementFilesDrawer';
 export { default as DocumentActionMenu } from './DocumentActionMenu';

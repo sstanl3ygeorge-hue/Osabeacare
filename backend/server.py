@@ -5775,6 +5775,138 @@ class RightToWorkDeclaration(BaseModel):
     share_code: Optional[str] = None  # For online RTW check
     requires_sponsorship: bool = False
 
+
+# ============================================================================
+# RIGHT TO WORK COMPLIANCE SYSTEM - UK GOVERNMENT COMPLIANT
+# ============================================================================
+# 3-Layer Model:
+#   1. Evidence - What the worker provided (passport, share code, BRP, etc.)
+#   2. Verification - What the employer did (online check, manual check, IDSP)
+#   3. Result - Structured compliance outcome with follow-up tracking
+# ============================================================================
+
+# Right to Work Verification Routes (UK Government Compliant)
+class RTWVerificationRoute(str, Enum):
+    HOME_OFFICE_ONLINE = "home_office_online_check"
+    MANUAL_LIST_A = "manual_list_a_check"
+    MANUAL_LIST_B_GROUP_1 = "manual_list_b_group_1_check"
+    MANUAL_LIST_B_GROUP_2 = "manual_list_b_group_2_check"
+    DIGITAL_VERIFICATION_SERVICE = "digital_verification_service_check"
+    ECS_PVN = "ecs_pvn_check"
+
+
+# Accepted document types per route
+RTW_DOCUMENT_TYPES = {
+    # List A - Unlimited right to work (no follow-up required)
+    "list_a": {
+        "uk_passport": {"label": "UK Passport (current or expired)", "unlimited": True},
+        "uk_passport_expired": {"label": "UK Passport (expired)", "unlimited": True},
+        "irish_passport": {"label": "Irish Passport (current or expired)", "unlimited": True},
+        "irish_passport_card": {"label": "Irish Passport Card (current or expired)", "unlimited": True},
+        "birth_cert_uk_ni": {"label": "UK Birth/Adoption Certificate + NI Proof", "unlimited": True},
+        "cert_registration_naturalisation": {"label": "Certificate of Registration/Naturalisation + NI Proof", "unlimited": True},
+        "indefinite_leave_passport": {"label": "Passport with Indefinite Leave Endorsement", "unlimited": True},
+        "indefinite_leave_document": {"label": "Immigration Status Document (Indefinite Leave)", "unlimited": True},
+        "settled_status_evisa": {"label": "Settled Status (eVisa)", "unlimited": True},
+        "frontier_worker_permit_indefinite": {"label": "Frontier Worker Permit (Indefinite)", "unlimited": True},
+    },
+    # List B Group 1 - Time-limited (requires follow-up)
+    "list_b_group_1": {
+        "time_limited_passport": {"label": "Passport with Time-Limited Permission", "unlimited": False, "requires_followup": True},
+        "time_limited_brp": {"label": "BRP (Time-Limited) with Online Check", "unlimited": False, "requires_followup": True},
+        "time_limited_status_document": {"label": "Immigration Status Document (Time-Limited)", "unlimited": False, "requires_followup": True},
+        "pre_settled_status_evisa": {"label": "Pre-Settled Status (eVisa)", "unlimited": False, "requires_followup": True},
+        "frontier_worker_permit_limited": {"label": "Frontier Worker Permit (Time-Limited)", "unlimited": False, "requires_followup": True},
+        "student_visa": {"label": "Student Visa (with work permission)", "unlimited": False, "requires_followup": True},
+        "work_visa": {"label": "Work Visa", "unlimited": False, "requires_followup": True},
+    },
+    # List B Group 2 - Pending applications (requires ECS)
+    "list_b_group_2": {
+        "certificate_of_application": {"label": "Certificate of Application (CoA)", "unlimited": False, "requires_ecs": True},
+        "arc_card": {"label": "Application Registration Card (ARC)", "unlimited": False, "requires_ecs": True},
+        "positive_verification_notice": {"label": "Positive Verification Notice (PVN)", "unlimited": False, "requires_ecs": True},
+    },
+    # Digital/Online results
+    "digital": {
+        "share_code_result": {"label": "Share Code Check Result", "source": "home_office"},
+        "evisa_status": {"label": "eVisa Status Screenshot", "source": "home_office"},
+        "home_office_check_result": {"label": "Home Office Online Check Result", "source": "home_office"},
+        "frontier_worker_online": {"label": "Frontier Worker Online Check Result", "source": "home_office"},
+        "idsp_result": {"label": "IDSP Verification Result", "source": "idsp"},
+    }
+}
+
+# BRP Warning - Expired BRP cannot be accepted alone
+BRP_EXPIRED_WARNING = """
+IMPORTANT: Expired Biometric Residence Permits (BRPs) are NOT valid Right to Work evidence by themselves.
+
+BRP cards are being phased out. If the BRP is expired:
+1. Ask the worker for their Share Code
+2. Complete the Home Office online check at gov.uk/view-right-to-work
+3. Use the online check result as your proof of Right to Work
+
+Do NOT accept an expired BRP as proof without completing an online check.
+"""
+
+
+class RTWResultRequest(BaseModel):
+    """Request model for recording Right to Work verification result."""
+    # Verification Route
+    route: str = Field(..., description="Verification route used")
+    
+    # Document/Result Type
+    document_type: str = Field(..., description="Type of document/result")
+    document_subtype: Optional[str] = Field(None, description="Subtype if applicable")
+    
+    # Check Details
+    check_date: str = Field(..., description="Date check was performed (YYYY-MM-DD)")
+    checked_by: Optional[str] = Field(None, description="Name of person who performed check")
+    
+    # Permission Details
+    permission_start_date: Optional[str] = Field(None, description="Start date of permission")
+    permission_end_date: Optional[str] = Field(None, description="End date / expiry (if time-limited)")
+    
+    # Follow-up
+    follow_up_required: bool = Field(False, description="Whether follow-up check is required")
+    next_follow_up_date: Optional[str] = Field(None, description="Date for next follow-up check")
+    
+    # Restrictions
+    restrictions: Optional[str] = Field(None, description="Any work restrictions")
+    hours_limit: Optional[int] = Field(None, description="Maximum hours per week if restricted")
+    
+    # Reference Numbers
+    reference_number: Optional[str] = Field(None, description="Reference/PVN number")
+    share_code: Optional[str] = Field(None, description="Share code used (if applicable)")
+    
+    # Linked Evidence
+    linked_evidence_ids: List[str] = Field(default_factory=list, description="IDs of linked evidence files")
+    linked_proof_id: Optional[str] = Field(None, description="ID of verification proof file")
+    
+    # Notes
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+
+# Valid route values for validation
+VALID_RTW_ROUTES = {
+    "home_office_online_check",
+    "manual_list_a_check", 
+    "manual_list_b_group_1_check",
+    "manual_list_b_group_2_check",
+    "digital_verification_service_check",
+    "ecs_pvn_check"
+}
+
+# Valid check method values (for Record Check dialog)
+VALID_RTW_CHECK_METHODS = {
+    "home_office_online_check": "Home Office Online Check (Share Code)",
+    "manual_passport_uk_irish": "Manual Check - UK/Irish Passport",
+    "manual_list_a_document": "Manual Check - List A Document",
+    "manual_list_b_group_1": "Manual Check - List B Group 1",
+    "manual_list_b_group_2_ecs": "Manual Check - List B Group 2 / ECS",
+    "idsp_check": "Digital Verification Service (IDSP)",
+    "ecs_pvn_check": "Employer Checking Service (PVN)"
+}
+
 class ApplicationDeclarations(BaseModel):
     """Combined declarations section"""
     # Accuracy declaration
@@ -27884,14 +28016,50 @@ class AgreementVerificationStatus(str, Enum):
 # Pydantic models for check records
 
 class RTWCheckInput(BaseModel):
-    """Input for recording a Right to Work check."""
-    method: str  # CheckMethod value
-    checked_at: str
-    outcome: str  # CheckOutcome value
-    source_status_type: Optional[str] = None
-    follow_up_due_at: Optional[str] = None
-    evidence_document_id: Optional[str] = None
-    notes: Optional[str] = None
+    """
+    Input for recording a Right to Work check.
+    
+    UK Government Compliant Routes:
+    - home_office_online_check: Share Code / Online Check
+    - manual_list_a_check: UK/Irish Passport, Birth Cert + NI, etc.
+    - manual_list_b_group_1_check: Time-limited visas, Pre-Settled Status
+    - manual_list_b_group_2_check: Pending applications (CoA, ARC)
+    - digital_verification_service_check: IDSP verification
+    - ecs_pvn_check: Employer Checking Service / PVN
+    """
+    # Required fields
+    method: str = Field(..., description="Verification method/route used")
+    checked_at: str = Field(..., description="Date check was performed (YYYY-MM-DD)")
+    outcome: str = Field(..., description="Check outcome: verified, failed, follow_up_required")
+    
+    # Route and document details
+    route: Optional[str] = Field(None, description="RTW route: home_office_online_check, manual_list_a_check, etc.")
+    document_type: Optional[str] = Field(None, description="Document type verified")
+    source_status_type: Optional[str] = Field(None, description="Status type: share_code, settled_status, etc.")
+    
+    # Permission details (for Result Panel)
+    permission_start_date: Optional[str] = Field(None, description="Permission start date")
+    permission_end_date: Optional[str] = Field(None, description="Permission end date / expiry")
+    
+    # Follow-up tracking
+    follow_up_required: bool = Field(False, description="Whether follow-up is required (time-limited)")
+    follow_up_due_at: Optional[str] = Field(None, description="Follow-up check due date")
+    
+    # Restrictions
+    restrictions: Optional[str] = Field(None, description="Work restrictions if any")
+    hours_limit: Optional[int] = Field(None, description="Max hours per week if restricted")
+    
+    # Reference numbers
+    reference_number: Optional[str] = Field(None, description="Reference/PVN number")
+    share_code: Optional[str] = Field(None, description="Share code used")
+    
+    # Linked evidence
+    evidence_document_id: Optional[str] = Field(None, description="Primary evidence document ID")
+    linked_evidence_ids: List[str] = Field(default_factory=list, description="All linked evidence IDs")
+    proof_document_id: Optional[str] = Field(None, description="Verification proof document ID")
+    
+    # Notes
+    notes: Optional[str] = Field(None, description="Additional notes")
 
 class DBSCheckInput(BaseModel):
     """Input for recording a DBS status check."""

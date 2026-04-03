@@ -14,69 +14,63 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // ==================== AUDIT-READY CHECK METHODS ====================
 // These verification methods reflect QA/inspection expectations
+// Values are backend enum-compatible, labels are user-friendly
 // Organized by requirement type for requirement-aware dropdowns
 
 const CHECK_METHODS = {
   // Right to Work verification methods - UK GOVERNMENT COMPLIANT
+  // Values match VALID_RTW_CHECK_METHODS in backend
   right_to_work: [
-    { value: 'share_code_check', label: 'Share Code verification (GOV.UK)', recommended: true },
-    { value: 'home_office_online', label: 'Home Office online check', recommended: true },
-    { value: 'ecs_check', label: 'Employer Checking Service (ECS)' },
-    { value: 'idsp_check', label: 'IDSP (Identity Service Provider) check' },
-    { value: 'original_passport_uk_irish', label: 'UK/Irish Passport - Original seen' },
-    { value: 'original_birth_cert_ni', label: 'Birth Certificate + NI proof - Original seen' },
-    { value: 'brp_with_online_check', label: 'BRP + Online verification' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'home_office_online_check', label: 'Home Office Online Check (Share Code)', recommended: true, route: 'home_office_online_check' },
+    { value: 'manual_passport_uk_irish', label: 'Manual Check - UK/Irish Passport', route: 'manual_list_a_check' },
+    { value: 'manual_list_a_document', label: 'Manual Check - List A Document', route: 'manual_list_a_check' },
+    { value: 'manual_list_b_group_1', label: 'Manual Check - List B Group 1 (Time-Limited)', route: 'manual_list_b_group_1_check' },
+    { value: 'manual_list_b_group_2_ecs', label: 'Manual Check - List B Group 2 / ECS', route: 'manual_list_b_group_2_check' },
+    { value: 'idsp_check', label: 'Digital Verification Service (IDSP)', route: 'digital_verification_service_check' },
+    { value: 'ecs_pvn_check', label: 'Employer Checking Service (PVN)', route: 'ecs_pvn_check' }
   ],
   right_to_work_check: [
-    { value: 'share_code_check', label: 'Share Code verification (GOV.UK)', recommended: true },
-    { value: 'home_office_online', label: 'Home Office online check', recommended: true },
-    { value: 'ecs_check', label: 'Employer Checking Service (ECS)' },
-    { value: 'idsp_check', label: 'IDSP (Identity Service Provider) check' },
-    { value: 'original_passport_uk_irish', label: 'UK/Irish Passport - Original seen' },
-    { value: 'original_birth_cert_ni', label: 'Birth Certificate + NI proof - Original seen' },
-    { value: 'brp_with_online_check', label: 'BRP + Online verification' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'home_office_online_check', label: 'Home Office Online Check (Share Code)', recommended: true, route: 'home_office_online_check' },
+    { value: 'manual_passport_uk_irish', label: 'Manual Check - UK/Irish Passport', route: 'manual_list_a_check' },
+    { value: 'manual_list_a_document', label: 'Manual Check - List A Document', route: 'manual_list_a_check' },
+    { value: 'manual_list_b_group_1', label: 'Manual Check - List B Group 1 (Time-Limited)', route: 'manual_list_b_group_1_check' },
+    { value: 'manual_list_b_group_2_ecs', label: 'Manual Check - List B Group 2 / ECS', route: 'manual_list_b_group_2_check' },
+    { value: 'idsp_check', label: 'Digital Verification Service (IDSP)', route: 'digital_verification_service_check' },
+    { value: 'ecs_pvn_check', label: 'Employer Checking Service (PVN)', route: 'ecs_pvn_check' }
   ],
   
   // DBS verification methods
   dbs: [
-    { value: 'dbs_certificate', label: 'DBS certificate reviewed' },
-    { value: 'update_service', label: 'DBS Update Service check' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'dbs_certificate_review', label: 'DBS Certificate Review' },
+    { value: 'dbs_update_service_check', label: 'DBS Update Service Check' },
+    { value: 'other', label: 'Other Documented Verification' }
   ],
   dbs_status_check: [
-    { value: 'dbs_certificate', label: 'DBS certificate reviewed' },
-    { value: 'update_service', label: 'DBS Update Service check' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'dbs_certificate_review', label: 'DBS Certificate Review' },
+    { value: 'dbs_update_service_check', label: 'DBS Update Service Check' },
+    { value: 'other', label: 'Other Documented Verification' }
   ],
   
   // Identity verification methods
   identity: [
-    { value: 'original_seen', label: 'Original document seen in person' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'digital_id_check', label: 'Digital ID verification service' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'original_document_seen', label: 'Original Document Seen' },
+    { value: 'certified_copy_verified', label: 'Certified Copy Verified' },
+    { value: 'digital_id_verification', label: 'Digital ID Verification' },
+    { value: 'other', label: 'Other Documented Verification' }
   ],
   identity_verification: [
-    { value: 'original_seen', label: 'Original document seen in person' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'digital_id_check', label: 'Digital ID verification service' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'original_document_seen', label: 'Original Document Seen' },
+    { value: 'certified_copy_verified', label: 'Certified Copy Verified' },
+    { value: 'digital_id_verification', label: 'Digital ID Verification' },
+    { value: 'other', label: 'Other Documented Verification' }
   ],
   
   // Proof of Address verification methods
   proof_of_address: [
-    { value: 'original_seen', label: 'Original document seen in person' },
-    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
-    { value: 'certified_copy', label: 'Certified copy reviewed' },
-    { value: 'other', label: 'Other documented verification' }
+    { value: 'original_document_seen', label: 'Original Document Seen' },
+    { value: 'uploaded_copy_verified', label: 'Uploaded Copy Verified' },
+    { value: 'certified_copy_verified', label: 'Certified Copy Verified' },
+    { value: 'other', label: 'Other Documented Verification' }
   ],
   address_verification: [
     { value: 'original_seen', label: 'Original document seen in person' },
@@ -151,8 +145,8 @@ const SOURCE_STATUS_TYPES = [
 
 // RTW-SPECIFIC GUIDANCE based on verification method
 const RTW_METHOD_GUIDANCE = {
-  share_code_check: {
-    title: 'Share Code Verification',
+  home_office_online_check: {
+    title: 'Home Office Online Check (Share Code)',
     guidance: 'You MUST verify this online via GOV.UK using the applicant\'s share code.',
     steps: [
       'Ask applicant for their 9-character share code',
@@ -163,100 +157,120 @@ const RTW_METHOD_GUIDANCE = {
     proofRequired: true,
     proofLabel: 'Home Office check result (screenshot/PDF)',
     link: 'https://www.gov.uk/view-right-to-work',
-    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
+    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
+    route: 'home_office_online_check'
   },
-  home_office_online: {
-    title: 'Home Office Online Check',
-    guidance: 'Complete the online check via GOV.UK Employer Checking Service.',
+  manual_passport_uk_irish: {
+    title: 'Manual Check - UK/Irish Passport',
+    guidance: 'Valid for UK/Irish citizens only. This is a List A document - unlimited right to work.',
     steps: [
-      'Visit gov.uk/employee-immigration-employment-status',
-      'Enter employee details as prompted',
-      'Save/screenshot the positive verification notice'
-    ],
-    proofRequired: true,
-    proofLabel: 'Home Office verification result (screenshot/PDF)',
-    link: 'https://www.gov.uk/employee-immigration-employment-status',
-    badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
-  },
-  ecs_check: {
-    title: 'Employer Checking Service',
-    guidance: 'Use when applicant cannot provide documents or share code.',
-    steps: [
-      'Submit request via ECS',
-      'Wait for Home Office response',
-      'Record the Positive Verification Notice'
-    ],
-    proofRequired: true,
-    proofLabel: 'Positive Verification Notice',
-    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200'
-  },
-  original_passport_uk_irish: {
-    title: 'UK/Irish Passport Check',
-    guidance: 'Valid for UK/Irish citizens only. Verify the original passport in person.',
-    steps: [
-      'Check passport is genuine and valid',
+      'Check passport is genuine (security features)',
       'Verify photo matches the applicant',
-      'Record passport number and expiry date',
-      'Apply "Original Document Seen" stamp'
+      'Check passport is current or expired (both valid for UK/Irish)',
+      'Record passport number and any expiry date',
+      'Take a clear copy for records',
+      'Apply "Original Document Seen" verification stamp'
     ],
     proofRequired: false,
     stampRequired: true,
     stampType: 'original_seen',
-    badgeColor: 'bg-green-100 text-green-800 border-green-200'
+    badgeColor: 'bg-green-100 text-green-800 border-green-200',
+    route: 'manual_list_a_check',
+    unlimited: true
   },
-  original_birth_cert_ni: {
-    title: 'Birth Certificate + NI Proof',
-    guidance: 'Valid for UK citizens born in UK. Requires BOTH documents.',
+  manual_list_a_document: {
+    title: 'Manual Check - List A Document',
+    guidance: 'List A documents prove unlimited right to work in the UK.',
     steps: [
-      'Check full birth certificate (not short form)',
-      'Verify National Insurance number proof',
-      'Both documents must show same name',
-      'Apply "Original Document Seen" stamp'
+      'Verify document is genuine with security features',
+      'Check document relates to the applicant',
+      'Acceptable documents: UK/Irish passport (current/expired), Birth certificate + NI proof, Certificate of Registration/Naturalisation + NI proof, Indefinite Leave documents',
+      'Take a clear copy for records',
+      'Apply appropriate verification stamp'
     ],
     proofRequired: false,
     stampRequired: true,
     stampType: 'original_seen',
-    badgeColor: 'bg-green-100 text-green-800 border-green-200'
+    badgeColor: 'bg-green-100 text-green-800 border-green-200',
+    route: 'manual_list_a_check',
+    unlimited: true
   },
-  brp_with_online_check: {
-    title: 'BRP + Online Verification',
-    guidance: 'BRP alone is NOT sufficient. You MUST complete an online check.',
-    warning: 'Expired BRP is not valid. Use Share Code check instead.',
+  manual_list_b_group_1: {
+    title: 'Manual Check - List B Group 1 (Time-Limited)',
+    guidance: 'List B Group 1 documents prove time-limited right to work. FOLLOW-UP REQUIRED before expiry.',
+    warning: 'You MUST set a follow-up date before the permission expires. The employee cannot work beyond this date without re-verification.',
     steps: [
-      'Note: BRP cards are being phased out',
-      'Check BRP expiry date - if expired, use Share Code',
-      'Complete online check via GOV.UK',
-      'Save screenshot of online check result'
+      'Check document is genuine with security features',
+      'Verify visa/permission is current (not expired)',
+      'Record the permission END DATE carefully',
+      'Check for any work restrictions',
+      'Set follow-up date 28 days BEFORE permission expires',
+      'Take a clear copy for records'
+    ],
+    proofRequired: false,
+    stampRequired: true,
+    stampType: 'original_seen',
+    badgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
+    route: 'manual_list_b_group_1_check',
+    unlimited: false,
+    requiresFollowUp: true
+  },
+  manual_list_b_group_2_ecs: {
+    title: 'Manual Check - List B Group 2 / ECS',
+    guidance: 'For applicants with pending immigration applications. Requires Employer Checking Service verification.',
+    warning: 'You MUST obtain a Positive Verification Notice (PVN) from the Home Office before employing.',
+    steps: [
+      'Check Certificate of Application or ARC card',
+      'Submit request to Employer Checking Service (ECS)',
+      'Wait for Positive Verification Notice (PVN)',
+      'Record the PVN reference number',
+      'Set 6-month follow-up for repeat ECS check',
+      'Do NOT employ without valid PVN'
     ],
     proofRequired: true,
-    proofLabel: 'Online check result (screenshot/PDF)',
-    link: 'https://www.gov.uk/view-right-to-work',
-    badgeColor: 'bg-amber-100 text-amber-800 border-amber-200'
+    proofLabel: 'Positive Verification Notice (PVN)',
+    link: 'https://www.gov.uk/employee-immigration-employment-status',
+    badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
+    route: 'manual_list_b_group_2_check',
+    unlimited: false,
+    requiresFollowUp: true,
+    requiresECS: true
   },
   idsp_check: {
-    title: 'IDSP Check',
-    guidance: 'Use an accredited Identity Service Provider for digital verification.',
+    title: 'Digital Verification Service (IDSP)',
+    guidance: 'Use an accredited Identity Service Provider for digital verification of British/Irish passports.',
     steps: [
-      'Use an accredited IDSP',
-      'Follow their verification process',
-      'Retain the verification certificate'
+      'Use an accredited IDSP from the government list',
+      'IDSP can only verify British or Irish passports/passport cards',
+      'Follow their digital verification process',
+      'Retain the IDSP verification certificate',
+      'Certificate must confirm document validity'
     ],
     proofRequired: true,
-    proofLabel: 'IDSP verification certificate',
-    badgeColor: 'bg-purple-100 text-purple-800 border-purple-200'
+    proofLabel: 'IDSP Verification Certificate',
+    badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+    route: 'digital_verification_service_check',
+    unlimited: true
   },
-  certified_copy: {
-    title: 'Certified Copy',
-    guidance: 'Only valid for specific document types. Original is preferred.',
+  ecs_pvn_check: {
+    title: 'Employer Checking Service (PVN)',
+    guidance: 'Use when applicant cannot provide acceptable documents or has pending immigration application.',
+    warning: 'You MUST NOT employ someone based solely on their word. A valid PVN is required.',
     steps: [
-      'Verify certification is from an authorized person',
-      'Check certification date is recent',
-      'Ensure full document is visible'
+      'Submit request via gov.uk/employee-immigration-employment-status',
+      'Wait for Home Office response (usually within 5 working days)',
+      'Receive Positive Verification Notice (PVN)',
+      'Record the PVN reference number',
+      'Set 6-month follow-up for repeat check',
+      'Keep the PVN on file'
     ],
-    proofRequired: false,
-    stampRequired: true,
-    stampType: 'copy_verified',
-    badgeColor: 'bg-gray-100 text-gray-800 border-gray-200'
+    proofRequired: true,
+    proofLabel: 'Positive Verification Notice (PVN)',
+    link: 'https://www.gov.uk/employee-immigration-employment-status',
+    badgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
+    route: 'ecs_pvn_check',
+    unlimited: false,
+    requiresFollowUp: true
   }
 };
 
@@ -425,22 +439,25 @@ export default function RecordCheckDialog({
 
     // RTW-SPECIFIC VALIDATION: Enforce proof upload for online check methods
     const isRTW = checkType === 'right_to_work_check' || checkType === 'right_to_work';
-    const onlineCheckMethods = ['share_code_check', 'home_office_online', 'ecs_check', 'brp_with_online_check', 'idsp_check'];
-    const requiresOnlineProof = isRTW && onlineCheckMethods.includes(formData.method);
+    const onlineCheckMethods = ['home_office_online_check', 'manual_list_b_group_2_ecs', 'ecs_pvn_check', 'idsp_check'];
+    const methodGuidance = RTW_METHOD_GUIDANCE[formData.method];
+    const requiresProof = isRTW && (onlineCheckMethods.includes(formData.method) || methodGuidance?.proofRequired);
     
-    // COMPLIANCE-CRITICAL: Require proof file
+    // COMPLIANCE-CRITICAL: Require proof file for online/ECS methods
     if (!proofFile && !uploadedProofId) {
-      if (requiresOnlineProof) {
-        toast.error('Online verification methods require proof upload (screenshot/PDF of check result). This is a legal requirement.');
-      } else {
-        toast.error('Upload proof of check before saving. This is required for compliance.');
+      if (requiresProof) {
+        const proofLabel = methodGuidance?.proofLabel || 'verification proof';
+        toast.error(`This method requires ${proofLabel}. This is a legal requirement.`);
+        return;
       }
+      // For manual checks, proof is still required but with different messaging
+      toast.error('Upload proof of check before saving. This is required for compliance.');
       return;
     }
     
-    // RTW-SPECIFIC: Warn if BRP method without online check confirmation
-    if (isRTW && formData.method === 'brp_with_online_check' && formData.source_status_type === 'brp_expired') {
-      toast.error('Expired BRP is not valid. Please use Share Code verification instead.');
+    // RTW-SPECIFIC: Block expired BRP without online check
+    if (isRTW && formData.source_status_type === 'brp_expired') {
+      toast.error('Expired BRP is not valid Right to Work evidence. Please use the Home Office Online Check (Share Code) method instead.');
       return;
     }
 
@@ -673,26 +690,26 @@ export default function RecordCheckDialog({
                     </span>
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* BRP CONFIRMATION PROMPT - Shows when BRP method is selected */}
-          {(checkType === 'right_to_work_check' || checkType === 'right_to_work') && formData.method === 'brp_with_online_check' && (
-            <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-amber-800">BRP Verification Confirmation</p>
-                  <p className="text-xs text-amber-700 mt-1">
-                    Before proceeding, confirm you have completed the online check:
-                  </p>
-                  <ul className="text-xs text-amber-700 mt-2 space-y-1 list-disc list-inside">
-                    <li>Have you verified this BRP online via GOV.UK?</li>
-                    <li>Is the BRP still within its validity period?</li>
-                    <li>Do you have a screenshot of the online check result?</li>
-                  </ul>
-                </div>
+                
+                {/* Follow-up requirement indicator */}
+                {RTW_METHOD_GUIDANCE[formData.method].requiresFollowUp && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-current/10">
+                    <AlertTriangle className="h-3 w-3 text-amber-600" />
+                    <span className="text-xs font-medium text-amber-700">
+                      Time-limited permission - Follow-up date REQUIRED
+                    </span>
+                  </div>
+                )}
+                
+                {/* Unlimited right indicator */}
+                {RTW_METHOD_GUIDANCE[formData.method].unlimited && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-current/10">
+                    <CheckCircle className="h-3 w-3 text-green-600" />
+                    <span className="text-xs font-medium text-green-700">
+                      Unlimited right to work - No follow-up required
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -22262,7 +22262,29 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "notes": f"Online application submitted. Role: {form.role_applied}. Availability: {form.availability}.",
         "completion_percentage": 0,
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
+        
+        # Reference fields - ReferenceIntegrityService reads these from employee doc
+        # Reference 1
+        "reference_1_name": form.references[0].referee_name if len(form.references) > 0 else None,
+        "reference_1_email": form.references[0].referee_email if len(form.references) > 0 else None,
+        "reference_1_phone": form.references[0].referee_phone if len(form.references) > 0 else None,
+        "reference_1_company": form.references[0].referee_organisation if len(form.references) > 0 else None,
+        "reference_1_job_title": form.references[0].referee_job_title if len(form.references) > 0 else None,
+        "reference_1_relationship": form.references[0].relationship if len(form.references) > 0 else None,
+        "reference_1_years_known": form.references[0].years_known if len(form.references) > 0 else None,
+        "reference_1_is_professional": form.references[0].is_professional if len(form.references) > 0 else None,
+        "reference_1_can_contact_before_offer": form.references[0].can_contact_before_offer if len(form.references) > 0 else None,
+        # Reference 2
+        "reference_2_name": form.references[1].referee_name if len(form.references) > 1 else None,
+        "reference_2_email": form.references[1].referee_email if len(form.references) > 1 else None,
+        "reference_2_phone": form.references[1].referee_phone if len(form.references) > 1 else None,
+        "reference_2_company": form.references[1].referee_organisation if len(form.references) > 1 else None,
+        "reference_2_job_title": form.references[1].referee_job_title if len(form.references) > 1 else None,
+        "reference_2_relationship": form.references[1].relationship if len(form.references) > 1 else None,
+        "reference_2_years_known": form.references[1].years_known if len(form.references) > 1 else None,
+        "reference_2_is_professional": form.references[1].is_professional if len(form.references) > 1 else None,
+        "reference_2_can_contact_before_offer": form.references[1].can_contact_before_offer if len(form.references) > 1 else None,
     }
     
     await db.employees.insert_one(employee_doc)
@@ -22341,6 +22363,49 @@ async def submit_structured_application(form: StructuredApplicationForm):
     
     await db.form_submissions.insert_one(form_submission)
     
+    # ==================== 2b. INSERT REFERENCES INTO db.references ====================
+    # This ensures references appear in the Recruitment Record's References section
+    # Uses defensive error handling to never fail the application submission
+    try:
+        reference_doc = {
+            "employee_id": app_id,
+            "created_at": now,
+            "updated_at": now,
+        }
+        
+        # Process each reference (minimum 2 required, already validated above)
+        for idx, ref in enumerate(form.references[:2], start=1):
+            ref_key = f"ref{idx}"
+            reference_doc[ref_key] = {
+                "declared": {
+                    "name": ref.referee_name,
+                    "job_title": ref.referee_job_title,
+                    "organisation": ref.referee_organisation,
+                    "email": ref.referee_email,
+                    "phone": ref.referee_phone,
+                    "relationship": ref.relationship,
+                    "years_known": ref.years_known,
+                    "is_professional": ref.is_professional,
+                    "can_contact_before_offer": ref.can_contact_before_offer,
+                    "declared_at": now
+                },
+                "verification_status": "pending",  # Awaiting admin verification
+                "response": None,  # No response yet
+                "request": {
+                    "sent_at": None,  # No request sent yet
+                    "method": None
+                },
+                "verified_by": None,
+                "verified_at": None,
+                "notes": None
+            }
+        
+        await db.references.insert_one(reference_doc)
+        logger.info(f"Created references record for applicant {app_id}")
+    except Exception as ref_err:
+        # Log the error but DO NOT fail the application submission
+        logger.warning(f"Non-blocking: Failed to insert references for {app_id}: {str(ref_err)}")
+    
     # ==================== 3. LINK CV IF UPLOADED ====================
     
     if form.cv_file_id:
@@ -22403,11 +22468,6 @@ async def submit_structured_application(form: StructuredApplicationForm):
         cv_file_id=form.cv_file_id,
         form_submission_id=form_submission_id
     )
-    
-    # Populate references collection with declared reference data from application
-    # This ensures the compliance-file endpoint can read reference data correctly
-    # NOTE: Temporarily disabled - will re-enable after debugging production issue
-    # References are already stored in employee_documents via generate_requirements_for_employee
     
     # Build follow-up items from created slots
     follow_up_items = stage_service.build_follow_up_items(normalized_role, created_slots)
@@ -30576,7 +30636,7 @@ async def get_compliance_file(
             
             # Lifecycle
             "lifecycle_status": lifecycle_status,
-            "status": "verified" if verified else ("partial" if has_response else "not_completed"),
+            "status": "verified" if verified else ("partial" if has_response else ("declared" if has_declared else "not_completed")),
             "status_summary": status_summary,
             
             # Actions

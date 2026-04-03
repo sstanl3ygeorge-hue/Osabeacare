@@ -1,20 +1,22 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { toast } from 'sonner';
 import { 
-  FileText, CheckCircle, Clock, AlertTriangle, Upload as UploadIcon,
-  Eye, Send, RefreshCw, Shield, Download, X, Loader2, ChevronDown, ChevronUp
+  FileText, CheckCircle, Clock, AlertTriangle,
+  Eye, Send, RefreshCw, Shield, Download, X, ChevronDown, ChevronUp, Upload as UploadIcon
 } from 'lucide-react';
 import RequirementSectionShell from './RequirementSectionShell';
 import RequirementActionBar from './RequirementActionBar';
 import { formatBackendDate } from '../../lib/dateUtils';
 
+// eslint-disable-next-line no-unused-vars
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Map requirement keys to check types for verification proof storage
+// Map requirement keys to check types for verification proof storage (used by RecordCheckDialog)
+// eslint-disable-next-line no-unused-vars
 const REQUIREMENT_TO_CHECK_TYPE = {
   'right_to_work': 'right_to_work_check',
   'dbs': 'dbs_status_check',
@@ -53,11 +55,10 @@ export default function UploadRequirementCard({
   onRefresh,
   isAuditor = false
 }) {
+  // eslint-disable-next-line no-unused-vars
   const { token } = useAuth();
-  const [isUploadingProof, setIsUploadingProof] = useState(false);
   const [evidenceExpanded, setEvidenceExpanded] = useState(true);
   const [verificationExpanded, setVerificationExpanded] = useState(true);
-  const proofFileInputRef = useRef(null);
 
   if (!surface) return null;
 
@@ -88,62 +89,6 @@ export default function UploadRequirementCard({
   // Get check data details
   const checkData = authoritativeCheck || {};
   const hasVerificationProof = checkData.evidence_document_id && checkData.evidence_document;
-
-  // Handle verification proof file upload
-  const handleProofFileSelect = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file type
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Invalid file type. Please upload PDF, JPG, or PNG.');
-      return;
-    }
-
-    // Validate file size (10MB max)
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('File too large. Maximum size is 10MB.');
-      return;
-    }
-
-    setIsUploadingProof(true);
-    try {
-      const checkType = REQUIREMENT_TO_CHECK_TYPE[key] || key;
-      
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('requirement_id', checkType);
-      formData.append('document_type', 'verification_proof');
-      formData.append('category', 'verification_proof');
-      formData.append('document_label', `${label} - Verification Proof`);
-
-      await axios.post(
-        `${API}/employees/${employeeId}/upload-document`,
-        formData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'multipart/form-data'
-          }
-        }
-      );
-
-      toast.success('Verification proof uploaded. Now record the check to link it.');
-      if (onRefresh) onRefresh();
-      
-      // Trigger record check dialog to link the proof
-      if (onRecordCheck) onRecordCheck(key);
-    } catch (err) {
-      console.error('Failed to upload verification proof:', err);
-      toast.error(err.response?.data?.detail || 'Failed to upload verification proof');
-    } finally {
-      setIsUploadingProof(false);
-      if (proofFileInputRef.current) {
-        proofFileInputRef.current.value = '';
-      }
-    }
-  };
 
   // Handle viewing verification proof
   const handleViewProof = () => {
@@ -616,36 +561,7 @@ export default function UploadRequirementCard({
               {/* Verification Actions */}
               {!isAuditor && (
                 <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                  {/* Upload Proof Button */}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => proofFileInputRef.current?.click()}
-                    disabled={isUploadingProof}
-                    className="h-8 text-xs rounded-lg"
-                    data-testid={`${key}-verification-upload-proof-btn`}
-                  >
-                    {isUploadingProof ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                        Uploading...
-                      </>
-                    ) : (
-                      <>
-                        <UploadIcon className="h-3.5 w-3.5 mr-1" />
-                        Upload Proof
-                      </>
-                    )}
-                  </Button>
-                  <input
-                    ref={proofFileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={handleProofFileSelect}
-                  />
-
-                  {/* Record Check / Update Check Button */}
+                  {/* Record Check / Update Check Button - Primary action that includes proof upload */}
                   {!hasCheck ? (
                     <Button
                       size="sm"

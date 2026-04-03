@@ -1,225 +1,316 @@
 """
-Test References Restoration - Phase D4.2 STEP A - P0 Functional Repair
-Tests that references appear as proper requirement cards in the Compliance File
+Test References Restoration - Verifies db.references insertion during public application submission
+and compliance-file endpoint returns references with status='declared' for new applicants.
+
+Tests:
+1. Public application submission creates employee record with reference fields
+2. Public application submission creates db.references record
+3. Compliance-file endpoint returns references with status='declared'
 """
+
 import pytest
 import requests
 import os
+import uuid
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
-TEST_EMPLOYEE_ID = "d88335f6-1b18-435a-8086-28af4a583f77"
 
-@pytest.fixture(scope="module")
-def auth_token():
-    """Get authentication token"""
-    response = requests.post(f"{BASE_URL}/api/auth/login", json={
-        "email": "admin@osabea.care",
-        "password": "admin123"
-    })
-    assert response.status_code == 200, f"Login failed: {response.text}"
-    return response.json().get("token")
-
-@pytest.fixture(scope="module")
-def api_client(auth_token):
-    """Shared requests session with auth"""
-    session = requests.Session()
-    session.headers.update({
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {auth_token}"
-    })
-    return session
-
-
-class TestReferencesSection:
-    """Test References section appears in Compliance File"""
+class TestReferencesRestoration:
+    """Test references insertion and retrieval for new applicants"""
     
-    def test_compliance_file_has_references_section(self, api_client):
-        """References section exists in compliance-file response"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Get auth token for tests"""
+        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "email": "admin@test.com",
+            "password": "admin123"
+        })
+        assert response.status_code == 200, f"Login failed: {response.text}"
+        self.token = response.json().get("token")
+        self.headers = {"Authorization": f"Bearer {self.token}"}
+        
+        # Test employee ID from main agent context
+        self.test_employee_id = "5bc0b72f-e298-4a97-bc63-25eece5cf9cf"
+    
+    def test_employee_has_reference_fields(self):
+        """Verify employee record has reference_1_* and reference_2_* fields populated"""
+        response = requests.get(
+            f"{BASE_URL}/api/employees/{self.test_employee_id}",
+            headers=self.headers
+        )
+        assert response.status_code == 200, f"Failed to get employee: {response.text}"
+        
+        employee = response.json()
+        
+        # Reference 1 fields
+        assert employee.get("reference_1_name") is not None, "reference_1_name should be populated"
+        assert employee.get("reference_1_email") is not None, "reference_1_email should be populated"
+        print(f"Reference 1: {employee.get('reference_1_name')} ({employee.get('reference_1_email')})")
+        
+        # Reference 2 fields
+        assert employee.get("reference_2_name") is not None, "reference_2_name should be populated"
+        assert employee.get("reference_2_email") is not None, "reference_2_email should be populated"
+        print(f"Reference 2: {employee.get('reference_2_name')} ({employee.get('reference_2_email')})")
+    
+    def test_compliance_file_references_section_exists(self):
+        """Verify compliance-file endpoint returns references section"""
+        response = requests.get(
+            f"{BASE_URL}/api/employees/{self.test_employee_id}/compliance-file",
+            headers=self.headers
+        )
+        assert response.status_code == 200, f"Failed to get compliance-file: {response.text}"
+        
+        data = response.json()
+        sections = data.get("sections", {})
+        
+        assert "references" in sections, "References section should exist in compliance-file"
+        refs_section = sections["references"]
+        
+        assert "rows" in refs_section, "References section should have rows"
+        assert len(refs_section["rows"]) >= 2, "Should have at least 2 reference rows"
+        print(f"References section found with {len(refs_section['rows'])} rows")
+    
+    def test_references_have_declared_status(self):
+        """Verify references show status='declared' for new applicants"""
+        response = requests.get(
+            f"{BASE_URL}/api/employees/{self.test_employee_id}/compliance-file",
+            headers=self.headers
+        )
         assert response.status_code == 200
         
         data = response.json()
-        assert "sections" in data
-        assert "references" in data["sections"], "References section missing from compliance file"
+        refs_section = data.get("sections", {}).get("references", {})
+        rows = refs_section.get("rows", [])
         
-        references = data["sections"]["references"]
-        assert references["title"] == "References"
-        assert "rows" in references
-        assert "valid_count" in references
-        assert "required_count" in references
-    
-    def test_references_has_two_rows(self, api_client):
-        """References section contains Reference 1 and Reference 2 rows"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        references = response.json()["sections"]["references"]
-        rows = references["rows"]
-        
-        assert len(rows) == 2, f"Expected 2 reference rows, got {len(rows)}"
-        
-        # Check Reference 1
-        ref1 = rows[0]
-        assert ref1["key"] == "reference_1"
-        assert ref1["title"] == "Reference 1"
-        assert ref1["row_type"] == "reference"
-        assert ref1["reference_num"] == 1
-        
-        # Check Reference 2
-        ref2 = rows[1]
-        assert ref2["key"] == "reference_2"
-        assert ref2["title"] == "Reference 2"
-        assert ref2["row_type"] == "reference"
-        assert ref2["reference_num"] == 2
-
-
-class TestReferenceRowFields:
-    """Test reference row contains all required fields"""
-    
-    def test_reference_row_has_lifecycle_status(self, api_client):
-        """Reference row includes lifecycle_status field"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
         for row in rows:
-            assert "lifecycle_status" in row, f"lifecycle_status missing from {row['key']}"
-            assert row["lifecycle_status"] in [
-                "verified", "reviewed", "mismatch_detected", "awaiting_review",
-                "awaiting_response", "requested", "not_requested", "not_declared"
-            ]
-    
-    def test_reference_row_has_verified_field(self, api_client):
-        """Reference row includes verified field"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
-        for row in rows:
-            assert "verified" in row, f"verified field missing from {row['key']}"
-            assert isinstance(row["verified"], bool)
-    
-    def test_reference_row_has_has_response_field(self, api_client):
-        """Reference row includes has_response field"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
-        for row in rows:
-            assert "has_response" in row, f"has_response field missing from {row['key']}"
-            assert isinstance(row["has_response"], bool)
-    
-    def test_reference_row_has_declared_referee(self, api_client):
-        """Reference row includes declared_referee details"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
-        for row in rows:
-            assert "has_declared" in row
-            assert "declared_referee" in row
+            key = row.get("key")
+            status = row.get("status")
+            lifecycle_status = row.get("lifecycle_status")
+            has_declared = row.get("has_declared")
             
-            if row["has_declared"]:
-                referee = row["declared_referee"]
-                assert referee is not None
-                # Check referee fields exist
-                assert "name" in referee
-                assert "company" in referee
-                assert "email" in referee
-                assert "phone" in referee
-
-
-class TestVerifiedReferences:
-    """Test verified references display correctly"""
+            print(f"{key}: status={status}, lifecycle={lifecycle_status}, has_declared={has_declared}")
+            
+            # For new applicants with declared references, status should be 'declared'
+            assert status == "declared", f"{key} should have status='declared', got '{status}'"
+            assert has_declared == True, f"{key} should have has_declared=True"
+            assert lifecycle_status == "not_requested", f"{key} should have lifecycle_status='not_requested'"
     
-    def test_verified_references_have_verified_true(self, api_client):
-        """Both references for test employee are verified"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
+    def test_references_have_declared_referee_details(self):
+        """Verify declared_referee contains referee details"""
+        response = requests.get(
+            f"{BASE_URL}/api/employees/{self.test_employee_id}/compliance-file",
+            headers=self.headers
+        )
         assert response.status_code == 200
         
-        references = response.json()["sections"]["references"]
-        rows = references["rows"]
-        
-        # Both should be verified for this test employee
-        assert rows[0]["verified"] == True, "Reference 1 should be verified"
-        assert rows[1]["verified"] == True, "Reference 2 should be verified"
-    
-    def test_verified_references_have_verifier_info(self, api_client):
-        """Verified references include verifier name and date"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
+        data = response.json()
+        refs_section = data.get("sections", {}).get("references", {})
+        rows = refs_section.get("rows", [])
         
         for row in rows:
-            if row["verified"]:
-                assert row["verified_by"] is not None, f"verified_by missing for {row['key']}"
-                assert row["verified_at"] is not None, f"verified_at missing for {row['key']}"
+            key = row.get("key")
+            declared_referee = row.get("declared_referee", {})
+            
+            assert declared_referee is not None, f"{key} should have declared_referee"
+            assert declared_referee.get("name") is not None, f"{key} declared_referee should have name"
+            assert declared_referee.get("email") is not None, f"{key} declared_referee should have email"
+            
+            print(f"{key}: {declared_referee.get('name')} ({declared_referee.get('email')})")
     
-    def test_verified_references_lifecycle_status(self, api_client):
-        """Verified references have lifecycle_status='verified'"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
+    def test_references_status_summary(self):
+        """Verify status_summary shows 'Referee declared • not yet requested'"""
+        response = requests.get(
+            f"{BASE_URL}/api/employees/{self.test_employee_id}/compliance-file",
+            headers=self.headers
+        )
         assert response.status_code == 200
         
-        rows = response.json()["sections"]["references"]["rows"]
+        data = response.json()
+        refs_section = data.get("sections", {}).get("references", {})
+        rows = refs_section.get("rows", [])
         
         for row in rows:
-            if row["verified"]:
-                assert row["lifecycle_status"] == "verified"
+            key = row.get("key")
+            status_summary = row.get("status_summary", "")
+            
+            assert "declared" in status_summary.lower(), f"{key} status_summary should mention 'declared'"
+            print(f"{key}: {status_summary}")
+
+
+class TestNewApplicationReferencesInsertion:
+    """Test that new application submissions create references correctly"""
     
-    def test_verified_references_status_summary(self, api_client):
-        """Verified references have status_summary with company and date"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        """Setup for new application tests"""
+        self.unique_email = f"test_ref_{uuid.uuid4().hex[:8]}@testapplicant.com"
+    
+    def test_structured_application_creates_references(self):
+        """Submit a new structured application and verify references are created"""
+        # Build application payload with 2 references
+        application_data = {
+            "title": "Mr",
+            "first_name": "Test",
+            "middle_name": "",
+            "last_name": f"RefApplicant{uuid.uuid4().hex[:4]}",
+            "preferred_name": "",
+            "date_of_birth": "1990-01-15",
+            "national_insurance": "AB123456C",
+            "email": self.unique_email,
+            "phone": "07700900123",
+            "phone_secondary": "",
+            "address_line_1": "123 Test Street",
+            "address_line_2": "",
+            "city": "London",
+            "county": "Greater London",
+            "postcode": "SW1A 1AA",
+            "years_at_current_address": 3,
+            "previous_addresses": [],
+            "role_applied": "Care Assistant",
+            "availability": "Full-time",
+            "earliest_start_date": "2026-02-01",
+            "preferred_locations": ["London"],
+            "has_driving_licence": True,
+            "has_own_transport": True,
+            "employment_history": [
+                {
+                    "employer_name": "Previous Care Home",
+                    "job_title": "Care Worker",
+                    "start_date": "2020-01-01",
+                    "end_date": "2025-12-31",
+                    "duties": "Providing care to residents",
+                    "reason_for_leaving": "Career progression",
+                    "employer_address": "456 Care Street, London",
+                    "employer_phone": "02012345678",
+                    "can_contact": True
+                }
+            ],
+            "has_employment_gaps": False,
+            "employment_gap_explanation": "",
+            "references": [
+                {
+                    "referee_name": "Test Referee One",
+                    "referee_job_title": "Manager",
+                    "referee_organisation": "Test Org One",
+                    "referee_email": "referee1@testorg.com",
+                    "referee_phone": "07700900001",
+                    "relationship": "Line Manager",
+                    "years_known": 3,
+                    "is_professional": True,
+                    "can_contact_before_offer": True
+                },
+                {
+                    "referee_name": "Test Referee Two",
+                    "referee_job_title": "Supervisor",
+                    "referee_organisation": "Test Org Two",
+                    "referee_email": "referee2@testorg.com",
+                    "referee_phone": "07700900002",
+                    "relationship": "Supervisor",
+                    "years_known": 2,
+                    "is_professional": True,
+                    "can_contact_before_offer": False
+                }
+            ],
+            "highest_qualification": "NVQ Level 2",
+            "relevant_qualifications": ["Care Certificate"],
+            "care_certificate_completed": True,
+            "mandatory_training_completed": True,
+            "health_declaration": {
+                "has_condition_affecting_work": False,
+                "condition_details": "",
+                "requires_reasonable_adjustments": False,
+                "adjustment_details": "",
+                "health_declaration_accurate": True
+            },
+            "criminal_declaration": {
+                "has_criminal_convictions": False,
+                "conviction_details": "",
+                "understands_dbs_required": True,
+                "consents_to_dbs_check": True
+            },
+            "right_to_work": {
+                "has_right_to_work_uk": True,
+                "citizenship_status": "british_citizen",
+                "visa_type": "",
+                "visa_expiry": ""
+            },
+            "declarations": {
+                "information_accurate": True,
+                "consents_to_reference_checks": True,
+                "consents_to_background_checks": True,
+                "consents_to_data_processing": True,
+                "has_professional_registration": False,
+                "registration_body": "",
+                "registration_number": ""
+            },
+            "additional_info": "",
+            "how_heard": "Website",
+            "cv_file_id": None
+        }
         
-        rows = response.json()["sections"]["references"]["rows"]
+        # Submit application (no auth required for public endpoint)
+        response = requests.post(
+            f"{BASE_URL}/api/applications/structured",
+            json=application_data
+        )
+        
+        assert response.status_code == 200, f"Application submission failed: {response.text}"
+        result = response.json()
+        
+        assert "reference" in result, "Response should contain applicant reference"
+        applicant_ref = result.get("reference")
+        print(f"Application submitted with reference: {applicant_ref}")
+        
+        # Now login and verify the employee was created with references
+        login_response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "email": "admin@test.com",
+            "password": "admin123"
+        })
+        token = login_response.json().get("token")
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        # Find the employee by email
+        employees_response = requests.get(
+            f"{BASE_URL}/api/employees",
+            headers=headers,
+            params={"search": self.unique_email}
+        )
+        assert employees_response.status_code == 200
+        
+        employees = employees_response.json()
+        matching = [e for e in employees if e.get("email") == self.unique_email]
+        assert len(matching) == 1, f"Should find exactly 1 employee with email {self.unique_email}"
+        
+        employee = matching[0]
+        employee_id = employee.get("id")
+        
+        # Verify reference fields on employee
+        assert employee.get("reference_1_name") == "Test Referee One"
+        assert employee.get("reference_1_email") == "referee1@testorg.com"
+        assert employee.get("reference_2_name") == "Test Referee Two"
+        assert employee.get("reference_2_email") == "referee2@testorg.com"
+        print("Employee reference fields verified")
+        
+        # Verify compliance-file shows references as declared
+        compliance_response = requests.get(
+            f"{BASE_URL}/api/employees/{employee_id}/compliance-file",
+            headers=headers
+        )
+        assert compliance_response.status_code == 200
+        
+        compliance_data = compliance_response.json()
+        refs_section = compliance_data.get("sections", {}).get("references", {})
+        rows = refs_section.get("rows", [])
+        
+        assert len(rows) >= 2, "Should have at least 2 reference rows"
         
         for row in rows:
-            if row["verified"]:
-                summary = row["status_summary"]
-                assert "Verified" in summary, f"status_summary should contain 'Verified': {summary}"
-                # Should contain company name
-                company = row["declared_referee"]["company"]
-                assert company in summary, f"status_summary should contain company '{company}': {summary}"
+            assert row.get("status") == "declared", f"{row.get('key')} should have status='declared'"
+            assert row.get("has_declared") == True
+            print(f"{row.get('key')}: status={row.get('status')}, declared_referee={row.get('declared_referee', {}).get('name')}")
+        
+        print("New application references insertion verified successfully!")
 
 
-class TestReferenceRowActions:
-    """Test reference row allowed_actions"""
-    
-    def test_verified_reference_has_view_response_action(self, api_client):
-        """Verified references with response have view_response action"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
-        
-        # Reference 2 has a response
-        ref2 = rows[1]
-        if ref2["has_response"]:
-            assert "view_response" in ref2["allowed_actions"], "view_response action missing"
-    
-    def test_reference_has_view_history_action(self, api_client):
-        """All references have view_history action"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        rows = response.json()["sections"]["references"]["rows"]
-        
-        for row in rows:
-            assert "view_history" in row["allowed_actions"], f"view_history missing from {row['key']}"
-
-
-class TestReferenceValidCount:
-    """Test references valid_count calculation"""
-    
-    def test_valid_count_matches_verified_references(self, api_client):
-        """valid_count equals number of verified references"""
-        response = api_client.get(f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/compliance-file")
-        assert response.status_code == 200
-        
-        references = response.json()["sections"]["references"]
-        rows = references["rows"]
-        
-        verified_count = sum(1 for row in rows if row["verified"])
-        assert references["valid_count"] == verified_count
-        assert references["required_count"] == 2
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

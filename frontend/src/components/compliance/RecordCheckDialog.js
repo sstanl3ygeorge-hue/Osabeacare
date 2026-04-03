@@ -12,24 +12,117 @@ import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle } from
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Check methods by type
+// ==================== AUDIT-READY CHECK METHODS ====================
+// These verification methods reflect QA/inspection expectations
+// Organized by requirement type for requirement-aware dropdowns
+
 const CHECK_METHODS = {
+  // Right to Work verification methods
+  right_to_work: [
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'home_office_online', label: 'Home Office online check' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'share_code_check', label: 'Share Code verification' },
+    { value: 'ecs_check', label: 'Employer Checking Service' },
+    { value: 'idsp_check', label: 'IDSP (Identity Service Provider) check' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
   right_to_work_check: [
-    { value: 'share_code_online_check', label: 'Share Code Online Check', description: 'Online Home Office check using share code' },
-    { value: 'manual_passport_check', label: 'Manual Passport Check', description: 'Manual verification of passport/visa' },
-    { value: 'idsp_check', label: 'IDSP Check', description: 'Identity Service Provider check' },
-    { value: 'ecs_check', label: 'ECS Check', description: 'Employer Checking Service' }
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'home_office_online', label: 'Home Office online check' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'share_code_check', label: 'Share Code verification' },
+    { value: 'ecs_check', label: 'Employer Checking Service' },
+    { value: 'idsp_check', label: 'IDSP (Identity Service Provider) check' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // DBS verification methods
+  dbs: [
+    { value: 'dbs_certificate', label: 'DBS certificate reviewed' },
+    { value: 'update_service', label: 'DBS Update Service check' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'other', label: 'Other documented verification' }
   ],
   dbs_status_check: [
-    { value: 'update_service_check', label: 'DBS Update Service', description: 'Online Update Service status check' },
-    { value: 'manual_certificate_review', label: 'Manual Certificate Review', description: 'Manual review of DBS certificate' }
+    { value: 'dbs_certificate', label: 'DBS certificate reviewed' },
+    { value: 'update_service', label: 'DBS Update Service check' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // Identity verification methods
+  identity: [
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'digital_id_check', label: 'Digital ID verification service' },
+    { value: 'other', label: 'Other documented verification' }
   ],
   identity_verification: [
-    { value: 'manual_id_verification', label: 'Manual ID Verification', description: 'Manual verification of ID documents' },
-    { value: 'digital_id_check', label: 'Digital ID Check', description: 'Digital identity verification service' }
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'digital_id_check', label: 'Digital ID verification service' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // Proof of Address verification methods
+  proof_of_address: [
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'other', label: 'Other documented verification' }
   ],
   address_verification: [
-    { value: 'manual_document_check', label: 'Manual Document Check', description: 'Manual verification of address documents' }
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // Reference verification methods
+  reference_1: [
+    { value: 'email_verified', label: 'Reference verified by email' },
+    { value: 'phone_verified', label: 'Reference verified by phone' },
+    { value: 'written_reference', label: 'Written reference reviewed' },
+    { value: 'employer_portal', label: 'Employer verification portal' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  reference_2: [
+    { value: 'email_verified', label: 'Reference verified by email' },
+    { value: 'phone_verified', label: 'Reference verified by phone' },
+    { value: 'written_reference', label: 'Written reference reviewed' },
+    { value: 'employer_portal', label: 'Employer verification portal' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // Training / Qualifications verification methods
+  training: [
+    { value: 'certificate_reviewed', label: 'Certificate reviewed' },
+    { value: 'provider_portal', label: 'Provider portal checked' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'register_checked', label: 'Third-party register checked' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // NMC Registration verification (for nurses)
+  nmc_registration: [
+    { value: 'register_checked', label: 'NMC register checked online' },
+    { value: 'pin_verified', label: 'NMC PIN verified' },
+    { value: 'certificate_reviewed', label: 'Registration certificate reviewed' },
+    { value: 'other', label: 'Other documented verification' }
+  ],
+  
+  // Default fallback for any unrecognized check types
+  default: [
+    { value: 'original_seen', label: 'Original document seen in person' },
+    { value: 'certified_copy', label: 'Certified copy reviewed' },
+    { value: 'uploaded_copy', label: 'Uploaded copy reviewed' },
+    { value: 'register_checked', label: 'Third-party register checked' },
+    { value: 'other', label: 'Other documented verification' }
   ]
 };
 
@@ -95,8 +188,8 @@ export default function RecordCheckDialog({
   
   const { token } = useAuth();
 
-  // Get methods for this check type
-  const methods = CHECK_METHODS[checkType] || [];
+  // Get methods for this check type with fallback to default
+  const methods = CHECK_METHODS[checkType] || CHECK_METHODS.default;
   
   // Get title based on check type
   const getTitle = () => {
@@ -358,10 +451,7 @@ export default function RecordCheckDialog({
               <SelectContent>
                 {methods.map(method => (
                   <SelectItem key={method.value} value={method.value}>
-                    <div>
-                      <div className="font-medium">{method.label}</div>
-                      <div className="text-xs text-text-muted">{method.description}</div>
-                    </div>
+                    {method.label}
                   </SelectItem>
                 ))}
               </SelectContent>

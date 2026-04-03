@@ -11008,9 +11008,11 @@ async def upload_requirement_evidence(
     now = datetime.now(timezone.utc).isoformat()
     req_type = requirement.get('type', 'document')
     
-    # Upload file to storage
+    # Upload file to storage with safe filename generation
     ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
-    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    first_name = (employee.get('first_name') or 'Unknown').strip()
+    last_name = (employee.get('last_name') or 'Employee').strip()
+    employee_name = f"{first_name}{last_name}".replace(' ', '_')
     req_slug = requirement_id.replace('_', '-')
     storage_filename = f"{employee_name}_{req_slug}_{uuid.uuid4().hex[:8]}.{ext}"
     path = f"{APP_NAME}/evidence/{employee_id}/{requirement_id}/{storage_filename}"
@@ -11867,9 +11869,11 @@ async def replace_requirement_evidence(
     user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
     user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
     
-    # Upload new file
+    # Upload new file with safe filename generation
     ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
-    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    first_name = (employee.get('first_name') or 'Unknown').strip()
+    last_name = (employee.get('last_name') or 'Employee').strip()
+    employee_name = f"{first_name}{last_name}".replace(' ', '_')
     req_slug = requirement_id.replace('_', '-')
     storage_filename = f"{employee_name}_{req_slug}_{uuid.uuid4().hex[:8]}.{ext}"
     path = f"{APP_NAME}/evidence/{employee_id}/{requirement_id}/{storage_filename}"
@@ -14298,9 +14302,11 @@ async def upload_document_for_requirement(
         if doc_type:
             break
     
-    # Upload file
+    # Upload file with safe filename generation
     ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
-    employee_name = f"{employee['first_name']}{employee['last_name']}"
+    first_name = (employee.get('first_name') or 'Unknown').strip()
+    last_name = (employee.get('last_name') or 'Employee').strip()
+    employee_name = f"{first_name}{last_name}".replace(' ', '_')
     timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H%M%S')
     filename = f"{employee_name}_{requirement_id}_{timestamp}.{ext}"
     path = f"{APP_NAME}/documents/{employee_id}/{requirement_id}/{filename}"

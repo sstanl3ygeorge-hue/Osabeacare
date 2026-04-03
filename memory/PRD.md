@@ -92,6 +92,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Reference Verification Workflow (Apr 3)** - Added employment history mismatch detection (reference vs application, reference vs normalized, response vs declared dates/employer). Added alternative reference path recording with attempt tracking. New endpoint: POST `/api/references/{employee_id}/{ref_num}/record-alternative-path`. UI shows employment mismatch warnings and alternative path section in ReferenceResponseDrawer.
 - [x] **Image Viewer Rotation Controls (Apr 3)** - Added Rotate Left/Right buttons to DocumentPreviewModal for images (JPEG/PNG). Client-side only rotation.
 - [x] **ID/Document Verification Stamps (Apr 3)** - New endpoint POST `/api/employee-documents/{doc_id}/verification-stamp`. Four stamp types: Original Seen, Copy Verified, Online Check, Not Verified. Stamp badge displays on evidence files with audit text. VerificationStampDialog created. Stamps appear on ACCEPTED files only.
+- [x] **Employment Gap Explanation Enforcement (Apr 3)** - 30-day threshold. Gaps over 30 days flagged for explanation. Full workflow: pending → explained → verified/rejected/needs_more_info. Unexplained/unverified gaps block recruitment approval. EmploymentGapPanel displays in Compliance File with status badges and action buttons.
 
 ## Prioritized Backlog
 
@@ -103,9 +104,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Evidence Review Workflow** (DONE Apr 3) - EvidenceReviewDialog allows Accept/Reject/Mark Uploaded in Error actions on evidence files
 - [x] **Reference Verification Workflow** (DONE Apr 3) - Employment mismatch detection, alternative reference path recording
 - [x] **ID/Document Verification Stamps** (DONE Apr 3) - Original seen, Copy verified, Online check, Not verified stamps
+- [x] **Employment Gap Explanation Enforcement** (DONE Apr 3) - 30-day threshold, blocks recruitment approval
 
 ### P1 (High)
-- [ ] Employment Gap explanation enforcement (30 days threshold)
 - [ ] Interview Notes integration
 - [ ] Training Matrix PDF export
 - [ ] Employee self-service portal
@@ -162,4 +163,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - ID/Document Verification Stamps implemented (Original seen, Copy verified, Online check, Not verified)
+April 3, 2026 - Employment Gap Explanation Enforcement (30-day threshold, blocks recruitment approval)

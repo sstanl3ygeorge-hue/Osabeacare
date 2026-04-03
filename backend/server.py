@@ -1876,7 +1876,7 @@ async def calculate_work_readiness_3tier(
                 pass
     
     # B3. Identity Verification (authoritative source for identity readiness)
-    identity_check = await CheckRecordService.get_current_identity_verification(employee_id)
+    identity_check = await CheckRecordService.get_current_identity_check(employee_id)
     
     if not identity_check:
         hard_block_reasons.append({
@@ -1920,7 +1920,7 @@ async def calculate_work_readiness_3tier(
     
     # D1. Address Verification (CHECK-BASED - Step 11)
     # Requires 2/2 verified address documents
-    address_check = await CheckRecordService.get_current_address_verification(employee_id)
+    address_check = await CheckRecordService.get_current_address_check(employee_id)
     
     if not address_check:
         hard_block_reasons.append({
@@ -31755,7 +31755,7 @@ async def get_address_verification(
     user: dict = Depends(get_current_user)
 ):
     """Get the current address verification status for an employee."""
-    current = await CheckRecordService.get_current_address_verification(employee_id)
+    current = await CheckRecordService.get_current_address_check(employee_id)
     return {"current": current}
 
 
@@ -33576,6 +33576,7 @@ async def get_compliance_file(
                 "outcome": check_data.get("outcome") if has_check else None,
                 "checked_at": check_data.get("checked_at") if has_check else None,
                 "checked_by": check_data.get("checked_by") if has_check else None,
+                "checked_by_name": check_data.get("checked_by_name") if has_check else None,
                 "notes": check_data.get("notes") if has_check else None,
                 "evidence_document_id": check_data.get("evidence_document_id") if has_check else None,
                 # COMPLIANCE-CRITICAL: Include evidence document details for proof display
@@ -33591,7 +33592,47 @@ async def get_compliance_file(
                         if d.get("id") == check_data.get("evidence_document_id")
                     ),
                     None
-                ) if has_check and check_data.get("evidence_document_id") else None
+                ) if has_check and check_data.get("evidence_document_id") else None,
+                # IDENTITY-SPECIFIC FIELDS (for Identity Result Panel)
+                "document_type": check_data.get("document_type") if has_check else None,
+                "full_name_on_document": check_data.get("full_name_on_document") if has_check else None,
+                "date_of_birth": check_data.get("date_of_birth") if has_check else None,
+                "document_number": check_data.get("document_number") if has_check else None,
+                "issue_date": check_data.get("issue_date") if has_check else None,
+                "expiry_date": check_data.get("expiry_date") if has_check else None,
+                "nationality": check_data.get("nationality") if has_check else None,
+                "name_matches_application": check_data.get("name_matches_application", False) if has_check else False,
+                "dob_matches_application": check_data.get("dob_matches_application", False) if has_check else False,
+                "photo_match_confirmed": check_data.get("photo_match_confirmed", False) if has_check else False,
+                "identity_status": check_data.get("identity_status", {}) if has_check else {},
+                # RTW-SPECIFIC FIELDS (for existing RTW Result Panel)
+                "permission_type": check_data.get("permission_type") if has_check else None,
+                "permission_start_date": check_data.get("permission_start_date") if has_check else None,
+                "permission_end_date": check_data.get("permission_end_date") if has_check else None,
+                "is_indefinite": check_data.get("is_indefinite", False) if has_check else False,
+                "share_code": check_data.get("share_code") if has_check else None,
+                "reference_number": check_data.get("reference_number") if has_check else None,
+                "restrictions": check_data.get("restrictions") if has_check else None,
+                "hours_limit": check_data.get("hours_limit") if has_check else None,
+                "follow_up_required": check_data.get("follow_up_required", False) if has_check else False,
+                "follow_up_due_at": check_data.get("follow_up_due_at") if has_check else None,
+                "route": check_data.get("route") if has_check else None,
+                # DBS-SPECIFIC FIELDS (for existing DBS Result Panel)
+                "dbs_level": check_data.get("dbs_level") if has_check else None,
+                "certificate_number": check_data.get("certificate_number") if has_check else None,
+                "certificate_issue_date": check_data.get("certificate_issue_date") if has_check else None,
+                "name_on_certificate": check_data.get("name_on_certificate") if has_check else None,
+                "workforce": check_data.get("workforce") if has_check else None,
+                "update_service_registered": check_data.get("update_service_registered", False) if has_check else False,
+                "update_service_status": check_data.get("update_service_status") if has_check else None,
+                "last_status_check_date": check_data.get("last_status_check_date") if has_check else None,
+                "update_service_check_result": check_data.get("update_service_check_result") if has_check else None,
+                "result_status": check_data.get("result_status") if has_check else None,
+                "information_present": check_data.get("information_present", False) if has_check else False,
+                "result_summary": check_data.get("result_summary") if has_check else None,
+                "recheck_required": check_data.get("recheck_required", True) if has_check else True,
+                "next_recheck_date": check_data.get("next_recheck_date") if has_check else None,
+                "dbs_status": check_data.get("dbs_status", {}) if has_check else {},
             } if has_check else None,
             
             # Follow-up / Review due info

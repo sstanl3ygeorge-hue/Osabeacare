@@ -1003,6 +1003,298 @@ export default function UploadRequirementCard({
                         )}
                       </div>
                     )}
+                    
+                    {/* Identity Result Details - COMPREHENSIVE DISPLAY */}
+                    {key === 'identity' && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-slate-600" />
+                          <p className="text-xs text-text-muted uppercase tracking-wide font-semibold">Identity Verification Result</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                          {/* Document Type */}
+                          {checkData.document_type && (
+                            <div>
+                              <p className="text-xs text-text-muted">Document Type</p>
+                              <p className="font-medium text-text-primary capitalize">{checkData.document_type.replace(/_/g, ' ')}</p>
+                            </div>
+                          )}
+                          
+                          {/* Full Name on Document */}
+                          {checkData.full_name_on_document && (
+                            <div className="col-span-2">
+                              <p className="text-xs text-text-muted">Name on Document</p>
+                              <p className="font-medium text-text-primary">{checkData.full_name_on_document}</p>
+                            </div>
+                          )}
+                          
+                          {/* Document Number */}
+                          {checkData.document_number && (
+                            <div>
+                              <p className="text-xs text-text-muted">Document Number</p>
+                              <p className="font-medium text-text-primary font-mono text-xs">{checkData.document_number}</p>
+                            </div>
+                          )}
+                          
+                          {/* Date of Birth */}
+                          {checkData.date_of_birth && (
+                            <div>
+                              <p className="text-xs text-text-muted">Date of Birth</p>
+                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.date_of_birth, { format: 'medium' })}</p>
+                            </div>
+                          )}
+                          
+                          {/* Nationality */}
+                          {checkData.nationality && (
+                            <div>
+                              <p className="text-xs text-text-muted">Nationality</p>
+                              <p className="font-medium text-text-primary">{checkData.nationality}</p>
+                            </div>
+                          )}
+                          
+                          {/* Issue Date */}
+                          {checkData.issue_date && (
+                            <div>
+                              <p className="text-xs text-text-muted">Issue Date</p>
+                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.issue_date, { format: 'medium' })}</p>
+                            </div>
+                          )}
+                          
+                          {/* Expiry Date */}
+                          {checkData.expiry_date && (
+                            <div>
+                              <p className="text-xs text-text-muted">Expiry Date</p>
+                              <p className={`font-medium ${
+                                checkData.identity_status?.status === 'expired' ? 'text-red-700' :
+                                checkData.identity_status?.days_until_expiry <= 30 ? 'text-amber-600' :
+                                'text-text-primary'
+                              }`}>
+                                {formatBackendDate(checkData.expiry_date, { format: 'medium' })}
+                                {checkData.identity_status?.days_until_expiry !== null && checkData.identity_status?.days_until_expiry > 0 && (
+                                  <span className="text-xs ml-1">({checkData.identity_status.days_until_expiry}d)</span>
+                                )}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Verification Match Checks */}
+                        <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                          <p className="text-xs text-slate-700 font-medium mb-2">Verification Checks</p>
+                          <div className="flex flex-wrap gap-3">
+                            <div className="flex items-center gap-1">
+                              {checkData.name_matches_application ? (
+                                <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                              ) : (
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                              )}
+                              <span className={`text-xs ${checkData.name_matches_application ? 'text-green-700' : 'text-amber-700'}`}>
+                                Name {checkData.name_matches_application ? 'matches' : 'mismatch'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {checkData.dob_matches_application ? (
+                                <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                              ) : (
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                              )}
+                              <span className={`text-xs ${checkData.dob_matches_application ? 'text-green-700' : 'text-amber-700'}`}>
+                                DOB {checkData.dob_matches_application ? 'matches' : 'mismatch'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {checkData.photo_match_confirmed ? (
+                                <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                              ) : (
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+                              )}
+                              <span className={`text-xs ${checkData.photo_match_confirmed ? 'text-green-700' : 'text-amber-700'}`}>
+                                Photo {checkData.photo_match_confirmed ? 'verified' : 'not verified'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Identity Status Alert Panel */}
+                        {checkData.identity_status && checkData.identity_status.status !== 'not_verified' && (
+                          <div className={`p-3 rounded-lg border ${
+                            checkData.identity_status.status_color === 'green' ? 'bg-green-50 border-green-200' :
+                            checkData.identity_status.status_color === 'amber' ? 'bg-amber-50 border-amber-200' :
+                            checkData.identity_status.status_color === 'red' ? 'bg-red-50 border-red-200' :
+                            'bg-gray-50 border-gray-200'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              {checkData.identity_status.status_color === 'green' && <CheckCircle className="h-4 w-4 text-green-600" />}
+                              {checkData.identity_status.status_color === 'amber' && <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                              {checkData.identity_status.status_color === 'red' && <AlertTriangle className="h-4 w-4 text-red-600" />}
+                              <span className={`text-sm font-semibold ${
+                                checkData.identity_status.status_color === 'green' ? 'text-green-800' :
+                                checkData.identity_status.status_color === 'amber' ? 'text-amber-800' :
+                                checkData.identity_status.status_color === 'red' ? 'text-red-800' :
+                                'text-gray-800'
+                              }`}>
+                                {checkData.identity_status.status_label}
+                              </span>
+                            </div>
+                            
+                            {/* Alerts */}
+                            {checkData.identity_status.alerts && checkData.identity_status.alerts.length > 0 && (
+                              <div className="space-y-1 mt-2">
+                                {checkData.identity_status.alerts.map((alert, idx) => (
+                                  <p key={idx} className={`text-xs ${
+                                    alert.level === 'error' || alert.level === 'urgent' ? 'text-red-700' :
+                                    alert.level === 'warning' ? 'text-amber-700' :
+                                    'text-gray-600'
+                                  }`}>
+                                    {alert.message}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Proof of Address Result Details - COMPREHENSIVE DISPLAY */}
+                    {key === 'proof_of_address' && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-slate-600" />
+                          <p className="text-xs text-text-muted uppercase tracking-wide font-semibold">Address Verification Result</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                          {/* Document Count */}
+                          <div>
+                            <p className="text-xs text-text-muted">Documents Verified</p>
+                            <p className={`font-semibold ${
+                              (checkData.documents_received_count || 0) >= (checkData.documents_required_count || 2) 
+                                ? 'text-green-700' 
+                                : 'text-amber-700'
+                            }`}>
+                              {checkData.documents_received_count || 0} / {checkData.documents_required_count || 2}
+                            </p>
+                          </div>
+                          
+                          {/* Recency Status */}
+                          <div>
+                            <p className="text-xs text-text-muted">Document Recency</p>
+                            <p className={`font-medium ${
+                              checkData.all_documents_sufficiently_recent ? 'text-green-700' : 'text-amber-700'
+                            }`}>
+                              {checkData.all_documents_sufficiently_recent ? 'All within limits' : 'Contains outdated'}
+                            </p>
+                          </div>
+                          
+                          {/* Address Match */}
+                          <div>
+                            <p className="text-xs text-text-muted">Address Match</p>
+                            <p className={`font-medium ${
+                              checkData.address_matches_application ? 'text-green-700' : 'text-amber-700'
+                            }`}>
+                              {checkData.address_matches_application ? 'Matches application' : 'Needs review'}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Extracted Address */}
+                        {(checkData.extracted_address_line1 || checkData.extracted_postcode) && (
+                          <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                            <p className="text-xs text-slate-700 font-medium mb-1">Verified Address</p>
+                            <div className="text-sm text-text-primary">
+                              {checkData.extracted_address_line1 && <p>{checkData.extracted_address_line1}</p>}
+                              {checkData.extracted_address_line2 && <p>{checkData.extracted_address_line2}</p>}
+                              {(checkData.extracted_city || checkData.extracted_postcode) && (
+                                <p>
+                                  {checkData.extracted_city && <span>{checkData.extracted_city}</span>}
+                                  {checkData.extracted_city && checkData.extracted_postcode && <span>, </span>}
+                                  {checkData.extracted_postcode && <span className="font-mono">{checkData.extracted_postcode}</span>}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Verified Documents List */}
+                        {checkData.verified_documents && checkData.verified_documents.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-xs text-text-muted uppercase tracking-wide">Verified Documents</p>
+                            {checkData.verified_documents.map((doc, idx) => (
+                              <div key={idx} className={`p-2 rounded-lg border ${
+                                doc.is_valid || doc.recency_status === 'valid' 
+                                  ? 'bg-green-50 border-green-200' 
+                                  : 'bg-amber-50 border-amber-200'
+                              }`}>
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <FileText className={`h-3.5 w-3.5 ${
+                                      doc.is_valid || doc.recency_status === 'valid' ? 'text-green-600' : 'text-amber-600'
+                                    }`} />
+                                    <span className="text-sm font-medium capitalize">
+                                      {(doc.type || doc.document_type || 'Document').replace(/_/g, ' ')}
+                                    </span>
+                                  </div>
+                                  <Badge className={`text-[10px] ${
+                                    doc.is_valid || doc.recency_status === 'valid'
+                                      ? 'bg-green-100 text-green-700 border-green-200'
+                                      : 'bg-amber-100 text-amber-700 border-amber-200'
+                                  }`}>
+                                    {doc.is_valid || doc.recency_status === 'valid' ? 'Valid' : doc.recency_status || 'Review needed'}
+                                  </Badge>
+                                </div>
+                                {doc.issue_date && (
+                                  <p className="text-xs text-text-muted mt-1 ml-5">
+                                    Dated: {formatBackendDate(doc.issue_date, { format: 'medium' })}
+                                    {doc.months_old !== undefined && <span className="ml-1">({doc.months_old} months old)</span>}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {/* Address Status Alert Panel */}
+                        {checkData.address_status && checkData.address_status.status !== 'not_verified' && (
+                          <div className={`p-3 rounded-lg border ${
+                            checkData.address_status.status_color === 'green' ? 'bg-green-50 border-green-200' :
+                            checkData.address_status.status_color === 'amber' ? 'bg-amber-50 border-amber-200' :
+                            checkData.address_status.status_color === 'red' ? 'bg-red-50 border-red-200' :
+                            'bg-gray-50 border-gray-200'
+                          }`}>
+                            <div className="flex items-center gap-2">
+                              {checkData.address_status.status_color === 'green' && <CheckCircle className="h-4 w-4 text-green-600" />}
+                              {checkData.address_status.status_color === 'amber' && <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                              {checkData.address_status.status_color === 'red' && <AlertTriangle className="h-4 w-4 text-red-600" />}
+                              <span className={`text-sm font-semibold ${
+                                checkData.address_status.status_color === 'green' ? 'text-green-800' :
+                                checkData.address_status.status_color === 'amber' ? 'text-amber-800' :
+                                checkData.address_status.status_color === 'red' ? 'text-red-800' :
+                                'text-gray-800'
+                              }`}>
+                                {checkData.address_status.status_label}
+                              </span>
+                            </div>
+                            
+                            {/* Alerts */}
+                            {checkData.address_status.alerts && checkData.address_status.alerts.length > 0 && (
+                              <div className="space-y-1 mt-2">
+                                {checkData.address_status.alerts.map((alert, idx) => (
+                                  <p key={idx} className={`text-xs ${
+                                    alert.level === 'error' || alert.level === 'urgent' ? 'text-red-700' :
+                                    alert.level === 'warning' ? 'text-amber-700' :
+                                    'text-gray-600'
+                                  }`}>
+                                    {alert.message}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* VERIFICATION PROOF FILE SECTION */}

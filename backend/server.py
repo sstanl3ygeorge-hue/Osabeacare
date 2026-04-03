@@ -14601,6 +14601,102 @@ async def unverify_employee_document(doc_id: str, user: dict = Depends(require_m
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**doc)
 
+class RejectDocumentRequest(BaseModel):
+    reason: str = Field(..., min_length=10, description="Reason for rejection")
+
+
+class MarkUploadedInErrorRequest(BaseModel):
+    reason: str = Field(..., min_length=10, description="Reason for marking as uploaded in error")
+
+
+@api_router.post("/employee-documents/{doc_id}/reject")
+async def reject_employee_document(
+    doc_id: str,
+    payload: RejectDocumentRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Reject an uploaded document (wrong file, unreadable, etc.)
+    
+    This is the EVIDENCE REVIEW action - distinct from formal compliance verification.
+    Rejecting means the file cannot be used for compliance purposes.
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get reviewer name
+    reviewer = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
+    reviewer_name = reviewer.get('name') if reviewer else None
+    
+    update_data = {
+        "status": "rejected",
+        "verified": False,
+        "verified_by": None,
+        "verified_at": None,
+        "rejected_by": user['user_id'],
+        "rejected_by_name": reviewer_name,
+        "rejected_at": now,
+        "rejection_reason": payload.reason
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    await log_audit_action(user['user_id'], "reject_document", "employee_document", doc_id, {
+        "rejected": True,
+        "reason": payload.reason,
+        "requirement_id": doc.get('requirement_id')
+    })
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    return EmployeeDocumentResponse(**updated_doc)
+
+
+@api_router.post("/employee-documents/{doc_id}/mark-uploaded-in-error")
+async def mark_employee_document_uploaded_in_error(
+    doc_id: str,
+    payload: MarkUploadedInErrorRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Mark a document as uploaded in error - effectively removes it from active consideration.
+    
+    This is different from rejection:
+    - Rejection = file was reviewed and found unsuitable
+    - Uploaded in error = file shouldn't have been uploaded (wrong person, wrong requirement, etc.)
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get reviewer name
+    reviewer = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
+    reviewer_name = reviewer.get('name') if reviewer else None
+    
+    update_data = {
+        "status": "uploaded_in_error",
+        "verified": False,
+        "verified_by": None,
+        "verified_at": None,
+        "marked_in_error_by": user['user_id'],
+        "marked_in_error_by_name": reviewer_name,
+        "marked_in_error_at": now,
+        "marked_in_error_reason": payload.reason
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    await log_audit_action(user['user_id'], "mark_document_uploaded_in_error", "employee_document", doc_id, {
+        "reason": payload.reason,
+        "requirement_id": doc.get('requirement_id')
+    })
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    return EmployeeDocumentResponse(**updated_doc)
+
+
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")
 async def verify_all_documents_in_requirement(employee_id: str, requirement_id: str, user: dict = Depends(require_manager_or_admin)):
     """

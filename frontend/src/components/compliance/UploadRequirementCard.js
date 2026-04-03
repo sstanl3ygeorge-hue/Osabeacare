@@ -651,6 +651,29 @@ export default function UploadRequirementCard({
           )}
         </div>
       </div>
+      
+      {/* Evidence Review Dialog */}
+      <EvidenceReviewDialog
+        isOpen={reviewDialog.isOpen}
+        onClose={() => setReviewDialog({ isOpen: false, file: null })}
+        file={reviewDialog.file}
+        employeeId={employeeId}
+        requirementKey={key}
+        requirementLabel={label}
+        onReviewComplete={(decision) => {
+          // Refresh parent data after review
+          if (onRefresh) {
+            onRefresh();
+          }
+        }}
+        onOpenRecordCheck={(file) => {
+          // Close review dialog and open record check with file context
+          setReviewDialog({ isOpen: false, file: null });
+          if (onRecordCheck) {
+            onRecordCheck(key, file);
+          }
+        }}
+      />
     </RequirementSectionShell>
   );
 }

@@ -4146,6 +4146,15 @@ class EmployeeDocumentResponse(BaseModel):
     marked_in_error_by_name: Optional[str] = None
     marked_in_error_at: Optional[str] = None
     marked_in_error_reason: Optional[str] = None
+    # Verification Stamp fields (ID/Document verification)
+    verification_stamp: Optional[str] = None  # original_seen, copy_verified, not_verified, online_check
+    verification_stamp_label: Optional[str] = None
+    verification_stamp_audit_text: Optional[str] = None
+    verification_stamp_badge_color: Optional[str] = None
+    verification_stamp_notes: Optional[str] = None
+    verification_stamp_by: Optional[str] = None
+    verification_stamp_by_name: Optional[str] = None
+    verification_stamp_at: Optional[str] = None
 
 
 # ============================================================================
@@ -14619,6 +14628,41 @@ class MarkUploadedInErrorRequest(BaseModel):
     reason: str = Field(..., min_length=10, description="Reason for marking as uploaded in error")
 
 
+class DocumentVerificationStampRequest(BaseModel):
+    """Request model for applying document verification stamps."""
+    stamp_type: str = Field(..., description="Type of verification: original_seen, copy_verified, not_verified")
+    notes: Optional[str] = Field(None, description="Optional notes about the verification")
+
+
+# Valid verification stamp types with their display labels
+VERIFICATION_STAMP_TYPES = {
+    "original_seen": {
+        "label": "Original Document Seen",
+        "description": "Physical original document was personally verified",
+        "audit_text": "ORIGINAL VERIFIED",
+        "badge_color": "green"
+    },
+    "copy_verified": {
+        "label": "Copy Verified",
+        "description": "Copy verified against original or trusted source",
+        "audit_text": "COPY VERIFIED",
+        "badge_color": "blue"
+    },
+    "not_verified": {
+        "label": "Not Verified",
+        "description": "Document has not been physically verified",
+        "audit_text": "NOT VERIFIED",
+        "badge_color": "gray"
+    },
+    "online_check": {
+        "label": "Online Check Completed",
+        "description": "Verified via official online service (e.g., Home Office right to work check)",
+        "audit_text": "ONLINE VERIFIED",
+        "badge_color": "indigo"
+    }
+}
+
+
 @api_router.post("/employee-documents/{doc_id}/reject")
 async def reject_employee_document(
     doc_id: str,
@@ -14705,6 +14749,78 @@ async def mark_employee_document_uploaded_in_error(
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**updated_doc)
+
+
+@api_router.post("/employee-documents/{doc_id}/verification-stamp")
+async def apply_verification_stamp(
+    doc_id: str,
+    payload: DocumentVerificationStampRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Apply a verification stamp to an evidence document.
+    
+    This is SEPARATE from:
+    - Evidence Review (accept/reject/error) - file quality check
+    - Record Check - formal compliance verification
+    
+    Verification stamps indicate how the document was verified:
+    - original_seen: Physical original document personally verified
+    - copy_verified: Copy verified against original/trusted source
+    - not_verified: Document not yet physically verified
+    - online_check: Verified via official online service
+    
+    Audit trail requirements:
+    - Records who applied the stamp and when
+    - Visible on evidence file record
+    - Part of compliance audit trail
+    """
+    # Validate stamp type
+    if payload.stamp_type not in VERIFICATION_STAMP_TYPES:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid stamp type. Valid options: {list(VERIFICATION_STAMP_TYPES.keys())}"
+        )
+    
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get reviewer name
+    reviewer = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
+    reviewer_name = reviewer.get('name') if reviewer else user.get('email', user['user_id'])
+    
+    stamp_info = VERIFICATION_STAMP_TYPES[payload.stamp_type]
+    
+    update_data = {
+        "verification_stamp": payload.stamp_type,
+        "verification_stamp_label": stamp_info["label"],
+        "verification_stamp_audit_text": stamp_info["audit_text"],
+        "verification_stamp_badge_color": stamp_info["badge_color"],
+        "verification_stamp_notes": payload.notes.strip() if payload.notes else None,
+        "verification_stamp_by": user['user_id'],
+        "verification_stamp_by_name": reviewer_name,
+        "verification_stamp_at": now
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    await log_audit_action(user['user_id'], "apply_verification_stamp", "employee_document", doc_id, {
+        "stamp_type": payload.stamp_type,
+        "stamp_label": stamp_info["label"],
+        "notes": payload.notes,
+        "requirement_id": doc.get('requirement_id')
+    })
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    return EmployeeDocumentResponse(**updated_doc)
+
+
+@api_router.get("/verification-stamp-types")
+async def get_verification_stamp_types():
+    """Return available verification stamp types."""
+    return {"stamp_types": VERIFICATION_STAMP_TYPES}
 
 
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")
@@ -26664,24 +26780,56 @@ async def get_normalized_references(
                 return True  # Can't compare if missing
             try:
                 from datetime import datetime as dt
-                # Handle various date formats
-                for fmt in ["%Y-%m-%d", "%Y-%m", "%d/%m/%Y", "%m/%d/%Y"]:
-                    try:
-                        d1 = dt.strptime(date1[:10], fmt)
-                        break
-                    except:
-                        continue
-                else:
-                    return True  # Can't parse date1
+                import re
                 
-                for fmt in ["%Y-%m-%d", "%Y-%m", "%d/%m/%Y", "%m/%d/%Y"]:
-                    try:
-                        d2 = dt.strptime(date2[:10], fmt)
-                        break
-                    except:
-                        continue
-                else:
-                    return True  # Can't parse date2
+                def parse_date(date_str: str):
+                    """Parse date from various formats."""
+                    if not date_str:
+                        return None
+                    
+                    date_str = str(date_str).strip()
+                    
+                    # List of formats to try
+                    formats = [
+                        "%Y-%m-%d",      # 2024-01-01
+                        "%Y-%m",         # 2024-01
+                        "%d/%m/%Y",      # 01/01/2024
+                        "%m/%d/%Y",      # 01/01/2024
+                        "%d %b, %Y",     # 17 Apr, 2024
+                        "%d %b %Y",      # 17 Apr 2024
+                        "%d %B, %Y",     # 17 April, 2024
+                        "%d %B %Y",      # 17 April 2024
+                        "%b %d, %Y",     # Apr 17, 2024
+                        "%B %d, %Y",     # April 17, 2024
+                    ]
+                    
+                    for fmt in formats:
+                        try:
+                            return dt.strptime(date_str[:20].strip(), fmt)
+                        except:
+                            continue
+                    
+                    # Try extracting year and month from string
+                    year_match = re.search(r'(20\d{2})', date_str)
+                    if year_match:
+                        year = int(year_match.group(1))
+                        month_names = {
+                            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                            'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+                        }
+                        for name, num in month_names.items():
+                            if name in date_str.lower():
+                                day_match = re.search(r'(\d{1,2})', date_str)
+                                day = int(day_match.group(1)) if day_match else 1
+                                return dt(year, num, min(day, 28))
+                    
+                    return None
+                
+                d1 = parse_date(date1)
+                d2 = parse_date(date2)
+                
+                if not d1 or not d2:
+                    return True  # Can't parse, assume match
                 
                 return abs((d1 - d2).days) <= tolerance_days
             except:

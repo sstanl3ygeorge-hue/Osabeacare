@@ -7,11 +7,12 @@ import { toast } from 'sonner';
 import { 
   FileText, CheckCircle, Clock, AlertTriangle,
   Eye, Send, RefreshCw, Shield, Download, X, ChevronDown, ChevronUp, Upload as UploadIcon,
-  ClipboardCheck
+  ClipboardCheck, Stamp
 } from 'lucide-react';
 import RequirementSectionShell from './RequirementSectionShell';
 import RequirementActionBar from './RequirementActionBar';
 import EvidenceReviewDialog from './EvidenceReviewDialog';
+import VerificationStampDialog from './VerificationStampDialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 
 // eslint-disable-next-line no-unused-vars
@@ -64,6 +65,12 @@ export default function UploadRequirementCard({
   
   // Evidence Review Dialog state
   const [reviewDialog, setReviewDialog] = useState({
+    isOpen: false,
+    file: null
+  });
+  
+  // Verification Stamp Dialog state
+  const [stampDialog, setStampDialog] = useState({
     isOpen: false,
     file: null
   });
@@ -232,10 +239,28 @@ export default function UploadRequirementCard({
                           <p className="text-sm font-medium text-text-primary truncate">
                             {file.file_name || file.original_filename || 'Document'}
                           </p>
-                          <p className="text-xs text-text-muted">
-                            {formatBackendDate(file.uploaded_at, { format: 'medium' })}
-                            {file.uploaded_by && ` • ${file.uploaded_by}`}
-                          </p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-text-muted">
+                              {formatBackendDate(file.uploaded_at, { format: 'medium' })}
+                              {file.uploaded_by && ` • ${file.uploaded_by}`}
+                            </span>
+                            {/* Verification Stamp Badge */}
+                            {file.verification_stamp && (
+                              <Badge 
+                                className={`text-[9px] px-1.5 py-0 ${
+                                  file.verification_stamp === 'original_seen' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                                  file.verification_stamp === 'copy_verified' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                                  file.verification_stamp === 'online_check' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                                  'bg-gray-100 text-gray-600 border-gray-200'
+                                }`}
+                                title={`Stamped by ${file.verification_stamp_by_name || 'Unknown'}`}
+                                data-testid={`${key}-stamp-badge-${file.file_id || file.id}`}
+                              >
+                                <Stamp className="h-2 w-2 mr-0.5" />
+                                {file.verification_stamp_audit_text || file.verification_stamp_label || file.verification_stamp}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -259,6 +284,21 @@ export default function UploadRequirementCard({
                             <Clock className="h-2.5 w-2.5 mr-0.5" />
                             Pending Review
                           </Badge>
+                        )}
+                        
+                        {/* Apply Verification Stamp button */}
+                        {!isAuditor && file.verified && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                            onClick={() => setStampDialog({ isOpen: true, file })}
+                            title="Apply verification stamp"
+                            data-testid={`${key}-stamp-btn-${file.file_id || file.id}`}
+                          >
+                            <Stamp className="h-3 w-3 mr-1" />
+                            {file.verification_stamp ? 'Update Stamp' : 'Stamp'}
+                          </Button>
                         )}
                         
                         {/* Review Evidence button - visible for non-verified files */}
@@ -671,6 +711,22 @@ export default function UploadRequirementCard({
           setReviewDialog({ isOpen: false, file: null });
           if (onRecordCheck) {
             onRecordCheck(key, file);
+          }
+        }}
+      />
+      
+      {/* Verification Stamp Dialog */}
+      <VerificationStampDialog
+        isOpen={stampDialog.isOpen}
+        onClose={() => setStampDialog({ isOpen: false, file: null })}
+        file={stampDialog.file}
+        employeeId={employeeId}
+        requirementKey={key}
+        requirementLabel={label}
+        onStampApplied={(stampType) => {
+          // Refresh parent data after stamp applied
+          if (onRefresh) {
+            onRefresh();
           }
         }}
       />

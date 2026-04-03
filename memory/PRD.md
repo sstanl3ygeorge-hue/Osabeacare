@@ -94,6 +94,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **ID/Document Verification Stamps (Apr 3)** - New endpoint POST `/api/employee-documents/{doc_id}/verification-stamp`. Four stamp types: Original Seen, Copy Verified, Online Check, Not Verified. Stamp badge displays on evidence files with audit text. VerificationStampDialog created. Stamps appear on ACCEPTED files only.
 - [x] **Employment Gap Explanation Enforcement (Apr 3)** - 30-day threshold. Gaps over 30 days flagged for explanation. Full workflow: pending → explained → verified/rejected/needs_more_info. Unexplained/unverified gaps block recruitment approval. EmploymentGapPanel displays in Compliance File with status badges and action buttons.
 - [x] **Evidence Workflow State Model Fix (Apr 3)** - Fixed critical bug where accepted/verified files disappeared from main card. Root cause: Frontend only included 'active'/'uploaded' as active statuses, missing 'approved'. Now standardized: ACTIVE_STATUSES = ['active', 'uploaded', 'approved', 'pending_review', 'under_review', 'verified'], EXCLUDED_STATUSES = ['rejected', 'uploaded_in_error', 'superseded', 'misfiled']. Main card and Manage drawer now consistent.
+- [x] **Right to Work Compliance Strengthening (Apr 3)** - Share Code as primary method with GOV.UK guidance. BRP warnings about expiry. Dynamic guidance in RecordCheckDialog. Proof upload enforced for online check methods. Public upload page shows Share Code guidance.
 
 ## Prioritized Backlog
 
@@ -164,4 +165,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - Evidence Workflow State Model fix (accepted/verified files remain on main card)
+April 3, 2026 - Right to Work compliance strengthening (Share Code, BRP warnings, proof enforcement)

@@ -94,7 +94,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Fix DuplicateKeyError on application submit (DONE - requires production verification)
 - [x] **Fix Application Form viewer "Form template not found" error** (DONE - ApplicationFormViewDrawer.js created)
 - [x] **Restore db.references insertion logic** (DONE - references now appear in Recruitment Record)
-- [ ] Verify "Request sent" state displays correctly for new applicants
+- [x] **Fix fake "Request sent" state on new applicants** (VERIFIED WORKING - frontend correctly shows "not yet requested")
 
 ### P1 (High)
 - [ ] Employee self-service portal

@@ -91,6 +91,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Evidence Review Workflow (Apr 3)** - Created `EvidenceReviewDialog.js` for Accept/Reject/Mark Uploaded in Error actions on evidence files. Added backend endpoints: POST `/api/employee-documents/{doc_id}/reject`, POST `/api/employee-documents/{doc_id}/mark-uploaded-in-error`. Review button visible on pending evidence files in UploadRequirementCard. "Accept & Record Check" button available for document-heavy requirements (RTW, DBS, Identity, PoA).
 - [x] **Reference Verification Workflow (Apr 3)** - Added employment history mismatch detection (reference vs application, reference vs normalized, response vs declared dates/employer). Added alternative reference path recording with attempt tracking. New endpoint: POST `/api/references/{employee_id}/{ref_num}/record-alternative-path`. UI shows employment mismatch warnings and alternative path section in ReferenceResponseDrawer.
 - [x] **Image Viewer Rotation Controls (Apr 3)** - Added Rotate Left/Right buttons to DocumentPreviewModal for images (JPEG/PNG). Client-side only rotation.
+- [x] **ID/Document Verification Stamps (Apr 3)** - New endpoint POST `/api/employee-documents/{doc_id}/verification-stamp`. Four stamp types: Original Seen, Copy Verified, Online Check, Not Verified. Stamp badge displays on evidence files with audit text. VerificationStampDialog created. Stamps appear on ACCEPTED files only.
 
 ## Prioritized Backlog
 
@@ -101,11 +102,11 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Fix fake "Request sent" state on new applicants** (VERIFIED WORKING - frontend correctly shows "not yet requested")
 - [x] **Evidence Review Workflow** (DONE Apr 3) - EvidenceReviewDialog allows Accept/Reject/Mark Uploaded in Error actions on evidence files
 - [x] **Reference Verification Workflow** (DONE Apr 3) - Employment mismatch detection, alternative reference path recording
+- [x] **ID/Document Verification Stamps** (DONE Apr 3) - Original seen, Copy verified, Online check, Not verified stamps
 
 ### P1 (High)
-- [ ] ID/Document verification stamps ("ORIGINAL VERIFIED" checkbox)
-- [ ] Interview Notes integration
 - [ ] Employment Gap explanation enforcement (30 days threshold)
+- [ ] Interview Notes integration
 - [ ] Training Matrix PDF export
 - [ ] Employee self-service portal
 - [ ] Supabase Auth integration and RLS policies
@@ -161,4 +162,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `GET /api/employees/{id}/requirements/{key}/files` - Get files for drawer
 
 ## Last Updated
-April 3, 2026 - Reference Verification Workflow with employment mismatch detection and alternative path recording
+April 3, 2026 - ID/Document Verification Stamps implemented (Original seen, Copy verified, Online check, Not verified)

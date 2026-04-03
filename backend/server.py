@@ -15827,7 +15827,8 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
     if not submission:
         raise HTTPException(status_code=404, detail="Form submission not found")
     
-    form_type = submission.get("form_type")
+    # Get form_type - application forms may use requirement_id instead
+    form_type = submission.get("form_type") or submission.get("requirement_id")
     employee_id = submission.get("employee_id")
     
     # Get employee data

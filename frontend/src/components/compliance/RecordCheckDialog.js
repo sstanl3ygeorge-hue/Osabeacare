@@ -325,10 +325,24 @@ export default function RecordCheckDialog({
     hours_limit: '',
     is_indefinite: false,
     follow_up_required: false,
-    document_type: ''
+    document_type: '',
+    // DBS Result Panel fields
+    dbs_level: '',
+    certificate_issue_date: '',
+    name_on_certificate: '',
+    workforce: '',
+    update_service_registered: false,
+    update_service_status: '',
+    last_status_check_date: '',
+    update_service_check_result: '',
+    recheck_required: true,
+    next_recheck_date: '',
+    result_status: '',
+    information_present: false,
+    result_summary: ''
   });
   
-  // Extraction state for RTW
+  // Extraction state for RTW and DBS
   const [extractionResult, setExtractionResult] = useState(null);
   const [extractionIssues, setExtractionIssues] = useState([]);
   
@@ -342,6 +356,9 @@ export default function RecordCheckDialog({
 
   // Check if RTW check
   const isRTW = checkType === 'right_to_work_check' || checkType === 'right_to_work';
+  
+  // Check if DBS check
+  const isDBS = checkType === 'dbs_status_check' || checkType === 'dbs';
 
   // Get methods for this check type with fallback to default
   const methods = CHECK_METHODS[checkType] || CHECK_METHODS.default;
@@ -398,15 +415,103 @@ export default function RecordCheckDialog({
 
     setProofFile(file);
     
-    // AUTO-EXTRACT: Automatically extract RTW fields when proof file is selected
+    // AUTO-EXTRACT: Automatically extract fields when proof file is selected
     if (isRTW) {
-      toast.info('Extracting fields from document...', { duration: 2000 });
-      await extractFieldsFromFile(file);
+      toast.info('Extracting RTW fields from document...', { duration: 2000 });
+      await extractRTWFieldsFromFile(file);
+    } else if (isDBS) {
+      toast.info('Extracting DBS fields from document...', { duration: 2000 });
+      await extractDBSFieldsFromFile(file);
+    }
+  };
+
+  // Extract DBS fields from a file using AI Vision
+  const extractDBSFieldsFromFile = async (file) => {
+    setIsExtracting(true);
+    setExtractionResult(null);
+    setExtractionIssues([]);
+
+    try {
+      // Convert file to base64
+      const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result.split(',')[1]);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await axios.post(
+        `${API}/dbs/extract`,
+        {
+          file_base64: base64Data,
+          file_type: file.type
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { employee_id: employeeId }
+        }
+      );
+
+      if (response.data?.success && response.data?.extraction) {
+        const { fields, issues } = response.data.extraction;
+        setExtractionResult(fields);
+        setExtractionIssues(issues || []);
+        
+        // Log extraction results for debugging
+        console.log('DBS Extraction result:', { fields, issues });
+
+        // Auto-populate form fields from extraction
+        setFormData(prev => ({
+          ...prev,
+          certificate_number: fields.certificate_number || prev.certificate_number,
+          dbs_level: fields.dbs_level || prev.dbs_level,
+          certificate_issue_date: fields.issue_date || prev.certificate_issue_date,
+          name_on_certificate: fields.name_on_certificate || prev.name_on_certificate,
+          workforce: fields.workforce || prev.workforce,
+          result_status: fields.result_status || prev.result_status,
+          information_present: fields.result_status === 'information_present' || prev.information_present,
+          result_summary: fields.result_summary || fields.information_summary || prev.result_summary,
+          update_service_status: fields.update_service_status || prev.update_service_status,
+          update_service_registered: fields.update_service_status === 'active' || prev.update_service_registered,
+          last_status_check_date: fields.last_status_check_date || prev.last_status_check_date,
+          update_service_check_result: fields.update_service_check_result || prev.update_service_check_result
+        }));
+
+        // Check for blockers
+        const blockers = (issues || []).filter(i => i.severity === 'blocker');
+        const hasExtractedData = Object.keys(fields).some(k => fields[k] !== null && fields[k] !== undefined);
+        
+        if (blockers.length > 0) {
+          toast.error(`Issue found: ${blockers[0].detail}`);
+        } else if (hasExtractedData) {
+          toast.success('DBS fields extracted - please review and confirm before saving');
+        } else {
+          toast.warning('Could not extract DBS data – please fill fields manually', { duration: 5000 });
+          setExtractionIssues([...issues, {
+            code: 'no_data_extracted',
+            detail: 'No DBS fields could be extracted from this document. Please fill in the form manually.',
+            severity: 'warning'
+          }]);
+        }
+      } else {
+        console.warn('DBS Extraction failed:', response.data);
+        toast.warning('Could not extract DBS data – please fill fields manually', { duration: 5000 });
+        setExtractionIssues([{
+          code: 'extraction_failed',
+          detail: response.data?.error || 'Extraction service unavailable. Please fill in the form manually.',
+          severity: 'warning'
+        }]);
+      }
+    } catch (err) {
+      console.error('DBS Extraction error:', err);
+      toast.info('Auto-extraction unavailable. Please fill in fields manually.');
+    } finally {
+      setIsExtracting(false);
     }
   };
 
   // Extract RTW fields from a file using AI Vision
-  const extractFieldsFromFile = async (file) => {
+  const extractRTWFieldsFromFile = async (file) => {
     setIsExtracting(true);
     setExtractionResult(null);
     setExtractionIssues([]);
@@ -540,10 +645,14 @@ export default function RecordCheckDialog({
     }
   };
 
-  // Re-extract RTW fields (manual trigger for retry)
+  // Re-extract fields (manual trigger for retry) - works for both RTW and DBS
   const handleReExtract = async () => {
-    if (!proofFile || !isRTW) return;
-    await extractFieldsFromFile(proofFile);
+    if (!proofFile) return;
+    if (isRTW) {
+      await extractRTWFieldsFromFile(proofFile);
+    } else if (isDBS) {
+      await extractDBSFieldsFromFile(proofFile);
+    }
   };
 
   // Map extracted permission type to source_status_type value
@@ -641,9 +750,29 @@ export default function RecordCheckDialog({
         payload.route = methodDef?.route || formData.method;
       }
       
-      if (checkType === 'dbs_status_check') {
-        payload.review_due_at = formData.review_due_at || null;
+      if (checkType === 'dbs_status_check' || checkType === 'dbs') {
+        // DBS Result Panel fields (3-layer model)
+        payload.dbs_level = formData.dbs_level || null;
         payload.certificate_number = formData.certificate_number || null;
+        payload.certificate_issue_date = formData.certificate_issue_date || null;
+        payload.name_on_certificate = formData.name_on_certificate || null;
+        payload.workforce = formData.workforce || null;
+        
+        // Update Service specific
+        payload.update_service_registered = formData.update_service_registered || false;
+        payload.update_service_status = formData.update_service_status || null;
+        payload.last_status_check_date = formData.last_status_check_date || null;
+        payload.update_service_check_result = formData.update_service_check_result || null;
+        
+        // Recheck tracking
+        payload.recheck_required = formData.recheck_required !== false; // Default true
+        payload.next_recheck_date = formData.next_recheck_date || formData.review_due_at || null;
+        payload.review_due_at = formData.review_due_at || formData.next_recheck_date || null;
+        
+        // Result details
+        payload.result_status = formData.result_status || (formData.information_present ? 'information_present' : 'clear');
+        payload.information_present = formData.information_present || false;
+        payload.result_summary = formData.result_summary || null;
       }
 
       await axios.post(endpoint, payload, {
@@ -679,7 +808,21 @@ export default function RecordCheckDialog({
       hours_limit: '',
       is_indefinite: false,
       follow_up_required: false,
-      document_type: ''
+      document_type: '',
+      // DBS Result Panel fields
+      dbs_level: '',
+      certificate_issue_date: '',
+      name_on_certificate: '',
+      workforce: '',
+      update_service_registered: false,
+      update_service_status: '',
+      last_status_check_date: '',
+      update_service_check_result: '',
+      recheck_required: true,
+      next_recheck_date: '',
+      result_status: '',
+      information_present: false,
+      result_summary: ''
     });
     setProofFile(null);
     setUploadedProofId(null);
@@ -790,14 +933,14 @@ export default function RecordCheckDialog({
             )}
           </div>
 
-          {/* RTW Extraction Status & Re-extract Option */}
-          {isRTW && hasProof && (
+          {/* Extraction Status & Re-extract Option - RTW and DBS */}
+          {(isRTW || isDBS) && hasProof && (
             <div className="space-y-2">
               {/* Extraction in progress */}
               {isExtracting && (
                 <div className="flex items-center gap-2 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
                   <Loader2 className="h-4 w-4 animate-spin text-indigo-600" />
-                  <span className="text-sm text-indigo-700">Extracting fields from document...</span>
+                  <span className="text-sm text-indigo-700">Extracting {isRTW ? 'RTW' : 'DBS'} fields from document...</span>
                 </div>
               )}
               
@@ -815,7 +958,7 @@ export default function RecordCheckDialog({
                     onClick={handleReExtract}
                     disabled={isExtracting}
                     className="h-7 px-2 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
-                    data-testid="rtw-re-extract-btn"
+                    data-testid={`${isRTW ? 'rtw' : 'dbs'}-re-extract-btn`}
                   >
                     <RefreshCw className="h-3 w-3 mr-1" />
                     Re-extract
@@ -831,10 +974,10 @@ export default function RecordCheckDialog({
                   onClick={handleReExtract}
                   disabled={isExtracting}
                   className="w-full h-9 text-sm bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
-                  data-testid="rtw-auto-extract-btn"
+                  data-testid={`${isRTW ? 'rtw' : 'dbs'}-auto-extract-btn`}
                 >
                   <FileText className="h-4 w-4 mr-2" />
-                  Extract RTW Fields
+                  Extract {isRTW ? 'RTW' : 'DBS'} Fields
                 </Button>
               )}
             </div>
@@ -1186,31 +1329,266 @@ export default function RecordCheckDialog({
           )}
 
           {/* DBS-specific: Certificate Number */}
-          {checkType === 'dbs_status_check' && (
+          {isDBS && (
             <div className="space-y-2">
-              <Label>Certificate Number</Label>
+              <Label>Certificate Number *</Label>
               <Input
                 value={formData.certificate_number}
-                onChange={(e) => setFormData(prev => ({ ...prev, certificate_number: e.target.value }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, certificate_number: e.target.value.replace(/\s/g, '') }))}
                 placeholder="12-digit certificate number"
-                className="rounded-lg"
+                maxLength={12}
+                className="rounded-lg font-mono"
+                data-testid="dbs-certificate-number"
               />
+              {formData.certificate_number && formData.certificate_number.length !== 12 && (
+                <p className="text-xs text-amber-600">Certificate number should be 12 digits</p>
+              )}
             </div>
           )}
 
           {/* DBS-specific: Review Due */}
-          {checkType === 'dbs_status_check' && (
+          {isDBS && (
             <div className="space-y-2">
-              <Label>Review Due Date</Label>
+              <Label>Next Recheck Date</Label>
               <Input
                 type="date"
-                value={formData.review_due_at}
-                onChange={(e) => setFormData(prev => ({ ...prev, review_due_at: e.target.value }))}
+                value={formData.review_due_at || formData.next_recheck_date}
+                onChange={(e) => setFormData(prev => ({ ...prev, review_due_at: e.target.value, next_recheck_date: e.target.value }))}
                 className="rounded-lg"
+                data-testid="dbs-review-due"
               />
               <p className="text-xs text-text-muted">
                 Internal policy date for next review (DBS certificates don't have a statutory expiry)
               </p>
+            </div>
+          )}
+
+          {/* ============================================== */}
+          {/* DBS RESULT PANEL - Certificate Details         */}
+          {/* 3-Layer Model: Evidence -> Verification -> Result */}
+          {/* ============================================== */}
+          {isDBS && (
+            <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-slate-600" />
+                <h4 className="text-sm font-semibold text-slate-800">DBS Result</h4>
+                {extractionResult && (
+                  <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                    AI Extracted
+                  </span>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-2 gap-3">
+                {/* DBS Level */}
+                <div className="space-y-1">
+                  <Label className="text-xs">DBS Level *</Label>
+                  <Select 
+                    value={formData.dbs_level} 
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, dbs_level: v }))}
+                  >
+                    <SelectTrigger className="h-8 text-sm rounded-lg" data-testid="dbs-level">
+                      <SelectValue placeholder="Select level" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="basic">Basic</SelectItem>
+                      <SelectItem value="standard">Standard</SelectItem>
+                      <SelectItem value="enhanced">Enhanced</SelectItem>
+                      <SelectItem value="enhanced_barred">Enhanced with Barred Lists</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                {/* Certificate Issue Date */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Issue Date</Label>
+                  <Input
+                    type="date"
+                    value={formData.certificate_issue_date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, certificate_issue_date: e.target.value }))}
+                    className="h-8 text-sm rounded-lg"
+                    data-testid="dbs-issue-date"
+                  />
+                </div>
+                
+                {/* Name on Certificate */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Name on Certificate</Label>
+                  <Input
+                    value={formData.name_on_certificate}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name_on_certificate: e.target.value }))}
+                    placeholder="As shown on certificate"
+                    className="h-8 text-sm rounded-lg"
+                    data-testid="dbs-name"
+                  />
+                </div>
+                
+                {/* Workforce Type */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Workforce</Label>
+                  <Select 
+                    value={formData.workforce} 
+                    onValueChange={(v) => setFormData(prev => ({ ...prev, workforce: v }))}
+                  >
+                    <SelectTrigger className="h-8 text-sm rounded-lg" data-testid="dbs-workforce">
+                      <SelectValue placeholder="Select workforce" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="adult">Adult Workforce</SelectItem>
+                      <SelectItem value="child">Child Workforce</SelectItem>
+                      <SelectItem value="adult_and_child">Adult and Child Workforce</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              {/* Update Service Section - only show for dbs_update_service_check method */}
+              {formData.method === 'dbs_update_service_check' && (
+                <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-lg space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Shield className="h-3 w-3 text-indigo-600" />
+                    <span className="text-xs font-semibold text-indigo-800">Update Service Check</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Update Service Status */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Update Service Status</Label>
+                      <Select 
+                        value={formData.update_service_status} 
+                        onValueChange={(v) => setFormData(prev => ({ 
+                          ...prev, 
+                          update_service_status: v,
+                          update_service_registered: v === 'active'
+                        }))}
+                      >
+                        <SelectTrigger className="h-8 text-sm rounded-lg" data-testid="dbs-update-status">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="active">Active (Registered)</SelectItem>
+                          <SelectItem value="not_registered">Not Registered</SelectItem>
+                          <SelectItem value="expired">Expired</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Last Status Check Date */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Check Date</Label>
+                      <Input
+                        type="date"
+                        value={formData.last_status_check_date}
+                        onChange={(e) => setFormData(prev => ({ ...prev, last_status_check_date: e.target.value }))}
+                        className="h-8 text-sm rounded-lg"
+                        data-testid="dbs-last-check-date"
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Update Service Check Result */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Check Result</Label>
+                    <Select 
+                      value={formData.update_service_check_result} 
+                      onValueChange={(v) => setFormData(prev => ({ ...prev, update_service_check_result: v }))}
+                    >
+                      <SelectTrigger className="h-8 text-sm rounded-lg" data-testid="dbs-check-result">
+                        <SelectValue placeholder="Select result" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="no_change">No change to disclose</SelectItem>
+                        <SelectItem value="changed">Changed - New certificate required</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {/* Warning if changed */}
+                  {formData.update_service_check_result === 'changed' && (
+                    <div className="p-2 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-xs text-red-700 font-medium">
+                        <AlertTriangle className="h-3 w-3 inline mr-1" />
+                        Update Service shows changes. Request a new DBS certificate disclosure.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Result Status Section */}
+              <div className="space-y-3 pt-3 border-t border-slate-200">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-700">Result Status</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Result Status */}
+                  <div className="space-y-1">
+                    <Label className="text-xs">Clearance Status</Label>
+                    <Select 
+                      value={formData.result_status || (formData.information_present ? 'information_present' : 'clear')} 
+                      onValueChange={(v) => setFormData(prev => ({ 
+                        ...prev, 
+                        result_status: v,
+                        information_present: v === 'information_present'
+                      }))}
+                    >
+                      <SelectTrigger className="h-8 text-sm rounded-lg" data-testid="dbs-result-status">
+                        <SelectValue placeholder="Select status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="clear">Clear - No information</SelectItem>
+                        <SelectItem value="information_present">Information Present</SelectItem>
+                        <SelectItem value="pending_review">Pending Review</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  {/* Recheck Required checkbox */}
+                  <div className="flex items-end">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer pb-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.recheck_required !== false}
+                        onChange={(e) => setFormData(prev => ({ ...prev, recheck_required: e.target.checked }))}
+                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        data-testid="dbs-recheck-required"
+                      />
+                      <span className="text-slate-700 text-xs">Recheck required</span>
+                    </label>
+                  </div>
+                </div>
+                
+                {/* Information Present Warning */}
+                {formData.information_present && (
+                  <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-xs text-amber-700">
+                      <AlertTriangle className="h-3 w-3 inline mr-1" />
+                      Information/disclosures present on certificate. Include details in notes for risk assessment.
+                    </p>
+                  </div>
+                )}
+                
+                {/* Result Summary */}
+                <div className="space-y-1">
+                  <Label className="text-xs">Result Summary</Label>
+                  <Input
+                    value={formData.result_summary}
+                    onChange={(e) => setFormData(prev => ({ ...prev, result_summary: e.target.value }))}
+                    placeholder="e.g., Clear - no information disclosed"
+                    className="h-8 text-sm rounded-lg"
+                    data-testid="dbs-result-summary"
+                  />
+                </div>
+              </div>
+              
+              {/* Policy reminder */}
+              <div className="p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs text-blue-700">
+                  <Info className="h-3 w-3 inline mr-1" />
+                  DBS certificates have no statutory expiry. Set a policy-based recheck date (typically 3 years).
+                </p>
+              </div>
             </div>
           )}
 

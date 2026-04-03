@@ -5965,57 +5965,52 @@ class DBSResultStatus(str, Enum):
     INCOMPLETE = "incomplete"
 
 class DBSCheckInput(BaseModel):
-    """Input for recording a DBS verification check."""
+    """
+    Input for recording a DBS verification check.
+    
+    DBS 3-Layer Model (mirroring RTW):
+    - Layer 1: Evidence (DBS Certificate / Update Service Screenshot)
+    - Layer 2: Verification (dbs_certificate_review / dbs_update_service_check)
+    - Layer 3: DBS Result (certificate details, Update Service status, clearance)
+    
+    IMPORTANT: DBS certificates do NOT have a statutory expiry date.
+    The review_due_at is your INTERNAL POLICY date.
+    """
     # Check method and date
-    method: str = Field(..., description="DBS check method (dbs_certificate_review, dbs_update_service_check, etc.)")
+    method: str = Field(..., description="DBS check method (dbs_certificate_review, dbs_update_service_check)")
     checked_at: str = Field(..., description="Date check was performed (YYYY-MM-DD)")
     outcome: str = Field(default="verified", description="Check outcome (verified, failed, follow_up_required)")
     
-    # Certificate details
+    # Certificate details (DBS Result - Layer 3)
     dbs_level: Optional[str] = Field(None, description="DBS level (basic, standard, enhanced, enhanced_barred)")
-    certificate_number: Optional[str] = Field(None, description="DBS certificate number")
+    certificate_number: Optional[str] = Field(None, description="12-digit DBS certificate number")
     certificate_issue_date: Optional[str] = Field(None, description="Certificate issue date (YYYY-MM-DD)")
     name_on_certificate: Optional[str] = Field(None, description="Name as shown on certificate")
     workforce: Optional[str] = Field(None, description="Workforce type (adult, child, adult_and_child)")
     
-    # Update Service specific
+    # Update Service specific (for dbs_update_service_check method)
+    update_service_registered: bool = Field(default=False, description="Whether registered with DBS Update Service")
     update_service_status: Optional[str] = Field(None, description="Update Service status (active, not_registered, expired)")
-    last_status_check_date: Optional[str] = Field(None, description="Date of last Update Service status check")
+    last_status_check_date: Optional[str] = Field(None, description="Date of last Update Service status check (YYYY-MM-DD)")
+    update_service_check_result: Optional[str] = Field(None, description="Result of Update Service check (no_change, changed)")
     
     # Recheck tracking
-    recheck_required: bool = Field(default=True, description="Whether periodic recheck is required")
-    next_recheck_date: Optional[str] = Field(None, description="Next recheck due date")
-    review_due_at: Optional[str] = Field(None, description="Review due date (alias for next_recheck_date)")
+    recheck_required: bool = Field(default=True, description="Whether periodic recheck is required (policy-based)")
+    next_recheck_date: Optional[str] = Field(None, description="Next recheck due date (YYYY-MM-DD)")
+    review_due_at: Optional[str] = Field(None, description="Review due date - alias for next_recheck_date (YYYY-MM-DD)")
     
     # Result details
-    result_status: Optional[str] = Field(None, description="Result status (clear, information_present, pending_review, incomplete)")
+    result_status: Optional[str] = Field(None, description="Result status (clear, information_present, pending_review)")
     information_present: bool = Field(default=False, description="Whether certificate shows any information/disclosures")
-    result_summary: Optional[str] = Field(None, description="Brief result summary (e.g., 'Clear / no information')")
+    result_summary: Optional[str] = Field(None, description="Brief result summary (e.g., 'Clear - no information')")
     
     # Linked evidence/proof
-    evidence_document_id: Optional[str] = Field(None, description="ID of linked evidence file")
-    proof_document_id: Optional[str] = Field(None, description="ID of proof-of-check file")
-    linked_evidence_ids: List[str] = Field(default_factory=list, description="IDs of linked evidence files")
+    evidence_document_id: Optional[str] = Field(None, description="ID of proof-of-check file (certificate/screenshot)")
+    proof_document_id: Optional[str] = Field(None, description="ID of proof-of-check file - alias for evidence_document_id")
+    linked_evidence_ids: List[str] = Field(default_factory=list, description="IDs of all linked evidence files")
     
     # Notes
     notes: Optional[str] = Field(None, description="Review notes (especially for information_present cases)")
-
-
-    
-    # Professional registration (if applicable)
-    has_professional_registration: bool = False
-    registration_body: Optional[str] = None  # e.g., "NMC", "HCPC"
-    registration_number: Optional[str] = None
-    registration_expiry: Optional[str] = None
-    
-    # Disciplinary history
-    has_disciplinary_history: bool = False
-    disciplinary_details: Optional[str] = None
-    
-    # Previous NHS/care employment
-    previously_worked_nhs: bool = False
-    previous_nhs_employer: Optional[str] = None
-    left_nhs_in_good_standing: Optional[bool] = None
 
 class StructuredApplicationForm(BaseModel):
     """
@@ -24032,6 +24027,157 @@ Return JSON only:
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
     @staticmethod
+    async def _extract_dbs_enhanced(images: List[str], api_key: str, employee_name: str) -> dict:
+        """
+        Enhanced DBS certificate/Update Service extraction for the 3-layer DBS model.
+        
+        Extracts fields needed for the DBS Result Panel:
+        - Certificate details (number, level, issue date, name, workforce)
+        - Update Service status (if screenshot)
+        - Result status (clear/information present)
+        """
+        fields = {}
+        metadata = {}
+        issues = []
+        
+        try:
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"doc-extract-dbs-enhanced-{uuid.uuid4()}",
+                system_message="""You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) documents.
+
+You may be analyzing either:
+1. A DBS Certificate (printed document)
+2. A DBS Update Service screenshot (online check result)
+
+For DBS CERTIFICATES, extract:
+- certificate_number: 12-digit DBS certificate number
+- dbs_level: Level (Basic, Standard, Enhanced, Enhanced with Barred Lists)
+- issue_date: Certificate issue date (YYYY-MM-DD)
+- name_on_certificate: Full name as shown
+- workforce: Workforce type if shown (Adult, Child, Adult and Child)
+- result_status: "clear" if no information, "information_present" if there are disclosures
+- information_summary: Brief summary if information is present
+
+For DBS UPDATE SERVICE SCREENSHOTS, extract:
+- certificate_number: The certificate number being checked
+- update_service_status: "active" if registered, "not_registered" or "expired" if not
+- update_service_check_result: "no_change" if "No change to disclose", "changed" if there are changes
+- last_status_check_date: Date of the check (YYYY-MM-DD)
+- result_summary: Brief description of the result shown
+
+IMPORTANT:
+- DBS certificates do NOT have an expiry date
+- The 12-digit certificate number may have spaces (e.g., "0012 3456 7890")
+- Return dates in YYYY-MM-DD format
+- Look for any indication of information/disclosures on the certificate
+
+Return JSON only:
+{
+  "document_type": {"value": "dbs_certificate" or "update_service_screenshot", "confidence": 0.0-1.0},
+  "certificate_number": {"value": "string or null", "confidence": 0.0-1.0},
+  "dbs_level": {"value": "basic/standard/enhanced/enhanced_barred or null", "confidence": 0.0-1.0},
+  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "name_on_certificate": {"value": "string or null", "confidence": 0.0-1.0},
+  "workforce": {"value": "adult/child/adult_and_child or null", "confidence": 0.0-1.0},
+  "result_status": {"value": "clear/information_present or null", "confidence": 0.0-1.0},
+  "information_summary": {"value": "string or null", "confidence": 0.0-1.0},
+  "update_service_status": {"value": "active/not_registered/expired or null", "confidence": 0.0-1.0},
+  "update_service_check_result": {"value": "no_change/changed or null", "confidence": 0.0-1.0},
+  "last_status_check_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
+  "result_summary": {"value": "string or null", "confidence": 0.0-1.0}
+}"""
+            ).with_model("openai", "gpt-5.2")
+            
+            image_content = ImageContent(image_base64=images[0])
+            user_message = UserMessage(
+                text=f"Extract all DBS information from this document. {'Expected holder name: ' + employee_name if employee_name else ''} Return JSON only.",
+                file_contents=[image_content]
+            )
+            
+            result = await chat.send_message(user_message)
+            
+            if result:
+                try:
+                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    if json_match:
+                        data = json.loads(json_match.group())
+                        for field_name, field_data in data.items():
+                            if isinstance(field_data, dict):
+                                value = field_data.get("value")
+                                confidence = field_data.get("confidence", 0.5)
+                            else:
+                                value = field_data
+                                confidence = 0.5
+                            
+                            fields[field_name] = value
+                            metadata[field_name] = {
+                                "source_type": "explicit" if value else "not_found",
+                                "confidence": confidence
+                            }
+                except json.JSONDecodeError as e:
+                    logger.error(f"DBS extraction JSON parse error: {e}")
+                    issues.append({"code": "parse_error", "detail": str(e), "severity": "warning"})
+            
+            # DBS-specific validation
+            cert_num = fields.get("certificate_number")
+            if cert_num:
+                # Remove spaces and check format
+                clean_num = str(cert_num).replace(" ", "").replace("-", "")
+                if not re.match(r'^\d{12}$', clean_num):
+                    issues.append({
+                        "code": "invalid_certificate_number",
+                        "detail": f"Certificate number '{cert_num}' should be 12 digits",
+                        "severity": "warning"
+                    })
+                else:
+                    # Normalize the certificate number (no spaces)
+                    fields["certificate_number"] = clean_num
+            
+            # Name mismatch check
+            if employee_name and fields.get("name_on_certificate"):
+                extracted_name = fields.get("name_on_certificate", "").lower()
+                expected_parts = employee_name.lower().split()
+                matches = sum(1 for part in expected_parts if part in extracted_name)
+                if matches < len(expected_parts) // 2:
+                    issues.append({
+                        "code": "name_mismatch",
+                        "detail": f"Name on certificate '{fields.get('name_on_certificate')}' may not match employee '{employee_name}'",
+                        "severity": "warning"
+                    })
+            
+            # Information present warning
+            if fields.get("result_status") == "information_present":
+                issues.append({
+                    "code": "information_present",
+                    "detail": "This DBS certificate shows information/disclosures. Manual review required.",
+                    "severity": "warning"
+                })
+            
+            # Policy-based renewal note
+            if fields.get("document_type") == "dbs_certificate" and fields.get("issue_date"):
+                issues.append({
+                    "code": "no_statutory_expiry",
+                    "detail": "DBS certificates have no statutory expiry. Set a policy-based recheck date (typically 3 years).",
+                    "severity": "info"
+                })
+            
+            # Update Service specific validation
+            if fields.get("document_type") == "update_service_screenshot":
+                if fields.get("update_service_check_result") == "changed":
+                    issues.append({
+                        "code": "update_service_changed",
+                        "detail": "Update Service shows changes - request a new DBS certificate disclosure.",
+                        "severity": "blocker"
+                    })
+        
+        except Exception as e:
+            logger.error(f"DBS enhanced extraction error: {e}")
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+        
+        return {"fields": fields, "metadata": metadata, "issues": issues}
+    
+    @staticmethod
     async def _extract_rtw(images: List[str], api_key: str, employee_name: str) -> dict:
         """Extract Right to Work document fields."""
         fields = {}
@@ -24996,6 +25142,172 @@ async def extract_rtw_document(
         }
 
 
+# ==================== DBS EXTRACTION ENDPOINT ====================
+
+class DBSExtractionRequest(BaseModel):
+    """Request model for DBS document extraction."""
+    document_id: Optional[str] = Field(None, description="Document ID to extract from")
+    file_base64: Optional[str] = Field(None, description="Base64 encoded file content for direct extraction")
+    file_type: Optional[str] = Field("image/png", description="MIME type of the file")
+
+@api_router.post("/dbs/extract")
+async def extract_dbs_document(
+    request: DBSExtractionRequest,
+    employee_id: Optional[str] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract DBS certificate/Update Service screenshot fields using GPT Vision.
+    
+    This endpoint supports two modes:
+    1. Extract from existing document: Provide `document_id`
+    2. Direct extraction: Provide `file_base64` (for preview before upload)
+    
+    Returns extracted fields that can be used to pre-populate the DBS check form.
+    
+    For DBS Certificates:
+    - Certificate number (12 digits)
+    - DBS level (Basic, Standard, Enhanced)
+    - Issue date
+    - Name on certificate
+    - Workforce type
+    
+    For Update Service Screenshots:
+    - Status (No change to disclose / Changed - disclose new certificate)
+    - Last check date
+    - Certificate reference
+    
+    Note: DBS certificates do NOT have an expiry date. Any renewal policy is internal.
+    """
+    try:
+        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="LLM key not configured")
+        
+        images = []
+        employee_name = None
+        
+        if request.document_id:
+            # Mode 1: Extract from existing document
+            doc = await db.employee_documents.find_one({"id": request.document_id}, {"_id": 0})
+            if not doc:
+                # Try finding by file_id in evidence_files
+                doc = await db.employee_documents.find_one(
+                    {"evidence_files.file_id": request.document_id},
+                    {"_id": 0}
+                )
+            
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Get employee name for validation
+            emp_id = doc.get("employee_id") or employee_id
+            if emp_id:
+                emp = await db.employees.find_one({"id": emp_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+            
+            # Get file content
+            file_url = doc.get("file_url")
+            file_type = doc.get("file_type") or doc.get("content_type") or "image/png"
+            
+            if not file_url and doc.get("evidence_files"):
+                for ef in doc.get("evidence_files", []):
+                    if ef.get("file_id") == request.document_id or ef.get("status") not in ["rejected", "superseded"]:
+                        file_url = ef.get("file_url")
+                        file_type = ef.get("file_type") or file_type
+                        break
+            
+            if not file_url:
+                raise HTTPException(status_code=404, detail="Document file not found")
+            
+            # Download file content
+            if file_url.startswith("/api/"):
+                file_content = doc.get("file_content")
+                if not file_content:
+                    raise HTTPException(status_code=400, detail="Cannot extract from this document - file content not directly accessible")
+            elif file_url.startswith("data:"):
+                _, encoded = file_url.split(",", 1)
+                file_content = base64.b64decode(encoded)
+            else:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(file_url)
+                    if resp.status_code != 200:
+                        raise HTTPException(status_code=400, detail="Could not download document file")
+                    file_content = resp.content
+            
+            images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+        
+        elif request.file_base64:
+            # Mode 2: Direct extraction from base64
+            logger.info(f"DBS Extraction: Direct extraction, file_type={request.file_type}")
+            
+            # Get employee name if employee_id provided
+            if employee_id:
+                emp = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+                if emp:
+                    employee_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+            
+            # If PDF, need to convert to images first
+            file_type = request.file_type or "image/png"
+            if file_type == "application/pdf" or file_type.endswith("/pdf"):
+                logger.info("DBS Extraction: Converting PDF to images")
+                try:
+                    file_content = base64.b64decode(request.file_base64)
+                    images = await DocumentExtractionService._convert_to_images(file_content, file_type)
+                    logger.info(f"DBS Extraction: Converted PDF to {len(images)} images")
+                except Exception as e:
+                    logger.error(f"DBS Extraction: PDF conversion failed - {e}")
+                    raise HTTPException(status_code=400, detail=f"Failed to convert PDF: {str(e)}")
+            else:
+                # Image - use directly
+                images = [request.file_base64]
+        
+        else:
+            raise HTTPException(status_code=400, detail="Provide either document_id or file_base64")
+        
+        if not images:
+            raise HTTPException(status_code=400, detail="Could not extract images from document")
+        
+        logger.info(f"DBS Extraction: Processing {len(images)} image(s)")
+        
+        # Call the DBS extraction method
+        result = await DocumentExtractionService._extract_dbs_enhanced(
+            images=images,
+            api_key=api_key,
+            employee_name=employee_name
+        )
+        
+        # Log audit
+        await log_audit_action(user['user_id'], "extract_dbs_document", "dbs_extraction", request.document_id or "direct", {
+            "employee_id": employee_id,
+            "fields_extracted": list(result.get("fields", {}).keys()),
+            "issues_count": len(result.get("issues", []))
+        })
+        
+        return {
+            "success": True,
+            "extraction": {
+                "fields": result.get("fields", {}),
+                "metadata": result.get("metadata", {}),
+                "issues": result.get("issues", [])
+            },
+            "employee_name": employee_name,
+            "document_id": request.document_id
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DBS extraction failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "extraction": None
+        }
+
+
 # ==================== REFERENCE INTEGRITY HARDENING ====================
 # Step 7: 3-layer reference truth model for NHS-level compliance
 # 
@@ -25361,6 +25673,11 @@ class CheckRecordService:
         """
         Record a DBS status check.
         
+        DBS 3-Layer Model (mirroring RTW):
+        - Layer 1: Evidence (DBS Certificate / Update Service Screenshot)
+        - Layer 2: Verification (dbs_certificate_review / dbs_update_service_check)
+        - Layer 3: DBS Result (certificate details, Update Service status, clearance)
+        
         Important: DBS certificates don't have a statutory expiry date.
         The "review_due_at" is your INTERNAL POLICY date, not certificate expiry.
         """
@@ -25382,13 +25699,42 @@ class CheckRecordService:
             "id": check_id,
             "employee_id": employee_id,
             "check_type": "dbs_status",
-            "method": data.get("method"),  # update_service_check, manual_certificate_review
+            
+            # Method and core fields (Layer 2: Verification)
+            "method": data.get("method"),  # dbs_certificate_review, dbs_update_service_check
             "checked_at": data.get("checked_at"),
             "checked_by": recorded_by,
             "outcome": data.get("outcome", "awaiting_review"),
-            "review_due_at": data.get("review_due_at"),  # Internal policy date, NOT expiry
-            "certificate_number": data.get("certificate_number"),
-            "evidence_document_id": data.get("evidence_document_id"),
+            
+            # Certificate details (Layer 3: DBS Result)
+            "dbs_level": data.get("dbs_level"),  # basic, standard, enhanced, enhanced_barred
+            "certificate_number": data.get("certificate_number"),  # 12-digit number
+            "certificate_issue_date": data.get("certificate_issue_date"),
+            "name_on_certificate": data.get("name_on_certificate"),
+            "workforce": data.get("workforce"),  # adult, child, adult_and_child
+            
+            # Update Service specific
+            "update_service_registered": data.get("update_service_registered", False),
+            "update_service_status": data.get("update_service_status"),  # active, not_registered, expired
+            "last_status_check_date": data.get("last_status_check_date"),
+            "update_service_check_result": data.get("update_service_check_result"),  # no_change, changed
+            
+            # Recheck tracking (policy-based, not statutory)
+            "recheck_required": data.get("recheck_required", True),
+            "next_recheck_date": data.get("next_recheck_date") or data.get("review_due_at"),
+            "review_due_at": data.get("review_due_at") or data.get("next_recheck_date"),
+            
+            # Result details
+            "result_status": data.get("result_status"),  # clear, information_present, pending_review
+            "information_present": data.get("information_present", False),
+            "result_summary": data.get("result_summary"),
+            
+            # Linked evidence/proof
+            "evidence_document_id": data.get("evidence_document_id") or data.get("proof_document_id"),
+            "proof_document_id": data.get("proof_document_id") or data.get("evidence_document_id"),
+            "linked_evidence_ids": data.get("linked_evidence_ids", []),
+            
+            # Notes and metadata
             "notes": data.get("notes"),
             "is_current": True,
             "created_at": now,
@@ -25401,7 +25747,9 @@ class CheckRecordService:
         await log_audit_action(recorded_by, "record_dbs_check", "dbs_checks", check_id, {
             "employee_id": employee_id,
             "method": data.get("method"),
-            "outcome": data.get("outcome")
+            "outcome": data.get("outcome"),
+            "dbs_level": data.get("dbs_level"),
+            "certificate_number": data.get("certificate_number")
         })
         
         check_record.pop("_id", None)
@@ -25409,12 +25757,226 @@ class CheckRecordService:
     
     @staticmethod
     async def get_current_dbs_check(employee_id: str) -> Optional[dict]:
-        """Get the current DBS check for an employee."""
+        """Get the current DBS check for an employee with resolved user name and computed status."""
         check = await db.dbs_checks.find_one(
             {"employee_id": employee_id, "is_current": True},
             {"_id": 0}
         )
+        
+        if check and check.get("checked_by"):
+            # Resolve checked_by user ID to a human-readable name
+            user = await db.users.find_one(
+                {"id": check["checked_by"]},
+                {"_id": 0, "first_name": 1, "last_name": 1, "email": 1}
+            )
+            if user:
+                name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                check["checked_by_name"] = name if name else user.get('email', 'Admin')
+            else:
+                check["checked_by_name"] = "Admin"
+        
+        # Compute and attach DBS status
+        if check:
+            check["dbs_status"] = CheckRecordService.compute_dbs_status(check)
+            
+            # Fetch linked evidence document if present
+            if check.get("evidence_document_id"):
+                evidence_doc = await db.employee_documents.find_one(
+                    {"id": check["evidence_document_id"]},
+                    {"_id": 0, "id": 1, "filename": 1, "original_filename": 1, "uploaded_at": 1, "file_type": 1}
+                )
+                if evidence_doc:
+                    check["evidence_document"] = {
+                        "id": evidence_doc.get("id"),
+                        "filename": evidence_doc.get("original_filename") or evidence_doc.get("filename"),
+                        "uploaded_at": evidence_doc.get("uploaded_at"),
+                        "file_type": evidence_doc.get("file_type")
+                    }
+        
         return check
+    
+    @staticmethod
+    def compute_dbs_status(dbs_check: Optional[dict]) -> dict:
+        """
+        Compute DBS compliance status from saved result fields.
+        
+        Non-breaking, read-only computation layer.
+        
+        DBS has no statutory expiry - status is based on:
+        - Verification outcome
+        - Update Service registration/status
+        - Policy-based recheck dates
+        - Information present flag
+        
+        Returns:
+            {
+                "status": str,  # clear, information_present, recheck_due_soon, recheck_overdue, incomplete, not_verified
+                "status_label": str,  # Human-readable label
+                "status_color": str,  # green, amber, red, gray
+                "days_until_recheck": int or None,
+                "recheck_date": str or None,
+                "has_update_service": bool,
+                "update_service_active": bool,
+                "information_present": bool,
+                "alerts": [{"level": "info|warning|urgent|error", "message": str}],
+                "summary_line": str  # One-line summary
+            }
+        """
+        from datetime import datetime, timezone
+        
+        result = {
+            "status": "not_verified",
+            "status_label": "Not Verified",
+            "status_color": "gray",
+            "days_until_recheck": None,
+            "recheck_date": None,
+            "has_update_service": False,
+            "update_service_active": False,
+            "information_present": False,
+            "dbs_level": None,
+            "alerts": [],
+            "summary_line": "DBS not verified"
+        }
+        
+        if not dbs_check:
+            return result
+        
+        # Check if verified
+        outcome = dbs_check.get("outcome")
+        if outcome not in ["verified", "follow_up_required"]:
+            result["status"] = "not_verified"
+            result["status_label"] = "Verification Pending" if outcome == "awaiting_review" else "Not Verified"
+            result["status_color"] = "gray"
+            result["summary_line"] = "DBS verification pending" if outcome == "awaiting_review" else "DBS not verified"
+            return result
+        
+        # Extract key fields
+        dbs_level = dbs_check.get("dbs_level")
+        certificate_number = dbs_check.get("certificate_number")
+        recheck_date = dbs_check.get("next_recheck_date") or dbs_check.get("review_due_at")
+        update_service_registered = dbs_check.get("update_service_registered", False)
+        update_service_status = dbs_check.get("update_service_status")
+        info_present = dbs_check.get("information_present", False)
+        result_status = dbs_check.get("result_status")
+        method = dbs_check.get("method")
+        
+        result["dbs_level"] = dbs_level
+        result["has_update_service"] = update_service_registered or method == "dbs_update_service_check"
+        result["update_service_active"] = update_service_status == "active"
+        result["information_present"] = info_present
+        result["recheck_date"] = recheck_date
+        
+        today = datetime.now(timezone.utc).date()
+        
+        # Compute days until recheck
+        if recheck_date:
+            try:
+                recheck_dt = datetime.fromisoformat(recheck_date.replace('Z', '+00:00')).date() if isinstance(recheck_date, str) else recheck_date
+                days_until_recheck = (recheck_dt - today).days
+                result["days_until_recheck"] = days_until_recheck
+            except (ValueError, TypeError):
+                days_until_recheck = None
+        else:
+            days_until_recheck = None
+        
+        # Determine status based on outcome and result_status
+        if info_present or result_status == "information_present":
+            # Information on certificate - requires review
+            result["status"] = "information_present"
+            result["status_label"] = "Information Present - Review Required"
+            result["status_color"] = "amber"
+            result["summary_line"] = "DBS: Information present - requires review"
+            result["alerts"].append({
+                "level": "warning",
+                "message": "DBS certificate shows information/disclosures. Review notes for risk assessment."
+            })
+        elif result_status == "clear" or (outcome == "verified" and not info_present):
+            # Clear result
+            level_label = dbs_level.replace("_", " ").title() if dbs_level else "DBS"
+            
+            if days_until_recheck is not None:
+                if days_until_recheck < 0:
+                    # Recheck overdue
+                    result["status"] = "recheck_overdue"
+                    result["status_label"] = f"Recheck overdue ({abs(days_until_recheck)} days)"
+                    result["status_color"] = "red"
+                    result["summary_line"] = f"{level_label}: Recheck OVERDUE by {abs(days_until_recheck)} days"
+                    result["alerts"].append({
+                        "level": "error",
+                        "message": f"DBS recheck was due on {recheck_date}. Complete recheck immediately."
+                    })
+                elif days_until_recheck <= 30:
+                    # Recheck due soon
+                    result["status"] = "recheck_due_soon"
+                    result["status_label"] = f"Recheck due in {days_until_recheck} days"
+                    result["status_color"] = "amber"
+                    result["summary_line"] = f"{level_label}: Recheck due in {days_until_recheck} days"
+                    result["alerts"].append({
+                        "level": "warning",
+                        "message": f"DBS recheck due in {days_until_recheck} days ({recheck_date})."
+                    })
+                elif days_until_recheck <= 90:
+                    # Approaching recheck
+                    result["status"] = "recheck_approaching"
+                    result["status_label"] = f"Valid - Recheck {recheck_date}"
+                    result["status_color"] = "green"
+                    result["summary_line"] = f"{level_label}: Clear - recheck scheduled {recheck_date}"
+                    result["alerts"].append({
+                        "level": "info",
+                        "message": f"DBS recheck due in {days_until_recheck} days ({recheck_date})."
+                    })
+                else:
+                    # All good
+                    result["status"] = "clear"
+                    result["status_label"] = f"Clear - {level_label}"
+                    result["status_color"] = "green"
+                    result["summary_line"] = f"{level_label}: Clear / no information"
+            else:
+                # No recheck date set - still valid but warn
+                result["status"] = "clear"
+                result["status_label"] = f"Clear - {level_label}"
+                result["status_color"] = "green"
+                result["summary_line"] = f"{level_label}: Clear / no information"
+                
+                if dbs_check.get("recheck_required", True):
+                    result["alerts"].append({
+                        "level": "info",
+                        "message": "No recheck date set. Consider setting a policy-based recheck date."
+                    })
+        else:
+            # Incomplete result - missing key data
+            has_certificate = bool(certificate_number)
+            has_level = bool(dbs_level)
+            
+            if has_certificate and has_level:
+                result["status"] = "clear"
+                result["status_label"] = "Verified"
+                result["status_color"] = "green"
+                result["summary_line"] = "DBS: Verified"
+            else:
+                result["status"] = "incomplete"
+                result["status_label"] = "Result Incomplete"
+                result["status_color"] = "amber"
+                result["summary_line"] = "DBS result incomplete"
+                result["alerts"].append({
+                    "level": "warning",
+                    "message": "DBS check recorded but missing certificate number or level. Consider re-recording with complete data."
+                })
+        
+        # Update Service status alerts
+        if result["has_update_service"]:
+            if update_service_status == "active":
+                result["alerts"].append({
+                    "level": "info",
+                    "message": "Registered with DBS Update Service - enables continuous monitoring."
+                })
+            elif update_service_status == "expired":
+                result["alerts"].append({
+                    "level": "warning",
+                    "message": "DBS Update Service subscription expired. Consider renewal."
+                })
+        
+        return result
     
     @staticmethod
     async def get_dbs_check_history(employee_id: str, limit: int = 10) -> List[dict]:
@@ -28783,15 +29345,7 @@ class RTWCheckInput(BaseModel):
     # Notes
     notes: Optional[str] = Field(None, description="Additional notes")
 
-class DBSCheckInput(BaseModel):
-    """Input for recording a DBS status check."""
-    method: str  # CheckMethod value
-    checked_at: str
-    outcome: str  # CheckOutcome value
-    review_due_at: Optional[str] = None
-    certificate_number: Optional[str] = None
-    evidence_document_id: Optional[str] = None
-    notes: Optional[str] = None
+# DBSCheckInput already defined above with comprehensive fields - removed duplicate here
 
 class IdentityCheckInput(BaseModel):
     """Input for recording an identity verification."""

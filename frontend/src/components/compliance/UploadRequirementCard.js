@@ -746,6 +746,191 @@ export default function UploadRequirementCard({
                         )}
                       </div>
                     )}
+                    
+                    {/* DBS Result Details - COMPREHENSIVE DISPLAY */}
+                    {key === 'dbs' && (
+                      <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Shield className="h-4 w-4 text-slate-600" />
+                          <p className="text-xs text-text-muted uppercase tracking-wide font-semibold">DBS Result</p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                          {/* DBS Level */}
+                          {checkData.dbs_level && (
+                            <div>
+                              <p className="text-xs text-text-muted">DBS Level</p>
+                              <p className="font-medium text-text-primary capitalize">{checkData.dbs_level.replace(/_/g, ' ')}</p>
+                            </div>
+                          )}
+                          
+                          {/* Certificate Number */}
+                          {checkData.certificate_number && (
+                            <div>
+                              <p className="text-xs text-text-muted">Certificate Number</p>
+                              <p className="font-medium text-text-primary font-mono text-xs">{checkData.certificate_number}</p>
+                            </div>
+                          )}
+                          
+                          {/* Certificate Issue Date */}
+                          {checkData.certificate_issue_date && (
+                            <div>
+                              <p className="text-xs text-text-muted">Issue Date</p>
+                              <p className="font-medium text-text-primary">{formatBackendDate(checkData.certificate_issue_date, { format: 'medium' })}</p>
+                            </div>
+                          )}
+                          
+                          {/* Workforce */}
+                          {checkData.workforce && (
+                            <div>
+                              <p className="text-xs text-text-muted">Workforce</p>
+                              <p className="font-medium text-text-primary capitalize">{checkData.workforce.replace(/_/g, ' ')}</p>
+                            </div>
+                          )}
+                          
+                          {/* Name on Certificate */}
+                          {checkData.name_on_certificate && (
+                            <div>
+                              <p className="text-xs text-text-muted">Name on Certificate</p>
+                              <p className="font-medium text-text-primary">{checkData.name_on_certificate}</p>
+                            </div>
+                          )}
+                          
+                          {/* Next Recheck Date */}
+                          {(checkData.next_recheck_date || checkData.review_due_at) && (
+                            <div>
+                              <p className="text-xs text-text-muted">Next Recheck</p>
+                              <p className="font-medium text-amber-700">{formatBackendDate(checkData.next_recheck_date || checkData.review_due_at, { format: 'medium' })}</p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Update Service Section */}
+                        {(checkData.update_service_registered || checkData.update_service_status) && (
+                          <div className="p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                            <p className="text-xs text-indigo-800 font-medium mb-1">Update Service</p>
+                            <div className="flex flex-wrap gap-2">
+                              <span className={`text-xs px-2 py-0.5 rounded ${
+                                checkData.update_service_status === 'active' 
+                                  ? 'bg-green-100 text-green-700' 
+                                  : 'bg-gray-100 text-gray-700'
+                              }`}>
+                                {checkData.update_service_status === 'active' ? 'Registered' : 'Not Registered'}
+                              </span>
+                              {checkData.last_status_check_date && (
+                                <span className="text-xs text-indigo-600">
+                                  Last checked: {formatBackendDate(checkData.last_status_check_date, { format: 'short' })}
+                                </span>
+                              )}
+                              {checkData.update_service_check_result && (
+                                <span className={`text-xs px-2 py-0.5 rounded ${
+                                  checkData.update_service_check_result === 'no_change' 
+                                    ? 'bg-green-100 text-green-700' 
+                                    : 'bg-red-100 text-red-700'
+                                }`}>
+                                  {checkData.update_service_check_result === 'no_change' ? 'No change' : 'Changes detected'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Result Status */}
+                        {checkData.result_status && (
+                          <div className={`p-2 rounded-lg ${
+                            checkData.result_status === 'clear' ? 'bg-green-50 border border-green-200' :
+                            checkData.result_status === 'information_present' ? 'bg-amber-50 border border-amber-200' :
+                            'bg-gray-50 border border-gray-200'
+                          }`}>
+                            <p className={`text-xs font-medium ${
+                              checkData.result_status === 'clear' ? 'text-green-800' :
+                              checkData.result_status === 'information_present' ? 'text-amber-800' :
+                              'text-gray-800'
+                            }`}>
+                              {checkData.result_status === 'clear' ? 'Clear - No information disclosed' :
+                               checkData.result_status === 'information_present' ? 'Information Present - Review Required' :
+                               'Pending Review'}
+                            </p>
+                            {checkData.result_summary && (
+                              <p className="text-xs text-gray-600 mt-1">{checkData.result_summary}</p>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Information Present Warning */}
+                        {checkData.information_present && (
+                          <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <p className="text-xs text-amber-800 font-medium">Information/disclosures present</p>
+                                <p className="text-xs text-amber-700 mt-0.5">Review notes for risk assessment details.</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Status flags */}
+                        <div className="flex flex-wrap gap-2">
+                          {checkData.recheck_required !== false && (
+                            <div className="flex items-center gap-1 px-2 py-1 bg-blue-50 border border-blue-200 rounded-lg">
+                              <Clock className="h-3 w-3 text-blue-600" />
+                              <span className="text-xs font-medium text-blue-700">Recheck required (policy)</span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* DBS STATUS ALERT PANEL - Non-breaking, read-only display */}
+                        {checkData.dbs_status && checkData.dbs_status.status !== 'not_verified' && (
+                          <div className={`p-3 rounded-lg border ${
+                            checkData.dbs_status.status_color === 'green' ? 'bg-green-50 border-green-200' :
+                            checkData.dbs_status.status_color === 'amber' ? 'bg-amber-50 border-amber-200' :
+                            checkData.dbs_status.status_color === 'red' ? 'bg-red-50 border-red-200' :
+                            'bg-gray-50 border-gray-200'
+                          }`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                {checkData.dbs_status.status_color === 'green' && <CheckCircle className="h-4 w-4 text-green-600" />}
+                                {checkData.dbs_status.status_color === 'amber' && <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                                {checkData.dbs_status.status_color === 'red' && <AlertTriangle className="h-4 w-4 text-red-600" />}
+                                <span className={`text-sm font-semibold ${
+                                  checkData.dbs_status.status_color === 'green' ? 'text-green-800' :
+                                  checkData.dbs_status.status_color === 'amber' ? 'text-amber-800' :
+                                  checkData.dbs_status.status_color === 'red' ? 'text-red-800' :
+                                  'text-gray-800'
+                                }`}>
+                                  {checkData.dbs_status.status_label}
+                                </span>
+                              </div>
+                              {checkData.dbs_status.days_until_recheck !== null && checkData.dbs_status.days_until_recheck > 0 && (
+                                <Badge className={`text-[10px] ${
+                                  checkData.dbs_status.days_until_recheck <= 30 ? 'bg-red-100 text-red-700 border-red-200' :
+                                  checkData.dbs_status.days_until_recheck <= 90 ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                                  'bg-green-100 text-green-700 border-green-200'
+                                }`}>
+                                  {checkData.dbs_status.days_until_recheck} days
+                                </Badge>
+                              )}
+                            </div>
+                            
+                            {/* Alerts */}
+                            {checkData.dbs_status.alerts && checkData.dbs_status.alerts.length > 0 && (
+                              <div className="space-y-1">
+                                {checkData.dbs_status.alerts.map((alert, idx) => (
+                                  <p key={idx} className={`text-xs ${
+                                    alert.level === 'error' || alert.level === 'urgent' ? 'text-red-700' :
+                                    alert.level === 'warning' ? 'text-amber-700' :
+                                    'text-gray-600'
+                                  }`}>
+                                    {alert.message}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* VERIFICATION PROOF FILE SECTION */}

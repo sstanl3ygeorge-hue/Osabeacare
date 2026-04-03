@@ -6,10 +6,12 @@ import { Button } from '../ui/button';
 import { toast } from 'sonner';
 import { 
   FileText, CheckCircle, Clock, AlertTriangle,
-  Eye, Send, RefreshCw, Shield, Download, X, ChevronDown, ChevronUp, Upload as UploadIcon
+  Eye, Send, RefreshCw, Shield, Download, X, ChevronDown, ChevronUp, Upload as UploadIcon,
+  ClipboardCheck
 } from 'lucide-react';
 import RequirementSectionShell from './RequirementSectionShell';
 import RequirementActionBar from './RequirementActionBar';
+import EvidenceReviewDialog from './EvidenceReviewDialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 
 // eslint-disable-next-line no-unused-vars
@@ -59,6 +61,12 @@ export default function UploadRequirementCard({
   const { token } = useAuth();
   const [evidenceExpanded, setEvidenceExpanded] = useState(true);
   const [verificationExpanded, setVerificationExpanded] = useState(true);
+  
+  // Evidence Review Dialog state
+  const [reviewDialog, setReviewDialog] = useState({
+    isOpen: false,
+    file: null
+  });
 
   if (!surface) return null;
 
@@ -234,7 +242,12 @@ export default function UploadRequirementCard({
                         {file.verified ? (
                           <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border border-green-200">
                             <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
-                            Verified
+                            Accepted
+                          </Badge>
+                        ) : file.status === 'rejected' ? (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border border-red-200">
+                            <X className="h-2.5 w-2.5 mr-0.5" />
+                            Rejected
                           </Badge>
                         ) : file.extraction_status?.status === 'awaiting_review' ? (
                           <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-700 border border-purple-200">
@@ -244,10 +257,26 @@ export default function UploadRequirementCard({
                         ) : (
                           <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
                             <Clock className="h-2.5 w-2.5 mr-0.5" />
-                            Awaiting review
+                            Pending Review
                           </Badge>
                         )}
-                        {/* Evidence file actions */}
+                        
+                        {/* Review Evidence button - visible for non-verified files */}
+                        {!isAuditor && !file.verified && file.status !== 'rejected' && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs text-teal-600 border-teal-200 hover:bg-teal-50"
+                            onClick={() => setReviewDialog({ isOpen: true, file })}
+                            title="Review evidence"
+                            data-testid={`${key}-evidence-review-${file.file_id || file.id}`}
+                          >
+                            <ClipboardCheck className="h-3 w-3 mr-1" />
+                            Review
+                          </Button>
+                        )}
+                        
+                        {/* View file button */}
                         {onPreviewFile && (
                           <Button
                             size="sm"

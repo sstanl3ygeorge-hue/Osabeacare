@@ -179,7 +179,7 @@ export default function EvidenceManageDrawer({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/documents/${fileId}/verify`,
+        `${API}/employee-documents/${fileId}/verify`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -200,7 +200,7 @@ export default function EvidenceManageDrawer({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/documents/${fileId}/reject`,
+        `${API}/employee-documents/${fileId}/reject`,
         { reason: actionReason },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -227,7 +227,7 @@ export default function EvidenceManageDrawer({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/documents/${fileId}/mark-uploaded-in-error`,
+        `${API}/employee-documents/${fileId}/mark-uploaded-in-error`,
         { reason: actionReason },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -255,7 +255,7 @@ export default function EvidenceManageDrawer({
     setIsSubmitting(true);
     try {
       await axios.post(
-        `${API}/documents/${fileId}/supersede`,
+        `${API}/employee-documents/${fileId}/supersede`,
         { reason: actionReason },
         { headers: { Authorization: `Bearer ${token}` } }
       );

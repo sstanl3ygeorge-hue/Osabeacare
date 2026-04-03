@@ -183,17 +183,36 @@ export function normalizeUploadRequirementSurface({
   checks = [],
   freshness = null  // PoA freshness data
 }) {
-  // FIX: Include "uploaded" status as active - backend uses "uploaded" for active files
-  const activeFiles = files.filter(f => 
-    f.status === 'active' || 
-    f.status === 'uploaded' || 
-    (!f.status && !f.superseded_at && !f.error_at)
-  );
-  const historicalFiles = files.filter(f => 
-    f.status !== 'active' && 
-    f.status !== 'uploaded' && 
-    (f.superseded_at || f.error_at || f.status === 'superseded' || f.status === 'uploaded_in_error')
-  );
+  // EVIDENCE STATE MODEL:
+  // Active/current files (visible on main card):
+  //   - uploaded: File uploaded, awaiting review
+  //   - active: Legacy status, treated as pending review
+  //   - approved: File accepted after evidence review
+  //   - pending_review: Awaiting evidence review
+  //   - under_review: Being reviewed
+  //   - verified: Explicit verified status
+  //
+  // Hidden from main card (only in Manage/Historical):
+  //   - rejected: File rejected during evidence review
+  //   - uploaded_in_error: Marked as wrong file/upload mistake
+  //   - superseded: Replaced by newer version
+  //   - misfiled: Wrong requirement
+  //   - historical: Archived
+  
+  const ACTIVE_STATUSES = ['active', 'uploaded', 'approved', 'pending_review', 'under_review', 'verified'];
+  const EXCLUDED_STATUSES = ['rejected', 'uploaded_in_error', 'superseded', 'misfiled', 'historical'];
+  
+  const activeFiles = files.filter(f => {
+    const status = f.status || 'active';
+    // Include if status is active OR not in excluded list
+    return ACTIVE_STATUSES.includes(status) || 
+           (!EXCLUDED_STATUSES.includes(status) && !f.superseded_at && !f.error_at);
+  });
+  
+  const historicalFiles = files.filter(f => {
+    const status = f.status;
+    return EXCLUDED_STATUSES.includes(status) || f.superseded_at || f.error_at;
+  });
   
   // Sort requests by date descending
   const sortedRequests = [...requests].sort((a, b) => 
@@ -219,10 +238,19 @@ export function normalizeUploadRequirementSurface({
   const counters = {
     active: activeFiles.length,
     pendingReview: activeFiles.filter(f => 
-      !f.verified && (f.extraction_status?.status === 'awaiting_review' || f.status === 'active' || !f.status)
+      !f.verified && 
+      !EXCLUDED_STATUSES.includes(f.status) &&
+      (f.extraction_status?.status === 'awaiting_review' || 
+       f.status === 'active' || 
+       f.status === 'uploaded' ||
+       f.status === 'pending_review' ||
+       f.status === 'under_review' ||
+       !f.status)
     ).length,
-    verified: activeFiles.filter(f => f.verified).length,
+    verified: activeFiles.filter(f => f.verified || f.status === 'approved' || f.status === 'verified').length,
     superseded: historicalFiles.filter(f => f.status === 'superseded').length,
+    rejected: historicalFiles.filter(f => f.status === 'rejected').length,
+    uploadedInError: historicalFiles.filter(f => f.status === 'uploaded_in_error').length,
     historical: historicalFiles.length
   };
   

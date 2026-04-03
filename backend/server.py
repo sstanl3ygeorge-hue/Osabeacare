@@ -30491,20 +30491,32 @@ async def get_compliance_file(
         # DIAGNOSTIC: Log total collected before filtering
         logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, total collected={len(all_docs)}, doc_requirement_keys={doc_requirement_keys}")
         
-        # Filter out superseded/error documents
-        active_docs = [d for d in all_docs if d.get("status") not in [
-            DocumentStatus.SUPERSEDED.value, 
-            DocumentStatus.UPLOADED_IN_ERROR.value,
-            DocumentStatus.MISFILED.value
-        ]]
+        # EVIDENCE STATE MODEL:
+        # Active files (visible on main card):
+        #   - uploaded, active, approved, pending_review, under_review, verified, None
+        # 
+        # Hidden from main card (historical/manage only):
+        #   - rejected, uploaded_in_error, superseded, misfiled
+        EXCLUDED_STATUSES = [
+            DocumentStatus.SUPERSEDED.value,        # "superseded"
+            DocumentStatus.UPLOADED_IN_ERROR.value, # "uploaded_in_error" 
+            DocumentStatus.MISFILED.value,          # "misfiled"
+            DocumentStatus.REJECTED.value,          # "rejected"
+        ]
+        
+        # Filter out excluded documents for active display
+        active_docs = [d for d in all_docs if d.get("status") not in EXCLUDED_STATUSES]
+        
+        # Historical files are the excluded ones
+        historical_docs = [d for d in all_docs if d.get("status") in EXCLUDED_STATUSES]
         
         # DIAGNOSTIC: Log after status filter
         if len(active_docs) != len(all_docs):
             filtered_out = len(all_docs) - len(active_docs)
             logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, filtered out {filtered_out} docs by status")
         
-        verified_count = len([d for d in active_docs if d.get("verified")])
-        awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") not in [DocumentStatus.REJECTED.value]])
+        verified_count = len([d for d in active_docs if d.get("verified") or d.get("status") == "approved"])
+        awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") not in ["approved"]])
         
         # Check extraction status
         awaiting_extraction = 0
@@ -30663,6 +30675,8 @@ async def get_compliance_file(
                 "awaiting_extraction_review": awaiting_extraction,
                 "rejected": len([d for d in all_docs if d.get("status") == DocumentStatus.REJECTED.value]),
                 "superseded": len([d for d in all_docs if d.get("status") == DocumentStatus.SUPERSEDED.value]),
+                "uploaded_in_error": len([d for d in all_docs if d.get("status") == DocumentStatus.UPLOADED_IN_ERROR.value]),
+                "historical": len(historical_docs),
                 "pending_requests": len(pending_requests),
                 "history": len(all_docs)
             },
@@ -30684,20 +30698,55 @@ async def get_compliance_file(
             "documents_preview": [
                 {
                     "id": d.get("id"),
+                    "file_id": d.get("id"),  # Alias for consistency
                     "file_name": d.get("file_name") or d.get("original_filename"),
+                    "original_filename": d.get("original_filename"),
                     # FIX: Return API endpoint URL, not storage path
                     "file_url": f"/api/employee-documents/{d.get('id')}/file" if d.get("id") else None,
                     "download_url": f"/api/employee-documents/{d.get('id')}/download" if d.get("id") else None,
                     "content_type": d.get("content_type") or d.get("mime_type"),  # For preview support detection
                     "file_available": bool(d.get("file_url")),  # Availability status
                     "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                    "uploaded_by": d.get("uploaded_by"),
                     "status": d.get("status", "uploaded"),
                     "verified": d.get("verified", False),
-                    "extraction_status": extractions.get(d["id"], {}).get("review_status")
+                    "verified_by": d.get("verified_by"),
+                    "verified_by_name": d.get("verified_by_name"),
+                    "verified_at": d.get("verified_at"),
+                    "extraction_status": {"status": extractions.get(d["id"], {}).get("review_status")} if d["id"] in extractions else None,
+                    # Verification stamp fields
+                    "verification_stamp": d.get("verification_stamp"),
+                    "verification_stamp_label": d.get("verification_stamp_label"),
+                    "verification_stamp_audit_text": d.get("verification_stamp_audit_text"),
+                    "verification_stamp_badge_color": d.get("verification_stamp_badge_color"),
+                    "verification_stamp_by_name": d.get("verification_stamp_by_name"),
+                    "verification_stamp_at": d.get("verification_stamp_at"),
+                    # Rejection fields
+                    "rejected_by": d.get("rejected_by"),
+                    "rejected_by_name": d.get("rejected_by_name"),
+                    "rejected_at": d.get("rejected_at"),
+                    "rejection_reason": d.get("rejection_reason"),
                 }
                 for d in active_docs[:3]
             ],
             "has_more_documents": active_count > 3,
+            
+            # Historical documents (rejected, superseded, uploaded_in_error)
+            "historical_documents": [
+                {
+                    "id": d.get("id"),
+                    "file_name": d.get("file_name") or d.get("original_filename"),
+                    "status": d.get("status"),
+                    "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                    "rejected_at": d.get("rejected_at"),
+                    "rejection_reason": d.get("rejection_reason"),
+                    "marked_in_error_at": d.get("marked_in_error_at"),
+                    "marked_in_error_reason": d.get("marked_in_error_reason"),
+                    "superseded_at": d.get("superseded_at"),
+                }
+                for d in historical_docs[:5]
+            ],
+            "historical_count": len(historical_docs),
             
             # Pending requests
             "pending_requests": [

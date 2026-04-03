@@ -324,11 +324,21 @@ export default function RecordCheckDialog({
   // Get endpoint based on check type
   const getEndpoint = () => {
     switch (checkType) {
-      case 'right_to_work_check': return `${API}/employees/${employeeId}/right-to-work/check`;
-      case 'dbs_status_check': return `${API}/employees/${employeeId}/dbs/check`;
-      case 'identity_verification': return `${API}/employees/${employeeId}/identity/check`;
-      case 'address_verification': return `${API}/employees/${employeeId}/address/check`;
-      default: return null;
+      case 'right_to_work':
+      case 'right_to_work_check': 
+        return `${API}/employees/${employeeId}/right-to-work/check`;
+      case 'dbs':
+      case 'dbs_status_check': 
+        return `${API}/employees/${employeeId}/dbs/check`;
+      case 'identity':
+      case 'identity_verification': 
+        return `${API}/employees/${employeeId}/identity/check`;
+      case 'proof_of_address':
+      case 'address_verification': 
+        return `${API}/employees/${employeeId}/address/check`;
+      default: 
+        console.warn(`Unknown check type: ${checkType}`);
+        return null;
     }
   };
 

@@ -198,22 +198,32 @@ export default function UploadRequirementCard({
               <div>
                 <h4 className="text-sm font-semibold text-text-primary">Evidence</h4>
                 <p className="text-xs text-text-muted">
-                  {hasFiles 
-                    ? `${counters.active} file${counters.active !== 1 ? 's' : ''} uploaded`
-                    : 'No files uploaded'
+                  {/* Computed workflow state based on file status */}
+                  {counters.verified > 0 
+                    ? `${counters.verified} verified${counters.pendingReview > 0 ? `, ${counters.pendingReview} pending` : ''}`
+                    : hasFiles 
+                      ? `${counters.active} file${counters.active !== 1 ? 's' : ''} uploaded${counters.pendingReview > 0 ? ' (pending review)' : ''}`
+                      : latestRequest && requestState === 'requested'
+                        ? 'Request sent - awaiting upload'
+                        : 'No files uploaded'
                   }
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {counters.active > 0 && (
-                <Badge className="text-[10px] px-1.5 py-0 bg-blue-100 text-blue-700 border border-blue-200">
-                  {counters.active} active
+              {counters.verified > 0 && (
+                <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border border-green-200">
+                  {counters.verified} verified
                 </Badge>
               )}
               {counters.pendingReview > 0 && (
                 <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
                   {counters.pendingReview} pending
+                </Badge>
+              )}
+              {counters.rejected > 0 && (
+                <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border border-red-200">
+                  {counters.rejected} rejected
                 </Badge>
               )}
               <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
@@ -406,8 +416,8 @@ export default function UploadRequirementCard({
                 </div>
               )}
 
-              {/* Request Status */}
-              {latestRequest && (
+              {/* Request Status - ONLY show if no evidence uploaded yet */}
+              {latestRequest && !hasFiles && (
                 <div className={`p-3 rounded-lg border ${
                   requestState === 'submitted' ? 'bg-green-50 border-green-200' :
                   requestState === 'viewed' ? 'bg-purple-50 border-purple-200' :

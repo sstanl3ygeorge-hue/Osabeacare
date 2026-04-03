@@ -99,6 +99,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **RTW Workflow Tightening (Apr 3)** - Auto-extract RTW fields when proof file uploaded. Human-friendly method labels (METHOD_LABELS mapping). Resolve checked_by to user name. Enhanced stamp badge with stamper name/date. Edit Stamp button when stamp exists. Fixed stamp document ID lookup.
 - [x] **RTW Stamp State Fix (Apr 3)** - Fixed stamp fields not passing through DualRowComplianceSection.transformToUploadSurface. Added Remove Stamp endpoint (DELETE `/api/employee-documents/{doc_id}/verification-stamp`). Evidence summary now says "accepted" instead of "verified". RecordCheckDialog warns if no accepted/stamped evidence before recording check.
 - [x] **RTW Expiry/Follow-up Alert Layer (Apr 3)** - Non-breaking, read-only computation from saved RTW result fields. `compute_rtw_status()` returns status (continuous, time_limited_valid, follow_up_due_soon, urgent_follow_up, expired, incomplete_result, not_verified). Thresholds: >180 days green, 90-180 amber, 30-90 amber+warning, <30 red+urgent, expired red+blocker. RTW Status Alert Panel in UploadRequirementCard. Page summary alert for expiring/expired RTW.
+- [x] **Compliance Page Top Restructure (Apr 3)** - Removed redundant panels (Applicant Stage, Not Ready to Work, Blocking Requirements, Compliance Alerts, duplicate buttons). Added ApprovalStatusPanel (single authoritative status block with blockers, actions). Added NextActionsPanel (dynamic clickable action items). Simplified ComplianceActionBar (Upload Evidence, Request Documents only). Focus on FUNCTION: What's blocking? What to do? Where to act?
 
 ## Prioritized Backlog
 
@@ -173,4 +174,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `POST /api/rtw/extract` - AI extraction of RTW document fields using GPT-5.2 Vision
 
 ## Last Updated
-April 3, 2026 - RTW Expiry/Follow-up Alert Layer (non-breaking status computation, threshold-based warnings, page summary alerts)
+April 3, 2026 - Compliance Page Top Restructure (ApprovalStatusPanel, NextActionsPanel, simplified ComplianceActionBar)

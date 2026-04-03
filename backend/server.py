@@ -3262,14 +3262,20 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
         "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}).to_list(10)
     
-    # Get Right to Work Verification (SOURCE OF TRUTH for status/expiry)
-    rtw_check = await db.employee_documents.find({
+    # Get Right to Work Verification from employee_documents (legacy)
+    rtw_check_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": "right_to_work_check",
         "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
         "$or": [{"active": {"$exists": False}}, {"active": True}],
         "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}).to_list(5)
+    
+    # Get Right to Work Verification from rtw_checks collection (3-layer model - SOURCE OF TRUTH)
+    rtw_check_record = await db.rtw_checks.find_one(
+        {"employee_id": employee_id, "is_current": True},
+        {"_id": 0}
+    )
     
     now = datetime.now(timezone.utc)
     
@@ -3300,17 +3306,59 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
                 summary["evidence_type"] = "document"
     
     # ═══════════════════════════════════════════════════════════════════
-    # STEP 2: Process RTW Verification (SOURCE OF TRUTH for all status)
+    # STEP 2: Process RTW Verification (3-LAYER MODEL - SOURCE OF TRUTH)
+    # Priority: rtw_checks collection > employee_documents (legacy)
     # ═══════════════════════════════════════════════════════════════════
-    if rtw_check:
+    
+    # Check rtw_checks collection first (3-layer model)
+    if rtw_check_record:
+        summary["verification_on_file"] = True
+        summary["verification_verified"] = rtw_check_record.get("outcome") == "verified"
+        summary["is_verified"] = rtw_check_record.get("outcome") == "verified"
+        summary["checked_at"] = rtw_check_record.get("checked_at")
+        summary["checked_by"] = rtw_check_record.get("checked_by")
+        summary["verified_date"] = rtw_check_record.get("checked_at") if rtw_check_record.get("outcome") == "verified" else None
+        
+        # Get expiry from the check record
+        permission_end = rtw_check_record.get("permission_end_date")
+        follow_up = rtw_check_record.get("follow_up_due_at")
+        is_indefinite = rtw_check_record.get("is_indefinite", False)
+        
+        if permission_end:
+            summary["expiry_date"] = permission_end
+            summary["permission_type"] = "time_limited"
+        elif is_indefinite:
+            summary["permission_type"] = "permanent"
+            summary["is_indefinite"] = True
+        elif rtw_check_record.get("permission_type"):
+            summary["permission_type"] = rtw_check_record.get("permission_type")
+            if rtw_check_record.get("permission_type") in ["permanent", "British Citizen", "Irish Citizen"]:
+                summary["is_indefinite"] = True
+        else:
+            # No expiry date and no explicit type = assume permanent
+            summary["permission_type"] = "permanent"
+            summary["is_indefinite"] = True
+        
+        # Compute days_remaining from expiry
+        if summary["expiry_date"]:
+            try:
+                expiry_dt = datetime.fromisoformat(summary["expiry_date"].replace('Z', '+00:00'))
+                if expiry_dt.tzinfo is None:
+                    expiry_dt = expiry_dt.replace(tzinfo=timezone.utc)
+                delta = (expiry_dt.date() - now.date()).days
+                summary["days_remaining"] = delta
+            except (ValueError, TypeError):
+                pass
+    elif rtw_check_docs:
+        # Fallback to legacy employee_documents check
         summary["verification_on_file"] = True
         summary["verification_verified"] = all(
             c.get("verified") or c.get("status") == "approved" 
-            for c in rtw_check
+            for c in rtw_check_docs
         )
         
         # Get the most recent verification record
-        for check in rtw_check:
+        for check in rtw_check_docs:
             # Extract checked_at
             if not summary["checked_at"]:
                 summary["checked_at"] = check.get("uploaded_at") or check.get("verified_at")
@@ -3363,7 +3411,68 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
             print(f"RTW verification expiry date parsing error: {e} for date: {summary['expiry_date']}")
     
     # Determine status and blocking state
-    if summary["documents_on_file"] and summary["verification_on_file"]:
+    # Priority: rtw_check_record (3-layer model) > legacy documents
+    
+    # If we have a verified check from rtw_checks, use that as source of truth
+    if rtw_check_record and rtw_check_record.get("outcome") == "verified":
+        summary["rule_applied"] = "rtw_check_verified"
+        summary["is_verified"] = True
+        
+        # Check expiry status for time-limited permission
+        days_remaining = summary.get("days_remaining")
+        
+        if days_remaining is not None:
+            if days_remaining < 0:
+                # EXPIRED - BLOCKING
+                summary["rtw_status"] = "expired"
+                summary["rtw_status_label"] = f"Expired {abs(days_remaining)}d ago"
+                summary["rtw_status_color"] = "red"
+                summary["status_band"] = "expired"
+                summary["is_blocking"] = True
+                summary["blocking_reason"] = f"Right to Work expired {abs(days_remaining)} days ago - cannot legally employ"
+                summary["needs_attention"] = True
+            elif days_remaining <= 30:
+                # Urgent - WARNING
+                summary["rtw_status"] = "expiring_urgent"
+                summary["rtw_status_label"] = f"Expires in {days_remaining}d"
+                summary["rtw_status_color"] = "amber"
+                summary["status_band"] = "urgent"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
+                summary["needs_attention"] = True
+                summary["expiry_status"] = "expiring_soon"
+            elif days_remaining <= 60:
+                # Due soon - WARNING
+                summary["rtw_status"] = "expiring_soon"
+                summary["rtw_status_label"] = f"Expires in {days_remaining}d"
+                summary["rtw_status_color"] = "amber"
+                summary["status_band"] = "due_soon"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
+                summary["needs_attention"] = True
+                summary["expiry_status"] = "expiring_soon"
+            else:
+                # Current (>60 days until expiry)
+                summary["rtw_status"] = "verified"
+                summary["rtw_status_label"] = "Verified (Time-Limited)"
+                summary["rtw_status_color"] = "green"
+                summary["status_band"] = "current"
+                summary["is_blocking"] = False
+                summary["blocking_reason"] = None
+                summary["needs_attention"] = False
+                summary["expiry_status"] = "valid"
+        else:
+            # No expiry date - permanent permission
+            summary["rtw_status"] = "verified"
+            summary["rtw_status_label"] = "Verified (Permanent)"
+            summary["rtw_status_color"] = "green"
+            summary["status_band"] = "current"
+            summary["is_blocking"] = False
+            summary["blocking_reason"] = None
+            summary["needs_attention"] = False
+            summary["expiry_status"] = "permanent"
+            summary["is_indefinite"] = True
+    elif summary["documents_on_file"] and summary["verification_on_file"]:
         if summary["documents_verified"] and summary["verification_verified"]:
             summary["rule_applied"] = "fully_verified"
             summary["is_verified"] = True  # Mark as verified

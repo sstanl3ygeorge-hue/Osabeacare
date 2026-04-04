@@ -51,7 +51,7 @@ from email_automation import (
     EventType,
     RequestFailureHandler
 )
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from openai import OpenAI
 import pytesseract
 from PIL import Image as PILImage
 from pdf2image import convert_from_bytes
@@ -23914,6 +23914,52 @@ class DocumentExtractionService:
         return len(common) >= 1
     
     @staticmethod
+    async def _call_openai_vision(image_base64: str, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """Call OpenAI Vision API directly."""
+        try:
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                logger.error("OPENAI_API_KEY not set")
+                return None
+            
+            client = OpenAI(api_key=api_key)
+            
+            # Determine image media type
+            if image_base64.startswith('/9j/'):
+                media_type = "image/jpeg"
+            elif image_base64.startswith('iVBOR'):
+                media_type = "image/png"
+            else:
+                media_type = "image/png"
+            
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": user_prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{image_base64}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1000,
+                temperature=0.1
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"OpenAI Vision call failed: {e}")
+            return None
+    
+    @staticmethod
     async def _extract_training_certificate(
         images: List[str], 
         api_key: str, 
@@ -24056,16 +24102,12 @@ Return JSON only:
     
     @staticmethod
     async def _extract_dbs(images: List[str], api_key: str, employee_name: str) -> dict:
-        """Extract DBS certificate fields."""
+        """Extract DBS certificate fields using OpenAI directly."""
         fields = {}
         metadata = {}
         issues = []
         
-        try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-dbs-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) certificates.
+        system_prompt = """You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) certificates.
 
 Extract the following fields:
 - holder_name: Name of the certificate holder
@@ -24079,7 +24121,7 @@ IMPORTANT:
 - Do NOT invent an expiry date if not explicitly shown
 - Return dates in YYYY-MM-DD format
 
-Return JSON only:
+Return JSON only, no markdown:
 {
   "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
   "certificate_number": {"value": "string or null", "confidence": 0.0-1.0},
@@ -24087,19 +24129,24 @@ Return JSON only:
   "disclosure_type": {"value": "string or null", "confidence": 0.0-1.0},
   "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}
 }"""
-            ).with_model("openai", "gpt-5.2")
-            
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Extract all fields from this DBS certificate. Return JSON only.",
-                file_contents=[image_content]
+        
+        try:
+            result = await DocumentExtractionService._call_openai_vision(
+                images[0],
+                system_prompt,
+                "Extract all fields from this DBS certificate. Return JSON only."
             )
-            
-            result = await chat.send_message(user_message)
             
             if result:
                 try:
-                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    # Handle markdown code blocks
+                    json_text = result
+                    if "```json" in result:
+                        json_text = result.split("```json")[1].split("```")[0]
+                    elif "```" in result:
+                        json_text = result.split("```")[1].split("```")[0]
+                    
+                    json_match = re.search(r'\{[\s\S]*\}', json_text)
                     if json_match:
                         data = json.loads(json_match.group())
                         for field_name, field_data in data.items():
@@ -24145,21 +24192,13 @@ Return JSON only:
     async def _extract_dbs_enhanced(images: List[str], api_key: str, employee_name: str) -> dict:
         """
         Enhanced DBS certificate/Update Service extraction for the 3-layer DBS model.
-        
-        Extracts fields needed for the DBS Result Panel:
-        - Certificate details (number, level, issue date, name, workforce)
-        - Update Service status (if screenshot)
-        - Result status (clear/information present)
+        Uses OpenAI directly.
         """
         fields = {}
         metadata = {}
         issues = []
         
-        try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-dbs-enhanced-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) documents.
+        system_prompt = """You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) documents.
 
 You may be analyzing either:
 1. A DBS Certificate (printed document)
@@ -24187,7 +24226,7 @@ IMPORTANT:
 - Return dates in YYYY-MM-DD format
 - Look for any indication of information/disclosures on the certificate
 
-Return JSON only:
+Return JSON only, no markdown:
 {
   "document_type": {"value": "dbs_certificate" or "update_service_screenshot", "confidence": 0.0-1.0},
   "certificate_number": {"value": "string or null", "confidence": 0.0-1.0},
@@ -24202,19 +24241,26 @@ Return JSON only:
   "last_status_check_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
   "result_summary": {"value": "string or null", "confidence": 0.0-1.0}
 }"""
-            ).with_model("openai", "gpt-5.2")
-            
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text=f"Extract all DBS information from this document. {'Expected holder name: ' + employee_name if employee_name else ''} Return JSON only.",
-                file_contents=[image_content]
+        
+        user_prompt = f"Extract all DBS information from this document. {'Expected holder name: ' + employee_name if employee_name else ''} Return JSON only."
+        
+        try:
+            result = await DocumentExtractionService._call_openai_vision(
+                images[0],
+                system_prompt,
+                user_prompt
             )
-            
-            result = await chat.send_message(user_message)
             
             if result:
                 try:
-                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    # Handle markdown code blocks
+                    json_text = result
+                    if "```json" in result:
+                        json_text = result.split("```json")[1].split("```")[0]
+                    elif "```" in result:
+                        json_text = result.split("```")[1].split("```")[0]
+                    
+                    json_match = re.search(r'\{[\s\S]*\}', json_text)
                     if json_match:
                         data = json.loads(json_match.group())
                         for field_name, field_data in data.items():
@@ -24237,7 +24283,6 @@ Return JSON only:
             # DBS-specific validation
             cert_num = fields.get("certificate_number")
             if cert_num:
-                # Remove spaces and check format
                 clean_num = str(cert_num).replace(" ", "").replace("-", "")
                 if not re.match(r'^\d{12}$', clean_num):
                     issues.append({
@@ -24246,7 +24291,6 @@ Return JSON only:
                         "severity": "warning"
                     })
                 else:
-                    # Normalize the certificate number (no spaces)
                     fields["certificate_number"] = clean_num
             
             # Name mismatch check
@@ -24568,16 +24612,12 @@ Return JSON only:
     
     @staticmethod
     async def _extract_rtw(images: List[str], api_key: str, employee_name: str) -> dict:
-        """Extract Right to Work document fields."""
+        """Extract Right to Work document fields using OpenAI directly."""
         fields = {}
         metadata = {}
         issues = []
         
-        try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-rtw-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing Right to Work documents (passports, visas, BRP cards, share codes).
+        system_prompt = """You are a document extraction specialist analyzing Right to Work documents (passports, visas, BRP cards, share codes).
 
 Extract the following fields:
 - holder_name: Name on document
@@ -24590,7 +24630,7 @@ Extract the following fields:
 - permission_end_date: Work permission end date if different from expiry
 - issuer: Issuing authority/country
 
-Return JSON only:
+Return JSON only, no markdown:
 {
   "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
   "document_type": {"value": "string or null", "confidence": 0.0-1.0},
@@ -24602,19 +24642,24 @@ Return JSON only:
   "permission_end_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
   "issuer": {"value": "string or null", "confidence": 0.0-1.0}
 }"""
-            ).with_model("openai", "gpt-5.2")
-            
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Extract all fields from this Right to Work document. Return JSON only.",
-                file_contents=[image_content]
+        
+        try:
+            result = await DocumentExtractionService._call_openai_vision(
+                images[0],
+                system_prompt,
+                "Extract all fields from this Right to Work document. Return JSON only."
             )
-            
-            result = await chat.send_message(user_message)
             
             if result:
                 try:
-                    json_match = re.search(r'\{[\s\S]*\}', result)
+                    # Handle markdown code blocks
+                    json_text = result
+                    if "```json" in result:
+                        json_text = result.split("```json")[1].split("```")[0]
+                    elif "```" in result:
+                        json_text = result.split("```")[1].split("```")[0]
+                    
+                    json_match = re.search(r'\{[\s\S]*\}', json_text)
                     if json_match:
                         data = json.loads(json_match.group())
                         for field_name, field_data in data.items():

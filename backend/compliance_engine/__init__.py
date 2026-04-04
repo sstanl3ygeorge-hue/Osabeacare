@@ -59,6 +59,10 @@ from .extraction import (
     DocumentExtractor,
     resize_image_for_extraction,
     pdf_first_page_to_image,
+    extract_rtw_fields,
+    extract_dbs_fields,
+    extract_identity_fields,
+    extract_address_fields,
     RTW_EXTRACTION_PROMPT,
     DBS_EXTRACTION_PROMPT,
     IDENTITY_EXTRACTION_PROMPT,
@@ -85,5 +89,6 @@ __all__ = [
     'get_label', 'get_status_color',
     # Extraction
     'DocumentExtractor', 'resize_image_for_extraction', 'pdf_first_page_to_image',
+    'extract_rtw_fields', 'extract_dbs_fields', 'extract_identity_fields', 'extract_address_fields',
     'RTW_EXTRACTION_PROMPT', 'DBS_EXTRACTION_PROMPT', 'IDENTITY_EXTRACTION_PROMPT', 'ADDRESS_EXTRACTION_PROMPT'
 ]

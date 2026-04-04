@@ -1,14 +1,14 @@
 # Document Extraction Service
-# Uses OpenAI GPT-5.2 Vision via Emergent Integrations for document field extraction
+# Uses OpenAI GPT-5.2 Vision directly for document field extraction
 
 import json
 import re
-import uuid
+import os
 import logging
 from typing import Dict, Optional, Any
 from io import BytesIO
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ Extract the following fields from this document:
 - nationality: Nationality
 - expiry_date: Document expiry date (format: YYYY-MM-DD)
 
-Return valid JSON only:
+Return valid JSON only, no markdown:
 {
   "permission_type": "string or null",
   "permission_start": "YYYY-MM-DD or null",
@@ -61,7 +61,7 @@ Extract the following fields from this DBS certificate or Update Service screens
 - result_status: Result (clear, information_present)
 - update_service_status: If Update Service screenshot, status shown (active, not_registered, etc.)
 
-Return valid JSON only:
+Return valid JSON only, no markdown:
 {
   "certificate_number": "string or null",
   "dbs_level": "Basic|Standard|Enhanced|Enhanced with Barred List(s) or null",
@@ -85,7 +85,7 @@ Extract the following fields from this identity document (passport, driving lice
 - nationality: Nationality/citizenship
 - issuing_authority: Issuing authority/country
 
-Return valid JSON only:
+Return valid JSON only, no markdown:
 {
   "document_type": "Passport|Driving Licence|National ID Card or null",
   "full_name": "string or null",
@@ -110,7 +110,7 @@ Extract the following fields from this proof of address document (utility bill, 
 - issue_date: Document date/issue date (format: YYYY-MM-DD)
 - issuer: Company/organization that issued the document
 
-Return valid JSON only:
+Return valid JSON only, no markdown:
 {
   "document_type": "Utility Bill|Bank Statement|Council Tax|HMRC Letter|Tenancy Agreement|Other or null",
   "name_on_document": "string or null",
@@ -124,12 +124,24 @@ Return valid JSON only:
 
 
 # =============================================================================
+# OPENAI CLIENT
+# =============================================================================
+
+def get_openai_client() -> OpenAI:
+    """Get OpenAI client with API key from environment."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable not set")
+    return OpenAI(api_key=api_key)
+
+
+# =============================================================================
 # EXTRACTION SERVICE
 # =============================================================================
 
 class DocumentExtractor:
     """
-    Document extraction service using OpenAI GPT-5.2 Vision via Emergent Integrations.
+    Document extraction service using OpenAI GPT-4o Vision directly.
     
     Architecture:
     Upload Evidence → Backend /api/{requirement}/extract → OpenAI Vision → Structured JSON → Populate Result Panel
@@ -140,26 +152,23 @@ class DocumentExtractor:
     - Frontend pre-fills fields from extraction but allows edits
     """
     
-    def __init__(self, api_key: str):
-        """Initialize with Emergent LLM API key."""
-        self.api_key = api_key
+    def __init__(self, api_key: Optional[str] = None):
+        """Initialize with OpenAI API key."""
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OpenAI API key required")
+        self.client = OpenAI(api_key=self.api_key)
     
     async def extract_rtw(
         self, 
         image_base64: str,
         employee_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Extract Right to Work fields from document image.
-        
-        Returns:
-            Dict with 'fields', 'success', 'error' keys
-        """
+        """Extract Right to Work fields from document image."""
         return await self._extract_document(
             image_base64=image_base64,
             prompt=RTW_EXTRACTION_PROMPT,
-            extraction_type="rtw",
-            context={"employee_name": employee_name}
+            extraction_type="rtw"
         )
     
     async def extract_dbs(
@@ -167,17 +176,11 @@ class DocumentExtractor:
         image_base64: str,
         employee_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Extract DBS certificate fields from document image.
-        
-        Returns:
-            Dict with 'fields', 'success', 'error' keys
-        """
+        """Extract DBS certificate fields from document image."""
         return await self._extract_document(
             image_base64=image_base64,
             prompt=DBS_EXTRACTION_PROMPT,
-            extraction_type="dbs",
-            context={"employee_name": employee_name}
+            extraction_type="dbs"
         )
     
     async def extract_identity(
@@ -186,17 +189,11 @@ class DocumentExtractor:
         employee_name: Optional[str] = None,
         employee_dob: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Extract identity document fields from document image.
-        
-        Returns:
-            Dict with 'fields', 'success', 'error' keys
-        """
+        """Extract identity document fields from document image."""
         return await self._extract_document(
             image_base64=image_base64,
             prompt=IDENTITY_EXTRACTION_PROMPT,
-            extraction_type="identity",
-            context={"employee_name": employee_name, "employee_dob": employee_dob}
+            extraction_type="identity"
         )
     
     async def extract_address(
@@ -205,75 +202,83 @@ class DocumentExtractor:
         employee_name: Optional[str] = None,
         expected_address: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """
-        Extract proof of address fields from document image.
-        
-        Returns:
-            Dict with 'fields', 'success', 'error' keys
-        """
+        """Extract proof of address fields from document image."""
         return await self._extract_document(
             image_base64=image_base64,
             prompt=ADDRESS_EXTRACTION_PROMPT,
-            extraction_type="address",
-            context={"employee_name": employee_name, "expected_address": expected_address}
+            extraction_type="address"
         )
     
     async def _extract_document(
         self,
         image_base64: str,
         prompt: str,
-        extraction_type: str,
-        context: Optional[Dict] = None
+        extraction_type: str
     ) -> Dict[str, Any]:
         """
-        Core extraction method using GPT-5.2 Vision.
-        
-        Args:
-            image_base64: Base64 encoded image data
-            prompt: System prompt with extraction instructions
-            extraction_type: Type of extraction (rtw, dbs, identity, address)
-            context: Optional context like employee name for validation
-        
-        Returns:
-            Dict with:
-            - fields: Extracted field values
-            - success: Whether extraction succeeded
-            - error: Error message if failed (but NOT blocking)
-            - confidence: Overall extraction confidence
+        Core extraction method using OpenAI GPT-4o Vision directly.
         """
         try:
-            # Create chat with GPT-5.2 Vision
-            chat = LlmChat(
-                api_key=self.api_key,
-                session_id=f"extract-{extraction_type}-{uuid.uuid4()}",
-                system_message=prompt
-            ).with_model("openai", "gpt-5.2")
+            # Determine image media type
+            if image_base64.startswith('/9j/'):
+                media_type = "image/jpeg"
+            elif image_base64.startswith('iVBOR'):
+                media_type = "image/png"
+            else:
+                media_type = "image/png"  # Default
             
-            # Build user message with image
-            image_content = ImageContent(image_base64=image_base64)
-            user_message = UserMessage(
-                text=f"Extract all fields from this {extraction_type.upper()} document. Return valid JSON only.",
-                file_contents=[image_content]
+            # Call OpenAI Vision API directly
+            response = self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Extract all fields from this {extraction_type.upper()} document. Return valid JSON only."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{media_type};base64,{image_base64}",
+                                    "detail": "high"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1000,
+                temperature=0.1
             )
             
-            # Send to model
-            result = await chat.send_message(user_message)
+            result = response.choices[0].message.content
             
             if not result:
                 return {
                     "fields": {},
                     "success": False,
-                    "error": "No response from AI model",
+                    "error": "No response from OpenAI",
                     "confidence": 0.0
                 }
             
-            # Parse JSON from response
-            json_match = re.search(r'\{[\s\S]*\}', result)
+            # Parse JSON from response (handle markdown code blocks)
+            json_text = result
+            if "```json" in result:
+                json_text = result.split("```json")[1].split("```")[0]
+            elif "```" in result:
+                json_text = result.split("```")[1].split("```")[0]
+            
+            json_match = re.search(r'\{[\s\S]*\}', json_text)
             if not json_match:
                 return {
                     "fields": {},
                     "success": False,
-                    "error": "Could not parse AI response as JSON",
+                    "error": "Could not parse response as JSON",
                     "confidence": 0.0
                 }
             
@@ -283,19 +288,19 @@ class DocumentExtractor:
                 return {
                     "fields": {},
                     "success": False,
-                    "error": f"Invalid JSON in response: {str(e)}",
+                    "error": f"Invalid JSON: {str(e)}",
                     "confidence": 0.0
                 }
             
             # Clean up fields - remove null values
             cleaned_fields = {k: v for k, v in fields.items() if v is not None}
             
-            # Calculate confidence based on how many fields were extracted
+            # Calculate confidence
             total_fields = len(fields)
             extracted_fields = len(cleaned_fields)
             confidence = extracted_fields / total_fields if total_fields > 0 else 0.0
             
-            logger.info(f"{extraction_type} extraction completed: {extracted_fields}/{total_fields} fields, confidence={confidence:.2f}")
+            logger.info(f"{extraction_type} extraction: {extracted_fields}/{total_fields} fields, confidence={confidence:.2f}")
             
             return {
                 "fields": cleaned_fields,
@@ -317,47 +322,58 @@ class DocumentExtractor:
 
 
 # =============================================================================
+# STANDALONE EXTRACTION FUNCTIONS (for server.py)
+# =============================================================================
+
+async def extract_rtw_fields(image_base64: str) -> Dict[str, Any]:
+    """Standalone RTW extraction function."""
+    extractor = DocumentExtractor()
+    return await extractor.extract_rtw(image_base64)
+
+
+async def extract_dbs_fields(image_base64: str) -> Dict[str, Any]:
+    """Standalone DBS extraction function."""
+    extractor = DocumentExtractor()
+    return await extractor.extract_dbs(image_base64)
+
+
+async def extract_identity_fields(image_base64: str) -> Dict[str, Any]:
+    """Standalone identity extraction function."""
+    extractor = DocumentExtractor()
+    return await extractor.extract_identity(image_base64)
+
+
+async def extract_address_fields(image_base64: str) -> Dict[str, Any]:
+    """Standalone address extraction function."""
+    extractor = DocumentExtractor()
+    return await extractor.extract_address(image_base64)
+
+
+# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
 def resize_image_for_extraction(image_bytes: bytes, max_size: int = 1024) -> bytes:
-    """
-    Resize image to reduce payload size for faster extraction.
-    
-    Vision models work fine with smaller images for document extraction.
-    This reduces latency significantly.
-    """
+    """Resize image to reduce payload size for faster extraction."""
     try:
         from PIL import Image
         
         img = Image.open(BytesIO(image_bytes))
-        
-        # Calculate new size maintaining aspect ratio
         ratio = max_size / max(img.size)
         if ratio < 1:
             new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
             img = img.resize(new_size, Image.Resampling.LANCZOS)
         
-        # Save to bytes
         output = BytesIO()
         img.save(output, format=img.format or 'PNG', quality=85)
         return output.getvalue()
         
-    except ImportError:
-        # PIL not available, return original
-        return image_bytes
     except Exception:
-        # Any other error, return original
         return image_bytes
 
 
 def pdf_first_page_to_image(pdf_bytes: bytes) -> Optional[bytes]:
-    """
-    Convert first page of PDF to image for extraction.
-    
-    Most compliance documents have key info on first page.
-    This is much faster than processing entire PDF.
-    """
+    """Convert first page of PDF to image for extraction."""
     try:
         import fitz  # PyMuPDF
         
@@ -365,17 +381,10 @@ def pdf_first_page_to_image(pdf_bytes: bytes) -> Optional[bytes]:
         if len(doc) == 0:
             return None
         
-        # Get first page
         page = doc[0]
-        
-        # Render at reasonable DPI (150 is enough for text extraction)
         mat = fitz.Matrix(150/72, 150/72)
         pix = page.get_pixmap(matrix=mat)
-        
-        # Convert to PNG bytes
         return pix.tobytes("png")
         
-    except ImportError:
-        return None
     except Exception:
         return None

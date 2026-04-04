@@ -317,6 +317,36 @@ Connected existing backend systems to new frontend UI components:
 - `/app/frontend/src/pages/portal/EmployeeProfilePage.js` (Tab restructure)
 - `/app/backend/server.py` (GET /api/employees/{id}/references endpoint)
 
+## Document Request & Interview Visibility (COMPLETED Apr 4)
+Connected existing systems for document request tracking and interview form output:
+
+### 1. Document Requests Panel (NEW)
+- Created `DocumentRequestsPanel.js` component
+- Shows pending requests with status badges (Sent, Opened, Clicked, Submitted, Overdue)
+- Displays sent/due dates for each request
+- Groups requests by: Pending vs Completed
+- Test Result: 100% pass
+
+### 2. Interview Records Panel (NEW)
+- Created `InterviewFormPanel.js` component
+- Displays submitted interview forms as structured records
+- Expandable details showing: strengths, areas for development, notes
+- PDF download button (fixed endpoint to /download-pdf)
+- Shows decision badges (Hire, Consider, Not Suitable)
+
+### 3. Backend Endpoint Added
+- `GET /api/employees/{id}/forms` - Returns form submissions with optional requirement_id filter
+- Normalizes form_data/data fields for compatibility
+
+### Files Created/Modified
+- `/app/frontend/src/components/compliance/DocumentRequestsPanel.js` (NEW)
+- `/app/frontend/src/components/compliance/InterviewFormPanel.js` (NEW)
+- `/app/backend/server.py` (GET /api/employees/{id}/forms)
+
+### Bugs Fixed by Testing Agent
+- InterviewFormPanel: Fixed PDF endpoint URL (export-pdf → download-pdf)
+- server.py: Fixed role check to allow super_admin for PDF download
+
 ## AI Extraction Architecture (Updated Apr 4)
 - **Provider**: Google Gemini 2.5 Flash (via `google-genai` SDK)
 - **API Key**: GEMINI_API_KEY in backend .env
@@ -333,10 +363,10 @@ Connected existing backend systems to new frontend UI components:
 - [x] Tab restructure - Overview, Compliance, References, Training, Policies, Audit
 - [x] Remove redundancy - WhatsNeededPanel, duplicate blockers, training summary
 - [x] Audit Trail panel using CQC audit endpoint
+- [x] Document request visibility - Show request status (sent, submitted, overdue) in UI
+- [x] Interview form output - Display as structured record, enable PDF download
 - [ ] Form rendering - Replace /upload-document with /form/{template_id}
 - [ ] Prefill activation - Frontend calls auto-fill endpoint on form load
-- [ ] Document request visibility - Show request status (sent, submitted, overdue) in UI
-- [ ] Interview form output - Display as structured record, enable PDF download
 
 ### P2 (Medium)
 - [ ] server.py modular split (>43k lines)

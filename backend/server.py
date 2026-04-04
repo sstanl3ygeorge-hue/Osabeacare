@@ -24049,7 +24049,7 @@ Return JSON only:
             issues.append({
                 "code": "extraction_error",
                 "detail": str(e),
-                "severity": "blocker"
+                "severity": "warning"
             })
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
@@ -24137,7 +24137,7 @@ Return JSON only:
                 })
         
         except Exception as e:
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24283,12 +24283,12 @@ Return JSON only:
                     issues.append({
                         "code": "update_service_changed",
                         "detail": "Update Service shows changes - request a new DBS certificate disclosure.",
-                        "severity": "blocker"
+                        "severity": "warning"
                     })
         
         except Exception as e:
             logger.error(f"DBS enhanced extraction error: {e}")
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24432,7 +24432,7 @@ Return JSON only:
         
         except Exception as e:
             logger.error(f"Identity extraction error: {e}")
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24562,7 +24562,7 @@ Return JSON only:
         
         except Exception as e:
             logger.error(f"Address extraction error: {e}")
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24642,7 +24642,7 @@ Return JSON only:
                 })
         
         except Exception as e:
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24712,7 +24712,7 @@ Return JSON only:
                     issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
         
         except Exception as e:
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24797,7 +24797,7 @@ Return JSON only:
                         issues.append({
                             "code": "proof_of_address_out_of_date",
                             "detail": f"Document is {months_old} months old (exceeds 12 month limit)",
-                            "severity": "blocker"
+                            "severity": "warning"
                         })
                     elif days_old > 270:  # 9 months - warning
                         issues.append({
@@ -24821,7 +24821,7 @@ Return JSON only:
                 })
         
         except Exception as e:
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -24949,7 +24949,7 @@ Return JSON only:
                             issues.append({
                                 "code": "permission_expired",
                                 "detail": "This document shows expired immigration permission - cannot be used for RTW verification",
-                                "severity": "blocker"
+                                "severity": "warning"
                             })
                         
                         # Check for work restrictions
@@ -24957,7 +24957,7 @@ Return JSON only:
                             issues.append({
                                 "code": "work_not_permitted",
                                 "detail": "This document indicates work is NOT permitted",
-                                "severity": "blocker"
+                                "severity": "warning"
                             })
                         
                         # Follow-up reminder
@@ -24980,7 +24980,7 @@ Return JSON only:
         
         except Exception as e:
             logger.error(f"RTW extraction error: {e}", exc_info=True)
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     
@@ -25038,7 +25038,7 @@ Return JSON only."""
                     pass
         
         except Exception as e:
-            issues.append({"code": "extraction_error", "detail": str(e), "severity": "blocker"})
+            issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
     

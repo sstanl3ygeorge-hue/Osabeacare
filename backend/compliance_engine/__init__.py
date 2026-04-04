@@ -55,6 +55,16 @@ from .labels import (
     get_status_color
 )
 
+from .extraction import (
+    DocumentExtractor,
+    resize_image_for_extraction,
+    pdf_first_page_to_image,
+    RTW_EXTRACTION_PROMPT,
+    DBS_EXTRACTION_PROMPT,
+    IDENTITY_EXTRACTION_PROMPT,
+    ADDRESS_EXTRACTION_PROMPT
+)
+
 __all__ = [
     # Models
     'RequirementType', 'EvidenceStatus', 'StampType', 
@@ -72,5 +82,8 @@ __all__ = [
     'OUTCOME_LABELS', 'COMPUTED_STATE_LABELS', 'METHOD_LABELS',
     'RTW_METHOD_LABELS', 'DBS_METHOD_LABELS', 'IDENTITY_METHOD_LABELS', 'ADDRESS_METHOD_LABELS',
     'STATUS_COLORS', 'REQUIREMENT_TYPE_LABELS', 'BLOCKER_MESSAGES',
-    'get_label', 'get_status_color'
+    'get_label', 'get_status_color',
+    # Extraction
+    'DocumentExtractor', 'resize_image_for_extraction', 'pdf_first_page_to_image',
+    'RTW_EXTRACTION_PROMPT', 'DBS_EXTRACTION_PROMPT', 'IDENTITY_EXTRACTION_PROMPT', 'ADDRESS_EXTRACTION_PROMPT'
 ]

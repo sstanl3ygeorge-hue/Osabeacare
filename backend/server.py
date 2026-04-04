@@ -26670,9 +26670,9 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "citizenship_status_declared": form.right_to_work.citizenship_status,
         "has_dbs_declared": form.criminal_declaration.consents_to_dbs_check,
         "has_criminal_convictions_declared": form.criminal_declaration.has_criminal_convictions,
-        "has_professional_registration_declared": form.declarations.has_professional_registration,
-        "professional_registration_body": form.declarations.registration_body,
-        "professional_registration_number": form.declarations.registration_number,
+        "has_professional_registration_declared": getattr(form.declarations, 'has_professional_registration', False),
+        "professional_registration_body": getattr(form.declarations, 'registration_body', None),
+        "professional_registration_number": getattr(form.declarations, 'registration_number', None),
         
         # Application metadata
         "application_source": "online_structured",
@@ -26905,11 +26905,14 @@ async def submit_structured_application(form: StructuredApplicationForm):
         })
     
     # Professional Registration (if declared and not already in role pack)
-    if form.declarations.has_professional_registration and normalized_role != "nurse":
+    has_prof_reg = getattr(form.declarations, 'has_professional_registration', False)
+    if has_prof_reg and normalized_role != "nurse":
+        reg_body = getattr(form.declarations, 'registration_body', 'Unknown')
+        reg_number = getattr(form.declarations, 'registration_number', 'Unknown')
         follow_up_items.append({
             "type": "professional_registration",
             "requirement_key": "professional_registration",
-            "description": f"Verify {form.declarations.registration_body} registration: {form.declarations.registration_number}",
+            "description": f"Verify {reg_body} registration: {reg_number}",
             "status": "verification_required"
         })
     

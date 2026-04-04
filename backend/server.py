@@ -23914,8 +23914,8 @@ class DocumentExtractionService:
         return len(common) >= 1
     
     @staticmethod
-    async def _call_openai_vision(image_base64: str, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """Call OpenAI Vision API directly."""
+    async def _call_openai_vision(image_base64: str, prompt: str, user_prompt: str = None) -> Optional[str]:
+        """Call OpenAI Vision API directly with production-grade prompts."""
         try:
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
@@ -23932,14 +23932,18 @@ class DocumentExtractionService:
             else:
                 media_type = "image/png"
             
+            # Combine prompt - production pattern: prompt contains all instructions
+            full_prompt = prompt
+            if user_prompt:
+                full_prompt = f"{prompt}\n\n{user_prompt}"
+            
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": system_prompt},
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": user_prompt},
+                            {"type": "text", "text": full_prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
@@ -23958,6 +23962,25 @@ class DocumentExtractionService:
         except Exception as e:
             logger.error(f"OpenAI Vision call failed: {e}")
             return None
+    
+    @staticmethod
+    def _parse_json_response(response_text: str) -> dict:
+        """Parse JSON from model response with JSON guard."""
+        if not response_text:
+            return {}
+        
+        # JSON Guard - models sometimes add text before JSON
+        match = re.search(r"\{.*\}", response_text, re.S)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+        
+        try:
+            return json.loads(response_text)
+        except json.JSONDecodeError:
+            return {}
     
     @staticmethod
     async def _extract_training_certificate(
@@ -24102,81 +24125,78 @@ Return JSON only:
     
     @staticmethod
     async def _extract_dbs(images: List[str], api_key: str, employee_name: str) -> dict:
-        """Extract DBS certificate fields using OpenAI directly."""
+        """Extract DBS certificate fields using OpenAI directly with production prompts."""
         fields = {}
         metadata = {}
         issues = []
         
-        system_prompt = """You are a document extraction specialist analyzing DBS (Disclosure and Barring Service) certificates.
+        # Production-grade DBS prompt
+        prompt = """Extract DBS certificate information from the document.
 
-Extract the following fields:
-- holder_name: Name of the certificate holder
-- certificate_number: DBS certificate number (12-digit number)
-- issue_date: Date of issue (format: YYYY-MM-DD)
-- disclosure_type: Type (Basic, Standard, Enhanced, Enhanced with Barred Lists)
-- expiry_date: ONLY if explicitly printed on certificate (usually DBS certificates don't have expiry)
+Return JSON only.
 
-IMPORTANT:
-- DBS certificates typically do NOT have an expiry date printed
-- Do NOT invent an expiry date if not explicitly shown
-- Return dates in YYYY-MM-DD format
+Fields:
 
-Return JSON only, no markdown:
+certificate_number
+applicant_name
+issue_date
+check_type (basic, standard, enhanced)
+status (clear, information_present)
+
+Rules:
+
+If the certificate states "No information recorded", status = clear.
+If offences or cautions appear, status = information_present.
+Certificate numbers are 12 digits.
+Use ISO date format YYYY-MM-DD.
+
+Return JSON only.
+
+Example:
+
 {
-  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
-  "certificate_number": {"value": "string or null", "confidence": 0.0-1.0},
-  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "disclosure_type": {"value": "string or null", "confidence": 0.0-1.0},
-  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}
+  "certificate_number": "001234567890",
+  "applicant_name": "Jane Smith",
+  "issue_date": "2025-10-12",
+  "check_type": "enhanced",
+  "status": "clear"
 }"""
         
         try:
-            result = await DocumentExtractionService._call_openai_vision(
-                images[0],
-                system_prompt,
-                "Extract all fields from this DBS certificate. Return JSON only."
-            )
+            result = await DocumentExtractionService._call_openai_vision(images[0], prompt)
             
             if result:
-                try:
-                    # Handle markdown code blocks
-                    json_text = result
-                    if "```json" in result:
-                        json_text = result.split("```json")[1].split("```")[0]
-                    elif "```" in result:
-                        json_text = result.split("```")[1].split("```")[0]
-                    
-                    json_match = re.search(r'\{[\s\S]*\}', json_text)
-                    if json_match:
-                        data = json.loads(json_match.group())
-                        for field_name, field_data in data.items():
-                            if isinstance(field_data, dict):
-                                value = field_data.get("value")
-                                confidence = field_data.get("confidence", 0.5)
-                            else:
-                                value = field_data
-                                confidence = 0.5
-                            
-                            fields[field_name] = value
-                            metadata[field_name] = {
-                                "source_type": "explicit" if value else "not_found",
-                                "confidence": confidence
-                            }
-                except json.JSONDecodeError as e:
-                    issues.append({"code": "parse_error", "detail": str(e), "severity": "warning"})
+                data = DocumentExtractionService._parse_json_response(result)
+                if data:
+                    # Map to expected field names
+                    field_mapping = {
+                        "certificate_number": "certificate_number",
+                        "applicant_name": "holder_name",
+                        "issue_date": "issue_date",
+                        "check_type": "disclosure_type",
+                        "status": "result_status"
+                    }
+                    for src_field, value in data.items():
+                        target_field = field_mapping.get(src_field, src_field)
+                        fields[target_field] = value
+                        metadata[target_field] = {
+                            "source_type": "explicit" if value else "not_found",
+                            "confidence": 0.95 if value else 0.0
+                        }
+                else:
+                    issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
             
             # DBS-specific validation
             if fields.get("certificate_number"):
-                cert_num = fields["certificate_number"]
-                if not re.match(r'^\d{12}$', str(cert_num).replace(" ", "")):
+                cert_num = str(fields["certificate_number"]).replace(" ", "")
+                if not re.match(r'^\d{12}$', cert_num):
                     issues.append({
                         "code": "invalid_certificate_number",
                         "detail": "Certificate number should be 12 digits",
                         "severity": "warning"
                     })
             
-            # Note about policy-based renewal
-            if not fields.get("expiry_date") and fields.get("issue_date"):
+            if not fields.get("issue_date"):
                 issues.append({
                     "code": "no_explicit_expiry",
                     "detail": "DBS certificates don't expire, but your organization may have a renewal policy",
@@ -24612,79 +24632,91 @@ Return JSON only:
     
     @staticmethod
     async def _extract_rtw(images: List[str], api_key: str, employee_name: str) -> dict:
-        """Extract Right to Work document fields using OpenAI directly."""
+        """Extract Right to Work document fields using OpenAI directly with production prompts."""
         fields = {}
         metadata = {}
         issues = []
         
-        system_prompt = """You are a document extraction specialist analyzing Right to Work documents (passports, visas, BRP cards, share codes).
+        # Production-grade RTW prompt
+        prompt = """You are an AI system extracting structured compliance data from UK Right to Work documents.
 
-Extract the following fields:
-- holder_name: Name on document
-- document_type: Type (Passport, Visa, BRP, Share Code Letter, etc.)
-- document_subtype: Subtype if applicable
-- document_number: Document/passport number
-- nationality: Nationality if shown
-- issue_date: Issue date (format: YYYY-MM-DD)
-- expiry_date: Expiry date (format: YYYY-MM-DD)
-- permission_end_date: Work permission end date if different from expiry
-- issuer: Issuing authority/country
+Extract the following fields and return ONLY valid JSON.
 
-Return JSON only, no markdown:
+If a field cannot be found, return null.
+
+Fields:
+
+holder_name
+document_type
+document_number
+nationality
+permission_type (e.g., British Citizen, Skilled Worker Visa, Student Visa, Pre-Settled Status)
+permission_start
+permission_end
+share_code
+pvn_number
+work_restrictions
+indefinite_right_to_work (true/false)
+issue_date
+expiry_date
+
+Rules:
+
+If the document states "no time limit" or "indefinite leave", set indefinite_right_to_work = true.
+If a visa expiry date exists, populate permission_end.
+Share codes are usually 9 characters.
+PVN numbers typically begin with "PVN".
+Use ISO date format YYYY-MM-DD.
+
+Return JSON only.
+
+Example:
+
 {
-  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
-  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
-  "document_subtype": {"value": "string or null", "confidence": 0.0-1.0},
-  "document_number": {"value": "string or null", "confidence": 0.0-1.0},
-  "nationality": {"value": "string or null", "confidence": 0.0-1.0},
-  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "permission_end_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "issuer": {"value": "string or null", "confidence": 0.0-1.0}
+  "holder_name": "Jane Smith",
+  "document_type": "BRP",
+  "document_number": "ZN1234567",
+  "nationality": "Nigerian",
+  "permission_type": "Skilled Worker Visa",
+  "permission_start": "2023-05-10",
+  "permission_end": "2026-05-10",
+  "share_code": "ABC123DEF",
+  "pvn_number": null,
+  "work_restrictions": null,
+  "indefinite_right_to_work": false,
+  "issue_date": "2023-05-10",
+  "expiry_date": "2026-05-10"
 }"""
         
         try:
-            result = await DocumentExtractionService._call_openai_vision(
-                images[0],
-                system_prompt,
-                "Extract all fields from this Right to Work document. Return JSON only."
-            )
+            result = await DocumentExtractionService._call_openai_vision(images[0], prompt)
             
             if result:
-                try:
-                    # Handle markdown code blocks
-                    json_text = result
-                    if "```json" in result:
-                        json_text = result.split("```json")[1].split("```")[0]
-                    elif "```" in result:
-                        json_text = result.split("```")[1].split("```")[0]
-                    
-                    json_match = re.search(r'\{[\s\S]*\}', json_text)
-                    if json_match:
-                        data = json.loads(json_match.group())
-                        for field_name, field_data in data.items():
-                            if isinstance(field_data, dict):
-                                value = field_data.get("value")
-                                confidence = field_data.get("confidence", 0.5)
-                            else:
-                                value = field_data
-                                confidence = 0.5
-                            
-                            fields[field_name] = value
-                            metadata[field_name] = {
-                                "source_type": "explicit" if value else "not_found",
-                                "confidence": confidence
-                            }
-                except json.JSONDecodeError:
+                data = DocumentExtractionService._parse_json_response(result)
+                if data:
+                    for field_name, value in data.items():
+                        fields[field_name] = value
+                        metadata[field_name] = {
+                            "source_type": "explicit" if value else "not_found",
+                            "confidence": 0.9 if value else 0.0
+                        }
+                else:
                     issues.append({"code": "parse_error", "detail": "Failed to parse response", "severity": "warning"})
             
             # RTW-specific validation
-            if not fields.get("expiry_date") and not fields.get("permission_end_date"):
-                issues.append({
-                    "code": "missing_expiry_date",
-                    "detail": "No expiry or permission end date found - may indicate indefinite right to work",
-                    "severity": "info"
-                })
+            if not fields.get("expiry_date") and not fields.get("permission_end"):
+                if fields.get("indefinite_right_to_work"):
+                    issues.append({
+                        "code": "indefinite_permission",
+                        "detail": "Document indicates indefinite right to work",
+                        "severity": "info"
+                    })
+                else:
+                    issues.append({
+                        "code": "missing_expiry_date",
+                        "detail": "No expiry or permission end date found",
+                        "severity": "warning"
+                    })
         
         except Exception as e:
             issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})

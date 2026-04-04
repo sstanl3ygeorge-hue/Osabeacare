@@ -1,5 +1,6 @@
 # Document Extraction Service
-# Uses OpenAI GPT-5.2 Vision directly for document field extraction
+# Uses OpenAI GPT-4o Vision directly for UK compliance document extraction
+# Production-grade prompts for high accuracy extraction
 
 import json
 import re
@@ -14,112 +15,142 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# EXTRACTION PROMPTS
+# PRODUCTION-GRADE EXTRACTION PROMPTS (UK Compliance Documents)
 # =============================================================================
 
-RTW_EXTRACTION_PROMPT = """You are a UK Right to Work document extraction specialist.
+RTW_EXTRACTION_PROMPT = """You are an AI system extracting structured compliance data from UK Right to Work documents.
 
-Extract the following fields from this document:
-- permission_type: Type of permission (e.g., "British Citizen", "Indefinite Leave to Remain", "Tier 2 Visa", "BRP", "EU Settlement Scheme")
-- permission_start: Permission start date (format: YYYY-MM-DD)
-- permission_end: Permission end date (format: YYYY-MM-DD), null if indefinite
-- share_code: Share code if present (format: XXX-XXX-XXX)
-- pvn_number: Positive Verification Notice number if present
-- work_restrictions: Any work restrictions mentioned
-- indefinite: true if permission is indefinite/permanent, false otherwise
-- holder_name: Full name on document
-- document_type: Document type (Passport, BRP, Visa, Share Code Letter)
-- document_number: Document/passport number
-- nationality: Nationality
-- expiry_date: Document expiry date (format: YYYY-MM-DD)
+Extract the following fields and return ONLY valid JSON.
 
-Return valid JSON only, no markdown:
+If a field cannot be found, return null.
+
+Fields:
+
+permission_type (e.g., British Citizen, Skilled Worker Visa, Student Visa, Pre-Settled Status)
+permission_start
+permission_end
+share_code
+pvn_number
+work_restrictions
+indefinite_right_to_work (true/false)
+
+Rules:
+
+If the document states "no time limit" or "indefinite leave", set indefinite_right_to_work = true.
+If a visa expiry date exists, populate permission_end.
+Share codes are usually 9 characters.
+PVN numbers typically begin with "PVN".
+
+Return JSON only.
+
+Expected output example:
+
 {
-  "permission_type": "string or null",
-  "permission_start": "YYYY-MM-DD or null",
-  "permission_end": "YYYY-MM-DD or null",
-  "share_code": "XXX-XXX-XXX or null",
-  "pvn_number": "string or null",
-  "work_restrictions": "string or null",
-  "indefinite": true/false,
-  "holder_name": "string or null",
-  "document_type": "string or null",
-  "document_number": "string or null",
-  "nationality": "string or null",
-  "expiry_date": "YYYY-MM-DD or null"
+  "permission_type": "Skilled Worker Visa",
+  "permission_start": "2023-05-10",
+  "permission_end": "2026-05-10",
+  "share_code": "ABC123DEF",
+  "pvn_number": null,
+  "work_restrictions": null,
+  "indefinite_right_to_work": false
 }"""
 
 
-DBS_EXTRACTION_PROMPT = """You are a UK DBS (Disclosure and Barring Service) certificate extraction specialist.
+DBS_EXTRACTION_PROMPT = """Extract DBS certificate information from the document.
 
-Extract the following fields from this DBS certificate or Update Service screenshot:
-- certificate_number: DBS certificate number (format: XXXXXXXXXXXXXX, 12 digits)
-- dbs_level: Level of check (Basic, Standard, Enhanced, Enhanced with Barred List(s))
-- certificate_issue_date: Issue date on certificate (format: YYYY-MM-DD)
-- name_on_certificate: Full name as shown on certificate
-- workforce: Workforce type (Adult, Child, Adult and Child, Other)
-- result_status: Result (clear, information_present)
-- update_service_status: If Update Service screenshot, status shown (active, not_registered, etc.)
+Return JSON only.
 
-Return valid JSON only, no markdown:
+Fields:
+
+certificate_number
+applicant_name
+issue_date
+check_type (basic, standard, enhanced)
+status (clear, information_present)
+
+Rules:
+
+If the certificate states "No information recorded", status = clear.
+If offences or cautions appear, status = information_present.
+Certificate numbers are 12 digits.
+
+Return JSON only.
+
+Example:
+
 {
-  "certificate_number": "string or null",
-  "dbs_level": "Basic|Standard|Enhanced|Enhanced with Barred List(s) or null",
-  "certificate_issue_date": "YYYY-MM-DD or null",
-  "name_on_certificate": "string or null",
-  "workforce": "Adult|Child|Adult and Child|Other or null",
-  "result_status": "clear|information_present or null",
-  "update_service_status": "string or null"
+  "certificate_number": "001234567890",
+  "applicant_name": "Jane Smith",
+  "issue_date": "2025-10-12",
+  "check_type": "enhanced",
+  "status": "clear"
 }"""
 
 
-IDENTITY_EXTRACTION_PROMPT = """You are a UK identity document extraction specialist.
+IDENTITY_EXTRACTION_PROMPT = """You are extracting structured identity data from an identity document.
 
-Extract the following fields from this identity document (passport, driving licence, national ID card):
-- document_type: Type of document (Passport, Driving Licence, National ID Card, etc.)
-- full_name: Full name as shown on document
-- date_of_birth: Date of birth (format: YYYY-MM-DD)
-- document_number: Document/passport number
-- issue_date: Issue date (format: YYYY-MM-DD)
-- expiry_date: Expiry date (format: YYYY-MM-DD)
-- nationality: Nationality/citizenship
-- issuing_authority: Issuing authority/country
+Return only valid JSON.
 
-Return valid JSON only, no markdown:
+Fields:
+
+document_type (passport, driving_licence, national_id)
+full_name
+date_of_birth
+nationality
+document_number
+issue_date
+expiry_date
+
+Rules:
+
+Use ISO date format YYYY-MM-DD if possible.
+If multiple names appear, return the full legal name.
+If a field is missing, return null.
+
+Return JSON only.
+
+Example output:
+
 {
-  "document_type": "Passport|Driving Licence|National ID Card or null",
-  "full_name": "string or null",
-  "date_of_birth": "YYYY-MM-DD or null",
-  "document_number": "string or null",
-  "issue_date": "YYYY-MM-DD or null",
-  "expiry_date": "YYYY-MM-DD or null",
-  "nationality": "string or null",
-  "issuing_authority": "string or null"
+  "document_type": "passport",
+  "full_name": "Jane Smith",
+  "date_of_birth": "1994-11-02",
+  "nationality": "British",
+  "document_number": "123456789",
+  "issue_date": "2019-06-01",
+  "expiry_date": "2029-06-01"
 }"""
 
 
-ADDRESS_EXTRACTION_PROMPT = """You are a UK proof of address document extraction specialist.
+ADDRESS_EXTRACTION_PROMPT = """Extract structured proof of address data from the document.
 
-Extract the following fields from this proof of address document (utility bill, bank statement, council tax, etc.):
-- document_type: Type of document (Utility Bill, Bank Statement, Council Tax, HMRC Letter, Tenancy Agreement, etc.)
-- name_on_document: Name as shown on document
-- address_line1: First line of address
-- address_line2: Second line of address (if present)
-- city: City/town
-- postcode: UK postcode
-- issue_date: Document date/issue date (format: YYYY-MM-DD)
-- issuer: Company/organization that issued the document
+Return valid JSON only.
 
-Return valid JSON only, no markdown:
+Fields:
+
+document_type (utility_bill, bank_statement, council_tax, hmrc_letter, tenancy_agreement)
+name_on_document
+address
+issue_date
+issuer
+
+Rules:
+
+The address must be a full UK postal address.
+Issue date is the statement date or letter date.
+If multiple addresses exist, return the primary residential address.
+If a field cannot be found, return null.
+
+Return JSON only.
+
+Example:
+
 {
-  "document_type": "Utility Bill|Bank Statement|Council Tax|HMRC Letter|Tenancy Agreement|Other or null",
-  "name_on_document": "string or null",
-  "address_line1": "string or null",
-  "address_line2": "string or null",
-  "city": "string or null",
-  "postcode": "string or null",
-  "issue_date": "YYYY-MM-DD or null",
-  "issuer": "string or null"
+  "document_type": "bank_statement",
+  "name_on_document": "Jane Smith",
+  "address": "12 King Street, London, SW1A 1AA",
+  "issue_date": "2026-03-01",
+  "issuer": "Barclays Bank"
 }"""
 
 
@@ -133,6 +164,29 @@ def get_openai_client() -> OpenAI:
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable not set")
     return OpenAI(api_key=api_key)
+
+
+def parse_json_response(response_text: str) -> Dict:
+    """
+    Parse JSON from model response, handling markdown code blocks.
+    JSON Guard - models sometimes add text before JSON.
+    """
+    if not response_text:
+        return {}
+    
+    # Try to find JSON in the response
+    match = re.search(r"\{.*\}", response_text, re.S)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+    
+    # Try parsing the whole thing
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        return {}
 
 
 # =============================================================================
@@ -232,15 +286,11 @@ class DocumentExtractor:
                 model="gpt-4o",
                 messages=[
                     {
-                        "role": "system",
-                        "content": prompt
-                    },
-                    {
                         "role": "user",
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"Extract all fields from this {extraction_type.upper()} document. Return valid JSON only."
+                                "text": prompt
                             },
                             {
                                 "type": "image_url",
@@ -266,29 +316,14 @@ class DocumentExtractor:
                     "confidence": 0.0
                 }
             
-            # Parse JSON from response (handle markdown code blocks)
-            json_text = result
-            if "```json" in result:
-                json_text = result.split("```json")[1].split("```")[0]
-            elif "```" in result:
-                json_text = result.split("```")[1].split("```")[0]
+            # Parse JSON with guard
+            fields = parse_json_response(result)
             
-            json_match = re.search(r'\{[\s\S]*\}', json_text)
-            if not json_match:
+            if not fields:
                 return {
                     "fields": {},
                     "success": False,
                     "error": "Could not parse response as JSON",
-                    "confidence": 0.0
-                }
-            
-            try:
-                fields = json.loads(json_match.group())
-            except json.JSONDecodeError as e:
-                return {
-                    "fields": {},
-                    "success": False,
-                    "error": f"Invalid JSON: {str(e)}",
                     "confidence": 0.0
                 }
             

@@ -13937,6 +13937,178 @@ async def request_document_replacement(
 
 
 # ===========================================================================
+# BULK DOCUMENT REQUEST ENDPOINT
+# ===========================================================================
+
+class BulkRequestInput(BaseModel):
+    """Input for bulk document request"""
+    include_training: bool = False  # Also include missing training requests
+    due_days: int = 14
+    custom_message: Optional[str] = None
+
+@api_router.post("/employees/{employee_id}/bulk-request")
+async def bulk_request_documents(
+    employee_id: str,
+    payload: Optional[BulkRequestInput] = None,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send document requests for ALL missing requirements at once.
+    Sends one email with upload links for each missing document.
+    
+    Returns summary of what was requested.
+    """
+    from email_automation import EmailRequestService, RequestType
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    due_days = payload.due_days if payload else 14
+    include_training = payload.include_training if payload else False
+    
+    # Get all mandatory requirements for this employee's role
+    all_items = get_mandatory_items_for_role(employee.get('role', ''))
+    
+    # Document categories that can be requested via email
+    REQUESTABLE_CATEGORIES = [
+        "right_to_work",
+        "dbs",
+        "identity",
+        "proof_of_address",
+        "health",
+        "professional"  # Qualifications, certifications
+    ]
+    
+    results = []
+    successful_requests = []
+    
+    for item in all_items:
+        item_id = item.get('id')
+        category = item.get('category', '')
+        
+        # Skip if not a requestable document type
+        if category not in REQUESTABLE_CATEGORIES:
+            continue
+        
+        # Skip evidence rows (check rows are sufficient)
+        if item_id.endswith('_evidence'):
+            continue
+        
+        # Check current status - only request if not already complete
+        evidence = await get_requirement_evidence(employee_id, item_id, user)
+        
+        if evidence.has_evidence or evidence.is_verified:
+            continue  # Already have evidence, skip
+        
+        # Check if there's already a pending request
+        existing_request = await db.email_requests.find_one({
+            "person_id": employee_id,
+            "requirement_id": item_id,
+            "status": {"$in": ["sent", "pending"]}
+        })
+        
+        if existing_request:
+            results.append({
+                "requirement_id": item_id,
+                "requirement_name": item.get('name', item_id),
+                "status": "already_requested",
+                "message": "Pending request exists"
+            })
+            continue
+        
+        # Send the request using EmailRequestService
+        try:
+            result = await EmailRequestService.create_request(
+                person_id=employee_id,
+                person_type="employee",
+                requirement_id=item_id,
+                request_type=RequestType.UPLOAD_DOCUMENT,
+                due_days=due_days,
+                sent_by=user['user_id']
+            )
+            
+            if result.get("success"):
+                results.append({
+                    "requirement_id": item_id,
+                    "requirement_name": item.get('name', item_id),
+                    "status": "sent",
+                    "request_id": result.get("request_id")
+                })
+                successful_requests.append(item.get('name', item_id))
+            else:
+                results.append({
+                    "requirement_id": item_id,
+                    "requirement_name": item.get('name', item_id),
+                    "status": "failed",
+                    "message": result.get("reason", "Unknown error")
+                })
+        except Exception as e:
+            logger.error(f"Failed to send request for {item_id}: {e}")
+            results.append({
+                "requirement_id": item_id,
+                "requirement_name": item.get('name', item_id),
+                "status": "failed",
+                "message": str(e)
+            })
+    
+    # Optionally include training requests
+    if include_training:
+        training_catalogue = await db.training_catalogue.find(
+            {"default_required": True, "active": {"$ne": False}}
+        ).to_list(length=50)
+        
+        for training in training_catalogue:
+            training_id = training.get('id')
+            
+            # Check if employee has completed this training
+            existing_record = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "requirement_id": training_id,
+                "status": {"$in": ["completed", "current"]}
+            })
+            
+            if existing_record:
+                continue  # Already completed
+            
+            # For training, we create a different type of request
+            # (Training certificates are uploaded differently)
+            results.append({
+                "requirement_id": f"training_{training_id}",
+                "requirement_name": training.get('name', training_id),
+                "status": "training_required",
+                "message": "Training certificate upload needed"
+            })
+    
+    # Log the bulk action
+    await log_audit_action(user['user_id'], "bulk_document_request", "employee", employee_id, {
+        "total_items": len(results),
+        "sent_count": len([r for r in results if r['status'] == 'sent']),
+        "requirements_sent": successful_requests,
+        "due_days": due_days
+    })
+    
+    sent_count = len([r for r in results if r['status'] == 'sent'])
+    already_requested = len([r for r in results if r['status'] == 'already_requested'])
+    failed_count = len([r for r in results if r['status'] == 'failed'])
+    
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "employee_email": employee.get('email'),
+        "summary": {
+            "total_items_checked": len(results),
+            "requests_sent": sent_count,
+            "already_requested": already_requested,
+            "failed": failed_count
+        },
+        "results": results,
+        "message": f"Sent {sent_count} document request(s) to {employee.get('email')}"
+    }
+
+
+# ===========================================================================
 # END PHASE D1 ENDPOINTS
 # ===========================================================================
 

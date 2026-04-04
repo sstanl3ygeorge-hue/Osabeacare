@@ -424,7 +424,101 @@ async def evaluate_work_readiness(
             })
     
     # ==========================================================================
-    # CHECK 5: Required Training Matrix
+    # CHECK 5: Verification Stamps on Critical Documents (NHS Requirement)
+    # ==========================================================================
+    # Documents must have "Original Seen" or equivalent stamp to be work-ready
+    verification_stamp_requirements = ["right_to_work", "dbs", "identity"]
+    
+    for doc_key in verification_stamp_requirements:
+        # Already added as blocker if not verified, but check stamp specifically
+        if doc_key in verified_keys:
+            # Check if the document has a verification stamp
+            evidence_key = f"{doc_key}_evidence"
+            evidence_docs = await db.employee_documents.find(
+                {
+                    "employee_id": person.get("id"),
+                    "requirement_id": {"$in": [evidence_key, doc_key]},
+                    "status": {"$in": ["active", "approved", "verified"]}
+                }
+            ).to_list(length=10)
+            
+            has_valid_stamp = False
+            for doc in evidence_docs:
+                stamp = doc.get("verification_stamp")
+                if stamp and stamp not in ["not_verified", None, ""]:
+                    has_valid_stamp = True
+                    break
+            
+            if not has_valid_stamp and doc_key not in [b.get("requirement_key") for b in blockers]:
+                # Add as warning - document verified but not stamped
+                warnings.append({
+                    "requirement_key": f"{doc_key}_stamp",
+                    "label": f"{get_work_readiness_label(doc_key)} Stamp",
+                    "reason": "Document needs 'Original Seen' verification stamp",
+                    "category": "verification_stamp"
+                })
+    
+    # ==========================================================================
+    # CHECK 6: References Verified (2 references required)
+    # ==========================================================================
+    all_required_keys.append("references")
+    
+    ref1_verified = person.get("reference_1_verified", False)
+    ref2_verified = person.get("reference_2_verified", False)
+    
+    # Also check references collection
+    ref_doc = await db.references.find_one({"employee_id": person.get("id")})
+    if ref_doc:
+        if ref_doc.get("ref1", {}).get("verification_status") == "verified":
+            ref1_verified = True
+        if ref_doc.get("ref2", {}).get("verification_status") == "verified":
+            ref2_verified = True
+    
+    if not ref1_verified or not ref2_verified:
+        missing_refs = []
+        if not ref1_verified:
+            missing_refs.append("Reference 1")
+        if not ref2_verified:
+            missing_refs.append("Reference 2")
+        
+        blockers.append({
+            "requirement_key": "references",
+            "label": "Employment References",
+            "reason": f"Not verified: {', '.join(missing_refs)}",
+            "category": "references",
+            "section": "recruitment"
+        })
+    else:
+        verified_keys.append("references")
+    
+    # ==========================================================================
+    # CHECK 7: Proof of Address (Minimum 2 documents required for NHS)
+    # ==========================================================================
+    all_required_keys.append("proof_of_address_count")
+    
+    poa_docs = await db.employee_documents.find(
+        {
+            "employee_id": person.get("id"),
+            "requirement_id": {"$in": ["proof_of_address_evidence", "proof_of_address"]},
+            "status": {"$in": ["active", "approved", "verified"]}
+        }
+    ).to_list(length=10)
+    
+    poa_count = len(poa_docs)
+    
+    if poa_count < 2:
+        blockers.append({
+            "requirement_key": "proof_of_address_count",
+            "label": "Proof of Address",
+            "reason": f"NHS requires 2 documents (currently {poa_count}/2)",
+            "category": "document",
+            "section": "proof_of_address"
+        })
+    else:
+        verified_keys.append("proof_of_address_count")
+    
+    # ==========================================================================
+    # CHECK 8: Required Training Matrix
     # ==========================================================================
     if requirements.get("training_blockers") and training_status:
         training_blocker_count = training_status.get("blockerCount", 0)

@@ -38762,6 +38762,7 @@ async def get_form_for_completion(token: str):
         "date_of_birth": employee.get("date_of_birth"),
         "phone": employee.get("phone"),
         "mobile": employee.get("phone"),
+        "contact_number": employee.get("phone"),  # Alias for phone
         "email": employee.get("email"),
         "ni_number": employee.get("ni_number"),
         # Address
@@ -38776,6 +38777,7 @@ async def get_form_for_completion(token: str):
         "role": employee.get("role"),
         "job_title": employee.get("role"),
         "position_applied": employee.get("role"),
+        "position": employee.get("role"),  # Alias for role
         "start_date": employee.get("start_date"),
         "employee_code": employee.get("employee_code"),
         # Interview/recruitment forms

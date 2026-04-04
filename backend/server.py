@@ -42028,6 +42028,813 @@ async def set_manual_system_role(
 
 
 # ============================================================================
+# INDUCTION & COMPETENCY TRACKING (CQC Compliant)
+# Collections: induction_checklists, competency_records, role_competency_requirements
+# Addresses Medway QA findings on induction, spot checks, competency assessments
+# ============================================================================
+
+# Default induction checklist items for all care roles
+DEFAULT_INDUCTION_ITEMS = [
+    {"name": "Safeguarding Adults", "mandatory": True, "order": 1},
+    {"name": "Safeguarding Children", "mandatory": True, "order": 2},
+    {"name": "Fire Safety", "mandatory": True, "order": 3},
+    {"name": "Health & Safety", "mandatory": True, "order": 4},
+    {"name": "Infection Prevention & Control", "mandatory": True, "order": 5},
+    {"name": "Data Protection (GDPR)", "mandatory": True, "order": 6},
+    {"name": "Equality & Diversity", "mandatory": True, "order": 7},
+    {"name": "Moving & Handling", "mandatory": True, "order": 8},
+    {"name": "Basic Life Support", "mandatory": True, "order": 9},
+    {"name": "Medication Awareness", "mandatory": False, "order": 10},
+    {"name": "Food Hygiene", "mandatory": False, "order": 11},
+    {"name": "Communication Skills", "mandatory": False, "order": 12},
+    {"name": "Company Policies Review", "mandatory": True, "order": 13},
+    {"name": "Shadow Shift Completed", "mandatory": True, "order": 14},
+]
+
+# Default competency types required for different roles
+DEFAULT_COMPETENCY_REQUIREMENTS = {
+    "healthcare_assistant": [
+        {"competency_type": "manual_handling", "competency_name": "Moving & Handling", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "medication", "competency_name": "Medication Administration", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "safeguarding", "competency_name": "Safeguarding Adults", "is_critical": True, "review_frequency_months": 12},
+    ],
+    "senior_carer": [
+        {"competency_type": "manual_handling", "competency_name": "Moving & Handling", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "medication", "competency_name": "Medication Administration", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "safeguarding", "competency_name": "Safeguarding Adults", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "supervision", "competency_name": "Staff Supervision", "is_critical": True, "review_frequency_months": 12},
+    ],
+    "nurse": [
+        {"competency_type": "clinical_competency", "competency_name": "Clinical Competency", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "medication", "competency_name": "Medication Administration", "is_critical": True, "review_frequency_months": 12},
+        {"competency_type": "manual_handling", "competency_name": "Moving & Handling", "is_critical": True, "review_frequency_months": 12},
+    ],
+}
+
+# All competency types available in the system
+COMPETENCY_TYPES = [
+    {"value": "medication", "label": "Medication Administration", "is_critical": True},
+    {"value": "manual_handling", "label": "Moving & Handling", "is_critical": True},
+    {"value": "safeguarding", "label": "Safeguarding Adults", "is_critical": True},
+    {"value": "dementia_care", "label": "Dementia Care", "is_critical": False},
+    {"value": "learning_disabilities", "label": "Learning Disabilities", "is_critical": False},
+    {"value": "mental_health", "label": "Mental Health Awareness", "is_critical": False},
+    {"value": "end_of_life", "label": "End of Life Care", "is_critical": False},
+    {"value": "catheter_care", "label": "Catheter Care", "is_critical": False},
+    {"value": "stoma_care", "label": "Stoma Care", "is_critical": False},
+    {"value": "peg_feeding", "label": "PEG Feeding", "is_critical": False},
+    {"value": "wound_care", "label": "Wound Care", "is_critical": False},
+    {"value": "diabetes", "label": "Diabetes Management", "is_critical": False},
+    {"value": "epilepsy", "label": "Epilepsy Management", "is_critical": False},
+    {"value": "parkinsons", "label": "Parkinson's Care", "is_critical": False},
+    {"value": "choking", "label": "Choking Management", "is_critical": False},
+    {"value": "challenging_behaviour", "label": "Challenging Behaviour", "is_critical": False},
+    {"value": "clinical_competency", "label": "Clinical Competency", "is_critical": True},
+    {"value": "supervision", "label": "Staff Supervision", "is_critical": False},
+]
+
+
+# Pydantic Models for Induction & Competency
+class InductionItemUpdate(BaseModel):
+    item_name: str
+    status: str  # pending, completed
+    notes: Optional[str] = None
+
+
+class CompetencyRecordCreate(BaseModel):
+    competency_type: str
+    competency_name: str
+    status: str  # competent, not_competent, training_required
+    review_due_date: Optional[str] = None
+    notes: Optional[str] = None
+    evidence_document_id: Optional[str] = None
+
+
+class PreEmploymentGatesUpdate(BaseModel):
+    """Update pre-employment gates status"""
+    interview_completed: Optional[bool] = None
+    contract_signed: Optional[bool] = None
+
+
+# ========== INDUCTION CHECKLIST ENDPOINTS ==========
+
+@api_router.get("/employees/{employee_id}/induction-checklist")
+async def get_induction_checklist(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get induction checklist for an employee.
+    If no checklist exists, returns default template.
+    """
+    # Check employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
+    
+    if not checklist:
+        # Return default structure
+        return {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "items": [{"name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by_name": None} for item in DEFAULT_INDUCTION_ITEMS],
+            "overall_status": "pending",
+            "started_at": None,
+            "completed_at": None
+        }
+    
+    return checklist
+
+
+@api_router.put("/employees/{employee_id}/induction-checklist")
+async def update_induction_checklist(
+    employee_id: str,
+    payload: InductionItemUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update an induction checklist item.
+    Creates checklist if it doesn't exist.
+    """
+    # Check employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get reviewer name
+    reviewer = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    reviewer_name = reviewer.get('name') if reviewer else user.get('email', 'Admin')
+    if not reviewer_name and reviewer:
+        reviewer_name = f"{reviewer.get('first_name', '')} {reviewer.get('last_name', '')}".strip() or reviewer.get('email', 'Admin')
+    
+    # Get or create checklist
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+    
+    if not checklist:
+        # Create new checklist with default items
+        checklist = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "employee_name": employee_name,
+            "items": [{"name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by": None, "completed_by_name": None, "notes": None} for item in DEFAULT_INDUCTION_ITEMS],
+            "overall_status": "pending",
+            "started_at": None,
+            "completed_at": None,
+            "created_at": now,
+            "updated_at": now
+        }
+    
+    # Find and update the specific item
+    item_found = False
+    for item in checklist["items"]:
+        if item["name"] == payload.item_name:
+            item["status"] = payload.status
+            item["notes"] = payload.notes
+            if payload.status == "completed":
+                item["completed_at"] = now
+                item["completed_by"] = user['user_id']
+                item["completed_by_name"] = reviewer_name
+            else:
+                item["completed_at"] = None
+                item["completed_by"] = None
+                item["completed_by_name"] = None
+            item_found = True
+            break
+    
+    if not item_found:
+        # Add new item
+        checklist["items"].append({
+            "name": payload.item_name,
+            "mandatory": False,
+            "status": payload.status,
+            "notes": payload.notes,
+            "completed_at": now if payload.status == "completed" else None,
+            "completed_by": user['user_id'] if payload.status == "completed" else None,
+            "completed_by_name": reviewer_name if payload.status == "completed" else None
+        })
+    
+    # Calculate overall status
+    completed_count = sum(1 for i in checklist["items"] if i["status"] == "completed")
+    mandatory_completed = sum(1 for i in checklist["items"] if i.get("mandatory") and i["status"] == "completed")
+    mandatory_total = sum(1 for i in checklist["items"] if i.get("mandatory"))
+    
+    if completed_count == 0:
+        checklist["overall_status"] = "pending"
+        checklist["started_at"] = None
+    elif mandatory_completed >= mandatory_total and completed_count >= len(checklist["items"]) * 0.8:
+        checklist["overall_status"] = "completed"
+        checklist["completed_at"] = now
+    else:
+        checklist["overall_status"] = "in_progress"
+        if not checklist.get("started_at"):
+            checklist["started_at"] = now
+    
+    checklist["updated_at"] = now
+    
+    # Upsert
+    await db.induction_checklists.update_one(
+        {"employee_id": employee_id},
+        {"$set": checklist},
+        upsert=True
+    )
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "induction_item_updated", "induction_checklist", employee_id, {
+        "item_name": payload.item_name,
+        "status": payload.status,
+        "overall_status": checklist["overall_status"]
+    })
+    
+    return {
+        "success": True,
+        "overall_status": checklist["overall_status"],
+        "completed_count": completed_count,
+        "total_count": len(checklist["items"]),
+        "mandatory_completed": mandatory_completed,
+        "mandatory_total": mandatory_total
+    }
+
+
+@api_router.post("/employees/{employee_id}/induction-checklist/reset")
+async def reset_induction_checklist(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Reset induction checklist for an employee (admin only).
+    Useful for re-induction after extended absence.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    await db.induction_checklists.delete_one({"employee_id": employee_id})
+    
+    await log_audit_action(user['user_id'], "induction_checklist_reset", "induction_checklist", employee_id, {})
+    
+    return {"success": True, "message": "Induction checklist reset"}
+
+
+# ========== COMPETENCY RECORDS ENDPOINTS ==========
+
+@api_router.get("/employees/{employee_id}/competencies")
+async def get_employee_competencies(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get all competency records for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    competencies = await db.competency_records.find(
+        {"employee_id": employee_id}
+    ).sort("assessed_at", -1).to_list(100)
+    
+    # Format for JSON serialization
+    formatted = []
+    for c in competencies:
+        c.pop("_id", None)
+        formatted.append(c)
+    
+    return {"competencies": formatted}
+
+
+@api_router.post("/employees/{employee_id}/competencies")
+async def create_competency_record(
+    employee_id: str,
+    payload: CompetencyRecordCreate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Create a new competency assessment record"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get assessor name
+    assessor = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    assessor_name = assessor.get('name') if assessor else user.get('email', 'Admin')
+    if not assessor_name and assessor:
+        assessor_name = f"{assessor.get('first_name', '')} {assessor.get('last_name', '')}".strip() or assessor.get('email', 'Admin')
+    
+    # Parse review_due_date
+    review_due = None
+    if payload.review_due_date:
+        try:
+            review_due = payload.review_due_date
+        except:
+            pass
+    
+    competency_id = str(uuid.uuid4())
+    
+    competency = {
+        "id": competency_id,
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "competency_type": payload.competency_type,
+        "competency_name": payload.competency_name,
+        "status": payload.status,
+        "assessed_by": user['user_id'],
+        "assessed_by_name": assessor_name,
+        "assessed_at": now,
+        "review_due_date": review_due,
+        "notes": payload.notes,
+        "evidence_document_id": payload.evidence_document_id,
+        "created_at": now,
+        "updated_at": now,
+        "audit": {
+            "created_by": user['user_id'],
+            "created_by_name": assessor_name,
+            "created_at": now,
+            "assessment_history": [
+                {
+                    "status": payload.status,
+                    "assessed_by": user['user_id'],
+                    "assessed_by_name": assessor_name,
+                    "assessed_at": now,
+                    "notes": payload.notes
+                }
+            ]
+        }
+    }
+    
+    await db.competency_records.insert_one(competency)
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "competency_assessed", "competency_record", competency_id, {
+        "employee_id": employee_id,
+        "competency_type": payload.competency_type,
+        "competency_name": payload.competency_name,
+        "status": payload.status
+    })
+    
+    return {"success": True, "id": competency_id, "status": payload.status}
+
+
+@api_router.put("/employees/{employee_id}/competencies/{competency_id}")
+async def update_competency_record(
+    employee_id: str,
+    competency_id: str,
+    payload: CompetencyRecordCreate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Update an existing competency assessment"""
+    existing = await db.competency_records.find_one({
+        "id": competency_id,
+        "employee_id": employee_id
+    })
+    
+    if not existing:
+        raise HTTPException(status_code=404, detail="Competency record not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get assessor name
+    assessor = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    assessor_name = assessor.get('name') if assessor else user.get('email', 'Admin')
+    if not assessor_name and assessor:
+        assessor_name = f"{assessor.get('first_name', '')} {assessor.get('last_name', '')}".strip() or assessor.get('email', 'Admin')
+    
+    # History entry
+    history_entry = {
+        "status": payload.status,
+        "assessed_by": user['user_id'],
+        "assessed_by_name": assessor_name,
+        "assessed_at": now,
+        "notes": payload.notes
+    }
+    
+    update_data = {
+        "status": payload.status,
+        "assessed_by": user['user_id'],
+        "assessed_by_name": assessor_name,
+        "assessed_at": now,
+        "review_due_date": payload.review_due_date,
+        "notes": payload.notes,
+        "evidence_document_id": payload.evidence_document_id,
+        "updated_at": now,
+        "audit.last_modified_by": user['user_id'],
+        "audit.last_modified_by_name": assessor_name,
+        "audit.last_modified_at": now
+    }
+    
+    await db.competency_records.update_one(
+        {"id": competency_id},
+        {
+            "$set": update_data,
+            "$push": {"audit.assessment_history": history_entry}
+        }
+    )
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "competency_updated", "competency_record", competency_id, {
+        "employee_id": employee_id,
+        "old_status": existing.get("status"),
+        "new_status": payload.status
+    })
+    
+    return {"success": True, "id": competency_id, "status": payload.status}
+
+
+@api_router.get("/employees/{employee_id}/missing-competencies")
+async def get_missing_competencies(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get missing or expiring competencies for an employee based on their role.
+    Used for work readiness blocking and dashboard alerts.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "role": 1, "system_role": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Determine role requirements
+    role = employee.get("role", "").lower().replace(" ", "_")
+    system_role = employee.get("system_role", "HCA")
+    
+    # Map to competency requirements
+    if system_role == "NURSE":
+        role_key = "nurse"
+    elif "senior" in role:
+        role_key = "senior_carer"
+    else:
+        role_key = "healthcare_assistant"
+    
+    required = DEFAULT_COMPETENCY_REQUIREMENTS.get(role_key, DEFAULT_COMPETENCY_REQUIREMENTS["healthcare_assistant"])
+    
+    # Get existing competencies
+    existing = await db.competency_records.find(
+        {"employee_id": employee_id}
+    ).to_list(100)
+    
+    existing_map = {c["competency_type"]: c for c in existing}
+    
+    missing = []
+    expiring_soon = []
+    now = datetime.now(timezone.utc)
+    
+    for req in required:
+        comp_type = req["competency_type"]
+        existing_comp = existing_map.get(comp_type)
+        
+        if not existing_comp:
+            missing.append({
+                "competency_type": comp_type,
+                "competency_name": req["competency_name"],
+                "is_critical": req.get("is_critical", True),
+                "status": "missing"
+            })
+        elif existing_comp.get("status") != "competent":
+            missing.append({
+                "competency_type": comp_type,
+                "competency_name": req["competency_name"],
+                "is_critical": req.get("is_critical", True),
+                "status": existing_comp.get("status"),
+                "current_assessment": {
+                    "assessed_at": existing_comp.get("assessed_at"),
+                    "assessed_by_name": existing_comp.get("assessed_by_name")
+                }
+            })
+        elif existing_comp.get("review_due_date"):
+            try:
+                due_str = existing_comp["review_due_date"]
+                if isinstance(due_str, str):
+                    due_date = datetime.fromisoformat(due_str.replace('Z', '+00:00'))
+                else:
+                    due_date = due_str
+                days_until = (due_date - now).days
+                if days_until <= 30:
+                    expiring_soon.append({
+                        "competency_type": comp_type,
+                        "competency_name": req["competency_name"],
+                        "review_due_date": existing_comp["review_due_date"],
+                        "days_until_due": days_until,
+                        "is_critical": req.get("is_critical", True)
+                    })
+            except:
+                pass
+    
+    has_critical_missing = any(m.get("is_critical", True) for m in missing)
+    
+    return {
+        "missing_competencies": missing,
+        "expiring_soon": expiring_soon,
+        "has_critical_missing": has_critical_missing,
+        "role_requirements": required
+    }
+
+
+@api_router.get("/competency-types")
+async def get_competency_types(user: dict = Depends(get_current_user)):
+    """Return all available competency types"""
+    return {"competency_types": COMPETENCY_TYPES}
+
+
+# ========== PRE-EMPLOYMENT GATES ENDPOINTS ==========
+
+@api_router.get("/employees/{employee_id}/pre-employment-gates")
+async def get_pre_employment_gates(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get pre-employment gates status for an employee.
+    These are REQUIRED before work readiness can be achieved.
+    
+    Gates:
+    - interview_completed: Interview record exists and is verified
+    - contract_signed: Employment contract signed/acknowledged
+    - verification_stamps_complete: All critical documents have verification stamps
+    - induction_complete: Induction checklist completed
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Check interview completed (from form_submissions)
+    interview = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": {"$in": ["interview_record", "interview", "interview_form"]},
+        "status": {"$in": ["submitted", "verified", "approved"]}
+    }, {"_id": 0, "id": 1, "status": 1, "submitted_at": 1})
+    interview_completed = interview is not None
+    
+    # Check contract signed (from acknowledgements)
+    contract = await db.acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": "contract_acceptance",
+        "verification_status": "verified"
+    }, {"_id": 0, "id": 1, "verified_at": 1})
+    contract_signed = contract is not None
+    
+    # Check verification stamps on critical documents
+    critical_requirements = ["right_to_work", "dbs", "identity"]
+    stamps_complete = True
+    stamps_detail = []
+    
+    for req_key in critical_requirements:
+        # Find accepted evidence for this requirement
+        evidence = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_id": {"$in": [req_key, f"{req_key}_evidence"]},
+            "status": {"$in": ["active", "uploaded", "approved", "accepted"]},
+            "verification_stamp": {"$in": ["original_seen", "copy_verified", "online_check"]}
+        }, {"_id": 0, "id": 1, "verification_stamp": 1, "verification_stamp_at": 1})
+        
+        if evidence:
+            stamps_detail.append({
+                "requirement": req_key,
+                "has_stamp": True,
+                "stamp_type": evidence.get("verification_stamp"),
+                "stamp_at": evidence.get("verification_stamp_at")
+            })
+        else:
+            stamps_complete = False
+            stamps_detail.append({
+                "requirement": req_key,
+                "has_stamp": False,
+                "stamp_type": None,
+                "stamp_at": None
+            })
+    
+    # Check induction complete
+    induction = await db.induction_checklists.find_one({
+        "employee_id": employee_id,
+        "overall_status": "completed"
+    }, {"_id": 0, "completed_at": 1})
+    induction_complete = induction is not None
+    
+    # Calculate overall readiness
+    gates_passed = sum([
+        interview_completed,
+        contract_signed,
+        stamps_complete,
+        induction_complete
+    ])
+    all_gates_passed = gates_passed == 4
+    
+    return {
+        "employee_id": employee_id,
+        "gates": {
+            "interview_completed": {
+                "passed": interview_completed,
+                "label": "Interview Record",
+                "detail": interview if interview_completed else None
+            },
+            "contract_signed": {
+                "passed": contract_signed,
+                "label": "Employment Contract Signed",
+                "detail": {"verified_at": contract.get("verified_at")} if contract_signed else None
+            },
+            "verification_stamps_complete": {
+                "passed": stamps_complete,
+                "label": "Document Verification Stamps",
+                "detail": stamps_detail
+            },
+            "induction_complete": {
+                "passed": induction_complete,
+                "label": "Induction Checklist",
+                "detail": {"completed_at": induction.get("completed_at")} if induction_complete else None
+            }
+        },
+        "gates_passed": gates_passed,
+        "total_gates": 4,
+        "all_gates_passed": all_gates_passed,
+        "blockers": [
+            {"gate": "interview_completed", "message": "Interview record not completed"} if not interview_completed else None,
+            {"gate": "contract_signed", "message": "Employment contract not signed"} if not contract_signed else None,
+            {"gate": "verification_stamps_complete", "message": "Critical documents missing verification stamps"} if not stamps_complete else None,
+            {"gate": "induction_complete", "message": "Induction checklist not completed"} if not induction_complete else None
+        ]
+    }
+
+
+@api_router.put("/employees/{employee_id}/pre-employment-gates")
+async def update_pre_employment_gates(
+    employee_id: str,
+    payload: PreEmploymentGatesUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Manually update pre-employment gate status.
+    Used for legacy records or manual overrides.
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {"updated_at": now}
+    
+    if payload.interview_completed is not None:
+        update_data["interview_completed"] = payload.interview_completed
+        update_data["interview_completed_at"] = now if payload.interview_completed else None
+    
+    if payload.contract_signed is not None:
+        update_data["contract_signed"] = payload.contract_signed
+        update_data["contract_signed_at"] = now if payload.contract_signed else None
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "pre_employment_gates_updated", "employee", employee_id, update_data)
+    
+    return {"success": True, "updated": update_data}
+
+
+# ========== REFERENCE-EMPLOYMENT COMPARISON ENDPOINT ==========
+
+@api_router.get("/employees/{employee_id}/reference-employment-comparison")
+async def get_reference_employment_comparison(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Compare declared references against employment history.
+    Addresses Medway QA finding: "references neither appear to match references given in application form"
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get employment history from application or CV extraction
+    employment_history = []
+    
+    # Try to get from form_submissions (application form)
+    application = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": {"$in": ["application_form", "application", "public_application"]}
+    }, {"_id": 0, "data": 1, "form_data": 1})
+    
+    if application:
+        app_data = application.get("data") or application.get("form_data") or {}
+        
+        # Extract employment history - try various structures
+        emp_hist = app_data.get("employment_history") or app_data.get("employmentHistory") or []
+        if isinstance(emp_hist, list):
+            for emp in emp_hist:
+                if isinstance(emp, dict):
+                    employment_history.append({
+                        "employer_name": emp.get("employer_name") or emp.get("employer") or emp.get("company") or emp.get("organisation") or "",
+                        "position": emp.get("position") or emp.get("job_title") or emp.get("role") or "",
+                        "start_date": emp.get("start_date") or emp.get("from") or "",
+                        "end_date": emp.get("end_date") or emp.get("to") or "",
+                        "is_current": emp.get("is_current") or emp.get("current") or False
+                    })
+    
+    # Also check CV extraction data
+    cv_data = employee.get("cv_extraction") or employee.get("extracted_cv_data") or {}
+    cv_employment = cv_data.get("employment_history") or cv_data.get("work_experience") or []
+    if isinstance(cv_employment, list):
+        for emp in cv_employment:
+            if isinstance(emp, dict):
+                # Avoid duplicates
+                employer = emp.get("employer") or emp.get("company") or emp.get("organisation") or ""
+                if employer and not any(e["employer_name"].lower() == employer.lower() for e in employment_history):
+                    employment_history.append({
+                        "employer_name": employer,
+                        "position": emp.get("position") or emp.get("title") or emp.get("role") or "",
+                        "start_date": emp.get("start_date") or "",
+                        "end_date": emp.get("end_date") or "",
+                        "is_current": emp.get("is_current") or False
+                    })
+    
+    # Get declared references
+    references = []
+    for ref_num in [1, 2]:
+        ref_prefix = f"reference_{ref_num}"
+        declared = {
+            "reference_num": ref_num,
+            "name": employee.get(f"{ref_prefix}_name") or "",
+            "email": employee.get(f"{ref_prefix}_email") or "",
+            "phone": employee.get(f"{ref_prefix}_phone") or "",
+            "organisation": employee.get(f"{ref_prefix}_organisation") or employee.get(f"{ref_prefix}_company") or "",
+            "job_title": employee.get(f"{ref_prefix}_job_title") or employee.get(f"{ref_prefix}_position") or "",
+            "relationship": employee.get(f"{ref_prefix}_relationship") or ""
+        }
+        
+        # Check if this reference matches employment history
+        matches_employment = False
+        matching_employer = None
+        
+        if declared["organisation"]:
+            for emp in employment_history:
+                # Fuzzy match on employer name
+                emp_name_lower = emp["employer_name"].lower()
+                ref_org_lower = declared["organisation"].lower()
+                
+                if emp_name_lower and ref_org_lower:
+                    # Check if one contains the other or they're similar
+                    if emp_name_lower in ref_org_lower or ref_org_lower in emp_name_lower:
+                        matches_employment = True
+                        matching_employer = emp
+                        break
+                    # Check for significant overlap (at least 60% of words match)
+                    emp_words = set(emp_name_lower.split())
+                    ref_words = set(ref_org_lower.split())
+                    if emp_words and ref_words:
+                        overlap = len(emp_words.intersection(ref_words))
+                        if overlap >= min(len(emp_words), len(ref_words)) * 0.6:
+                            matches_employment = True
+                            matching_employer = emp
+                            break
+        
+        references.append({
+            **declared,
+            "matches_employment_history": matches_employment,
+            "matching_employer": matching_employer
+        })
+    
+    # Check db.references for additional data
+    db_refs = await db.references.find({"employee_id": employee_id}).to_list(10)
+    for db_ref in db_refs:
+        ref_num = db_ref.get("reference_num", 0)
+        if ref_num in [1, 2]:
+            idx = ref_num - 1
+            if idx < len(references):
+                references[idx]["request_status"] = db_ref.get("status")
+                references[idx]["response_received"] = db_ref.get("response") is not None
+                references[idx]["verified"] = db_ref.get("verification", {}).get("status") == "verified"
+    
+    # Count issues
+    unmatched_count = sum(1 for r in references if r["name"] and not r["matches_employment_history"])
+    
+    return {
+        "employee_id": employee_id,
+        "employment_history": employment_history,
+        "references": references,
+        "comparison_summary": {
+            "total_references_declared": sum(1 for r in references if r["name"]),
+            "references_matching_employment": sum(1 for r in references if r["matches_employment_history"]),
+            "unmatched_references": unmatched_count,
+            "has_discrepancy": unmatched_count > 0
+        },
+        "alert": {
+            "show": unmatched_count > 0,
+            "level": "warning",
+            "message": f"{unmatched_count} reference(s) do not match declared employment history - verify before approving"
+        }
+    }
+
+
+# ============================================================================
 # INSPECTION PACK GENERATION
 # Reuses: org_policies, insurance_docs, CQC_EVIDENCE_MAPPING, verification stamp
 # New: Bundle endpoint + cover sheet generator

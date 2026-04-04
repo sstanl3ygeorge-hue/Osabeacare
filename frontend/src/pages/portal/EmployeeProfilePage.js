@@ -26,6 +26,13 @@ import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, Training
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
+import { 
+  InductionChecklistPanel, 
+  CompetencyRecordsPanel, 
+  PreEmploymentGatesPanel, 
+  ReferenceEmploymentComparison,
+  HealthCompetencySection 
+} from '../../components/employee';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
@@ -3873,6 +3880,20 @@ export default function EmployeeProfilePage() {
             />
           </div>
 
+          {/* Pre-Employment Gates - CQC Critical Check */}
+          <div className="mt-6">
+            <PreEmploymentGatesPanel 
+              employeeId={employeeId}
+              onNavigate={(hash) => {
+                // Navigate to specific tab based on gate
+                if (hash === '#compliance') setActiveTab('checklist');
+                else if (hash === '#training') setActiveTab('training');
+                else if (hash === '#policies') setActiveTab('policies');
+              }}
+              onRefresh={fetchComplianceFile}
+            />
+          </div>
+
           {/* Training & Compliance Overview */}
           <ComplianceOverview
             employee={employee}
@@ -4293,6 +4314,19 @@ export default function EmployeeProfilePage() {
 
         {/* Training Tab */}
         <TabsContent value="training" ref={trainingSectionRef}>
+          {/* Induction & Competency Section - CQC Requirement */}
+          <div className="mb-6">
+            <HealthCompetencySection
+              employeeId={employeeId}
+              employeeName={`${employee?.first_name} ${employee?.last_name}`}
+              isAuditor={isAuditor()}
+              onRefresh={() => {
+                fetchTraining();
+                fetchComplianceFile();
+              }}
+            />
+          </div>
+          
           {/* Audit-Ready Training Matrix - Complete training record with tabs */}
           <AuditReadyTrainingMatrix
             employeeId={employeeId}
@@ -4320,6 +4354,17 @@ export default function EmployeeProfilePage() {
 
         {/* References Tab */}
         <TabsContent value="references">
+          {/* Reference-Employment Cross Check - CQC Requirement */}
+          <div className="mb-6">
+            <ReferenceEmploymentComparison 
+              employeeId={employeeId}
+              onRefresh={() => {
+                fetchComplianceFile();
+                fetchRecruitmentStatus();
+              }}
+            />
+          </div>
+          
           <ReferencesPanel 
             employeeId={employeeId}
             onRefresh={() => {

@@ -49,6 +49,15 @@ export default function Header() {
 
           {/* Desktop CTAs */}
           <div className="hidden lg:flex items-center gap-3">
+            <Link to="/worker/login">
+              <Button 
+                variant="ghost" 
+                className="text-text-primary hover:bg-[#F8FAFA]"
+                data-testid="applicant-portal-btn"
+              >
+                Applicant Portal
+              </Button>
+            </Link>
             <Link to="/login">
               <Button 
                 variant="ghost" 
@@ -100,6 +109,11 @@ export default function Header() {
                     </Link>
                   ))}
                   <hr className="border-[#E4E8EB]" />
+                  <Link to="/worker/login" onClick={() => setIsOpen(false)}>
+                    <Button variant="outline" className="w-full rounded-xl mb-2">
+                      Applicant Portal
+                    </Button>
+                  </Link>
                   <Link to="/login" onClick={() => setIsOpen(false)}>
                     <Button variant="outline" className="w-full rounded-xl">
                       Staff Login

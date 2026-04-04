@@ -81,9 +81,9 @@ export default function WorkerLoginPage() {
           <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
             <Mail className="h-8 w-8 text-white" />
           </div>
-          <CardTitle className="text-2xl font-bold text-slate-800">Worker Portal</CardTitle>
+          <CardTitle className="text-2xl font-bold text-slate-800">Applicant Portal</CardTitle>
           <p className="text-sm text-slate-500 mt-2">
-            Access your compliance dashboard
+            Track your application and complete your onboarding
           </p>
         </CardHeader>
         <CardContent className="pt-4">
@@ -124,12 +124,19 @@ export default function WorkerLoginPage() {
             </p>
           </div>
           
-          <div className="mt-6 text-center">
+          <div className="mt-6 text-center space-y-2">
             <Link 
-              to="/login" 
+              to="/" 
               className="text-sm text-slate-500 hover:text-slate-700 inline-flex items-center gap-1"
             >
               <ArrowLeft className="h-3 w-3" />
+              Back to Homepage
+            </Link>
+            <span className="text-slate-300 mx-2">|</span>
+            <Link 
+              to="/login" 
+              className="text-sm text-slate-500 hover:text-slate-700"
+            >
               Admin/Staff Login
             </Link>
           </div>

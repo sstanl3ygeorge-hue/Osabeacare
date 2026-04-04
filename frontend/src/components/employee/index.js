@@ -6,6 +6,7 @@ export { default as ReferenceEmploymentComparison } from './ReferenceEmploymentC
 export { default as HealthCompetencySection } from './HealthCompetencySection';
 export { default as SpotCheckPanel } from './SpotCheckPanel';
 export { default as ProfessionalRegistrationPanel } from './ProfessionalRegistrationPanel';
+export { default as ApplicationDataPanel } from './ApplicationDataPanel';
 
 // Tab content components (extracted from EmployeeProfilePage)
 export { 

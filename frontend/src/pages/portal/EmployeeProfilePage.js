@@ -33,6 +33,7 @@ import {
   ReferenceEmploymentComparison,
   HealthCompetencySection,
   ProfessionalRegistrationPanel,
+  ApplicationDataPanel,
   PoliciesTabContent,
   TrainingTabContent,
   AuditTabContent,
@@ -4072,6 +4073,17 @@ export default function EmployeeProfilePage() {
                     <ProfessionalRegistrationPanel
                       employeeId={employeeId}
                       employeeRole={employee?.system_role || employee?.role}
+                      onRefresh={() => {
+                        fetchData();
+                        fetchCompliance();
+                      }}
+                    />
+                  </div>
+
+                  {/* Application Form Data - Employment History, Declarations, etc. */}
+                  <div className="mb-6">
+                    <ApplicationDataPanel
+                      employeeId={employeeId}
                       onRefresh={() => {
                         fetchData();
                         fetchCompliance();

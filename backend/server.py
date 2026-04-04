@@ -29427,6 +29427,109 @@ async def get_all_references_integrity(
     }
 
 
+@api_router.get("/employees/{employee_id}/references")
+async def get_employee_references(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get references data from db.references collection.
+    
+    Returns ref1 and ref2 with declared info, request status, response, and verification.
+    This is the canonical source for reference data (not employee fields).
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get from db.references
+    refs = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    
+    # Get any email requests for references
+    ref_requests = await db.email_requests.find({
+        "person_id": employee_id,
+        "requirement_id": {"$in": ["reference_1", "reference_2"]},
+        "status": {"$nin": ["cancelled", "expired", "superseded"]}
+    }, {"_id": 0}).sort("created_at", -1).to_list(10)
+    
+    # Build response for each reference
+    result = {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "references": {}
+    }
+    
+    for ref_num in [1, 2]:
+        ref_key = f"ref{ref_num}"
+        ref_data = refs.get(ref_key, {}) if refs else {}
+        
+        # Get request status from email_requests
+        req = next((r for r in ref_requests if r.get("requirement_id") == f"reference_{ref_num}"), None)
+        
+        # Determine status
+        verification_status = ref_data.get("verification_status", "pending")
+        has_response = bool(ref_data.get("response"))
+        request_sent = bool(ref_data.get("request", {}).get("sent_at")) or bool(req)
+        declared = ref_data.get("declared", {})
+        
+        # Fallback to employee fields if declared is empty
+        if not declared.get("name"):
+            declared = {
+                "name": employee.get(f"reference_{ref_num}_name"),
+                "email": employee.get(f"reference_{ref_num}_email"),
+                "phone": employee.get(f"reference_{ref_num}_phone"),
+                "organisation": employee.get(f"reference_{ref_num}_company"),
+                "job_title": employee.get(f"reference_{ref_num}_job_title"),
+                "relationship": employee.get(f"reference_{ref_num}_relationship"),
+                "years_known": employee.get(f"reference_{ref_num}_years_known"),
+                "is_professional": employee.get(f"reference_{ref_num}_is_professional"),
+                "can_contact_before_offer": employee.get(f"reference_{ref_num}_can_contact_before_offer")
+            }
+            # Filter out None values
+            declared = {k: v for k, v in declared.items() if v is not None}
+        
+        # Also check employee-level verification
+        emp_verified = employee.get(f"reference_{ref_num}_verified", False)
+        emp_verified_by = employee.get(f"reference_{ref_num}_verified_by")
+        emp_verified_at = employee.get(f"reference_{ref_num}_verified_at")
+        
+        if emp_verified and verification_status == "pending":
+            verification_status = "verified"
+        
+        if verification_status == "verified":
+            status = "verified"
+        elif verification_status == "rejected":
+            status = "rejected"
+        elif has_response:
+            status = "response_received"
+        elif request_sent:
+            status = "sent"
+        elif declared.get("name"):
+            status = "declared"
+        else:
+            status = "not_declared"
+        
+        result["references"][f"reference_{ref_num}"] = {
+            "status": status,
+            "declared": declared,
+            "request": {
+                "sent_at": ref_data.get("request", {}).get("sent_at") or (req.get("sent_at") if req else None),
+                "method": ref_data.get("request", {}).get("method"),
+                "request_id": req.get("id") if req else None,
+                "due_at": req.get("due_at") if req else None
+            },
+            "response": ref_data.get("response"),
+            "verification": {
+                "status": verification_status,
+                "verified_by": ref_data.get("verified_by") or emp_verified_by,
+                "verified_at": ref_data.get("verified_at") or emp_verified_at,
+                "notes": ref_data.get("notes")
+            }
+        }
+    
+    return result
+
+
 @api_router.get("/employees/{employee_id}/references-normalized")
 async def get_normalized_references(
     employee_id: str,

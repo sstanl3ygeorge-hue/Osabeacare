@@ -60,3 +60,9 @@ export { default as AgreementFormDrawer } from './AgreementFormDrawer';
 // Production-Ready Compliance Drawers
 export { default as ComplianceDrawer, DrawerSection, DrawerCard, DrawerEmptyState, DrawerStatusChip } from './ComplianceDrawer';
 export { default as EvidenceManageDrawer } from './EvidenceManageDrawer';
+
+// References Panel (CQC Gap Fix)
+export { default as ReferencesPanel } from './ReferencesPanel';
+
+// Audit Trail Panel (CQC Gap Fix)
+export { default as AuditTrailPanel } from './AuditTrailPanel';

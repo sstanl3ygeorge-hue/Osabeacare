@@ -103,6 +103,30 @@ from employment_gap_engine import (
     MIN_GAP_DAYS
 )
 
+# Unified Compliance Engine - CQC Audit Trail, Status, and Health Services
+from compliance_engine import (
+    # Audit Trail
+    AuditAction,
+    EntityType,
+    AuditTrailService,
+    init_audit_service,
+    get_audit_service,
+    # Compliance Status
+    ComplianceStatus,
+    OverallStatus,
+    EmployeeComplianceSummary,
+    ComplianceStatusService,
+    init_compliance_status_service,
+    get_compliance_status_service,
+    # Health Declarations
+    HealthStatus,
+    HealthDeclarationInput,
+    HealthDeclaration as OccupationalHealthDeclaration,
+    HealthDeclarationService,
+    init_health_service,
+    get_health_service
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -9567,23 +9591,17 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
                     all_extracted_text = []
                     ai_quality_score = 0
                     
-                    for i, image_base64 in enumerate(images_to_process):
-                        chat = LlmChat(
-                            api_key=api_key,
-                            session_id=f"extraction-{uuid.uuid4()}",
-                            system_message="""You are a document data extraction specialist. Extract all visible text and data from the provided document image.
+                    prompt = """You are a document data extraction specialist. Extract all visible text and data from this document image.
 Focus on identifying form fields, their labels, and the values filled in.
 Return the extracted content in a structured, readable format.
-At the end, rate your confidence in the extraction quality from 0-100 on a new line like: CONFIDENCE_SCORE: 85"""
-                        ).with_model("openai", "gpt-5.2")
+At the end, rate your confidence in the extraction quality from 0-100 on a new line like: CONFIDENCE_SCORE: 85
+
+Extract all text and data from this document. Include form field labels and their values. End with CONFIDENCE_SCORE: X (0-100)."""
+                    
+                    for i, image_base64 in enumerate(images_to_process):
+                        # Use Gemini Vision directly
+                        page_text = await DocumentExtractionService._call_gemini_vision(image_base64, prompt)
                         
-                        image_content = ImageContent(image_base64=image_base64)
-                        user_message = UserMessage(
-                            text=f"Extract all text and data from this document image (page {i+1}). Include form field labels and their values. End with CONFIDENCE_SCORE: X (0-100).",
-                            file_contents=[image_content]
-                        )
-                        
-                        page_text = await chat.send_message(user_message)
                         if page_text and page_text.strip():
                             # Extract confidence score if present
                             confidence_match = re.search(r'CONFIDENCE_SCORE:\s*(\d+)', page_text)
@@ -9631,8 +9649,9 @@ async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str, 
     low_confidence_fields = []
     
     try:
-        api_key = os.environ.get('EMERGENT_LLM_KEY')
+        api_key = os.environ.get('GEMINI_API_KEY')
         if not api_key:
+            logger.warning("GEMINI_API_KEY not configured, skipping text parsing")
             return [], []
         
         # Get current employee data for comparison
@@ -9642,20 +9661,16 @@ async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str, 
             for field in EXTRACTABLE_PROFILE_FIELDS:
                 current_values[field] = employee.get(field)
         
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"parsing-{uuid.uuid4()}",
-            system_message="""You are a data parsing specialist. Parse the extracted document text into structured profile fields.
+        field_list = ", ".join(EXTRACTABLE_PROFILE_FIELDS)
+        prompt = f"""You are a data parsing specialist. Parse the extracted document text into structured profile fields.
 Return a JSON array of objects with NUMERIC confidence scores.
 Each object has: field_name, extracted_value, confidence (0.0 to 1.0 number).
 - confidence 0.9-1.0 = clearly visible and readable
 - confidence 0.6-0.89 = partially visible or slightly unclear
 - confidence 0.0-0.59 = unclear, guessed, or uncertain
-Only include fields where you found data. Use exact field names from the allowed list."""
-        ).with_model("openai", "gpt-5.2")
-        
-        field_list = ", ".join(EXTRACTABLE_PROFILE_FIELDS)
-        prompt = f"""Parse this extracted application form text into profile fields.
+Only include fields where you found data. Use exact field names from the allowed list.
+
+Parse this extracted application form text into profile fields.
 
 Allowed field names: {field_list}
 
@@ -9683,7 +9698,17 @@ Rules for confidence scoring:
 
 If no data can be extracted, return an empty array: []"""
 
-        response = await chat.send_message(UserMessage(text=prompt))
+        # Use Gemini for text parsing
+        try:
+            client = genai.Client(api_key=api_key)
+            gemini_response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[{"role": "user", "parts": [{"text": prompt}]}]
+            )
+            response = gemini_response.text
+        except Exception as gemini_err:
+            logger.error(f"Gemini text parsing failed: {gemini_err}")
+            return [], []
         
         # Parse JSON response
         import json
@@ -20515,6 +20540,375 @@ async def get_compliance_summary(employee_id: str, user: dict = Depends(get_curr
         "generated_at": datetime.now(timezone.utc).isoformat()
     }
 
+
+# ==================== CQC AUDIT TRAIL & COMPLIANCE STATUS ENDPOINTS ====================
+
+@api_router.get("/employees/{employee_id}/audit-trail")
+async def get_employee_audit_trail(
+    employee_id: str,
+    limit: int = Query(100, ge=1, le=500),
+    skip: int = Query(0, ge=0),
+    action_type: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get CQC-compliant audit trail for an employee.
+    Returns all compliance-related actions with timestamps and user details.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        audit_service = get_audit_service()
+        
+        # Parse action filter if provided
+        action_filter = None
+        if action_type:
+            try:
+                action_filter = [AuditAction(action_type)]
+            except ValueError:
+                pass
+        
+        audit_logs = await audit_service.get_employee_audit_trail(
+            employee_id=employee_id,
+            limit=limit,
+            skip=skip,
+            action_filter=action_filter
+        )
+        
+        return {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "audit_trail": audit_logs,
+            "total_returned": len(audit_logs),
+            "pagination": {"limit": limit, "skip": skip}
+        }
+    except RuntimeError:
+        # Service not initialized - return empty
+        return {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "audit_trail": [],
+            "total_returned": 0,
+            "pagination": {"limit": limit, "skip": skip}
+        }
+
+
+@api_router.get("/employees/{employee_id}/unified-compliance-status")
+async def get_unified_compliance_status(
+    employee_id: str,
+    force_refresh: bool = Query(False),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get unified compliance status using the CQC-compliant status model.
+    Returns: COMPLIANT, MISSING, EXPIRED, or ATTENTION_REQUIRED per requirement.
+    Single source of truth for work readiness decisions.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        status_service = get_compliance_status_service()
+        
+        # Try cached first unless force refresh
+        if not force_refresh:
+            cached = await status_service.get_cached_summary(employee_id)
+            if cached:
+                # Check if cache is fresh (within 5 minutes)
+                cached_at = cached.get("last_calculated_at")
+                if cached_at:
+                    try:
+                        if isinstance(cached_at, str):
+                            cached_dt = datetime.fromisoformat(cached_at.replace("Z", "+00:00"))
+                        else:
+                            cached_dt = cached_at
+                        if (datetime.now(timezone.utc) - cached_dt).total_seconds() < 300:
+                            return cached
+                    except:
+                        pass
+        
+        # Calculate fresh summary
+        summary = await status_service.calculate_summary(employee_id)
+        return summary.dict()
+        
+    except RuntimeError as e:
+        logger.error(f"Compliance status service error: {e}")
+        raise HTTPException(status_code=500, detail="Compliance status service not available")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+# ==================== OCCUPATIONAL HEALTH ENDPOINTS ====================
+
+class HealthDeclarationRequest(BaseModel):
+    """Request model for submitting health declaration."""
+    declaration_date: str  # ISO date string
+    declared_fit_to_work: bool
+    conditions_disclosed: bool = False
+    conditions_details: Optional[str] = None
+    back_problems: bool = False
+    skin_conditions: bool = False
+    respiratory_conditions: bool = False
+    infectious_diseases: bool = False
+    mental_health: bool = False
+    physical_limitations: bool = False
+    medication: bool = False
+    medication_details: Optional[str] = None
+    hepatitis_b_vaccinated: Optional[bool] = None
+    flu_vaccinated: Optional[bool] = None
+    covid_vaccinated: Optional[bool] = None
+    consent_to_oh_contact: bool = True
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@api_router.post("/employees/{employee_id}/health-declaration")
+async def submit_health_declaration(
+    employee_id: str,
+    request: HealthDeclarationRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Submit occupational health declaration.
+    Required for CQC compliance - must be completed before deployment.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        from datetime import date as date_type
+        health_service = get_health_service()
+        
+        # Parse date
+        declaration_date = date_type.fromisoformat(request.declaration_date)
+        
+        # Create input model
+        declaration_input = HealthDeclarationInput(
+            declaration_date=declaration_date,
+            declared_fit_to_work=request.declared_fit_to_work,
+            conditions_disclosed=request.conditions_disclosed,
+            conditions_details=request.conditions_details,
+            back_problems=request.back_problems,
+            skin_conditions=request.skin_conditions,
+            respiratory_conditions=request.respiratory_conditions,
+            infectious_diseases=request.infectious_diseases,
+            mental_health=request.mental_health,
+            physical_limitations=request.physical_limitations,
+            medication=request.medication,
+            medication_details=request.medication_details,
+            hepatitis_b_vaccinated=request.hepatitis_b_vaccinated,
+            flu_vaccinated=request.flu_vaccinated,
+            covid_vaccinated=request.covid_vaccinated,
+            consent_to_oh_contact=request.consent_to_oh_contact,
+            emergency_contact_name=request.emergency_contact_name,
+            emergency_contact_phone=request.emergency_contact_phone,
+            notes=request.notes
+        )
+        
+        # Submit declaration
+        result = await health_service.submit_declaration(
+            employee_id=employee_id,
+            declaration=declaration_input,
+            submitted_by=user.get("id")
+        )
+        
+        # Log audit event
+        try:
+            audit_service = get_audit_service()
+            await audit_service.log(
+                action=AuditAction.HEALTH_DECLARATION_SUBMITTED,
+                entity_type=EntityType.HEALTH_DECLARATION,
+                entity_id=result.id,
+                user_id=user.get("id"),
+                user_email=user.get("email"),
+                user_name=f"{user.get('first_name', '')} {user.get('last_name', '')}".strip(),
+                employee_id=employee_id,
+                employee_name=f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+                metadata={
+                    "declared_fit": request.declared_fit_to_work,
+                    "conditions_disclosed": request.conditions_disclosed
+                }
+            )
+        except Exception as audit_err:
+            logger.warning(f"Audit logging failed: {audit_err}")
+        
+        return {
+            "success": True,
+            "declaration_id": result.id,
+            "status": result.status,
+            "message": "Health declaration submitted successfully"
+        }
+        
+    except RuntimeError as e:
+        logger.error(f"Health service error: {e}")
+        raise HTTPException(status_code=500, detail="Health service not available")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@api_router.get("/employees/{employee_id}/health-declaration")
+async def get_health_declaration(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get current health declaration for an employee.
+    Returns the most recent declaration with status.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        health_service = get_health_service()
+        declaration = await health_service.get_current_declaration(employee_id)
+        
+        if not declaration:
+            return {
+                "has_declaration": False,
+                "declaration": None,
+                "status": "missing",
+                "message": "No health declaration on file"
+            }
+        
+        return {
+            "has_declaration": True,
+            "declaration": declaration,
+            "status": declaration.get("status", "requires_review"),
+            "message": None
+        }
+        
+    except RuntimeError as e:
+        logger.error(f"Health service error: {e}")
+        raise HTTPException(status_code=500, detail="Health service not available")
+
+
+@api_router.get("/employees/{employee_id}/health-declaration/history")
+async def get_health_declaration_history(
+    employee_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    user: dict = Depends(get_current_user)
+):
+    """Get health declaration history for an employee."""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        health_service = get_health_service()
+        history = await health_service.get_declaration_history(employee_id, limit=limit)
+        
+        return {
+            "employee_id": employee_id,
+            "declarations": history,
+            "count": len(history)
+        }
+        
+    except RuntimeError as e:
+        logger.error(f"Health service error: {e}")
+        raise HTTPException(status_code=500, detail="Health service not available")
+
+
+class HealthDeclarationReviewRequest(BaseModel):
+    """Request model for reviewing health declaration."""
+    status: str  # fit, requires_review, not_fit, conditional
+    review_notes: Optional[str] = None
+    adjustments_required: Optional[str] = None
+
+
+@api_router.post("/health-declarations/{declaration_id}/review")
+async def review_health_declaration(
+    declaration_id: str,
+    request: HealthDeclarationReviewRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Review a health declaration (Admin only).
+    Sets status to fit, not_fit, or conditional.
+    """
+    try:
+        health_service = get_health_service()
+        
+        # Validate status
+        try:
+            status = HealthStatus(request.status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
+        
+        reviewer_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+        
+        result = await health_service.review_declaration(
+            declaration_id=declaration_id,
+            status=status,
+            reviewed_by=reviewer_name,
+            review_notes=request.review_notes,
+            adjustments_required=request.adjustments_required
+        )
+        
+        if not result:
+            raise HTTPException(status_code=404, detail="Declaration not found")
+        
+        # Log audit event
+        try:
+            audit_service = get_audit_service()
+            await audit_service.log(
+                action=AuditAction.HEALTH_DECLARATION_REVIEWED,
+                entity_type=EntityType.HEALTH_DECLARATION,
+                entity_id=declaration_id,
+                user_id=user.get("id"),
+                user_email=user.get("email"),
+                user_name=reviewer_name,
+                employee_id=result.get("employee_id"),
+                metadata={
+                    "status": request.status,
+                    "has_adjustments": bool(request.adjustments_required)
+                }
+            )
+        except Exception as audit_err:
+            logger.warning(f"Audit logging failed: {audit_err}")
+        
+        return {
+            "success": True,
+            "declaration": result,
+            "message": f"Declaration reviewed - status: {request.status}"
+        }
+        
+    except RuntimeError as e:
+        logger.error(f"Health service error: {e}")
+        raise HTTPException(status_code=500, detail="Health service not available")
+
+
+@api_router.get("/admin/health-declarations/pending-review")
+async def get_pending_health_declarations(
+    limit: int = Query(50, ge=1, le=100),
+    user: dict = Depends(require_admin)
+):
+    """Get all health declarations pending review (Admin only)."""
+    try:
+        health_service = get_health_service()
+        pending = await health_service.get_declarations_requiring_review(limit=limit)
+        
+        # Enrich with employee names
+        for decl in pending:
+            emp = await db.employees.find_one({"id": decl.get("employee_id")}, {"_id": 0, "first_name": 1, "last_name": 1})
+            if emp:
+                decl["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+        
+        return {
+            "declarations": pending,
+            "count": len(pending)
+        }
+        
+    except RuntimeError as e:
+        logger.error(f"Health service error: {e}")
+        raise HTTPException(status_code=500, detail="Health service not available")
+
+
 # ==================== SEED TEMPLATES ====================
 
 @api_router.post("/seed-templates")
@@ -23984,16 +24378,13 @@ class DocumentExtractionService:
         api_key: str, 
         employee_name: str
     ) -> dict:
-        """Extract training certificate fields using GPT Vision."""
+        """Extract training certificate fields using Gemini Vision."""
         fields = {}
         metadata = {}
         issues = []
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-training-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing training certificates.
+            prompt = """You are a document extraction specialist analyzing training certificates.
 
 Extract the following fields from the training certificate:
 - holder_name: Name of the certificate holder
@@ -24021,16 +24412,11 @@ Return JSON only:
   "duration_text": {"value": "string or null", "confidence": 0.0-1.0},
   "reference_number": {"value": "string or null", "confidence": 0.0-1.0},
   "accreditation": {"value": "string or null", "confidence": 0.0-1.0}
-}"""
-            ).with_model("openai", "gpt-5.2")
+}
+
+Extract all fields from this training certificate. Return JSON only."""
             
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Extract all fields from this training certificate. Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            result = await chat.send_message(user_message)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 # Parse JSON response
@@ -24368,10 +24754,7 @@ Return JSON only, no markdown:
         issues = []
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-identity-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing identity documents.
+            prompt = f"""You are a document extraction specialist analyzing identity documents.
 
 You may be analyzing:
 1. Passport (UK or international)
@@ -24396,26 +24779,21 @@ IMPORTANT:
 - For passports, the number is usually in the top right of the data page
 
 Return JSON only:
-{
-  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
-  "full_name_on_document": {"value": "string or null", "confidence": 0.0-1.0},
-  "date_of_birth": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "document_number": {"value": "string or null", "confidence": 0.0-1.0},
-  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "nationality": {"value": "string or null", "confidence": 0.0-1.0},
-  "gender": {"value": "string or null", "confidence": 0.0-1.0},
-  "place_of_birth": {"value": "string or null", "confidence": 0.0-1.0}
-}"""
-            ).with_model("openai", "gpt-5.2")
+{{
+  "document_type": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "full_name_on_document": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "date_of_birth": {{"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}},
+  "document_number": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "issue_date": {{"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}},
+  "expiry_date": {{"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}},
+  "nationality": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "gender": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "place_of_birth": {{"value": "string or null", "confidence": 0.0-1.0}}
+}}
+
+Extract all identity information from this document. {'Expected name: ' + employee_name if employee_name else ''} {'Expected DOB: ' + employee_dob if employee_dob else ''} Return JSON only."""
             
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text=f"Extract all identity information from this document. {'Expected name: ' + employee_name if employee_name else ''} {'Expected DOB: ' + employee_dob if employee_dob else ''} Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            result = await chat.send_message(user_message)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 try:
@@ -24512,10 +24890,15 @@ Return JSON only:
         issues = []
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-address-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing Proof of Address documents.
+            context_parts = []
+            if employee_name:
+                context_parts.append(f"Expected addressee: {employee_name}")
+            if employee_address and employee_address.get("postcode"):
+                context_parts.append(f"Expected postcode: {employee_address.get('postcode')}")
+            if document_type_hint:
+                context_parts.append(f"Expected document type: {document_type_hint}")
+            
+            prompt = f"""You are a document extraction specialist analyzing Proof of Address documents.
 
 You may be analyzing:
 1. Utility Bill (gas, electricity, water)
@@ -24542,33 +24925,20 @@ IMPORTANT:
 - Look for the statement/bill date, not any transaction dates
 
 Return JSON only:
-{
-  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
-  "issue_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "addressee_name": {"value": "string or null", "confidence": 0.0-1.0},
-  "address_line1": {"value": "string or null", "confidence": 0.0-1.0},
-  "address_line2": {"value": "string or null", "confidence": 0.0-1.0},
-  "city": {"value": "string or null", "confidence": 0.0-1.0},
-  "postcode": {"value": "string or null", "confidence": 0.0-1.0},
-  "provider_name": {"value": "string or null", "confidence": 0.0-1.0}
-}"""
-            ).with_model("openai", "gpt-5.2")
+{{
+  "document_type": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "issue_date": {{"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0}},
+  "addressee_name": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "address_line1": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "address_line2": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "city": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "postcode": {{"value": "string or null", "confidence": 0.0-1.0}},
+  "provider_name": {{"value": "string or null", "confidence": 0.0-1.0}}
+}}
+
+Extract address and document information from this proof of address document. {' '.join(context_parts)} Return JSON only."""
             
-            image_content = ImageContent(image_base64=images[0])
-            context_parts = []
-            if employee_name:
-                context_parts.append(f"Expected addressee: {employee_name}")
-            if employee_address and employee_address.get("postcode"):
-                context_parts.append(f"Expected postcode: {employee_address.get('postcode')}")
-            if document_type_hint:
-                context_parts.append(f"Expected document type: {document_type_hint}")
-            
-            user_message = UserMessage(
-                text=f"Extract address and document information from this proof of address document. {' '.join(context_parts)} Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            result = await chat.send_message(user_message)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 try:
@@ -24727,10 +25097,7 @@ Example:
         issues = []
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-id-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing ID documents (passports, driving licenses, national ID cards).
+            prompt = """You are a document extraction specialist analyzing ID documents (passports, driving licenses, national ID cards).
 
 Extract the following fields:
 - holder_name: Full name on document
@@ -24752,16 +25119,11 @@ Return JSON only:
   "expiry_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
   "issuing_authority": {"value": "string or null", "confidence": 0.0-1.0},
   "nationality": {"value": "string or null", "confidence": 0.0-1.0}
-}"""
-            ).with_model("openai", "gpt-5.2")
+}
+
+Extract all fields from this ID document. Return JSON only."""
             
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Extract all fields from this ID document. Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            result = await chat.send_message(user_message)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 try:
@@ -24797,10 +25159,7 @@ Return JSON only:
         issues = []
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-poa-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist analyzing Proof of Address documents (utility bills, bank statements, council tax).
+            prompt = """You are a document extraction specialist analyzing Proof of Address documents (utility bills, bank statements, council tax).
 
 Extract the following fields:
 - holder_name: Name on document
@@ -24823,16 +25182,11 @@ Return JSON only:
   "document_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
   "issuer": {"value": "string or null", "confidence": 0.0-1.0},
   "account_number": {"value": "string or null", "confidence": 0.0-1.0}
-}"""
-            ).with_model("openai", "gpt-5.2")
+}
+
+Extract all fields from this Proof of Address document. Return JSON only."""
             
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Extract all fields from this Proof of Address document. Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            result = await chat.send_message(user_message)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 try:
@@ -24965,10 +25319,7 @@ Example:
         issues = [{"code": "document_type_unclear", "detail": "Document type could not be determined", "severity": "warning"}]
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-generic-{uuid.uuid4()}",
-                system_message="""You are a document extraction specialist. Analyze this document and extract any relevant fields.
+            prompt = """You are a document extraction specialist. Analyze this document and extract any relevant fields.
 
 Extract whatever fields you can identify:
 - holder_name: Name on document
@@ -24978,16 +25329,9 @@ Extract whatever fields you can identify:
 - reference_number: Any reference/ID number
 - issuer_name: Issuing organization
 
-Return JSON only."""
-            ).with_model("openai", "gpt-5.2")
+Analyze this document and extract whatever fields you can identify. Return JSON only."""
             
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Analyze this document and extract whatever fields you can identify. Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            result = await chat.send_message(user_message)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 try:
@@ -34798,11 +35142,8 @@ async def extract_employment_history_from_cv(
         if not images_to_process:
             raise HTTPException(status_code=400, detail="Could not process CV file")
         
-        # Use GPT-5.2 Vision to extract employment history
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"cv-extraction-{uuid.uuid4()}",
-            system_message="""You are an employment history extraction specialist. Extract ALL employment roles from the provided CV/Resume.
+        # Use Gemini Vision to extract employment history
+        prompt = """You are an employment history extraction specialist. Extract ALL employment roles from the provided CV/Resume.
 
 For EACH role found, extract:
 - job_title: The job title/position held
@@ -34818,19 +35159,14 @@ IMPORTANT:
 - If dates are only years (e.g., "2019-2021"), use YYYY-01 for start and YYYY-12 for end
 - If "Present" or "Current", set end_date to null and is_current to true
 - Order by most recent first
-- Return ONLY valid JSON array, no other text"""
-        ).with_model("openai", "gpt-5.2")
+- Return ONLY valid JSON array, no other text
+
+Extract all employment/work history roles from this CV. Return a JSON array of role objects. If no employment found, return empty array []."""
         
         # Process images
         all_extraction_results = []
         for i, image_base64 in enumerate(images_to_process[:3]):  # Max 3 pages for employment
-            image_content = ImageContent(image_base64=image_base64)
-            user_message = UserMessage(
-                text=f"Extract all employment/work history roles from this CV page {i+1}. Return a JSON array of role objects. If no employment found on this page, return empty array [].",
-                file_contents=[image_content]
-            )
-            
-            page_result = await chat.send_message(user_message)
+            page_result = await DocumentExtractionService._call_gemini_vision(image_base64, prompt)
             if page_result:
                 all_extraction_results.append(page_result)
         
@@ -42829,6 +43165,15 @@ async def startup():
         init_storage()
     except Exception as e:
         logger.error(f"Storage initialization failed: {e}")
+    
+    # Initialize CQC Compliance Services
+    try:
+        init_audit_service(db)
+        init_compliance_status_service(db)
+        init_health_service(db)
+        logger.info("CQC Compliance services initialized (Audit, Status, Health)")
+    except Exception as e:
+        logger.error(f"CQC Compliance services initialization failed: {e}")
     
     # Auto-seed organisation policies and insurance if empty
     try:

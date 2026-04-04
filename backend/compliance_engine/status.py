@@ -642,9 +642,26 @@ class ComplianceStatusService:
     
     async def _store_summary(self, summary: EmployeeComplianceSummary):
         """Store summary in database for caching."""
+        # Convert to dict and ensure all dates are JSON serializable
+        summary_dict = summary.dict()
+        
+        # Convert date objects to ISO strings in requirements
+        for key, req in summary_dict.get("requirements", {}).items():
+            if isinstance(req, dict):
+                if req.get("expiry_date") and isinstance(req["expiry_date"], date):
+                    req["expiry_date"] = req["expiry_date"].isoformat()
+                if req.get("verified_at") and isinstance(req["verified_at"], datetime):
+                    req["verified_at"] = req["verified_at"].isoformat()
+                if req.get("last_updated") and isinstance(req["last_updated"], datetime):
+                    req["last_updated"] = req["last_updated"].isoformat()
+        
+        # Convert top-level datetime
+        if isinstance(summary_dict.get("last_calculated_at"), datetime):
+            summary_dict["last_calculated_at"] = summary_dict["last_calculated_at"].isoformat()
+        
         await self.db.employee_compliance_summary.update_one(
             {"employee_id": summary.employee_id},
-            {"$set": summary.dict()},
+            {"$set": summary_dict},
             upsert=True
         )
     

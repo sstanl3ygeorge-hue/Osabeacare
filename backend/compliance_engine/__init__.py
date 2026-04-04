@@ -69,6 +69,34 @@ from .extraction import (
     ADDRESS_EXTRACTION_PROMPT
 )
 
+from .audit import (
+    AuditAction,
+    EntityType,
+    AuditLogEntry,
+    AuditTrailService,
+    init_audit_service,
+    get_audit_service
+)
+
+from .status import (
+    ComplianceStatus,
+    OverallStatus,
+    RequirementSummary as StatusRequirementSummary,
+    EmployeeComplianceSummary,
+    ComplianceStatusService,
+    init_compliance_status_service,
+    get_compliance_status_service
+)
+
+from .health import (
+    HealthStatus,
+    HealthDeclarationInput,
+    HealthDeclaration,
+    HealthDeclarationService,
+    init_health_service,
+    get_health_service
+)
+
 __all__ = [
     # Models
     'RequirementType', 'EvidenceStatus', 'StampType', 
@@ -90,5 +118,15 @@ __all__ = [
     # Extraction
     'DocumentExtractor', 'resize_image_for_extraction', 'pdf_first_page_to_image',
     'extract_rtw_fields', 'extract_dbs_fields', 'extract_identity_fields', 'extract_address_fields',
-    'RTW_EXTRACTION_PROMPT', 'DBS_EXTRACTION_PROMPT', 'IDENTITY_EXTRACTION_PROMPT', 'ADDRESS_EXTRACTION_PROMPT'
+    'RTW_EXTRACTION_PROMPT', 'DBS_EXTRACTION_PROMPT', 'IDENTITY_EXTRACTION_PROMPT', 'ADDRESS_EXTRACTION_PROMPT',
+    # Audit
+    'AuditAction', 'EntityType', 'AuditLogEntry', 'AuditTrailService',
+    'init_audit_service', 'get_audit_service',
+    # Status
+    'ComplianceStatus', 'OverallStatus', 'StatusRequirementSummary', 
+    'EmployeeComplianceSummary', 'ComplianceStatusService',
+    'init_compliance_status_service', 'get_compliance_status_service',
+    # Health
+    'HealthStatus', 'HealthDeclarationInput', 'HealthDeclaration',
+    'HealthDeclarationService', 'init_health_service', 'get_health_service'
 ]

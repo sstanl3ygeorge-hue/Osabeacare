@@ -148,7 +148,16 @@ class HealthDeclarationService:
             status=status
         )
         
-        await self.collection.insert_one(record.dict())
+        # Convert to dict and serialize dates for MongoDB
+        record_dict = record.dict()
+        if isinstance(record_dict.get("declaration_date"), date):
+            record_dict["declaration_date"] = record_dict["declaration_date"].isoformat()
+        if isinstance(record_dict.get("submitted_at"), datetime):
+            record_dict["submitted_at"] = record_dict["submitted_at"].isoformat()
+        if isinstance(record_dict.get("updated_at"), datetime):
+            record_dict["updated_at"] = record_dict["updated_at"].isoformat()
+        
+        await self.collection.insert_one(record_dict)
         
         return record
     

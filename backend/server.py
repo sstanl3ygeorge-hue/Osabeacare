@@ -51,7 +51,7 @@ from email_automation import (
     EventType,
     RequestFailureHandler
 )
-from openai import OpenAI
+from google import genai
 import pytesseract
 from PIL import Image as PILImage
 from pdf2image import convert_from_bytes
@@ -23914,53 +23914,42 @@ class DocumentExtractionService:
         return len(common) >= 1
     
     @staticmethod
-    async def _call_openai_vision(image_base64: str, prompt: str, user_prompt: str = None) -> Optional[str]:
-        """Call OpenAI Vision API directly with production-grade prompts."""
+    async def _call_gemini_vision(image_base64: str, prompt: str) -> Optional[str]:
+        """Call Gemini Vision API directly with production-grade prompts."""
         try:
-            api_key = os.environ.get("OPENAI_API_KEY")
+            api_key = os.environ.get("GEMINI_API_KEY")
             if not api_key:
-                logger.error("OPENAI_API_KEY not set")
+                logger.error("GEMINI_API_KEY not set")
                 return None
             
-            client = OpenAI(api_key=api_key)
+            client = genai.Client(api_key=api_key)
             
             # Determine image media type
             if image_base64.startswith('/9j/'):
                 media_type = "image/jpeg"
             elif image_base64.startswith('iVBOR'):
                 media_type = "image/png"
+            elif image_base64.startswith('JVBERi'):
+                media_type = "application/pdf"
             else:
                 media_type = "image/png"
             
-            # Combine prompt - production pattern: prompt contains all instructions
-            full_prompt = prompt
-            if user_prompt:
-                full_prompt = f"{prompt}\n\n{user_prompt}"
-            
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": full_prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{media_type};base64,{image_base64}",
-                                    "detail": "high"
-                                }
-                            }
+                        "parts": [
+                            {"text": prompt},
+                            {"inline_data": {"mime_type": media_type, "data": image_base64}}
                         ]
                     }
-                ],
-                max_tokens=1000,
-                temperature=0.1
+                ]
             )
             
-            return response.choices[0].message.content
+            return response.text
         except Exception as e:
-            logger.error(f"OpenAI Vision call failed: {e}")
+            logger.error(f"Gemini Vision call failed: {e}")
             return None
     
     @staticmethod
@@ -23969,8 +23958,15 @@ class DocumentExtractionService:
         if not response_text:
             return {}
         
+        # Remove markdown code blocks if present
+        text = response_text
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+        
         # JSON Guard - models sometimes add text before JSON
-        match = re.search(r"\{.*\}", response_text, re.S)
+        match = re.search(r"\{.*\}", text, re.S)
         if match:
             try:
                 return json.loads(match.group())
@@ -23978,7 +23974,7 @@ class DocumentExtractionService:
                 pass
         
         try:
-            return json.loads(response_text)
+            return json.loads(text.strip())
         except json.JSONDecodeError:
             return {}
     
@@ -24163,7 +24159,7 @@ Example:
 }"""
         
         try:
-            result = await DocumentExtractionService._call_openai_vision(images[0], prompt)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 data = DocumentExtractionService._parse_json_response(result)
@@ -24265,7 +24261,7 @@ Return JSON only, no markdown:
         user_prompt = f"Extract all DBS information from this document. {'Expected holder name: ' + employee_name if employee_name else ''} Return JSON only."
         
         try:
-            result = await DocumentExtractionService._call_openai_vision(
+            result = await DocumentExtractionService._call_gemini_vision(
                 images[0],
                 system_prompt,
                 user_prompt
@@ -24689,7 +24685,7 @@ Example:
 }"""
         
         try:
-            result = await DocumentExtractionService._call_openai_vision(images[0], prompt)
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
                 data = DocumentExtractionService._parse_json_response(result)
@@ -24904,163 +24900,63 @@ Return JSON only:
     
     @staticmethod
     async def _extract_right_to_work(images: List[str], api_key: str, employee_name: str) -> dict:
-        """
-        Extract Right to Work document fields using GPT Vision.
-        
-        Handles:
-        - Home Office Online Check Results (Share Code)
-        - eVisa status screenshots
-        - Passport pages with visa endorsements
-        - BRP cards
-        - Positive Verification Notices (PVN)
-        """
+        """Extract Right to Work document fields using Gemini Vision."""
         fields = {}
         metadata = {}
         issues = []
         
-        logger.info(f"RTW Extraction: Starting extraction with {len(images)} image(s), employee_name={employee_name}")
+        logger.info(f"RTW Extraction: Starting extraction with {len(images)} image(s)")
+        
+        prompt = """You are an AI system extracting structured compliance data from UK Right to Work documents.
+
+Extract the following fields and return ONLY valid JSON, no markdown code blocks.
+
+Fields:
+- holder_name: Full name of the person
+- document_type: Type of document
+- check_date: Date (format: YYYY-MM-DD)
+- reference_number: Any reference number or share code
+- permission_type: Type of immigration permission
+- permission_start_date: Start date (format: YYYY-MM-DD)
+- permission_end_date: End date (format: YYYY-MM-DD)
+- share_code: The 9-character share code if present
+- work_permitted: Boolean - is work permitted?
+- restrictions: Any work restrictions text
+- is_indefinite: Boolean - indefinite right to work?
+
+Return JSON only.
+
+Example:
+{
+  "holder_name": "Jane Smith",
+  "document_type": "Home Office Online Check Result",
+  "permission_type": "Skilled Worker Visa",
+  "permission_end_date": "2026-05-10",
+  "share_code": "ABC123DEF",
+  "work_permitted": true,
+  "is_indefinite": false
+}"""
         
         try:
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"doc-extract-rtw-{uuid.uuid4()}",
-                system_message="""You are a UK Right to Work document extraction specialist. You analyze Home Office online check results, eVisa screenshots, passports with visa endorsements, and BRP cards.
-
-Extract the following fields from the document:
-
-CORE FIELDS:
-- holder_name: Full name of the person
-- document_type: Type of document (e.g., "Home Office Online Check Result", "eVisa Screenshot", "UK Passport", "BRP Card", "Positive Verification Notice", "Passport with Visa Endorsement")
-- check_date: Date the check was performed or document was issued (format: YYYY-MM-DD)
-- reference_number: Any reference number, share code, or PVN number
-
-PERMISSION FIELDS:
-- permission_type: Type of immigration permission (e.g., "Settled Status", "Pre-Settled Status", "Student Visa", "Work Visa", "Indefinite Leave to Remain", "Limited Leave to Remain")
-- permission_start_date: Start date of permission if shown (format: YYYY-MM-DD)
-- permission_end_date: End date/expiry of permission if shown (format: YYYY-MM-DD) - IMPORTANT: Only extract if explicitly stated
-- share_code: The 9-character share code if this is a Home Office online check
-
-WORK RESTRICTIONS:
-- work_permitted: Boolean - is work permitted? (true/false)
-- restrictions: Any work restrictions text (e.g., "No work permitted", "20 hours per week during term time", "No recourse to public funds")
-- hours_limit: If there's an hours restriction, extract the number (e.g., 20)
-
-STATUS INDICATORS:
-- is_expired: Boolean - is this document/permission expired based on dates shown?
-- is_indefinite: Boolean - does this grant indefinite/unlimited right to work?
-- requires_followup: Boolean - is follow-up check required before permission expires?
-
-IMPORTANT RULES:
-- Return dates in YYYY-MM-DD format
-- If a field is not found, set it to null
-- Do NOT guess expiry dates - only extract if explicitly shown
-- For UK/Irish passports, is_indefinite should be true
-- For Share Code checks, is_indefinite depends on the status shown
-- Set confidence for each field (0.0-1.0)
-
-Return JSON only:
-{
-  "holder_name": {"value": "string or null", "confidence": 0.0-1.0},
-  "document_type": {"value": "string or null", "confidence": 0.0-1.0},
-  "check_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "reference_number": {"value": "string or null", "confidence": 0.0-1.0},
-  "permission_type": {"value": "string or null", "confidence": 0.0-1.0},
-  "permission_start_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "permission_end_date": {"value": "YYYY-MM-DD or null", "confidence": 0.0-1.0},
-  "share_code": {"value": "string or null", "confidence": 0.0-1.0},
-  "work_permitted": {"value": true/false/null, "confidence": 0.0-1.0},
-  "restrictions": {"value": "string or null", "confidence": 0.0-1.0},
-  "hours_limit": {"value": number or null, "confidence": 0.0-1.0},
-  "is_expired": {"value": true/false/null, "confidence": 0.0-1.0},
-  "is_indefinite": {"value": true/false/null, "confidence": 0.0-1.0},
-  "requires_followup": {"value": true/false/null, "confidence": 0.0-1.0}
-}"""
-            ).with_model("openai", "gpt-5.2")
-            
-            image_content = ImageContent(image_base64=images[0])
-            user_message = UserMessage(
-                text="Extract all Right to Work fields from this document. This is a UK immigration/right to work document. Return JSON only.",
-                file_contents=[image_content]
-            )
-            
-            logger.info("RTW Extraction: Sending to LLM...")
-            result = await chat.send_message(user_message)
-            logger.info(f"RTW Extraction: LLM response received, length={len(result) if result else 0}")
+            result = await DocumentExtractionService._call_gemini_vision(images[0], prompt)
             
             if result:
-                try:
-                    json_match = re.search(r'\{[\s\S]*\}', result)
-                    if json_match:
-                        data = json.loads(json_match.group())
-                        logger.info(f"RTW Extraction: Parsed {len(data)} fields from response")
-                        
-                        for field_name, field_data in data.items():
-                            if isinstance(field_data, dict):
-                                value = field_data.get("value")
-                                confidence = field_data.get("confidence", 0.5)
-                            else:
-                                value = field_data
-                                confidence = 0.5
-                            
-                            fields[field_name] = value
-                            metadata[field_name] = {
-                                "source_type": "explicit" if value is not None else "not_found",
-                                "confidence": confidence
-                            }
-                        
-                        # Log extracted fields for debugging
-                        logger.info(f"RTW Extraction: Extracted fields - permission_start={fields.get('permission_start_date')}, permission_end={fields.get('permission_end_date')}, share_code={fields.get('share_code')}, is_indefinite={fields.get('is_indefinite')}")
-                        
-                        # Check for name mismatch
-                        extracted_name = fields.get("holder_name")
-                        if extracted_name and employee_name:
-                            if not DocumentExtractionService._check_name_match(extracted_name, employee_name):
-                                issues.append({
-                                    "code": "name_mismatch",
-                                    "detail": f"Document name '{extracted_name}' may not match employee name '{employee_name}'",
-                                    "severity": "warning"
-                                })
-                        
-                        # Check for expired permission
-                        if fields.get("is_expired") is True:
-                            issues.append({
-                                "code": "permission_expired",
-                                "detail": "This document shows expired immigration permission - cannot be used for RTW verification",
-                                "severity": "warning"
-                            })
-                        
-                        # Check for work restrictions
-                        if fields.get("work_permitted") is False:
-                            issues.append({
-                                "code": "work_not_permitted",
-                                "detail": "This document indicates work is NOT permitted",
-                                "severity": "warning"
-                            })
-                        
-                        # Follow-up reminder
-                        if fields.get("requires_followup") is True and fields.get("permission_end_date"):
-                            issues.append({
-                                "code": "followup_required",
-                                "detail": f"Time-limited permission - set follow-up before {fields.get('permission_end_date')}",
-                                "severity": "warning"
-                            })
-                    else:
-                        logger.warning(f"RTW Extraction: No JSON found in response: {result[:200]}...")
-                        issues.append({"code": "no_json", "detail": "AI response did not contain valid JSON", "severity": "warning"})
-                        
-                except json.JSONDecodeError as e:
-                    logger.error(f"RTW Extraction: JSON decode error - {e}")
-                    issues.append({"code": "parse_error", "detail": "Failed to parse AI response", "severity": "warning"})
+                data = DocumentExtractionService._parse_json_response(result)
+                if data:
+                    for field_name, value in data.items():
+                        fields[field_name] = value
+                        metadata[field_name] = {"source_type": "explicit" if value else "not_found", "confidence": 0.9 if value else 0.0}
+                else:
+                    issues.append({"code": "parse_error", "detail": "Failed to parse JSON", "severity": "warning"})
             else:
-                logger.warning("RTW Extraction: Empty response from LLM")
-                issues.append({"code": "empty_response", "detail": "No response from extraction service", "severity": "warning"})
+                issues.append({"code": "empty_response", "detail": "No response from extraction", "severity": "warning"})
         
         except Exception as e:
-            logger.error(f"RTW extraction error: {e}", exc_info=True)
+            logger.error(f"RTW extraction error: {e}")
             issues.append({"code": "extraction_error", "detail": str(e), "severity": "warning"})
         
         return {"fields": fields, "metadata": metadata, "issues": issues}
-    
+
     @staticmethod
     async def _extract_generic(images: List[str], api_key: str, employee_name: str) -> dict:
         """Generic extraction for unclassified documents."""

@@ -1,5 +1,5 @@
 # Document Extraction Service
-# Uses OpenAI GPT-4o Vision directly for UK compliance document extraction
+# Uses Google Gemini 2.5 Flash Vision for UK compliance document extraction
 # Production-grade prompts for high accuracy extraction
 
 import json
@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Optional, Any
 from io import BytesIO
 
-from openai import OpenAI
+from google import genai
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,12 @@ share_code
 pvn_number
 work_restrictions
 indefinite_right_to_work (true/false)
+holder_name
+document_type
+document_number
+nationality
+issue_date
+expiry_date
 
 Rules:
 
@@ -40,25 +46,32 @@ If the document states "no time limit" or "indefinite leave", set indefinite_rig
 If a visa expiry date exists, populate permission_end.
 Share codes are usually 9 characters.
 PVN numbers typically begin with "PVN".
+Use ISO date format YYYY-MM-DD.
 
-Return JSON only.
+Return JSON only, no markdown code blocks.
 
-Expected output example:
+Example:
 
 {
+  "holder_name": "Jane Smith",
+  "document_type": "BRP",
+  "document_number": "ZN1234567",
+  "nationality": "Nigerian",
   "permission_type": "Skilled Worker Visa",
   "permission_start": "2023-05-10",
   "permission_end": "2026-05-10",
   "share_code": "ABC123DEF",
   "pvn_number": null,
   "work_restrictions": null,
-  "indefinite_right_to_work": false
+  "indefinite_right_to_work": false,
+  "issue_date": "2023-05-10",
+  "expiry_date": "2026-05-10"
 }"""
 
 
 DBS_EXTRACTION_PROMPT = """Extract DBS certificate information from the document.
 
-Return JSON only.
+Return JSON only, no markdown code blocks.
 
 Fields:
 
@@ -73,6 +86,7 @@ Rules:
 If the certificate states "No information recorded", status = clear.
 If offences or cautions appear, status = information_present.
 Certificate numbers are 12 digits.
+Use ISO date format YYYY-MM-DD.
 
 Return JSON only.
 
@@ -89,7 +103,7 @@ Example:
 
 IDENTITY_EXTRACTION_PROMPT = """You are extracting structured identity data from an identity document.
 
-Return only valid JSON.
+Return only valid JSON, no markdown code blocks.
 
 Fields:
 
@@ -124,7 +138,7 @@ Example output:
 
 ADDRESS_EXTRACTION_PROMPT = """Extract structured proof of address data from the document.
 
-Return valid JSON only.
+Return valid JSON only, no markdown code blocks.
 
 Fields:
 
@@ -155,15 +169,15 @@ Example:
 
 
 # =============================================================================
-# OPENAI CLIENT
+# GEMINI CLIENT
 # =============================================================================
 
-def get_openai_client() -> OpenAI:
-    """Get OpenAI client with API key from environment."""
-    api_key = os.environ.get("OPENAI_API_KEY")
+def get_gemini_client() -> genai.Client:
+    """Get Gemini client with API key from environment."""
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise ValueError("OPENAI_API_KEY environment variable not set")
-    return OpenAI(api_key=api_key)
+        raise ValueError("GEMINI_API_KEY environment variable not set")
+    return genai.Client(api_key=api_key)
 
 
 def parse_json_response(response_text: str) -> Dict:
@@ -174,8 +188,15 @@ def parse_json_response(response_text: str) -> Dict:
     if not response_text:
         return {}
     
+    # Remove markdown code blocks if present
+    text = response_text
+    if "```json" in text:
+        text = text.split("```json")[1].split("```")[0]
+    elif "```" in text:
+        text = text.split("```")[1].split("```")[0]
+    
     # Try to find JSON in the response
-    match = re.search(r"\{.*\}", response_text, re.S)
+    match = re.search(r"\{.*\}", text, re.S)
     if match:
         try:
             return json.loads(match.group())
@@ -184,7 +205,7 @@ def parse_json_response(response_text: str) -> Dict:
     
     # Try parsing the whole thing
     try:
-        return json.loads(response_text)
+        return json.loads(text.strip())
     except json.JSONDecodeError:
         return {}
 
@@ -195,10 +216,10 @@ def parse_json_response(response_text: str) -> Dict:
 
 class DocumentExtractor:
     """
-    Document extraction service using OpenAI GPT-4o Vision directly.
+    Document extraction service using Google Gemini 2.5 Flash Vision.
     
     Architecture:
-    Upload Evidence → Backend /api/{requirement}/extract → OpenAI Vision → Structured JSON → Populate Result Panel
+    Upload Evidence → Backend /api/{requirement}/extract → Gemini Vision → Structured JSON → Populate Result Panel
     
     Key behaviors:
     - Extraction is assistive, not blocking
@@ -207,11 +228,11 @@ class DocumentExtractor:
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize with OpenAI API key."""
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        """Initialize with Gemini API key."""
+        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
         if not self.api_key:
-            raise ValueError("OpenAI API key required")
-        self.client = OpenAI(api_key=self.api_key)
+            raise ValueError("Gemini API key required")
+        self.client = genai.Client(api_key=self.api_key)
     
     async def extract_rtw(
         self, 
@@ -270,7 +291,7 @@ class DocumentExtractor:
         extraction_type: str
     ) -> Dict[str, Any]:
         """
-        Core extraction method using OpenAI GPT-4o Vision directly.
+        Core extraction method using Gemini 2.5 Flash Vision.
         """
         try:
             # Determine image media type
@@ -278,41 +299,32 @@ class DocumentExtractor:
                 media_type = "image/jpeg"
             elif image_base64.startswith('iVBOR'):
                 media_type = "image/png"
+            elif image_base64.startswith('JVBERi'):
+                media_type = "application/pdf"
             else:
                 media_type = "image/png"  # Default
             
-            # Call OpenAI Vision API directly
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
+            # Call Gemini Vision API
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": prompt
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{media_type};base64,{image_base64}",
-                                    "detail": "high"
-                                }
-                            }
+                        "parts": [
+                            {"text": prompt},
+                            {"inline_data": {"mime_type": media_type, "data": image_base64}}
                         ]
                     }
-                ],
-                max_tokens=1000,
-                temperature=0.1
+                ]
             )
             
-            result = response.choices[0].message.content
+            result = response.text
             
             if not result:
                 return {
                     "fields": {},
                     "success": False,
-                    "error": "No response from OpenAI",
+                    "error": "No response from Gemini",
                     "confidence": 0.0
                 }
             

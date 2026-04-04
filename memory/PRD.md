@@ -235,3 +235,84 @@ Created `/backend/compliance_engine/` module as the single source of truth for a
 - `/app/backend/compliance_engine/labels.py`
 - `/app/frontend/src/components/compliance/UploadRequirementCard.js` (Identity/POA Result panels)
 - `/app/frontend/src/components/compliance/DualRowComplianceSection.js` (Check transformation)
+
+## CQC 7 Critical Gaps Implementation (COMPLETED Apr 4)
+Implemented the 7 Critical CQC Gaps identified in system architecture review:
+
+### 1. Unified Compliance Status Model (COMPLIANT/MISSING/EXPIRED/ATTENTION_REQUIRED)
+- `/app/backend/compliance_engine/status.py` - ComplianceStatusService
+- Calculates per-requirement status with single-source-of-truth
+- API: `GET /api/employees/{id}/unified-compliance-status`
+- Returns overall_status, regulatory_status, blockers[], requirements{}
+
+### 2. Audit Trail Collection
+- `/app/backend/compliance_engine/audit.py` - AuditTrailService
+- Tracks all compliance actions with timestamps, user details, before/after states
+- API: `GET /api/employees/{id}/audit-trail`
+- Supports action filtering and pagination
+
+### 3. Occupational Health Declarations
+- `/app/backend/compliance_engine/health.py` - HealthDeclarationService
+- Health questionnaire with immunizations, emergency contacts
+- APIs:
+  - `POST /api/employees/{id}/health-declaration` - Submit
+  - `GET /api/employees/{id}/health-declaration` - Get current
+  - `GET /api/employees/{id}/health-declaration/history` - History
+  - `POST /api/health-declarations/{id}/review` - Admin review
+  - `GET /api/admin/health-declarations/pending-review` - Admin queue
+
+### 4. Work Status Regulatory Mapping
+- Implemented in `status.py` via regulatory_status calculation
+- Maps 3-tier work readiness to CQC regulatory compliance
+
+### 5. Expiry Tracking at Requirement Level
+- Implemented in `status.py` RequirementSummary model
+- Tracks expiry_date, days_until_expiry per requirement
+- Generates EXPIRED status and alerts
+
+### 6. Blocking vs Non-Blocking Classification
+- Implemented in `rule_packs.py` via is_blocker property
+- Clear separation of blocking requirements (RTW, DBS, Identity) vs non-blocking (Training)
+
+### 7. LlmChat → Gemini Migration
+- Migrated all 9 remaining LlmChat references to use Gemini Vision
+- Uses existing `_call_gemini_vision` helper in DocumentExtractionService
+- CV extraction, training certificates, generic documents all use Gemini
+
+### New MongoDB Collections
+- `audit_logs` - Audit trail entries
+- `health_declarations` - Occupational health records
+- `employee_compliance_summary` - Cached compliance status
+
+### Test Results
+- 100% pass rate (22/22 tests) in iteration_142.json
+- All CQC endpoints verified working
+
+## AI Extraction Architecture (Updated Apr 4)
+- **Provider**: Google Gemini 2.5 Flash (via `google-genai` SDK)
+- **API Key**: GEMINI_API_KEY in backend .env
+- **Helper**: `DocumentExtractionService._call_gemini_vision(image_base64, prompt)`
+- **LlmChat/OpenAI**: Fully deprecated and removed
+
+## Prioritized Backlog
+
+### P0 (Critical)
+- None
+
+### P1 (High)
+- [ ] Strict Reference Rule enforcement (min 2 verified references)
+- [ ] Frontend UI for Health Declaration form
+- [ ] Frontend UI for Audit Trail timeline
+- [ ] Interview Notes integration
+- [ ] Training Matrix PDF export
+
+### P2 (Medium)
+- [ ] server.py modular split (>43k lines)
+- [ ] F811 duplicate function cleanup
+- [ ] Induction & Competency tracking
+- [ ] Spot Check templates
+
+### P3 (Future)
+- [ ] Supabase Auth integration
+- [ ] Employee self-service portal
+- [ ] Phase out MongoDB entirely

@@ -751,3 +751,54 @@ Added new blocker checks:
 ### Git Commit
 - Pushed to GitHub: `f9520b9` - "Implement NHS-compliant status flow and professional registration"
 
+
+---
+
+## Medway CQC Compliance Fixes (December 2025)
+
+### Issue 1: Visual Document Stamps - IMPLEMENTED
+**Problem**: Only RTW showed "Online Verified" in UI metadata. No visible stamp on downloaded documents.
+
+**Solution**:
+- Modified `apply_verification_stamp` endpoint to burn stamps into PDF/image files
+- Stamps include: Document Type, Employee Name, Verified By, Date, Method, Verification ID
+- Download endpoint (`/employee-documents/{id}/download`) serves stamped version when available
+- Added back-stamp endpoint: `POST /admin/back-stamp-verified-documents`
+
+**Stamp Types**:
+- `online_check` - Right to Work (Home Office online verification)
+- `original_seen` - Identity, DBS, Proof of Address (physical document)
+- `copy_verified` - Training certificates, qualifications
+
+### Issue 2: References System - PARTIAL FIX
+**Problem**: No way to add referee details manually, no email workflow visible.
+
+**Solution**:
+- Added `POST /employees/{id}/references/{ref_num}` for manual referee entry
+- Updated `ReferencesPanel.js` with "Add Referee Details" button and dialog
+- Form includes: name, email, phone, organisation, position, relationship
+
+**Remaining**:
+- Public reference form endpoint for referees to complete
+- Email tracking (sent → opened → completed)
+
+### Issue 3: Application Data in Compliance - NOT STARTED
+- Employment history from application not visible in compliance
+- Qualifications not extracted
+
+### Issue 4: Test Employee - IMPLEMENTED
+- `POST /admin/create-test-employee?name=...&email=...`
+- Creates fully compliant employee with:
+  - All documents verified with stamps
+  - 2 verified references
+  - 8 mandatory training courses complete
+  - Contract signed, induction complete
+  - Status: `active_employee` (READY_TO_WORK)
+
+### Files Modified
+- `/app/backend/server.py` - Added stamp burning, referee endpoints, test employee endpoint
+- `/app/frontend/src/components/compliance/ReferencesPanel.js` - Added referee form
+
+### Git Commits
+- `f9520b9` - NHS-compliant status flow
+- `d78a67b` - Document stamps, references UI, test employee

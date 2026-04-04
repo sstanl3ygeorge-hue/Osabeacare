@@ -22,7 +22,7 @@ import DocumentExtractionReview from '../../components/documents/DocumentExtract
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
-import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel } from '../../components/compliance';
+import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
@@ -3859,6 +3859,18 @@ export default function EmployeeProfilePage() {
                 </div>
               </CardContent>
             </Card>
+          </div>
+
+          {/* Document Requests & Interview Records */}
+          <div className="grid lg:grid-cols-2 gap-6 mt-6">
+            <DocumentRequestsPanel 
+              employeeId={employeeId}
+              onRefresh={fetchComplianceFile}
+            />
+            <InterviewFormPanel 
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            />
           </div>
 
           {/* Training & Compliance Overview */}

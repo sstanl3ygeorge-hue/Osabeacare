@@ -15665,6 +15665,40 @@ async def get_form_submissions(
     return submissions
 
 
+@api_router.get("/employees/{employee_id}/forms")
+async def get_employee_forms(
+    employee_id: str,
+    requirement_id: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all form submissions for an employee.
+    Optionally filter by requirement_id (e.g., 'interview_record').
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    query = {
+        "employee_id": employee_id,
+        "status": {"$nin": ["deleted", "superseded"]}
+    }
+    
+    if requirement_id:
+        query["requirement_id"] = requirement_id
+    
+    submissions = await db.form_submissions.find(query, {"_id": 0}).sort("created_at", -1).to_list(50)
+    
+    # Normalize form_data/data fields
+    for sub in submissions:
+        if 'form_data' in sub and 'data' not in sub:
+            sub['data'] = sub['form_data']
+        elif 'data' in sub and 'form_data' not in sub:
+            sub['form_data'] = sub['data']
+    
+    return {"forms": submissions, "count": len(submissions)}
+
+
 @api_router.get("/form-submissions/{submission_id}")
 async def get_form_submission(submission_id: str, user: dict = Depends(get_current_user)):
     """

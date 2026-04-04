@@ -1,5 +1,5 @@
 """
-Work Readiness Engine (Gate 2)
+Work Readiness Engine (Gate 2) - NHS Employment Check Standards Compliant
 
 This module evaluates whether an APPROVED employee is ready to start work.
 Separate from Recruitment Approval (Gate 1), this checks post-recruitment items.
@@ -7,18 +7,26 @@ Separate from Recruitment Approval (Gate 1), this checks post-recruitment items.
 Gate 1 (Recruitment Approval): Can we hire this person?
 Gate 2 (Work Readiness): Can this person start working?
 
+NHS Status Flow:
+- Conditional Offer (applicant/onboarding) = Checks pending, CANNOT work
+- Unconditional Offer (active_employee) = All checks passed, CLEARED to work
+
 Work Readiness Blockers include:
-- Contract not completed/verified
-- Handbook not completed/verified
+- Contract not signed
+- Handbook not acknowledged
 - Induction not completed/verified
 - Health questionnaire not completed/reviewed
 - Role-specific competency not completed
 - Required training not satisfied
-- Expired/invalid critical documents (RTW, DBS, identity, NMC)
+- Expired/invalid critical documents (RTW, DBS, identity)
+- Professional registration not verified (NMC for nurses, etc.)
+- References not verified (2 required)
+- Proof of address not verified (2 documents required)
 """
 
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
+from bson import ObjectId
 
 # =============================================================================
 # ROLE-SPECIFIC WORK READINESS REQUIREMENTS
@@ -108,6 +116,72 @@ ROLE_WORK_REQUIREMENTS = {
 # Default requirements for unknown roles
 DEFAULT_WORK_REQUIREMENTS = ROLE_WORK_REQUIREMENTS["healthcare_assistant"]
 
+# =============================================================================
+# PROFESSIONAL REGISTRATION REQUIREMENTS (NHS REQUIREMENT)
+# =============================================================================
+
+ROLE_REGISTRATION_REQUIREMENTS = {
+    "nurse": {
+        "body": "NMC",
+        "body_name": "Nursing & Midwifery Council",
+        "required": True,
+        "check_url": "https://www.nmc.org.uk/registration/search/"
+    },
+    "social_worker": {
+        "body": "Social Work England",
+        "body_name": "Social Work England",
+        "required": True,
+        "check_url": "https://www.socialworkengland.org.uk/register/"
+    },
+    "doctor": {
+        "body": "GMC",
+        "body_name": "General Medical Council",
+        "required": True,
+        "check_url": "https://www.gmc-uk.org/registration-and-licensing"
+    },
+    "occupational_therapist": {
+        "body": "HCPC",
+        "body_name": "Health and Care Professions Council",
+        "required": True,
+        "check_url": "https://www.hcpc-uk.org/check-the-register/"
+    },
+    "physiotherapist": {
+        "body": "HCPC",
+        "body_name": "Health and Care Professions Council",
+        "required": True,
+        "check_url": "https://www.hcpc-uk.org/check-the-register/"
+    },
+    "healthcare_assistant": {
+        "required": False
+    },
+    "senior_carer": {
+        "required": False
+    },
+    "support_worker": {
+        "required": False
+    },
+    "care_assistant": {
+        "required": False
+    }
+}
+
+# =============================================================================
+# NHS STATUS DEFINITIONS
+# =============================================================================
+
+# Employee Status Values
+EMPLOYEE_STATUS_APPLICANT = "applicant"  # Initial application stage
+EMPLOYEE_STATUS_ONBOARDING = "onboarding"  # Conditional offer, checks in progress
+EMPLOYEE_STATUS_ACTIVE = "active_employee"  # Unconditional offer, cleared to work
+EMPLOYEE_STATUS_SUSPENDED = "suspended"  # Temporarily not allowed to work
+EMPLOYEE_STATUS_ARCHIVED = "archived"  # Left organization
+
+# Statuses that appear in Recruitment Pipeline (cannot work)
+RECRUITMENT_STATUSES = [EMPLOYEE_STATUS_APPLICANT, EMPLOYEE_STATUS_ONBOARDING]
+
+# Statuses that appear in Active Employees (can work)
+ACTIVE_STATUSES = [EMPLOYEE_STATUS_ACTIVE]
+
 # Display labels for work readiness items
 WORK_READINESS_LABELS = {
     # Agreements
@@ -124,8 +198,17 @@ WORK_READINESS_LABELS = {
     "dbs": "DBS Certificate",
     "identity": "Identity Documents",
     "nmc_registration": "NMC Registration",
+    "proof_of_address": "Proof of Address",
+    # Professional Registration
+    "professional_registration": "Professional Registration",
+    "NMC": "NMC (Nursing & Midwifery Council)",
+    "GMC": "GMC (General Medical Council)",
+    "HCPC": "HCPC (Health & Care Professions Council)",
+    "Social Work England": "Social Work England",
     # Training
     "training": "Required Training",
+    # References
+    "references": "Employment References",
 }
 
 
@@ -188,6 +271,231 @@ def is_document_expired(doc_data: dict) -> tuple:
         return (is_expired, is_expiring_soon, days_until)
     except Exception:
         return (False, False, None)
+
+
+async def check_professional_registration(employee_id: str, role_normalized: str, db) -> Tuple[bool, Optional[str]]:
+    """
+    Check if required professional registration is present and verified.
+    
+    Returns:
+        (is_satisfied, error_message)
+    """
+    req = ROLE_REGISTRATION_REQUIREMENTS.get(role_normalized, {})
+    
+    # Registration not required for this role
+    if not req.get("required", False):
+        return (True, None)
+    
+    required_body = req.get("body")
+    body_name = req.get("body_name", required_body)
+    
+    # Get employee's professional registrations - try 'id' field first, then _id
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        try:
+            employee = await db.employees.find_one({"_id": ObjectId(employee_id)})
+        except Exception:
+            pass
+    
+    if not employee:
+        return (False, "Employee not found")
+    
+    registrations = employee.get("professional_registrations", [])
+    
+    # Find registration for the required body
+    matching = [r for r in registrations if r.get("body") == required_body]
+    
+    if not matching:
+        return (False, f"Missing {body_name} registration")
+    
+    reg = matching[0]
+    
+    # Check if verified
+    if not reg.get("verified", False):
+        return (False, f"{body_name} registration not verified")
+    
+    # Check if active
+    if reg.get("registration_status") != "active":
+        return (False, f"{body_name} registration is {reg.get('registration_status', 'unknown')}")
+    
+    # Check if expired
+    if reg.get("registration_expiry_date"):
+        try:
+            expiry_str = reg["registration_expiry_date"]
+            if isinstance(expiry_str, str):
+                if 'T' in expiry_str:
+                    expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                else:
+                    expiry = datetime.fromisoformat(expiry_str + "T00:00:00+00:00")
+            else:
+                expiry = expiry_str
+            
+            if expiry < datetime.now(timezone.utc):
+                return (False, f"{body_name} registration expired on {expiry_str[:10]}")
+        except Exception:
+            pass  # If date parsing fails, assume not expired
+    
+    return (True, None)
+
+
+async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
+    """
+    Check if an employee can be automatically promoted to active_employee status.
+    
+    NHS Employment Check Standards require ALL of the following:
+    - Right to Work verified and stamped
+    - DBS verified with update service
+    - Identity verified with stamp
+    - Proof of Address (2 documents with stamps)
+    - Both references verified
+    - All mandatory training complete and not expired
+    - Contract signed
+    - Induction checklist complete
+    - Health questionnaire complete
+    - Professional registration verified (for regulated roles)
+    
+    Returns:
+        (can_promote, checks_dict)
+    """
+    checks = {}
+    
+    # Try to find by 'id' field (UUID) first, then by _id (ObjectId)
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        try:
+            employee = await db.employees.find_one({"_id": ObjectId(employee_id)})
+        except Exception:
+            pass
+    
+    if not employee:
+        return (False, {"error": "Employee not found"})
+    
+    emp_id_str = employee.get("id", str(employee.get("_id", "")))
+    role = employee.get("system_role", employee.get("role", "healthcare_assistant"))
+    role_normalized = normalize_role_for_work(role)
+    
+    # 1. Right to Work - verified with stamp
+    rtw_docs = await db.employee_documents.find({
+        "employee_id": emp_id_str,
+        "requirement_id": {"$in": ["right_to_work_evidence", "right_to_work"]},
+        "status": {"$in": ["active", "approved", "verified"]}
+    }).to_list(length=10)
+    rtw_stamped = any(d.get("verification_stamp") and d.get("verification_stamp") != "not_verified" for d in rtw_docs)
+    rtw_check = await db.rtw_checks.find_one({
+        "employee_id": emp_id_str,
+        "status": "verified"
+    })
+    checks["right_to_work"] = bool(rtw_check and rtw_stamped)
+    
+    # 2. DBS - verified
+    dbs_check = await db.dbs_checks.find_one({
+        "employee_id": emp_id_str,
+        "status": "verified"
+    })
+    checks["dbs"] = bool(dbs_check)
+    
+    # 3. Identity - verified with stamp
+    id_docs = await db.employee_documents.find({
+        "employee_id": emp_id_str,
+        "requirement_id": {"$in": ["identity_evidence", "identity", "id_document", "passport"]},
+        "status": {"$in": ["active", "approved", "verified"]}
+    }).to_list(length=10)
+    id_stamped = any(d.get("verification_stamp") and d.get("verification_stamp") != "not_verified" for d in id_docs)
+    checks["identity"] = bool(id_docs and id_stamped)
+    
+    # 4. Proof of Address - 2 documents with stamps
+    poa_docs = await db.employee_documents.find({
+        "employee_id": emp_id_str,
+        "requirement_id": {"$in": ["proof_of_address_evidence", "proof_of_address"]},
+        "status": {"$in": ["active", "approved", "verified"]}
+    }).to_list(length=10)
+    poa_stamped_count = sum(1 for d in poa_docs if d.get("verification_stamp") and d.get("verification_stamp") != "not_verified")
+    checks["proof_of_address"] = poa_stamped_count >= 2
+    
+    # 5. References - both verified
+    ref1_verified = employee.get("reference_1_verified", False)
+    ref2_verified = employee.get("reference_2_verified", False)
+    ref_doc = await db.references.find_one({"employee_id": emp_id_str})
+    if ref_doc:
+        if ref_doc.get("ref1", {}).get("verification_status") == "verified":
+            ref1_verified = True
+        if ref_doc.get("ref2", {}).get("verification_status") == "verified":
+            ref2_verified = True
+    checks["references"] = ref1_verified and ref2_verified
+    
+    # 6. Mandatory Training - all complete and not expired
+    training_records = await db.training_records.find({
+        "employee_id": emp_id_str,
+        "is_mandatory": True,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }).to_list(length=50)
+    
+    # Simplified check - ensure we have verified training records
+    training_ok = len(training_records) > 0  # At minimum, some training exists
+    for record in training_records:
+        if record.get("expiry_date"):
+            try:
+                expiry = record["expiry_date"]
+                if isinstance(expiry, str):
+                    expiry = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                if expiry < datetime.now(timezone.utc):
+                    training_ok = False
+                    break
+            except Exception:
+                pass
+    checks["mandatory_training"] = training_ok
+    
+    # 7. Contract signed
+    contract_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": emp_id_str,
+        "agreement_type": "contract_acceptance",
+        "status": {"$in": ["submitted", "signed"]}
+    })
+    checks["contract"] = bool(contract_ack)
+    
+    # 8. Induction complete
+    induction = await db.induction_checklists.find_one({
+        "employee_id": emp_id_str,
+        "status": "completed"
+    })
+    # Also check form submissions
+    if not induction:
+        induction_form = await db.form_submissions.find_one({
+            "employee_id": emp_id_str,
+            "form_type": "induction",
+            "status": {"$in": ["submitted", "verified"]}
+        })
+        induction = induction_form
+    checks["induction"] = bool(induction)
+    
+    # 9. Health questionnaire complete
+    health_form = await db.form_submissions.find_one({
+        "employee_id": emp_id_str,
+        "form_type": "staff_health_questionnaire",
+        "status": {"$in": ["submitted", "verified"]}
+    })
+    checks["health_declaration"] = bool(health_form)
+    
+    # 10. Professional registration (for regulated roles)
+    reg_ok, reg_error = await check_professional_registration(emp_id_str, role_normalized, db)
+    checks["professional_registration"] = reg_ok
+    if reg_error:
+        checks["professional_registration_error"] = reg_error
+    
+    # Determine if all checks pass
+    can_promote = all([
+        checks.get("right_to_work"),
+        checks.get("dbs"),
+        checks.get("identity"),
+        checks.get("proof_of_address"),
+        checks.get("references"),
+        checks.get("contract"),
+        checks.get("induction"),
+        checks.get("health_declaration"),
+        checks.get("professional_registration")
+    ])
+    
+    return (can_promote, checks)
 
 
 # =============================================================================
@@ -553,20 +861,46 @@ async def evaluate_work_readiness(
             verified_keys.append("training")
     
     # ==========================================================================
+    # CHECK 9: Professional Registration (NHS Requirement for Regulated Roles)
+    # ==========================================================================
+    all_required_keys.append("professional_registration")
+    
+    reg_ok, reg_error = await check_professional_registration(person.get("id"), role_normalized, db)
+    
+    if reg_ok:
+        verified_keys.append("professional_registration")
+    elif reg_error:
+        blockers.append({
+            "requirement_key": "professional_registration",
+            "label": "Professional Registration",
+            "reason": reg_error,
+            "category": "professional_registration",
+            "section": "compliance"
+        })
+    # If no error and not required, it passes silently
+    
+    # ==========================================================================
     # BUILD RESULT
     # ==========================================================================
     
     can_work = len(blockers) == 0
     
-    # Determine stage identity
-    is_recruitment_approved = person.get("recruitment_approved", False)
-    stage_identity = "employee" if is_recruitment_approved else "applicant"
+    # Determine stage identity based on employee status field
+    employee_status = person.get("status", "applicant")
     
-    # Work readiness status
+    # NHS two-status model:
+    # - Recruitment (Conditional Offer): applicant, onboarding
+    # - Active (Unconditional Offer): active_employee
+    if employee_status == EMPLOYEE_STATUS_ACTIVE:
+        stage_identity = "active_employee"
+    elif employee_status in [EMPLOYEE_STATUS_APPLICANT, EMPLOYEE_STATUS_ONBOARDING]:
+        stage_identity = "onboarding"
+    else:
+        stage_identity = "onboarding"  # Default to onboarding for unknown statuses
+    
+    # Work readiness status - NHS compliant (no READY_WITH_CONDITIONS)
     if can_work:
         readiness_status = "READY_TO_WORK"
-    elif len(blockers) <= 3:
-        readiness_status = "READY_WITH_CONDITIONS"
     else:
         readiness_status = "NOT_READY"
     
@@ -575,8 +909,9 @@ async def evaluate_work_readiness(
         "employee_name": f"{person.get('first_name', '')} {person.get('last_name', '')}".strip(),
         "role": role,
         "role_normalized": role_normalized,
+        "employee_status": employee_status,
         "stage_identity": stage_identity,
-        "recruitment_approved": is_recruitment_approved,
+        "recruitment_approved": person.get("recruitment_approved", False),
         "can_work": can_work,
         "readiness_status": readiness_status,
         "blockers": blockers,

@@ -32,6 +32,7 @@ import {
   PreEmploymentGatesPanel, 
   ReferenceEmploymentComparison,
   HealthCompetencySection,
+  ProfessionalRegistrationPanel,
   PoliciesTabContent,
   TrainingTabContent,
   AuditTabContent,
@@ -4059,6 +4060,18 @@ export default function EmployeeProfilePage() {
                       }}
                       employeeData={employee}
                       isAuditor={isAuditor()}
+                      onRefresh={() => {
+                        fetchData();
+                        fetchCompliance();
+                      }}
+                    />
+                  </div>
+
+                  {/* Professional Registration Panel - NHS Requirement for regulated roles */}
+                  <div className="mb-6">
+                    <ProfessionalRegistrationPanel
+                      employeeId={employeeId}
+                      employeeRole={employee?.system_role || employee?.role}
                       onRefresh={() => {
                         fetchData();
                         fetchCompliance();

@@ -8715,6 +8715,388 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
 
 
 # ============================================================================
+# NHS STATUS FLOW & PROMOTION ENDPOINTS
+# Two-status model: Recruitment (onboarding) → Active Employee
+# ============================================================================
+
+from work_readiness_engine import (
+    can_promote_to_active, 
+    check_professional_registration,
+    ROLE_REGISTRATION_REQUIREMENTS,
+    EMPLOYEE_STATUS_APPLICANT,
+    EMPLOYEE_STATUS_ONBOARDING,
+    EMPLOYEE_STATUS_ACTIVE
+)
+
+class ProfessionalRegistrationRequest(BaseModel):
+    body: str  # NMC, GMC, HCPC, Social Work England
+    registration_number: str
+    registration_status: str = "active"  # active, lapsed, suspended, applied
+    registration_expiry_date: Optional[str] = None
+    certificate_url: Optional[str] = None
+
+class ForcePromoteRequest(BaseModel):
+    reason: str
+    notes: Optional[str] = None
+
+
+@api_router.get("/employees/{employee_id}/promotion-status")
+async def get_promotion_status(employee_id: str, user: dict = Depends(get_current_user)):
+    """
+    Check if employee is ready for automatic promotion to active_employee.
+    Returns detailed check status for each requirement.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    can_promote, checks = await can_promote_to_active(employee_id, db)
+    
+    # Get current status
+    current_status = employee.get("status", "applicant")
+    
+    # Count passed vs failed
+    passed = sum(1 for k, v in checks.items() if v is True and not k.endswith("_error"))
+    total = sum(1 for k, v in checks.items() if isinstance(v, bool))
+    
+    # Get missing checks
+    missing = [k for k, v in checks.items() if v is False]
+    
+    return {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "current_status": current_status,
+        "can_promote": can_promote,
+        "checks": checks,
+        "passed_count": passed,
+        "total_count": total,
+        "missing_checks": missing,
+        "nhs_status": "Unconditional Offer" if can_promote else "Conditional Offer"
+    }
+
+
+@api_router.post("/employees/{employee_id}/auto-promote")
+async def auto_promote_to_active(employee_id: str, user: dict = Depends(require_manager_or_admin)):
+    """
+    Automatically promote employee to active_employee if all checks pass.
+    This endpoint should be called after significant compliance changes.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    current_status = employee.get("status", "applicant")
+    
+    # Already active
+    if current_status == EMPLOYEE_STATUS_ACTIVE:
+        return {
+            "success": True,
+            "message": "Employee is already active",
+            "promoted": False,
+            "status": current_status
+        }
+    
+    # Check if can promote
+    can_promote, checks = await can_promote_to_active(employee_id, db)
+    
+    if not can_promote:
+        missing = [k for k, v in checks.items() if v is False]
+        return {
+            "success": False,
+            "message": "Cannot promote - not all checks passed",
+            "promoted": False,
+            "status": current_status,
+            "missing_checks": missing
+        }
+    
+    # Promote to active
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "status": EMPLOYEE_STATUS_ACTIVE,
+        "promoted_at": now,
+        "promoted_via": "auto",
+        "updated_at": now
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    # Audit log
+    await log_audit_action(
+        user['user_id'],
+        "auto_promoted_to_active",
+        "employee",
+        employee_id,
+        {
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "previous_status": current_status,
+            "new_status": EMPLOYEE_STATUS_ACTIVE,
+            "checks_passed": [k for k, v in checks.items() if v is True],
+            "triggered_by": "system_auto"
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Employee promoted to active status",
+        "promoted": True,
+        "previous_status": current_status,
+        "new_status": EMPLOYEE_STATUS_ACTIVE,
+        "promoted_at": now
+    }
+
+
+@api_router.post("/employees/{employee_id}/force-promote")
+async def force_promote_to_active(
+    employee_id: str,
+    request: ForcePromoteRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin override to promote someone before all checks complete.
+    RARE - only for emergencies. Full audit trail required.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    current_status = employee.get("status", "applicant")
+    
+    if current_status == EMPLOYEE_STATUS_ACTIVE:
+        raise HTTPException(status_code=400, detail="Employee is already active")
+    
+    if len(request.reason) < 10:
+        raise HTTPException(status_code=400, detail="Reason must be at least 10 characters")
+    
+    # Get missing checks for audit
+    can_promote, checks = await can_promote_to_active(employee_id, db)
+    missing_checks = [k for k, v in checks.items() if v is False]
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Record the override
+    override_record = {
+        "employee_id": employee_id,
+        "promoted_by": user['user_id'],
+        "promoted_by_name": user.get('name', user.get('email', 'Unknown')),
+        "promoted_at": now,
+        "reason": request.reason,
+        "notes": request.notes,
+        "missing_checks": missing_checks
+    }
+    
+    await db.manual_promotions.insert_one(override_record)
+    
+    # Update employee status
+    update_data = {
+        "status": EMPLOYEE_STATUS_ACTIVE,
+        "promoted_at": now,
+        "promoted_via": "manual_override",
+        "promoted_by": user['user_id'],
+        "updated_at": now
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    # Audit log
+    await log_audit_action(
+        user['user_id'],
+        "manual_promotion_to_active",
+        "employee",
+        employee_id,
+        {
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "previous_status": current_status,
+            "new_status": EMPLOYEE_STATUS_ACTIVE,
+            "reason": request.reason,
+            "notes": request.notes,
+            "missing_checks": missing_checks,
+            "override": True
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Employee manually promoted to active status",
+        "employee_id": employee_id,
+        "missing_checks_ignored": missing_checks
+    }
+
+
+# ============================================================================
+# PROFESSIONAL REGISTRATION ENDPOINTS (NHS Requirement)
+# ============================================================================
+
+@api_router.get("/employees/{employee_id}/professional-registrations")
+async def get_professional_registrations(employee_id: str, user: dict = Depends(get_current_user)):
+    """Get all professional registrations for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    role = employee.get("system_role", employee.get("role", "healthcare_assistant")).lower()
+    role_normalized = role.replace(" ", "_")
+    
+    # Get role requirements
+    role_req = ROLE_REGISTRATION_REQUIREMENTS.get(role_normalized, {})
+    
+    registrations = employee.get("professional_registrations", [])
+    
+    return {
+        "employee_id": employee_id,
+        "registrations": registrations,
+        "role": role,
+        "registration_required": role_req.get("required", False),
+        "required_body": role_req.get("body"),
+        "required_body_name": role_req.get("body_name"),
+        "check_url": role_req.get("check_url")
+    }
+
+
+@api_router.post("/employees/{employee_id}/professional-registration")
+async def add_professional_registration(
+    employee_id: str,
+    request: ProfessionalRegistrationRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Add or update professional registration for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    role = employee.get("system_role", employee.get("role", "healthcare_assistant")).lower()
+    role_normalized = role.replace(" ", "_")
+    
+    # Check if registration body is valid
+    valid_bodies = ["NMC", "GMC", "HCPC", "Social Work England"]
+    if request.body not in valid_bodies:
+        raise HTTPException(status_code=400, detail=f"Invalid registration body. Must be one of: {valid_bodies}")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    registration = {
+        "body": request.body,
+        "registration_number": request.registration_number,
+        "registration_status": request.registration_status,
+        "registration_expiry_date": request.registration_expiry_date,
+        "certificate_url": request.certificate_url,
+        "verified": False,
+        "verified_by": None,
+        "verified_by_name": None,
+        "verified_at": None,
+        "added_by": user['user_id'],
+        "added_at": now
+    }
+    
+    # Check if registration for this body already exists
+    existing_registrations = employee.get("professional_registrations", [])
+    existing_idx = next((i for i, r in enumerate(existing_registrations) if r.get("body") == request.body), None)
+    
+    if existing_idx is not None:
+        # Update existing
+        existing_registrations[existing_idx] = {**existing_registrations[existing_idx], **registration}
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {"professional_registrations": existing_registrations, "updated_at": now}}
+        )
+        action = "updated"
+    else:
+        # Add new
+        await db.employees.update_one(
+            {"id": employee_id},
+            {
+                "$push": {"professional_registrations": registration},
+                "$set": {"updated_at": now}
+            }
+        )
+        action = "added"
+    
+    await log_audit_action(
+        user['user_id'],
+        f"professional_registration_{action}",
+        "employee",
+        employee_id,
+        {
+            "body": request.body,
+            "registration_number": request.registration_number,
+            "action": action
+        }
+    )
+    
+    return {"success": True, "action": action, "registration": registration}
+
+
+@api_router.post("/employees/{employee_id}/professional-registration/verify")
+async def verify_professional_registration(
+    employee_id: str,
+    registration_body: str,
+    user: dict = Depends(require_admin)
+):
+    """Mark professional registration as verified (admin only)"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    registrations = employee.get("professional_registrations", [])
+    
+    # Find matching registration
+    reg_idx = next((i for i, r in enumerate(registrations) if r.get("body") == registration_body), None)
+    
+    if reg_idx is None:
+        raise HTTPException(status_code=404, detail=f"No registration found for {registration_body}")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update verification
+    registrations[reg_idx]["verified"] = True
+    registrations[reg_idx]["verified_by"] = user['user_id']
+    registrations[reg_idx]["verified_by_name"] = user.get('name', user.get('email', 'Admin'))
+    registrations[reg_idx]["verified_at"] = now
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "professional_registrations": registrations,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(
+        user['user_id'],
+        "professional_registration_verified",
+        "employee",
+        employee_id,
+        {
+            "body": registration_body,
+            "registration_number": registrations[reg_idx].get("registration_number")
+        }
+    )
+    
+    # Check if this enables auto-promotion
+    can_promote, checks = await can_promote_to_active(employee_id, db)
+    
+    return {
+        "success": True,
+        "verified": True,
+        "can_promote_now": can_promote,
+        "missing_checks": [k for k, v in checks.items() if v is False] if not can_promote else []
+    }
+
+
+@api_router.get("/professional-registration-requirements")
+async def get_registration_requirements(user: dict = Depends(get_current_user)):
+    """Get professional registration requirements for all roles"""
+    return {
+        "requirements": ROLE_REGISTRATION_REQUIREMENTS,
+        "valid_bodies": [
+            {"value": "NMC", "label": "NMC (Nursing & Midwifery Council)", "url": "https://www.nmc.org.uk/registration/search/"},
+            {"value": "GMC", "label": "GMC (General Medical Council)", "url": "https://www.gmc-uk.org/registration-and-licensing"},
+            {"value": "HCPC", "label": "HCPC (Health & Care Professions Council)", "url": "https://www.hcpc-uk.org/check-the-register/"},
+            {"value": "Social Work England", "label": "Social Work England", "url": "https://www.socialworkengland.org.uk/register/"}
+        ]
+    }
+
+
+# ============================================================================
 # AUTHORITATIVE READINESS ENDPOINTS (Change Set 2)
 # Single source of truth - all views must read from these endpoints
 # ============================================================================

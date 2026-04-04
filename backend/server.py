@@ -4586,7 +4586,7 @@ class EmployeeDocumentResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     employee_id: str
-    document_type_id: str
+    document_type_id: Optional[str] = None  # Made optional for legacy documents
     document_type_name: Optional[str] = None
     category: Optional[str] = None
     file_url: Optional[str] = None
@@ -7597,6 +7597,64 @@ async def worker_upload_document(
         "document_id": doc_id,
         "file_name": file.filename
     })
+    
+    # Send admin notification about document upload
+    try:
+        if resend.api_key:
+            employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
+            emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else "Unknown"
+            emp_code = employee.get("employee_code", "N/A") if employee else "N/A"
+            
+            # Get requirement name
+            req_name = requirement_id.replace("_", " ").title()
+            for item in MANDATORY_ITEMS:
+                if item.get("id") == requirement_id:
+                    req_name = item.get("name", req_name)
+                    break
+            
+            admin_email_html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #0F172A; padding: 16px; text-align: center;">
+                    <h2 style="color: white; margin: 0;">Document Uploaded</h2>
+                </div>
+                <div style="padding: 24px; background: #f8fafc;">
+                    <h3 style="color: #1e293b; margin-top: 0;">New Document Requires Verification</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Employee:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-weight: bold;">{emp_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Employee Code:</td>
+                            <td style="padding: 8px 0; color: #1e293b;">{emp_code}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Document Type:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-weight: bold;">{req_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">File Name:</td>
+                            <td style="padding: 8px 0; color: #1e293b;">{file.filename}</td>
+                        </tr>
+                    </table>
+                    <div style="margin-top: 24px; text-align: center;">
+                        <a href="{os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')}/portal/employees/{employee_id}?tab=evidence" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                            Review Document
+                        </a>
+                    </div>
+                </div>
+            </div>
+            """
+            
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": SENDER_EMAIL,
+                "to": [ADMIN_EMAIL],
+                "subject": f"Document Upload: {req_name} - {emp_name}",
+                "html": admin_email_html
+            })
+            logger.info(f"Admin notification sent for document upload: {requirement_id} by {employee_id}")
+    except Exception as e:
+        logger.warning(f"Failed to send admin notification for document upload: {e}")
     
     # NOTE: Auto-promotion is NOT triggered on worker uploads because
     # documents need admin verification (stamps) first.

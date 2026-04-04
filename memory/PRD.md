@@ -602,13 +602,46 @@ Added new blocker checks:
 ### P1 - High Priority
 - [ ] Role-Based Compliance Configuration using `role_compliance_profiles`
 - [ ] Supervision Records tracking UI
-- [ ] Contract digital signature (draw signature feature)
 
 ### P2 - Medium Priority
-- [ ] server.py modular split (currently 45k+ lines)
+- [ ] server.py modular split (currently 46k+ lines)
 - [ ] Refactor frontend per ChatGPT review
 
 ### P3 - Future
 - [ ] Supabase Auth integration
 - [ ] Phase out MongoDB
+
+---
+
+## Contract Digital Signature (April 4, 2026 - COMPLETED)
+
+### Backend Endpoints
+- `POST /api/employees/{employee_id}/contract/sign` - Worker signs with drawn signature
+- `GET /api/employees/{employee_id}/contract/status` - Check contract status
+
+### Implementation Details
+- Signature captured as base64 PNG from canvas
+- Signature image saved to `/uploads/contract_signatures/`
+- Signed contract PDF generated using PyPDF2/reportlab
+- Signature embedded on last page of contract
+- Signer info: name, date, employee ID
+- Auto-verified digital signatures (no admin review required)
+
+### Frontend Component
+- `SignaturePad.js` - Canvas-based signature drawing
+- Touch-enabled (works on mobile)
+- Full name confirmation
+- Legal agreement checkbox
+- Integrated into WorkerDashboard
+
+### Files Created/Modified
+- `/app/backend/server.py` - Contract signing endpoints
+- `/app/frontend/src/components/worker/SignaturePad.js` (NEW)
+- `/app/frontend/src/pages/worker/WorkerDashboard.js` - Added dialog
+
+### Test Results
+- Contract signing: ✅ Working
+- Signature PNG saved: ✅ Working
+- Signed PDF generated: ✅ Working (2999 bytes with signature overlay)
+- Dashboard shows contract_signed: ✅ Correct
 

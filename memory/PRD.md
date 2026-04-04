@@ -706,3 +706,48 @@ Added new blocker checks:
 ### Future
 - Supabase Auth integration with RLS policies
 - PostgreSQL migration from MongoDB
+
+---
+
+## NHS Status Flow Implementation (COMPLETED - December 2025)
+
+### Status Model
+- **onboarding** (Conditional Offer): Checks pending, cannot work - appears in Recruitment Pipeline
+- **active_employee** (Unconditional Offer): All checks passed, cleared to work - appears in Employees tab
+
+### Promotion Requirements (ALL must pass)
+1. Right to Work - verified with stamp
+2. DBS - verified
+3. Identity - verified with stamp
+4. Proof of Address - 2 documents with stamps
+5. References - both verified
+6. Mandatory Training - complete and not expired
+7. Contract - signed
+8. Induction - complete
+9. Health Declaration - complete
+10. Professional Registration - verified (for regulated roles only)
+
+### Professional Registration Requirements
+- **Nurses**: NMC (Nursing & Midwifery Council)
+- **Doctors**: GMC (General Medical Council)
+- **Occupational Therapists/Physiotherapists**: HCPC
+- **Social Workers**: Social Work England
+- **Healthcare Assistants/Care Assistants**: Not required
+
+### New API Endpoints
+- `GET /api/employees/{id}/promotion-status` - Check if ready for promotion
+- `POST /api/employees/{id}/auto-promote` - Auto-promote if all checks pass
+- `POST /api/employees/{id}/force-promote` - Admin override with audit trail
+- `GET /api/employees/{id}/professional-registrations` - Get registrations
+- `POST /api/employees/{id}/professional-registration` - Add registration
+- `POST /api/employees/{id}/professional-registration/verify` - Verify registration
+
+### Files Created/Modified
+- `/app/backend/work_readiness_engine.py` - Added NHS status constants, promotion checks
+- `/app/backend/server.py` - Added promotion and registration endpoints
+- `/app/frontend/src/components/employee/ProfessionalRegistrationPanel.js` (NEW)
+- `/app/frontend/src/components/employee/index.js` - Export new component
+
+### Git Commit
+- Pushed to GitHub: `f9520b9` - "Implement NHS-compliant status flow and professional registration"
+

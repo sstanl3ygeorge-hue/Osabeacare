@@ -7,16 +7,18 @@ import { toast } from 'sonner';
 import { 
   Upload, FileText, RefreshCw, CheckCircle, XCircle, Eye, Clock, 
   AlertTriangle, ChevronDown, ChevronUp, MoreHorizontal, History,
-  FileSearch, Trash2, Archive, Send, Download
+  FileSearch, Trash2, Archive, Send, Download, Stamp
 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from '../ui/dropdown-menu';
 import { formatBackendDate } from '../../lib/dateUtils';
 import RequestLifecycleInline, { RequestLifecycleSummary } from './RequestLifecycleInline';
+import DigitalStampDialog from './DigitalStampDialog';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -37,6 +39,7 @@ export default function EvidenceRow({
   row,
   employeeId,
   employeeEmail,
+  employeeName,
   onRefresh,
   onUpload,
   onRequest,
@@ -48,6 +51,8 @@ export default function EvidenceRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [stampDialogOpen, setStampDialogOpen] = useState(false);
+  const [selectedDocForStamp, setSelectedDocForStamp] = useState(null);
   const { token } = useAuth();
 
   const {
@@ -252,15 +257,42 @@ export default function EvidenceRow({
               {documents_preview.map((doc, idx) => (
                 <div 
                   key={doc.id || idx}
-                  className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100"
+                  className={`flex items-center justify-between p-3 bg-white rounded-lg border ${
+                    doc.verification_stamp && doc.verification_stamp !== 'not_verified'
+                      ? 'border-green-200 bg-green-50/30'
+                      : 'border-gray-100'
+                  }`}
                 >
                   <div className="flex items-center gap-3 flex-1 min-w-0">
                     <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-text-primary truncate">{doc.file_name}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-text-primary truncate">{doc.file_name}</p>
+                        {doc.verification_stamp && doc.verification_stamp !== 'not_verified' && (
+                          <Badge className={`text-[10px] ${
+                            doc.verification_stamp === 'original_seen' ? 'bg-green-100 text-green-700' :
+                            doc.verification_stamp === 'copy_verified' ? 'bg-blue-100 text-blue-700' :
+                            doc.verification_stamp === 'online_check' ? 'bg-purple-100 text-purple-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            <CheckCircle className="h-2.5 w-2.5 mr-1" />
+                            {doc.verification_stamp === 'original_seen' ? 'Original Seen' :
+                             doc.verification_stamp === 'copy_verified' ? 'Copy Verified' :
+                             doc.verification_stamp === 'online_check' ? 'Online Check' :
+                             'Verified'}
+                          </Badge>
+                        )}
+                        {doc.has_visual_stamp && (
+                          <Badge className="text-[10px] bg-emerald-100 text-emerald-700">
+                            <Stamp className="h-2.5 w-2.5 mr-1" />
+                            Stamped
+                          </Badge>
+                        )}
+                      </div>
                       <p className="text-xs text-text-muted">
                         {formatBackendDate(doc.uploaded_at, { format: 'medium' })}
                         {doc.extraction_status === 'awaiting_review' && ' • Extraction pending'}
+                        {doc.verification_stamp_by_name && ` • Verified by ${doc.verification_stamp_by_name}`}
                       </p>
                     </div>
                   </div>
@@ -342,7 +374,26 @@ export default function EvidenceRow({
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuContent align="end" className="w-56">
+                          {/* Digital Stamp Action */}
+                          {!doc.verification_stamp || doc.verification_stamp === 'not_verified' ? (
+                            <DropdownMenuItem 
+                              onClick={() => {
+                                setSelectedDocForStamp(doc);
+                                setStampDialogOpen(true);
+                              }}
+                              className="text-green-600"
+                            >
+                              <Stamp className="h-4 w-4 mr-2" />
+                              Verify & Apply Digital Stamp
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem disabled className="text-gray-400">
+                              <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                              Already Verified
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem onClick={() => handleMarkUploadedInError(doc.id, doc.file_name)}>
                             <Trash2 className="h-4 w-4 mr-2 text-red-500" />
                             Mark Uploaded in Error
@@ -413,6 +464,18 @@ export default function EvidenceRow({
           </div>
         </div>
       )}
+      
+      {/* Digital Stamp Dialog */}
+      <DigitalStampDialog
+        open={stampDialogOpen}
+        onOpenChange={setStampDialogOpen}
+        document={selectedDocForStamp}
+        employeeName={employeeName}
+        onSuccess={() => {
+          setSelectedDocForStamp(null);
+          if (onRefresh) onRefresh();
+        }}
+      />
     </div>
   );
 }

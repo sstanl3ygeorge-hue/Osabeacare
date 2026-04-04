@@ -72,3 +72,6 @@ export { default as DocumentRequestsPanel } from './DocumentRequestsPanel';
 
 // Interview Form Panel (Interview records with PDF download)
 export { default as InterviewFormPanel } from './InterviewFormPanel';
+
+// Digital Stamp Dialog (CQC verification stamps)
+export { default as DigitalStampDialog } from './DigitalStampDialog';

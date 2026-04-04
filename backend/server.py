@@ -24,11 +24,15 @@ import bcrypt
 import requests
 import resend
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm, inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.pdfgen import canvas
+from reportlab.lib.colors import Color, black, gray
+from PyPDF2 import PdfReader, PdfWriter
+from PIL import Image as PILImage, ImageDraw, ImageFont
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from templates_data import COMPLIANCE_TEMPLATES, EMAIL_TEMPLATES
@@ -2453,6 +2457,272 @@ def create_verification_footer_elements(
         elements.append(Paragraph(hash_text, stamp_style))
     
     return elements
+
+
+# ============================================================================
+# DIGITAL STAMP EMBEDDING SYSTEM (CQC/Medway Compliance)
+# Adds visible, permanent verification stamps directly to PDF/Image files
+# ============================================================================
+
+def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> bytes:
+    """
+    Add a visible verification stamp to a PDF document.
+    The stamp is permanently embedded and cannot be removed.
+    
+    Args:
+        input_pdf_bytes: Original PDF file as bytes
+        stamp_data: {
+            "stamp_type": "original_seen" | "copy_verified" | "online_check",
+            "verified_by_name": "Jane Smith",
+            "verified_at": "2026-04-04T10:30:00Z",
+            "employee_name": "John Doe",
+            "document_type": "Right to Work",
+            "verification_id": "abc123"
+        }
+    
+    Returns:
+        Stamped PDF as bytes
+    """
+    from io import BytesIO
+    
+    # Read existing PDF
+    try:
+        existing_pdf = PdfReader(BytesIO(input_pdf_bytes))
+    except Exception as e:
+        logging.error(f"Failed to read PDF: {e}")
+        return input_pdf_bytes  # Return original if can't process
+    
+    output = PdfWriter()
+    
+    # Stamp configuration based on type
+    stamp_config = {
+        "original_seen": {
+            "text": "ORIGINAL DOCUMENT SEEN",
+            "color": Color(0, 0.5, 0, alpha=0.85),  # Green
+            "bg_color": Color(0.92, 0.98, 0.92, alpha=0.95)
+        },
+        "copy_verified": {
+            "text": "COPY VERIFIED WITH ORIGINAL",
+            "color": Color(0, 0.4, 0.8, alpha=0.85),  # Blue
+            "bg_color": Color(0.92, 0.95, 1, alpha=0.95)
+        },
+        "online_check": {
+            "text": "ONLINE CHECK COMPLETED",
+            "color": Color(0.5, 0.25, 0.7, alpha=0.85),  # Purple
+            "bg_color": Color(0.96, 0.92, 1, alpha=0.95)
+        }
+    }
+    
+    config = stamp_config.get(stamp_data.get("stamp_type", "copy_verified"), stamp_config["copy_verified"])
+    
+    # Create stamp overlay
+    packet = BytesIO()
+    c = canvas.Canvas(packet, pagesize=letter)
+    
+    # Position: bottom right corner
+    page_width = 612  # letter width in points
+    page_height = 792  # letter height in points
+    
+    box_width = 250
+    box_height = 95
+    box_x = page_width - box_width - 15
+    box_y = 15
+    
+    # Draw background box with rounded corners effect
+    c.setFillColor(config["bg_color"])
+    c.setStrokeColor(config["color"])
+    c.setLineWidth(2)
+    c.roundRect(box_x, box_y, box_width, box_height, 5, fill=1, stroke=1)
+    
+    # Draw checkmark circle
+    c.setFillColor(config["color"])
+    c.circle(box_x + 20, box_y + box_height - 20, 8, fill=1, stroke=0)
+    c.setFillColor(Color(1, 1, 1))  # White checkmark
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(box_x + 16, box_y + box_height - 24, "✓")
+    
+    # Draw stamp header text
+    c.setFillColor(config["color"])
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(box_x + 35, box_y + box_height - 22, config["text"])
+    
+    # Draw details
+    c.setFillColor(black)
+    c.setFont("Helvetica", 9)
+    y_pos = box_y + box_height - 40
+    
+    doc_type = stamp_data.get('document_type', 'Document')
+    c.drawString(box_x + 12, y_pos, f"Document: {doc_type[:30]}")
+    y_pos -= 12
+    
+    emp_name = stamp_data.get('employee_name', 'N/A')
+    c.drawString(box_x + 12, y_pos, f"Employee: {emp_name[:30]}")
+    y_pos -= 12
+    
+    verifier = stamp_data.get('verified_by_name', 'N/A')
+    c.drawString(box_x + 12, y_pos, f"Verified by: {verifier[:30]}")
+    y_pos -= 12
+    
+    # Format date
+    try:
+        verified_at = stamp_data.get("verified_at", "")
+        if verified_at:
+            if isinstance(verified_at, str):
+                verified_dt = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
+            else:
+                verified_dt = verified_at
+            date_str = verified_dt.strftime('%d %b %Y %H:%M UTC')
+        else:
+            date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')
+    except:
+        date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')
+    
+    c.drawString(box_x + 12, y_pos, f"Date: {date_str}")
+    
+    # Add verification ID at bottom
+    c.setFont("Helvetica-Oblique", 7)
+    c.setFillColor(gray)
+    verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8])
+    c.drawString(box_x + 12, box_y + 5, f"Verification ID: {verification_id}")
+    
+    c.save()
+    
+    # Create overlay PDF
+    packet.seek(0)
+    stamp_pdf = PdfReader(packet)
+    
+    # Merge stamp with each page of original PDF
+    for page_num in range(len(existing_pdf.pages)):
+        page = existing_pdf.pages[page_num]
+        if page_num == 0:  # Only stamp first page
+            page.merge_page(stamp_pdf.pages[0])
+        output.add_page(page)
+    
+    # Write output
+    output_bytes = BytesIO()
+    output.write(output_bytes)
+    
+    return output_bytes.getvalue()
+
+
+def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, original_format: str = 'PNG') -> bytes:
+    """
+    Add verification stamp to image files (JPG, PNG).
+    The stamp is permanently embedded and cannot be removed.
+    
+    Args:
+        input_image_bytes: Original image as bytes
+        stamp_data: Same as add_verification_stamp_to_pdf
+        original_format: Original image format (PNG, JPEG, etc.)
+    
+    Returns:
+        Stamped image as bytes
+    """
+    from io import BytesIO
+    
+    try:
+        # Open image
+        img = PILImage.open(BytesIO(input_image_bytes))
+        
+        # Convert to RGBA for compositing
+        if img.mode != 'RGBA':
+            img = img.convert('RGBA')
+        
+        # Stamp configuration
+        stamp_config = {
+            "original_seen": {"text": "ORIGINAL DOCUMENT SEEN", "color": (0, 128, 0)},
+            "copy_verified": {"text": "COPY VERIFIED WITH ORIGINAL", "color": (0, 102, 204)},
+            "online_check": {"text": "ONLINE CHECK COMPLETED", "color": (128, 64, 178)}
+        }
+        
+        config = stamp_config.get(stamp_data.get("stamp_type", "copy_verified"), stamp_config["copy_verified"])
+        
+        # Image dimensions
+        img_width, img_height = img.size
+        
+        # Calculate stamp size based on image size
+        box_width = min(280, int(img_width * 0.4))
+        box_height = 90
+        box_x = img_width - box_width - 15
+        box_y = img_height - box_height - 15
+        
+        # Create overlay
+        overlay = PILImage.new('RGBA', img.size, (255, 255, 255, 0))
+        draw = ImageDraw.Draw(overlay)
+        
+        # Draw semi-transparent background
+        draw.rounded_rectangle(
+            [(box_x, box_y), (box_x + box_width, box_y + box_height)],
+            radius=8,
+            fill=(255, 255, 255, 230),
+            outline=config["color"],
+            width=3
+        )
+        
+        # Try to load fonts
+        try:
+            font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 13)
+            font_normal = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 9)
+        except:
+            font_bold = ImageFont.load_default()
+            font_normal = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+        
+        # Draw checkmark
+        draw.ellipse([(box_x + 10, box_y + 10), (box_x + 28, box_y + 28)], fill=config["color"])
+        draw.text((box_x + 14, box_y + 8), "✓", fill=(255, 255, 255), font=font_bold)
+        
+        # Draw header text
+        draw.text((box_x + 35, box_y + 10), config["text"], fill=config["color"], font=font_bold)
+        
+        # Draw details
+        y_pos = box_y + 32
+        doc_type = stamp_data.get('document_type', 'Document')[:25]
+        draw.text((box_x + 12, y_pos), f"Document: {doc_type}", fill=(0, 0, 0), font=font_normal)
+        y_pos += 14
+        
+        verifier = stamp_data.get('verified_by_name', 'N/A')[:25]
+        draw.text((box_x + 12, y_pos), f"Verified by: {verifier}", fill=(0, 0, 0), font=font_normal)
+        y_pos += 14
+        
+        # Format date
+        try:
+            verified_at = stamp_data.get("verified_at", "")
+            if verified_at:
+                if isinstance(verified_at, str):
+                    verified_dt = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
+                else:
+                    verified_dt = verified_at
+                date_str = verified_dt.strftime('%d %b %Y %H:%M')
+            else:
+                date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')
+        except:
+            date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')
+        
+        draw.text((box_x + 12, y_pos), f"Date: {date_str}", fill=(0, 0, 0), font=font_normal)
+        
+        # Verification ID
+        verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8])
+        draw.text((box_x + 12, box_y + box_height - 15), f"ID: {verification_id}", fill=(128, 128, 128), font=font_small)
+        
+        # Composite overlay onto original
+        img = PILImage.alpha_composite(img, overlay)
+        
+        # Convert back to original format
+        output = BytesIO()
+        if original_format.upper() in ['JPEG', 'JPG']:
+            # JPEG doesn't support alpha, convert to RGB
+            img = img.convert('RGB')
+            img.save(output, format='JPEG', quality=95)
+        else:
+            img.save(output, format='PNG')
+        
+        return output.getvalue()
+        
+    except Exception as e:
+        logging.error(f"Failed to stamp image: {e}")
+        return input_image_bytes  # Return original if can't process
 
 
 # ============================================================================
@@ -15311,6 +15581,242 @@ async def remove_verification_stamp(
 async def get_verification_stamp_types():
     """Return available verification stamp types."""
     return {"stamp_types": VERIFICATION_STAMP_TYPES}
+
+
+@api_router.post("/employee-documents/{doc_id}/verify-with-digital-stamp")
+async def verify_document_with_digital_stamp(
+    doc_id: str,
+    payload: DocumentVerificationStampRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Verify a document and add a VISIBLE digital stamp to the file.
+    
+    The stamp is permanently embedded into the PDF/image and cannot be removed.
+    This creates a new stamped version while preserving the original.
+    
+    CQC/Medway Requirement: Visible proof of document verification.
+    
+    Supported formats: PDF, JPG, JPEG, PNG
+    """
+    from io import BytesIO
+    
+    # Validate stamp type
+    if payload.stamp_type not in VERIFICATION_STAMP_TYPES:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid stamp type. Valid options: {list(VERIFICATION_STAMP_TYPES.keys())}"
+        )
+    
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Get employee info for stamp
+    employee = await db.employees.find_one(
+        {"id": doc.get("employee_id")}, 
+        {"_id": 0, "first_name": 1, "last_name": 1}
+    )
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else "N/A"
+    
+    now = datetime.now(timezone.utc).isoformat()
+    verification_id = str(uuid.uuid4())[:12].upper()
+    
+    # Get reviewer name
+    reviewer = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    if reviewer:
+        reviewer_name = reviewer.get('name')
+        if not reviewer_name:
+            reviewer_name = f"{reviewer.get('first_name', '')} {reviewer.get('last_name', '')}".strip()
+        if not reviewer_name:
+            reviewer_name = reviewer.get('email', user.get('email', 'Admin'))
+    else:
+        reviewer_name = user.get('email', 'Admin')
+    
+    # Prepare stamp data
+    stamp_data = {
+        "stamp_type": payload.stamp_type,
+        "verified_by": user['user_id'],
+        "verified_by_name": reviewer_name,
+        "verified_at": now,
+        "employee_name": employee_name,
+        "document_type": doc.get("requirement_id", "Document").replace("_", " ").title(),
+        "verification_id": verification_id
+    }
+    
+    # Get file info
+    file_url = doc.get("file_url", "")
+    file_name = doc.get("file_name", doc.get("original_filename", "document"))
+    file_extension = file_name.split(".")[-1].lower() if "." in file_name else ""
+    
+    stamped_file_url = None
+    stamped_file_name = None
+    
+    # Try to get and stamp the file
+    if file_url and file_extension in ["pdf", "jpg", "jpeg", "png"]:
+        try:
+            # Determine if file is stored locally or remotely
+            if file_url.startswith(("http://", "https://")):
+                # Download from remote URL
+                response = requests.get(file_url, timeout=30)
+                if response.status_code == 200:
+                    file_bytes = response.content
+                else:
+                    file_bytes = None
+            elif file_url.startswith("/uploads/") or file_url.startswith("uploads/"):
+                # Local file storage
+                local_path = file_url if file_url.startswith("/") else f"/{file_url}"
+                if os.path.exists(local_path):
+                    with open(local_path, "rb") as f:
+                        file_bytes = f.read()
+                else:
+                    file_bytes = None
+            else:
+                file_bytes = None
+            
+            if file_bytes:
+                # Apply stamp based on file type
+                if file_extension == "pdf":
+                    stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
+                    stamped_file_name = file_name.replace(".pdf", f"_verified_{verification_id}.pdf")
+                elif file_extension in ["jpg", "jpeg"]:
+                    stamped_bytes = add_verification_stamp_to_image(file_bytes, stamp_data, "JPEG")
+                    stamped_file_name = file_name.replace(f".{file_extension}", f"_verified_{verification_id}.{file_extension}")
+                elif file_extension == "png":
+                    stamped_bytes = add_verification_stamp_to_image(file_bytes, stamp_data, "PNG")
+                    stamped_file_name = file_name.replace(".png", f"_verified_{verification_id}.png")
+                else:
+                    stamped_bytes = None
+                
+                if stamped_bytes and stamped_file_name:
+                    # Save stamped file
+                    uploads_dir = "/app/uploads/stamped"
+                    os.makedirs(uploads_dir, exist_ok=True)
+                    
+                    stamped_path = os.path.join(uploads_dir, stamped_file_name)
+                    with open(stamped_path, "wb") as f:
+                        f.write(stamped_bytes)
+                    
+                    stamped_file_url = f"/uploads/stamped/{stamped_file_name}"
+                    
+                    logging.info(f"Created stamped document: {stamped_file_url}")
+        except Exception as e:
+            logging.error(f"Failed to create stamped document: {e}")
+            # Continue without stamped file - still update metadata
+    
+    # Get stamp info
+    stamp_info = VERIFICATION_STAMP_TYPES[payload.stamp_type]
+    
+    # Update document record with stamp metadata AND stamped file reference
+    update_data = {
+        "verification_stamp": payload.stamp_type,
+        "verification_stamp_label": stamp_info["label"],
+        "verification_stamp_audit_text": stamp_info["audit_text"],
+        "verification_stamp_badge_color": stamp_info["badge_color"],
+        "verification_stamp_notes": payload.notes.strip() if payload.notes else None,
+        "verification_stamp_by": user['user_id'],
+        "verification_stamp_by_name": reviewer_name,
+        "verification_stamp_at": now,
+        "verification_id": verification_id,
+        "status": "verified"
+    }
+    
+    if stamped_file_url:
+        update_data["stamped_file_url"] = stamped_file_url
+        update_data["stamped_file_name"] = stamped_file_name
+        update_data["has_visual_stamp"] = True
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "verify_with_digital_stamp", "employee_document", doc_id, {
+        "stamp_type": payload.stamp_type,
+        "stamp_label": stamp_info["label"],
+        "verification_id": verification_id,
+        "stamped_file_created": stamped_file_url is not None,
+        "employee_id": doc.get('employee_id'),
+        "requirement_id": doc.get('requirement_id'),
+        "notes": payload.notes
+    })
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "message": f"Document verified with {stamp_info['label']}",
+        "verification_id": verification_id,
+        "stamped_file_url": stamped_file_url,
+        "stamped_file_name": stamped_file_name,
+        "has_visual_stamp": stamped_file_url is not None,
+        "document": EmployeeDocumentResponse(**updated_doc) if updated_doc else None
+    }
+
+
+@api_router.get("/employee-documents/{doc_id}/download-stamped")
+async def download_stamped_document(
+    doc_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Download the stamped version of a document if available.
+    Falls back to original if no stamped version exists.
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Prefer stamped version
+    if doc.get("stamped_file_url"):
+        file_url = doc["stamped_file_url"]
+        file_name = doc.get("stamped_file_name", doc.get("file_name", "document"))
+    else:
+        file_url = doc.get("file_url")
+        file_name = doc.get("file_name", doc.get("original_filename", "document"))
+    
+    if not file_url:
+        raise HTTPException(status_code=404, detail="No file available for download")
+    
+    # Read file
+    try:
+        if file_url.startswith(("http://", "https://")):
+            response = requests.get(file_url, timeout=30)
+            if response.status_code != 200:
+                raise HTTPException(status_code=404, detail="File not found at URL")
+            file_bytes = response.content
+        else:
+            local_path = file_url if file_url.startswith("/") else f"/app/{file_url}"
+            if not os.path.exists(local_path):
+                raise HTTPException(status_code=404, detail="File not found on disk")
+            with open(local_path, "rb") as f:
+                file_bytes = f.read()
+        
+        # Determine content type
+        ext = file_name.split(".")[-1].lower() if "." in file_name else ""
+        content_types = {
+            "pdf": "application/pdf",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png"
+        }
+        content_type = content_types.get(ext, "application/octet-stream")
+        
+        return Response(
+            content=file_bytes,
+            media_type=content_type,
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{file_name}\"",
+                "X-Verification-ID": doc.get("verification_id", ""),
+                "X-Has-Visual-Stamp": str(doc.get("has_visual_stamp", False))
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to download document: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download document")
 
 
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")

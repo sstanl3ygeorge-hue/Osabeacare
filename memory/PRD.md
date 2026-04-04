@@ -288,6 +288,35 @@ Implemented the 7 Critical CQC Gaps identified in system architecture review:
 - 100% pass rate (22/22 tests) in iteration_142.json
 - All CQC endpoints verified working
 
+## UI System Connections (COMPLETED Apr 4)
+Connected existing backend systems to new frontend UI components:
+
+### 1. References Tab (NEW)
+- Created `ReferencesPanel.js` component
+- GET `/api/employees/{id}/references` endpoint added with employee fields fallback
+- Displays Reference 1 & Reference 2 cards with:
+  - Declared referee info (name, email, phone, organisation)
+  - Request status (not_declared, declared, sent, response_received, verified)
+  - Send/Resend Request button
+- Test Result: 100% pass (iteration_143.json)
+
+### 2. Audit Trail Tab (ENHANCED)  
+- Created `AuditTrailPanel.js` component
+- Uses CQC audit trail endpoint `/api/employees/{id}/audit-trail`
+- Shows timeline of compliance actions with filtering
+- Displays metadata for each action
+
+### 3. Tab Restructure
+- **New tabs**: Overview, Compliance, References, Training, Policies, Audit
+- **Removed**: Recruitment tab (merged into References), Recurring tab
+- **Removed from Compliance tab**: WhatsNeededPanel, TrainingSummaryCard
+
+### Files Created/Modified
+- `/app/frontend/src/components/compliance/ReferencesPanel.js` (NEW)
+- `/app/frontend/src/components/compliance/AuditTrailPanel.js` (NEW)
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` (Tab restructure)
+- `/app/backend/server.py` (GET /api/employees/{id}/references endpoint)
+
 ## AI Extraction Architecture (Updated Apr 4)
 - **Provider**: Google Gemini 2.5 Flash (via `google-genai` SDK)
 - **API Key**: GEMINI_API_KEY in backend .env
@@ -300,11 +329,14 @@ Implemented the 7 Critical CQC Gaps identified in system architecture review:
 - None
 
 ### P1 (High)
-- [ ] Strict Reference Rule enforcement (min 2 verified references)
-- [ ] Frontend UI for Health Declaration form
-- [ ] Frontend UI for Audit Trail timeline
-- [ ] Interview Notes integration
-- [ ] Training Matrix PDF export
+- [x] References UI - Fetch from db.references, display status, send request button
+- [x] Tab restructure - Overview, Compliance, References, Training, Policies, Audit
+- [x] Remove redundancy - WhatsNeededPanel, duplicate blockers, training summary
+- [x] Audit Trail panel using CQC audit endpoint
+- [ ] Form rendering - Replace /upload-document with /form/{template_id}
+- [ ] Prefill activation - Frontend calls auto-fill endpoint on form load
+- [ ] Document request visibility - Show request status (sent, submitted, overdue) in UI
+- [ ] Interview form output - Display as structured record, enable PDF download
 
 ### P2 (Medium)
 - [ ] server.py modular split (>43k lines)

@@ -347,6 +347,28 @@ Connected existing systems for document request tracking and interview form outp
 - InterviewFormPanel: Fixed PDF endpoint URL (export-pdf → download-pdf)
 - server.py: Fixed role check to allow super_admin for PDF download
 
+## Form Rendering & Prefill (COMPLETED Apr 4)
+Connected form system with auto-fill from employee profile:
+
+### 1. Email Routing Fix
+- Updated `email_automation.py` to route form-based requests to `/forms/complete/{token}`
+- Upload requests continue to use `/upload-document`
+
+### 2. Enhanced Auto-Fill Logic
+- Comprehensive field_value_map in `/api/forms/complete/{token}`
+- Includes: full_name, email, phone, contact_number, address, role, position, date_of_birth, NI number
+- Scans form sections for fields with `auto_fill` attribute
+
+### 3. Frontend Visual Indicators
+- Pre-filled count notice: "X fields pre-filled from your profile"
+- "Pre-filled" green badge next to auto-filled field labels
+- Green border and background on pre-filled inputs
+- User can review and edit pre-filled values
+
+### Test Results
+- Backend: 16/16 tests passed (100%)
+- Frontend: All prefill features verified (100%)
+
 ## AI Extraction Architecture (Updated Apr 4)
 - **Provider**: Google Gemini 2.5 Flash (via `google-genai` SDK)
 - **API Key**: GEMINI_API_KEY in backend .env
@@ -365,8 +387,8 @@ Connected existing systems for document request tracking and interview form outp
 - [x] Audit Trail panel using CQC audit endpoint
 - [x] Document request visibility - Show request status (sent, submitted, overdue) in UI
 - [x] Interview form output - Display as structured record, enable PDF download
-- [ ] Form rendering - Replace /upload-document with /form/{template_id}
-- [ ] Prefill activation - Frontend calls auto-fill endpoint on form load
+- [x] Form rendering - Route form requests to /forms/complete/{token}
+- [x] Prefill activation - Auto-fill with visual indicators (green badges, highlights)
 
 ### P2 (Medium)
 - [ ] server.py modular split (>43k lines)

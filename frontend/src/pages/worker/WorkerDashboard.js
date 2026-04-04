@@ -5,12 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
+import { Dialog, DialogContent } from '../../components/ui/dialog';
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X
+  Shield, X, PenTool
 } from 'lucide-react';
 import { toast } from 'sonner';
+import SignaturePad from '../../components/worker/SignaturePad';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -29,6 +31,7 @@ export default function WorkerDashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(null);
+  const [showSignaturePad, setShowSignaturePad] = useState(false);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -359,11 +362,15 @@ export default function WorkerDashboard() {
                   <span className="font-medium text-slate-800">Contract Not Signed</span>
                   <p className="text-xs text-slate-500">You must sign your contract before you can start work</p>
                 </div>
-                <Badge className="bg-red-100 text-red-700">Required</Badge>
+                <Button 
+                  onClick={() => setShowSignaturePad(true)}
+                  className="gap-2 bg-blue-600 hover:bg-blue-700"
+                  data-testid="sign-contract-btn"
+                >
+                  <PenTool className="h-4 w-4" />
+                  Sign Contract
+                </Button>
               </div>
-              <p className="text-xs text-slate-500 mt-3">
-                Your employer will send you the contract to sign electronically.
-              </p>
             </CardContent>
           </Card>
         )}
@@ -413,6 +420,22 @@ export default function WorkerDashboard() {
           <p>Employee Code: {employee.code}</p>
         </div>
       </div>
+
+      {/* Contract Signature Dialog */}
+      <Dialog open={showSignaturePad} onOpenChange={setShowSignaturePad}>
+        <DialogContent className="max-w-xl p-0">
+          <SignaturePad
+            employeeId={employee.id}
+            employeeName={employee.name}
+            onSigned={() => {
+              setShowSignaturePad(false);
+              fetchDashboard(); // Refresh dashboard
+              toast.success('Contract signed! Your compliance status has been updated.');
+            }}
+            onCancel={() => setShowSignaturePad(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

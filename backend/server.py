@@ -7554,6 +7554,253 @@ async def worker_upload_document(
 
 
 # ===========================================================================
+# CONTRACT DIGITAL SIGNATURE
+# ===========================================================================
+
+class ContractSignatureRequest(BaseModel):
+    signature_base64: str
+    full_name: str
+
+async def embed_signature_in_contract_pdf(contract_template_bytes: bytes, signature_bytes: bytes, signer_info: dict) -> bytes:
+    """Embed signature image into contract PDF on the last page"""
+    try:
+        # Create signature image from bytes
+        signature_img = PILImage.open(io.BytesIO(signature_bytes))
+        
+        # Ensure RGBA mode for transparency
+        if signature_img.mode != 'RGBA':
+            signature_img = signature_img.convert('RGBA')
+        
+        # Create a PDF with signature overlay using reportlab
+        packet = io.BytesIO()
+        c = canvas.Canvas(packet, pagesize=letter)
+        
+        # Save signature as temp file for reportlab
+        temp_sig = io.BytesIO()
+        signature_img.save(temp_sig, format='PNG')
+        temp_sig.seek(0)
+        
+        # Position signature at bottom (above footer area)
+        sig_width = 150
+        sig_height = 50
+        x_pos = 350
+        y_pos = 120
+        
+        # Draw signature image
+        from reportlab.lib.utils import ImageReader
+        sig_reader = ImageReader(temp_sig)
+        c.drawImage(sig_reader, x_pos, y_pos, width=sig_width, height=sig_height, mask='auto')
+        
+        # Add signer info below signature
+        c.setFont("Helvetica", 10)
+        c.drawString(x_pos, y_pos - 15, f"Signed by: {signer_info['name']}")
+        c.drawString(x_pos, y_pos - 30, f"Date: {signer_info['date']}")
+        c.drawString(x_pos, y_pos - 45, f"Employee ID: {signer_info['employee_id']}")
+        
+        # Add signature verification line
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(x_pos, y_pos - 60, "Digitally signed via Osabea Healthcare Portal")
+        
+        c.save()
+        
+        # Merge with original PDF
+        packet.seek(0)
+        overlay_pdf = PdfReader(packet)
+        
+        # Read existing contract or create a simple one
+        if contract_template_bytes:
+            existing_pdf = PdfReader(io.BytesIO(contract_template_bytes))
+        else:
+            # Create a basic contract page if no template
+            basic_packet = io.BytesIO()
+            basic_c = canvas.Canvas(basic_packet, pagesize=letter)
+            basic_c.setFont("Helvetica-Bold", 16)
+            basic_c.drawString(200, 750, "EMPLOYMENT CONTRACT")
+            basic_c.setFont("Helvetica", 12)
+            basic_c.drawString(72, 700, f"This contract is between Osabea Healthcare Solutions")
+            basic_c.drawString(72, 680, f"and {signer_info['name']} (Employee ID: {signer_info['employee_id']})")
+            basic_c.drawString(72, 640, "Terms and conditions as discussed during onboarding.")
+            basic_c.save()
+            basic_packet.seek(0)
+            existing_pdf = PdfReader(basic_packet)
+        
+        output = PdfWriter()
+        
+        # Process all pages
+        for page_num in range(len(existing_pdf.pages)):
+            page = existing_pdf.pages[page_num]
+            # Add signature overlay to last page
+            if page_num == len(existing_pdf.pages) - 1:
+                page.merge_page(overlay_pdf.pages[0])
+            output.add_page(page)
+        
+        output_bytes = io.BytesIO()
+        output.write(output_bytes)
+        
+        return output_bytes.getvalue()
+        
+    except Exception as e:
+        logger.error(f"Failed to embed signature in PDF: {e}")
+        raise
+
+
+@api_router.post("/employees/{employee_id}/contract/sign")
+async def sign_contract(
+    employee_id: str,
+    request: ContractSignatureRequest,
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Worker signs contract with drawn signature.
+    Saves signature as image, creates signed PDF.
+    """
+    # Verify worker is signing their own contract
+    if worker.get("employee_id") != employee_id:
+        raise HTTPException(status_code=403, detail="You can only sign your own contract")
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Decode base64 signature image
+    try:
+        signature_data = request.signature_base64
+        if ',' in signature_data:
+            signature_data = signature_data.split(',')[1]
+        signature_bytes = base64.b64decode(signature_data)
+    except Exception as e:
+        logger.error(f"Failed to decode signature: {e}")
+        raise HTTPException(status_code=400, detail="Invalid signature data")
+    
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime('%Y%m%d_%H%M%S')
+    
+    # Save signature image
+    sig_dir = Path("/app/uploads/contract_signatures")
+    sig_dir.mkdir(parents=True, exist_ok=True)
+    sig_filename = f"{employee_id}_{timestamp}.png"
+    sig_path = sig_dir / sig_filename
+    
+    with open(sig_path, "wb") as f:
+        f.write(signature_bytes)
+    
+    signature_url = f"/uploads/contract_signatures/{sig_filename}"
+    
+    # Get contract template (if exists)
+    contract_template = None
+    contract_doc = await db.contract_templates.find_one({"active": True})
+    if contract_doc and contract_doc.get("file_url"):
+        template_path = contract_doc.get("file_url")
+        if template_path.startswith("/"):
+            template_path = f"/app{template_path}"
+        if os.path.exists(template_path):
+            with open(template_path, "rb") as f:
+                contract_template = f.read()
+    
+    # Generate signed PDF with signature embedded
+    signer_info = {
+        "name": request.full_name,
+        "date": now.strftime("%d %B %Y"),
+        "employee_id": employee.get("employee_code", employee_id)
+    }
+    
+    signed_pdf_bytes = await embed_signature_in_contract_pdf(
+        contract_template,
+        signature_bytes,
+        signer_info
+    )
+    
+    # Save signed contract
+    contracts_dir = Path("/app/uploads/contracts")
+    contracts_dir.mkdir(parents=True, exist_ok=True)
+    contract_filename = f"{employee_id}_signed_contract_{timestamp}.pdf"
+    contract_path = contracts_dir / contract_filename
+    
+    with open(contract_path, "wb") as f:
+        f.write(signed_pdf_bytes)
+    
+    contract_url = f"/uploads/contracts/{contract_filename}"
+    
+    # Update or create agreement_acknowledgements
+    await db.agreement_acknowledgements.update_one(
+        {
+            "employee_id": employee_id,
+            "agreement_type": "contract_acceptance"
+        },
+        {
+            "$set": {
+                "status": "signed",
+                "signed_document_url": contract_url,
+                "signed_at": now.isoformat(),
+                "signature_image_url": signature_url,
+                "signer_name": request.full_name,
+                "signer_employee_code": employee.get("employee_code"),
+                "completion_mode": "digital_signature",
+                "verification_status": "verified",  # Auto-verify digital signatures
+                "verified_at": now.isoformat(),
+                "verified_by": "system_auto_verify"
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "agreement_type": "contract_acceptance",
+                "created_at": now.isoformat()
+            }
+        },
+        upsert=True
+    )
+    
+    # Log audit
+    await log_audit_action(f"worker_{employee_id}", "contract_signed", "employee", employee_id, {
+        "signature_url": signature_url,
+        "contract_url": contract_url,
+        "signer_name": request.full_name,
+        "signed_at": now.isoformat()
+    })
+    
+    logger.info(f"Contract signed by employee {employee_id}: {contract_url}")
+    
+    return {
+        "success": True,
+        "message": "Contract signed successfully",
+        "contract_url": contract_url,
+        "signed_at": now.isoformat()
+    }
+
+
+@api_router.get("/employees/{employee_id}/contract/status")
+async def get_contract_status(
+    employee_id: str
+):
+    """
+    Get contract signing status for an employee.
+    """
+    # Check agreement_acknowledgements
+    contract_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": "contract_acceptance"
+    }, {"_id": 0})
+    
+    if not contract_ack:
+        return {
+            "signed": False,
+            "status": "not_signed",
+            "message": "Contract has not been signed yet"
+        }
+    
+    return {
+        "signed": contract_ack.get("status") == "signed",
+        "status": contract_ack.get("status", "unknown"),
+        "signed_at": contract_ack.get("signed_at"),
+        "signer_name": contract_ack.get("signer_name"),
+        "contract_url": contract_ack.get("signed_document_url"),
+        "verification_status": contract_ack.get("verification_status"),
+        "completion_mode": contract_ack.get("completion_mode")
+    }
+
+
+# ===========================================================================
 # END WORKER PORTAL ENDPOINTS
 # ===========================================================================
 

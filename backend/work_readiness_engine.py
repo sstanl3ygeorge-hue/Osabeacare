@@ -468,10 +468,10 @@ async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
         induction = induction_form
     checks["induction"] = bool(induction)
     
-    # 9. Health questionnaire complete
+    # 9. Health questionnaire complete (check multiple form types)
     health_form = await db.form_submissions.find_one({
         "employee_id": emp_id_str,
-        "form_type": "staff_health_questionnaire",
+        "form_type": {"$in": ["staff_health_questionnaire", "health_questionnaire"]},
         "status": {"$in": ["submitted", "verified"]}
     })
     checks["health_declaration"] = bool(health_form)

@@ -7079,7 +7079,7 @@ async def get_current_worker(authorization: str = Header(None)):
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.JWTError:
+    except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @api_router.post("/worker/request-login")
@@ -7227,7 +7227,7 @@ async def worker_verify_login(request: WorkerVerifyRequest):
         
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=400, detail="Login link has expired. Please request a new one.")
-    except jwt.JWTError as e:
+    except jwt.PyJWTError as e:
         logger.error(f"JWT verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid login link")
 
@@ -7235,7 +7235,9 @@ async def worker_verify_login(request: WorkerVerifyRequest):
 async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     """
     Get worker's compliance dashboard data.
-    Shows progress, missing items, alerts, and completed items.
+    Shows different views for onboarding vs active employees:
+    - Onboarding: Forms to complete, documents to upload
+    - Active: Expiry alerts, renewal documents
     """
     employee_id = worker.get("employee_id")
     if not employee_id:
@@ -7244,6 +7246,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Determine if active employee or still onboarding
+    employee_status = employee.get("status", "onboarding")
+    is_active_employee = employee_status == "active_employee"
     
     # Get documents
     documents = await db.employee_documents.find({
@@ -7450,7 +7456,52 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # Determine work readiness status
     has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
-    status = "NOT_READY" if has_blockers else "READY"
+    status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
+    
+    # Get form status for onboarding employees
+    forms_status = []
+    if not is_active_employee:
+        for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+            # Check if there's saved progress
+            progress = await db.form_progress.find_one({
+                "employee_id": employee_id,
+                "form_id": form_id
+            }, {"_id": 0})
+            
+            # Check if already submitted
+            submission = await db.form_submissions.find_one({
+                "employee_id": employee_id,
+                "form_type": form_id,
+                "status": {"$in": ["submitted", "verified"]}
+            }, {"_id": 0})
+            
+            form_status = "not_started"
+            saved_at = None
+            submitted_at = None
+            progress_percentage = 0
+            
+            if submission:
+                form_status = "submitted" if submission.get("status") == "submitted" else "verified"
+                submitted_at = submission.get("submitted_at")
+            elif progress:
+                form_status = "in_progress"
+                saved_at = progress.get("last_saved")
+                form_data = progress.get("data", {})
+                if form_data:
+                    filled_fields = sum(1 for v in form_data.values() if v)
+                    total_fields = len(form_data) or 1
+                    progress_percentage = int((filled_fields / total_fields) * 100)
+            
+            forms_status.append({
+                "id": form_id,
+                "name": form_def["name"],
+                "description": form_def.get("description", ""),
+                "required": form_def.get("required", True),
+                "status": form_status,
+                "saved_at": saved_at,
+                "submitted_at": submitted_at,
+                "progress_percentage": progress_percentage
+            })
     
     return {
         "employee": {
@@ -7458,13 +7509,16 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
             "code": employee.get("employee_code"),
             "email": employee.get("email"),
-            "status": status
+            "status": status,
+            "employee_status": employee_status,
+            "is_active_employee": is_active_employee
         },
         "progress": {
             "percentage": progress_percentage,
             "completed": total_completed,
             "required": total_required
         },
+        "forms": forms_status,  # Only populated for onboarding employees
         "missing_documents": missing_docs,
         "completed_documents": completed_docs,
         "missing_trainings": missing_trainings,
@@ -7543,6 +7597,10 @@ async def worker_upload_document(
         "document_id": doc_id,
         "file_name": file.filename
     })
+    
+    # NOTE: Auto-promotion is NOT triggered on worker uploads because
+    # documents need admin verification (stamps) first.
+    # Auto-promotion will be triggered when admin verifies documents.
     
     return {
         "success": True,
@@ -7790,6 +7848,61 @@ async def submit_worker_form(
         }
     )
     
+    # Send admin notification about form submission
+    try:
+        if resend.api_key:
+            employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
+            emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else employee_name
+            emp_code = employee.get("employee_code", "N/A") if employee else "N/A"
+            
+            admin_email_html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #0F172A; padding: 16px; text-align: center;">
+                    <h2 style="color: white; margin: 0;">Form Submission</h2>
+                </div>
+                <div style="padding: 24px; background: #f8fafc;">
+                    <h3 style="color: #1e293b; margin-top: 0;">New Form Requires Review</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Employee:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-weight: bold;">{emp_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Employee Code:</td>
+                            <td style="padding: 8px 0; color: #1e293b;">{emp_code}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Form:</td>
+                            <td style="padding: 8px 0; color: #1e293b; font-weight: bold;">{WORKER_FORM_DEFINITIONS[form_id]['name']}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 0; color: #64748b;">Submitted:</td>
+                            <td style="padding: 8px 0; color: #1e293b;">{now[:16].replace('T', ' ')}</td>
+                        </tr>
+                    </table>
+                    <div style="margin-top: 24px; text-align: center;">
+                        <a href="{os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')}/portal/employees/{employee_id}?tab=compliance" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                            Review Submission
+                        </a>
+                    </div>
+                </div>
+            </div>
+            """
+            
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": SENDER_EMAIL,
+                "to": [ADMIN_EMAIL],
+                "subject": f"Form Submission: {WORKER_FORM_DEFINITIONS[form_id]['name']} - {emp_name}",
+                "html": admin_email_html
+            })
+            logger.info(f"Admin notification sent for form submission: {form_id} by {employee_id}")
+    except Exception as e:
+        logger.warning(f"Failed to send admin notification for form: {e}")
+    
+    # Try auto-promotion after form submission
+    # Forms are self-certified so we check after each submission
+    await try_auto_promote_worker(employee_id)
+    
     return {
         "success": True,
         "submission_id": submission["id"],
@@ -8005,6 +8118,9 @@ async def sign_contract(
     })
     
     logger.info(f"Contract signed by employee {employee_id}: {contract_url}")
+    
+    # Try auto-promotion after contract signature
+    await try_auto_promote_worker(employee_id)
     
     return {
         "success": True,
@@ -8983,6 +9099,108 @@ class ProfessionalRegistrationRequest(BaseModel):
 class ForcePromoteRequest(BaseModel):
     reason: str
     notes: Optional[str] = None
+
+
+async def try_auto_promote_worker(employee_id: str):
+    """
+    Internal helper to check and auto-promote an employee after significant events.
+    Called automatically after document uploads, form submissions, etc.
+    Does not require user auth - runs as system background task.
+    """
+    try:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if not employee:
+            return
+        
+        current_status = employee.get("status", "applicant")
+        
+        # Don't promote if already active
+        if current_status == EMPLOYEE_STATUS_ACTIVE:
+            return
+        
+        # Check if can promote
+        can_promote, checks = await can_promote_to_active(employee_id, db)
+        
+        if not can_promote:
+            return  # Not ready yet
+        
+        # Promote to active
+        now = datetime.now(timezone.utc).isoformat()
+        update_data = {
+            "status": EMPLOYEE_STATUS_ACTIVE,
+            "promoted_at": now,
+            "promoted_via": "auto_system",
+            "updated_at": now
+        }
+        
+        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+        
+        # Audit log
+        await log_audit_action(
+            "system",
+            "auto_promoted_to_active",
+            "employee",
+            employee_id,
+            {
+                "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+                "previous_status": current_status,
+                "new_status": EMPLOYEE_STATUS_ACTIVE,
+                "checks_passed": [k for k, v in checks.items() if v is True],
+                "triggered_by": "system_auto"
+            }
+        )
+        
+        # Send notification to employee about promotion
+        emp_email = employee.get("email")
+        if emp_email and resend.api_key:
+            try:
+                frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+                
+                promo_email_html = f"""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #059669, #10b981); padding: 24px; text-align: center;">
+                        <h1 style="color: white; margin: 0; font-size: 24px;">Congratulations!</h1>
+                    </div>
+                    <div style="padding: 32px; background: #f8fafc;">
+                        <h2 style="color: #1e293b; margin-top: 0;">You're Ready to Work!</h2>
+                        <p style="color: #475569; line-height: 1.6;">
+                            Great news, {employee.get('first_name')}! All your compliance requirements have been verified 
+                            and you are now cleared to work at Osabea Healthcare.
+                        </p>
+                        <div style="background: #d1fae5; border-left: 4px solid #059669; padding: 16px; margin: 24px 0;">
+                            <p style="color: #065f46; margin: 0; font-weight: bold;">
+                                Your status: ACTIVE EMPLOYEE
+                            </p>
+                            <p style="color: #065f46; margin: 8px 0 0 0;">
+                                You can now be assigned to shifts and client placements.
+                            </p>
+                        </div>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="{frontend_url}/worker/login" style="background: #059669; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                                View My Dashboard
+                            </a>
+                        </div>
+                        <p style="color: #64748b; font-size: 14px;">
+                            Remember to keep your documents up to date. You'll receive reminders when items are due for renewal.
+                        </p>
+                    </div>
+                </div>
+                """
+                
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": SENDER_EMAIL,
+                    "to": [emp_email],
+                    "subject": "You're Cleared to Work - Osabea Healthcare",
+                    "html": promo_email_html
+                })
+                logger.info(f"Promotion notification sent to {emp_email}")
+            except Exception as e:
+                logger.warning(f"Failed to send promotion email: {e}")
+        
+        logger.info(f"Employee {employee_id} auto-promoted to active_employee")
+        
+    except Exception as e:
+        logger.error(f"Auto-promotion check failed for {employee_id}: {e}")
 
 
 @api_router.get("/employees/{employee_id}/promotion-status")
@@ -17503,6 +17721,11 @@ async def apply_verification_stamp(
         "stamped_file_url": stamped_file_url,
         "stamp_burn_error": stamp_burn_error
     })
+    
+    # Try auto-promotion after document verification
+    employee_id = doc.get("employee_id")
+    if employee_id:
+        await try_auto_promote_worker(employee_id)
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**updated_doc)
@@ -26776,44 +26999,95 @@ async def submit_structured_application(form: StructuredApplicationForm):
         ]
     ]
     
-    # Send confirmation email to applicant
+    # Send confirmation email with magic link to applicant portal
     try:
-        from email_service import EmailService
-        email_svc = EmailService(db)
+        # Generate magic link token for worker portal access
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+        magic_token_data = {
+            "employee_id": app_id,
+            "email": form.email.lower(),
+            "type": "worker_login",
+            "exp": datetime.now(timezone.utc) + timedelta(days=7)  # 7 day expiry for new applicants
+        }
+        magic_token = jwt.encode(magic_token_data, JWT_SECRET, algorithm=JWT_ALGORITHM)
         
-        await email_svc.send_raw(
-            to_email=form.email,
-            subject=f"Application Received - Reference {applicant_ref}",
-            body=f"""
-Dear {form.first_name} {form.last_name},
-
-Thank you for submitting your application to join Osabea Healthcare Solutions.
-
-Your Application Reference: {applicant_ref}
-
-We have received your application and it is now being reviewed by our recruitment team.
-
-What happens next:
-- Our team will review your application within 5 working days
-- We may contact your references for verification
-- You may be invited for an interview
-- Additional evidence (Right to Work, DBS, etc.) will be requested as needed
-
-Please keep this reference number for your records. If you have any questions, contact our recruitment team at recruitment@osabeacares.co.uk quoting your reference number.
-
-Thank you for your interest in joining our team.
-
-Best regards,
-Osabea Healthcare Recruitment Team
-            """.strip()
-        )
-        logger.info(f"Confirmation email sent to {form.email} for application {applicant_ref}")
+        # Store magic token
+        await db.magic_tokens.insert_one({
+            "token": magic_token,
+            "employee_id": app_id,
+            "email": form.email.lower(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "used": False,
+            "created_at": now,
+            "purpose": "application_welcome"
+        })
+        
+        portal_url = f"{frontend_url}/worker/verify?token={magic_token}"
+        
+        email_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: #0F172A; padding: 24px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 24px;">Osabea Healthcare</h1>
+            </div>
+            <div style="padding: 32px; background: #f8fafc;">
+                <h2 style="color: #1e293b; margin-top: 0;">Welcome, {form.first_name}!</h2>
+                <p style="color: #475569; line-height: 1.6;">
+                    Thank you for submitting your application. Your reference number is:
+                </p>
+                <div style="background: white; border: 2px solid #e2e8f0; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
+                    <span style="font-size: 24px; font-weight: bold; color: #0F172A; letter-spacing: 2px;">{applicant_ref}</span>
+                </div>
+                
+                <h3 style="color: #1e293b; margin-top: 24px;">Complete Your Onboarding</h3>
+                <p style="color: #475569; line-height: 1.6;">
+                    To proceed with your application, you'll need to complete some forms and upload documents. 
+                    Click the button below to access your personal compliance portal:
+                </p>
+                
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{portal_url}" style="background: #2563EB; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                        Access My Portal
+                    </a>
+                </div>
+                
+                <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 24px 0;">
+                    <p style="color: #92400e; margin: 0; font-weight: bold;">What you'll need to provide:</p>
+                    <ul style="color: #92400e; margin: 8px 0 0 0; padding-left: 20px;">
+                        <li>Health Questionnaire</li>
+                        <li>Personal Information</li>
+                        <li>HMRC Starter Checklist (for payroll)</li>
+                        <li>Right to Work documents</li>
+                        <li>DBS certificate or DBS application</li>
+                        <li>Proof of identity</li>
+                        <li>Proof of address (2 documents)</li>
+                    </ul>
+                </div>
+                
+                <p style="color: #64748b; font-size: 14px;">
+                    This link expires in 7 days. If you need a new link, visit <a href="{frontend_url}/worker/login" style="color: #2563EB;">the worker portal</a> and enter your email.
+                </p>
+                
+                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;">
+                <p style="color: #94a3b8; font-size: 12px; text-align: center;">
+                    Osabea Healthcare Solutions | Compliance Portal<br/>
+                    Questions? Contact recruitment@osabeacares.co.uk
+                </p>
+            </div>
+        </div>
+        """
+        
+        # Send via Resend
+        if resend.api_key:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": SENDER_EMAIL,
+                "to": [form.email],
+                "subject": f"Welcome to Osabea Healthcare - Application {applicant_ref}",
+                "html": email_html
+            })
+            logger.info(f"Welcome email with portal link sent to {form.email} for application {applicant_ref}")
     except Exception as e:
         # Log but don't fail the submission if email fails
-        logger.warning(f"Failed to send confirmation email to {form.email}: {e}")
-    except Exception as e:
-        # Log but don't fail the submission if email fails
-        logger.warning(f"Failed to send confirmation email to {form.email}: {e}")
+        logger.warning(f"Failed to send welcome email to {form.email}: {e}")
     
     return {
         "status": "submitted",

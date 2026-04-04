@@ -268,7 +268,9 @@ export default function WorkerDashboard() {
 
   if (!dashboard) return null;
 
-  const { employee, progress, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, alerts, contract_signed } = dashboard;
+  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, alerts, contract_signed } = dashboard;
+  
+  const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -293,15 +295,27 @@ export default function WorkerDashboard() {
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
         {/* Status Banner */}
-        {employee.status === 'READY' ? (
+        {isActiveEmployee ? (
           <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
                 <Shield className="h-8 w-8" />
               </div>
               <div>
-                <h3 className="font-bold text-xl">You're Ready to Work!</h3>
-                <p className="text-green-100">All compliance requirements are complete.</p>
+                <h3 className="font-bold text-xl">Active Employee</h3>
+                <p className="text-green-100">You are cleared to work. Keep your documents up to date.</p>
+              </div>
+            </div>
+          </div>
+        ) : employee.status === 'READY' ? (
+          <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
+                <CheckCircle className="h-8 w-8" />
+              </div>
+              <div>
+                <h3 className="font-bold text-xl">Compliance Complete!</h3>
+                <p className="text-blue-100">All requirements submitted. Awaiting final review.</p>
               </div>
             </div>
           </div>
@@ -312,29 +326,31 @@ export default function WorkerDashboard() {
                 <AlertCircle className="h-8 w-8" />
               </div>
               <div>
-                <h3 className="font-bold text-xl">Compliance In Progress</h3>
+                <h3 className="font-bold text-xl">Onboarding In Progress</h3>
                 <p className="text-amber-100">Complete the items below to become work-ready.</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Progress Card */}
-        <Card className="shadow-md border-0">
-          <CardContent className="pt-6">
-            <div className="flex justify-between items-center mb-3">
-              <span className="text-sm font-medium text-slate-600">Your Compliance Progress</span>
-              <span className="text-3xl font-bold text-blue-600">{progress.percentage}%</span>
-            </div>
-            <Progress value={progress.percentage} className="h-3" />
-            <p className="text-sm text-slate-500 mt-3">
-              {progress.completed} of {progress.required} requirements completed
-            </p>
-          </CardContent>
-        </Card>
+        {/* Progress Card - Only for onboarding */}
+        {!isActiveEmployee && (
+          <Card className="shadow-md border-0">
+            <CardContent className="pt-6">
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-sm font-medium text-slate-600">Your Compliance Progress</span>
+                <span className="text-3xl font-bold text-blue-600">{progress.percentage}%</span>
+              </div>
+              <Progress value={progress.percentage} className="h-3" />
+              <p className="text-sm text-slate-500 mt-3">
+                {progress.completed} of {progress.required} requirements completed
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
-        {/* Forms Section */}
-        <FormsSection />
+        {/* Forms Section - Only for onboarding */}
+        {!isActiveEmployee && <FormsSection />}
 
         {/* Urgent Alerts */}
         {alerts.length > 0 && (
@@ -366,8 +382,8 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Missing Documents */}
-        {missing_documents.length > 0 && (
+        {/* Missing Documents - Only for onboarding */}
+        {!isActiveEmployee && missing_documents.length > 0 && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -449,8 +465,8 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Missing Training */}
-        {missing_trainings?.length > 0 && (
+        {/* Missing Training - Only for onboarding */}
+        {!isActiveEmployee && missing_trainings?.length > 0 && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
@@ -490,8 +506,8 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Contract Status */}
-        {!contract_signed && (
+        {/* Contract Status - Only for onboarding */}
+        {!isActiveEmployee && !contract_signed && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">

@@ -22,6 +22,7 @@ import AuthCallback from "./pages/auth/AuthCallback";
 import WorkerLoginPage from "./pages/worker/WorkerLoginPage";
 import WorkerVerifyPage from "./pages/worker/WorkerVerifyPage";
 import WorkerDashboard from "./pages/worker/WorkerDashboard";
+import WorkerFormPage from "./pages/worker/WorkerFormPage";
 
 // Portal Pages
 import PortalLayout from "./components/portal/PortalLayout";
@@ -88,6 +89,7 @@ function AppRouter() {
       <Route path="/worker/login" element={<WorkerLoginPage />} />
       <Route path="/worker/verify" element={<WorkerVerifyPage />} />
       <Route path="/worker/dashboard" element={<WorkerDashboard />} />
+      <Route path="/worker/forms/:formId" element={<WorkerFormPage />} />
       
       {/* Portal Routes - Protected */}
       <Route path="/portal" element={

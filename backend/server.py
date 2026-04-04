@@ -38737,19 +38737,74 @@ async def get_form_for_completion(token: str):
     
     form_template = FORM_BASED_REQUIREMENTS[form_type]
     
-    # Build auto-fill data from employee
+    # Build auto-fill data from employee - comprehensive mapping
     auto_fill_data = {}
+    
+    # Build helper values
+    full_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    full_address_parts = []
+    if employee.get('address_line_1'):
+        full_address_parts.append(employee['address_line_1'])
+    if employee.get('address_line_2'):
+        full_address_parts.append(employee['address_line_2'])
+    if employee.get('city'):
+        full_address_parts.append(employee['city'])
+    if employee.get('postcode'):
+        full_address_parts.append(employee['postcode'])
+    full_address = ', '.join(full_address_parts)
+    
+    # Comprehensive field value map
+    field_value_map = {
+        # Personal
+        "full_name": full_name,
+        "first_name": employee.get("first_name"),
+        "last_name": employee.get("last_name"),
+        "date_of_birth": employee.get("date_of_birth"),
+        "phone": employee.get("phone"),
+        "mobile": employee.get("phone"),
+        "email": employee.get("email"),
+        "ni_number": employee.get("ni_number"),
+        # Address
+        "address": full_address,
+        "full_address": full_address,
+        "address_line_1": employee.get("address_line_1"),
+        "address_line_2": employee.get("address_line_2"),
+        "city": employee.get("city"),
+        "postcode": employee.get("postcode"),
+        "country": employee.get("country", "United Kingdom"),
+        # Role
+        "role": employee.get("role"),
+        "job_title": employee.get("role"),
+        "position_applied": employee.get("role"),
+        "start_date": employee.get("start_date"),
+        "employee_code": employee.get("employee_code"),
+        # Interview/recruitment forms
+        "candidate_name": full_name,
+        "employee_name": full_name,
+        # Today's date
+        "today": datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+    }
+    
+    # First, apply simple auto_fill_fields from template
     for field_id in form_template.get("auto_fill_fields", []):
-        value = employee.get(field_id)
-        if field_id == "full_name":
-            value = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
-        if value:
-            auto_fill_data[field_id] = value
+        if field_id in field_value_map and field_value_map[field_id]:
+            auto_fill_data[field_id] = field_value_map[field_id]
+    
+    # Then, scan sections for fields with auto_fill attribute
+    for section in form_template.get("sections", []):
+        for field in section.get("fields", []):
+            field_id = field.get("id")
+            auto_fill_key = field.get("auto_fill")
+            
+            if auto_fill_key and auto_fill_key in field_value_map:
+                value = field_value_map[auto_fill_key]
+                if value is not None and value != "":
+                    auto_fill_data[field_id] = value
     
     return {
         "request_id": request_id_val,
         "employee_id": employee_id,
-        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "employee_name": full_name,
         "form_type": form_type,
         "form_template": form_template,
         "auto_fill_data": auto_fill_data,

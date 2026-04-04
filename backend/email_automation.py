@@ -747,14 +747,19 @@ class EmailRequestService:
         # Build action link with token
         action_type = REQUEST_TYPE_ACTIONS.get(request.request_type, "upload_document")
         
-        # Use correct path based on person type
-        if request.person_type == "applicant":
-            # For applicants, use public upload page
-            path = f"/upload-document?token={token}&request_id={request.id}"
+        # Determine the correct path based on request type
+        if request.request_type == RequestType.COMPLETE_FORM or action_type == "complete_form":
+            # Form-based requirement - use form completion page
+            path = f"/forms/complete/{token}"
         else:
-            # For employees, also use public upload page (no login required)
-            # This allows employees to upload documents directly from email links
-            path = f"/upload-document?token={token}&request_id={request.id}"
+            # Document upload - use upload page
+            # Use correct path based on person type
+            if request.person_type == "applicant":
+                # For applicants, use public upload page
+                path = f"/upload-document?token={token}&request_id={request.id}"
+            else:
+                # For employees, also use public upload page (no login required)
+                path = f"/upload-document?token={token}&request_id={request.id}"
         
         email_context["action_link"] = f"{PORTAL_URL}{path}"
         email_context["admin_link"] = f"{PORTAL_URL}/portal/employees/{request.person_id}"

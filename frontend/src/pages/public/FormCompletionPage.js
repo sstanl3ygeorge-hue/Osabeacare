@@ -105,12 +105,18 @@ export default function FormCompletionPage() {
     }
     
     const isRequired = field.required;
+    const isPreFilled = formData?.auto_fill_data?.[fieldKey] !== undefined;
     
     return (
       <div key={fieldKey} className="space-y-2">
         <Label className="text-gray-700 font-medium flex items-center gap-1">
           {field.label}
           {isRequired && <span className="text-red-500">*</span>}
+          {isPreFilled && (
+            <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+              Pre-filled
+            </span>
+          )}
         </Label>
         
         {field.type === 'text' && (
@@ -119,7 +125,7 @@ export default function FormCompletionPage() {
             onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
             placeholder={field.placeholder}
             required={isRequired}
-            className="bg-white border-gray-200"
+            className={`bg-white border-gray-200 ${isPreFilled ? 'border-green-200 bg-green-50/50' : ''}`}
           />
         )}
         
@@ -130,7 +136,7 @@ export default function FormCompletionPage() {
             placeholder={field.placeholder}
             required={isRequired}
             rows={3}
-            className="bg-white border-gray-200"
+            className={`bg-white border-gray-200 ${isPreFilled ? 'border-green-200 bg-green-50/50' : ''}`}
           />
         )}
         
@@ -140,7 +146,7 @@ export default function FormCompletionPage() {
             value={value}
             onChange={(e) => handleFieldChange(fieldKey, e.target.value)}
             required={isRequired}
-            className="bg-white border-gray-200"
+            className={`bg-white border-gray-200 ${isPreFilled ? 'border-green-200 bg-green-50/50' : ''}`}
           />
         )}
         
@@ -263,6 +269,7 @@ export default function FormCompletionPage() {
   }
 
   const template = formData?.form_template;
+  const preFilledCount = formData?.auto_fill_data ? Object.keys(formData.auto_fill_data).length : 0;
 
   return (
     <div className="min-h-screen bg-[#F8FAFA]">
@@ -287,6 +294,23 @@ export default function FormCompletionPage() {
       <main className="max-w-3xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit}>
           <div className="space-y-6">
+            {/* Pre-fill Notice */}
+            {preFilledCount > 0 && (
+              <Card className="border-green-200 bg-green-50/50">
+                <CardContent className="pt-4 flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">
+                      {preFilledCount} field{preFilledCount !== 1 ? 's' : ''} pre-filled from your profile
+                    </p>
+                    <p className="text-xs text-green-700 mt-1">
+                      Fields marked with "Pre-filled" have been automatically populated. Please review and update if needed.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
             {/* Intro Card */}
             <Card className="border-blue-100 bg-blue-50/50">
               <CardContent className="pt-4">

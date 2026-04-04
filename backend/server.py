@@ -15667,12 +15667,16 @@ async def verify_document_with_digital_stamp(
                 else:
                     file_bytes = None
             elif file_url.startswith("/uploads/") or file_url.startswith("uploads/"):
-                # Local file storage
-                local_path = file_url if file_url.startswith("/") else f"/{file_url}"
+                # Local file storage - prepend /app to the path
+                clean_path = file_url if file_url.startswith("/") else f"/{file_url}"
+                local_path = f"/app{clean_path}"
+                logging.info(f"Looking for local file at: {local_path}")
                 if os.path.exists(local_path):
                     with open(local_path, "rb") as f:
                         file_bytes = f.read()
+                    logging.info(f"Loaded file bytes: {len(file_bytes)} bytes")
                 else:
+                    logging.warning(f"Local file not found at: {local_path}")
                     file_bytes = None
             else:
                 file_bytes = None
@@ -15786,6 +15790,15 @@ async def download_stamped_document(
             if response.status_code != 200:
                 raise HTTPException(status_code=404, detail="File not found at URL")
             file_bytes = response.content
+        elif file_url.startswith("/uploads/") or file_url.startswith("uploads/"):
+            # Local file storage - prepend /app to the path
+            clean_path = file_url if file_url.startswith("/") else f"/{file_url}"
+            local_path = f"/app{clean_path}"
+            logging.info(f"Looking for stamped file at: {local_path}")
+            if not os.path.exists(local_path):
+                raise HTTPException(status_code=404, detail="File not found on disk")
+            with open(local_path, "rb") as f:
+                file_bytes = f.read()
         else:
             local_path = file_url if file_url.startswith("/") else f"/app/{file_url}"
             if not os.path.exists(local_path):

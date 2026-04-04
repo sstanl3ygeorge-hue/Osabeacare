@@ -17158,12 +17158,105 @@ async def apply_verification_stamp(
         "verification_stamp_at": now
     }
     
+    # ==========================================================================
+    # BURN VISUAL STAMP INTO DOCUMENT (Medway CQC Requirement)
+    # The stamp must be visually embedded in the file when downloaded
+    # ==========================================================================
+    stamped_file_url = None
+    stamp_burn_error = None
+    
+    file_url = doc.get("file_url")
+    if file_url:
+        try:
+            # Get employee name for stamp
+            employee = await db.employees.find_one({"id": doc.get("employee_id")}, {"_id": 0, "first_name": 1, "last_name": 1})
+            employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else "Unknown"
+            
+            # Determine document type label
+            doc_type_labels = {
+                "right_to_work_evidence": "Right to Work",
+                "right_to_work": "Right to Work",
+                "dbs_certificate": "DBS Certificate",
+                "dbs": "DBS Certificate",
+                "identity_evidence": "Identity Document",
+                "identity": "Identity Document",
+                "passport": "Passport",
+                "proof_of_address_evidence": "Proof of Address",
+                "proof_of_address": "Proof of Address",
+                "training_certificate": "Training Certificate",
+                "qualification": "Qualification",
+                "professional_registration": "Professional Registration"
+            }
+            doc_type_label = doc_type_labels.get(doc.get("requirement_id", ""), doc.get("document_type", "Document"))
+            
+            # Build stamp data
+            stamp_data = {
+                "stamp_type": payload.stamp_type,
+                "verified_by_name": reviewer_name,
+                "verified_at": now,
+                "employee_name": employee_name,
+                "document_type": doc_type_label,
+                "verification_id": doc_id[:8],
+                "reference_code": payload.notes if payload.notes else None
+            }
+            
+            # Download the original file
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(file_url)
+                if response.status_code == 200:
+                    original_bytes = response.content
+                    content_type = response.headers.get("content-type", "").lower()
+                    
+                    # Determine file type and apply appropriate stamp
+                    stamped_bytes = None
+                    file_ext = None
+                    
+                    if "pdf" in content_type or file_url.lower().endswith(".pdf"):
+                        stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+                        file_ext = "pdf"
+                    elif any(img_type in content_type for img_type in ["image/", "png", "jpg", "jpeg", "webp"]):
+                        # Determine original format
+                        if "png" in content_type or file_url.lower().endswith(".png"):
+                            original_format = "PNG"
+                            file_ext = "png"
+                        elif "jpeg" in content_type or "jpg" in content_type or file_url.lower().endswith((".jpg", ".jpeg")):
+                            original_format = "JPEG"
+                            file_ext = "jpg"
+                        else:
+                            original_format = "PNG"
+                            file_ext = "png"
+                        stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+                    
+                    if stamped_bytes:
+                        # Upload stamped file to storage
+                        import uuid as uuid_module
+                        stamped_filename = f"stamped_{doc_id}_{uuid_module.uuid4().hex[:8]}.{file_ext}"
+                        
+                        # Use Supabase storage if available, otherwise store locally
+                        from supabase_storage import upload_file_to_supabase
+                        stamped_file_url = await upload_file_to_supabase(
+                            stamped_bytes, 
+                            stamped_filename, 
+                            f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+                        )
+                        
+                        if stamped_file_url:
+                            update_data["stamped_file_url"] = stamped_file_url
+                            update_data["stamp_burned_at"] = now
+                            logger.info(f"Visual stamp burned into document {doc_id}: {stamped_file_url}")
+        except Exception as e:
+            stamp_burn_error = str(e)
+            logger.error(f"Failed to burn visual stamp into document {doc_id}: {e}")
+    
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
     await log_audit_action(user['user_id'], "apply_verification_stamp", "employee_document", doc_id, {
         "stamp_type": payload.stamp_type,
         "stamp_label": stamp_info["label"],
         "notes": payload.notes,
-        "requirement_id": doc.get('requirement_id')
+        "requirement_id": doc.get('requirement_id'),
+        "stamped_file_url": stamped_file_url,
+        "stamp_burn_error": stamp_burn_error
     })
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -17597,18 +17690,33 @@ async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_cur
 
 @api_router.get("/employee-documents/{doc_id}/download")
 async def download_employee_document_file(doc_id: str, user: dict = Depends(get_current_user)):
-    """Download an employee document file"""
+    """
+    Download an employee document file.
+    
+    If the document has a stamped version (stamped_file_url), it will be served instead.
+    This ensures all downloaded verified documents show the visual stamp.
+    """
     doc = await db.employee_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    file_path = doc.get("file_url")
+    # Prefer stamped file if available (Medway CQC requirement)
+    file_path = doc.get("stamped_file_url") or doc.get("file_url")
     if not file_path:
         raise HTTPException(status_code=404, detail="No file uploaded for this document")
     
     try:
         content, content_type = get_object(file_path)
         filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
+        
+        # Add "_stamped" suffix if serving stamped version
+        if doc.get("stamped_file_url") and file_path == doc.get("stamped_file_url"):
+            name_parts = filename.rsplit(".", 1)
+            if len(name_parts) == 2:
+                filename = f"{name_parts[0]}_verified.{name_parts[1]}"
+            else:
+                filename = f"{filename}_verified"
+        
         safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
         
         return Response(
@@ -17622,6 +17730,7 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
     except Exception as e:
         logger.error(f"Failed to download employee document file: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve file")
+
 async def download_file(path: str, authorization: str = Header(None), auth: str = Query(None)):
     auth_header = authorization or (f"Bearer {auth}" if auth else None)
     if not auth_header:
@@ -17633,6 +17742,394 @@ async def download_file(path: str, authorization: str = Header(None), auth: str 
     except Exception as e:
         logger.error(f"File download failed: {e}")
         raise HTTPException(status_code=404, detail="File not found")
+
+
+
+# ==================== BACK-STAMP EXISTING DOCUMENTS ====================
+
+@api_router.post("/admin/back-stamp-verified-documents")
+async def back_stamp_verified_documents(
+    limit: int = Query(50, description="Max documents to process"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Back-stamp all verified documents that don't have a stamped_file_url.
+    This is for Medway CQC compliance - all verified documents must have visual stamps.
+    
+    Run this periodically or once to stamp existing verified documents.
+    """
+    import httpx
+    from supabase_storage import upload_file_to_supabase
+    
+    # Find verified documents without stamped files
+    query = {
+        "verification_stamp": {"$nin": [None, "", "not_verified"]},
+        "stamped_file_url": {"$exists": False},
+        "file_url": {"$exists": True, "$ne": None}
+    }
+    
+    docs_to_stamp = await db.employee_documents.find(query, {"_id": 0}).limit(limit).to_list(limit)
+    
+    results = {
+        "processed": 0,
+        "success": 0,
+        "failed": 0,
+        "errors": []
+    }
+    
+    for doc in docs_to_stamp:
+        results["processed"] += 1
+        try:
+            doc_id = doc.get("id")
+            file_url = doc.get("file_url")
+            
+            # Get employee name
+            employee = await db.employees.find_one({"id": doc.get("employee_id")}, {"_id": 0, "first_name": 1, "last_name": 1})
+            employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else "Unknown"
+            
+            # Build stamp data
+            doc_type_labels = {
+                "right_to_work_evidence": "Right to Work",
+                "dbs_certificate": "DBS Certificate",
+                "identity_evidence": "Identity Document",
+                "proof_of_address_evidence": "Proof of Address",
+            }
+            doc_type_label = doc_type_labels.get(doc.get("requirement_id", ""), doc.get("document_type", "Document"))
+            
+            stamp_data = {
+                "stamp_type": doc.get("verification_stamp", "copy_verified"),
+                "verified_by_name": doc.get("verification_stamp_by_name", "Admin"),
+                "verified_at": doc.get("verification_stamp_at", datetime.now(timezone.utc).isoformat()),
+                "employee_name": employee_name,
+                "document_type": doc_type_label,
+                "verification_id": doc_id[:8]
+            }
+            
+            # Download and stamp
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(file_url)
+                if response.status_code == 200:
+                    original_bytes = response.content
+                    content_type = response.headers.get("content-type", "").lower()
+                    
+                    stamped_bytes = None
+                    file_ext = None
+                    
+                    if "pdf" in content_type or file_url.lower().endswith(".pdf"):
+                        stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+                        file_ext = "pdf"
+                    elif any(t in content_type for t in ["image/", "png", "jpg", "jpeg"]):
+                        original_format = "PNG" if ("png" in content_type or file_url.lower().endswith(".png")) else "JPEG"
+                        file_ext = "png" if original_format == "PNG" else "jpg"
+                        stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+                    
+                    if stamped_bytes:
+                        stamped_filename = f"stamped_{doc_id}_{uuid.uuid4().hex[:8]}.{file_ext}"
+                        stamped_url = await upload_file_to_supabase(
+                            stamped_bytes,
+                            stamped_filename,
+                            f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+                        )
+                        
+                        if stamped_url:
+                            await db.employee_documents.update_one(
+                                {"id": doc_id},
+                                {"$set": {
+                                    "stamped_file_url": stamped_url,
+                                    "stamp_burned_at": datetime.now(timezone.utc).isoformat()
+                                }}
+                            )
+                            results["success"] += 1
+                        else:
+                            results["failed"] += 1
+                            results["errors"].append(f"{doc_id}: Upload failed")
+                    else:
+                        results["failed"] += 1
+                        results["errors"].append(f"{doc_id}: Could not stamp (unsupported format)")
+                else:
+                    results["failed"] += 1
+                    results["errors"].append(f"{doc_id}: Download failed ({response.status_code})")
+                    
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append(f"{doc.get('id', 'unknown')}: {str(e)}")
+    
+    # Get remaining count
+    remaining = await db.employee_documents.count_documents(query)
+    results["remaining"] = remaining
+    
+    await log_audit_action(user['user_id'], "back_stamp_documents", "system", "admin", results)
+    
+    return results
+
+
+
+@api_router.post("/admin/create-test-employee")
+async def create_test_employee(
+    name: str = Query("Test Candidate Ready", description="Employee name"),
+    email: str = Query("test.ready@example.com", description="Employee email"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Create a fully compliant test employee that passes ALL checks.
+    
+    Used for testing the work readiness engine and demonstrating a 
+    complete employee profile to CQC inspectors.
+    
+    The employee will have:
+    - All documents verified with stamps
+    - Both references verified
+    - All mandatory training complete
+    - Contract signed
+    - Induction complete
+    - Health declaration complete
+    - Status: active_employee (READY_TO_WORK)
+    """
+    import random
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Generate employee code
+    count = await db.employees.count_documents({})
+    emp_code = f"OCS-TEST-{count + 1:04d}"
+    emp_id = str(uuid.uuid4())
+    
+    # Split name
+    name_parts = name.strip().split(" ", 1)
+    first_name = name_parts[0]
+    last_name = name_parts[1] if len(name_parts) > 1 else "Employee"
+    
+    # Create employee record
+    test_employee = {
+        "id": emp_id,
+        "employee_code": emp_code,
+        "first_name": first_name,
+        "last_name": last_name,
+        "email": email,
+        "phone": f"07{random.randint(100000000, 999999999)}",
+        "status": "active_employee",  # NHS status
+        "work_readiness_status": "READY_TO_WORK",
+        "recruitment_approved": True,
+        "recruitment_approved_at": now,
+        "role": "Healthcare Assistant",  # Required field for EmployeeResponse
+        "system_role": "healthcare_assistant",
+        "job_title": "Healthcare Assistant",
+        "created_at": now,
+        "updated_at": now,
+        "is_test_employee": True,  # Mark as test data
+        "is_employee": True,
+        
+        # Reference 1 - verified
+        "reference_1_name": "Jane Smith",
+        "reference_1_email": "jane.smith@test-company.com",
+        "reference_1_phone": "01onal23456789",
+        "reference_1_company": "Previous Care Home Ltd",
+        "reference_1_job_title": "Care Manager",
+        "reference_1_verified": True,
+        "reference_1_verified_by": user['user_id'],
+        "reference_1_verified_at": now,
+        
+        # Reference 2 - verified
+        "reference_2_name": "John Doe",
+        "reference_2_email": "john.doe@another-company.com",
+        "reference_2_phone": "01personal87654321",
+        "reference_2_company": "Another Care Provider",
+        "reference_2_job_title": "Senior Carer",
+        "reference_2_verified": True,
+        "reference_2_verified_by": user['user_id'],
+        "reference_2_verified_at": now,
+        
+        # Professional registration (not required for HCA)
+        "professional_registrations": [],
+        
+        # NHS flags
+        "promoted_at": now,
+        "promoted_via": "test_data",
+        "ready_to_work_at": now
+    }
+    
+    await db.employees.insert_one(test_employee)
+    
+    # Create RTW check - verified
+    rtw_check = {
+        "id": f"rtw_{uuid.uuid4().hex[:12]}",
+        "employee_id": emp_id,
+        "status": "verified",
+        "rtw_type": "uk_citizen",
+        "has_indefinite_leave": True,
+        "share_code": "ABC123XYZ",
+        "checked_at": now,
+        "checked_by": user['user_id'],
+        "created_at": now
+    }
+    await db.rtw_checks.insert_one(rtw_check)
+    
+    # Create DBS check - verified
+    dbs_check = {
+        "id": f"dbs_{uuid.uuid4().hex[:12]}",
+        "employee_id": emp_id,
+        "status": "verified",
+        "dbs_level": "enhanced_adults",
+        "dbs_number": f"00{random.randint(10000000, 99999999)}",
+        "issue_date": (datetime.now(timezone.utc) - timedelta(days=180)).isoformat(),
+        "expiry_date": (datetime.now(timezone.utc) + timedelta(days=730)).isoformat(),
+        "update_service_registered": True,
+        "update_service_status": "no_changes",
+        "verified_at": now,
+        "verified_by": user['user_id'],
+        "created_at": now
+    }
+    await db.dbs_checks.insert_one(dbs_check)
+    
+    # Create documents - all with verification stamps
+    doc_types = [
+        ("right_to_work_evidence", "Right to Work", "online_check"),
+        ("dbs_certificate", "DBS Certificate", "original_seen"),
+        ("identity_evidence", "Identity Document", "original_seen"),
+        ("proof_of_address_evidence", "Proof of Address 1", "original_seen"),
+        ("proof_of_address_evidence_2", "Proof of Address 2", "original_seen")
+    ]
+    
+    for req_id, doc_type, stamp_type in doc_types:
+        doc = {
+            "id": f"doc_{uuid.uuid4().hex[:12]}",
+            "employee_id": emp_id,
+            "requirement_id": req_id,
+            "document_type": doc_type,
+            "status": "active",
+            "file_url": None,  # Test doc - no actual file
+            "verification_stamp": stamp_type,
+            "verification_stamp_label": VERIFICATION_STAMP_TYPES.get(stamp_type, {}).get("label", "Verified"),
+            "verification_stamp_by": user['user_id'],
+            "verification_stamp_at": now,
+            "created_at": now
+        }
+        await db.employee_documents.insert_one(doc)
+    
+    # Create training records - all mandatory training complete
+    mandatory_training = [
+        "Safeguarding Adults",
+        "Manual Handling", 
+        "Fire Safety",
+        "Health & Safety",
+        "Basic Life Support",
+        "Infection Control",
+        "Medication Administration",
+        "Food Hygiene"
+    ]
+    
+    for training_name in mandatory_training:
+        training = {
+            "id": f"tr_{uuid.uuid4().hex[:12]}",
+            "employee_id": emp_id,
+            "training_name": training_name,
+            "training_code": training_name.lower().replace(" ", "_"),
+            "is_mandatory": True,
+            "completion_date": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(),
+            "expiry_date": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+            "record_status": "active",
+            "verified": True,
+            "verified_by": user['user_id'],
+            "verified_at": now,
+            "created_at": now
+        }
+        await db.training_records.insert_one(training)
+    
+    # Create contract acknowledgement
+    contract_ack = {
+        "id": f"ack_{uuid.uuid4().hex[:12]}",
+        "employee_id": emp_id,
+        "agreement_type": "contract_acceptance",
+        "status": "signed",
+        "signed_at": now,
+        "signer_name": f"{first_name} {last_name}",
+        "created_at": now
+    }
+    await db.agreement_acknowledgements.insert_one(contract_ack)
+    
+    # Create induction checklist - completed
+    induction = {
+        "id": f"ind_{uuid.uuid4().hex[:12]}",
+        "employee_id": emp_id,
+        "status": "completed",
+        "completed_at": now,
+        "completed_by": user['user_id'],
+        "created_at": now
+    }
+    await db.induction_checklists.insert_one(induction)
+    
+    # Create health form submission
+    health_form = {
+        "id": f"form_{uuid.uuid4().hex[:12]}",
+        "employee_id": emp_id,
+        "form_type": "staff_health_questionnaire",
+        "status": "verified",
+        "submitted_at": now,
+        "verified_at": now,
+        "verified_by": user['user_id'],
+        "created_at": now
+    }
+    await db.form_submissions.insert_one(health_form)
+    
+    # Create references record
+    ref_record = {
+        "employee_id": emp_id,
+        "ref1": {
+            "declared": {
+                "name": "Jane Smith",
+                "email": "jane.smith@test-company.com",
+                "organisation": "Previous Care Home Ltd"
+            },
+            "verification_status": "verified",
+            "verified_by": user['user_id'],
+            "verified_at": now
+        },
+        "ref2": {
+            "declared": {
+                "name": "John Doe",
+                "email": "john.doe@another-company.com",
+                "organisation": "Another Care Provider"
+            },
+            "verification_status": "verified",
+            "verified_by": user['user_id'],
+            "verified_at": now
+        },
+        "created_at": now
+    }
+    await db.references.insert_one(ref_record)
+    
+    await log_audit_action(user['user_id'], "create_test_employee", "employee", emp_id, {
+        "name": f"{first_name} {last_name}",
+        "email": email,
+        "employee_code": emp_code
+    })
+    
+    return {
+        "status": "success",
+        "message": "Test employee created with all compliance checks passed",
+        "employee": {
+            "id": emp_id,
+            "employee_code": emp_code,
+            "name": f"{first_name} {last_name}",
+            "email": email,
+            "status": "active_employee",
+            "work_readiness_status": "READY_TO_WORK",
+            "profile_url": f"/portal/employees/{emp_id}"
+        },
+        "compliance_summary": {
+            "right_to_work": "verified",
+            "dbs": "verified",
+            "identity": "verified",
+            "proof_of_address": "2 documents verified",
+            "references": "2 verified",
+            "mandatory_training": f"{len(mandatory_training)} courses complete",
+            "contract": "signed",
+            "induction": "complete",
+            "health_declaration": "verified"
+        }
+    }
+
+
 
 
 # ==================== FORM SUBMISSION ROUTES ====================
@@ -32598,6 +33095,116 @@ class ChangeRefereeRequest(BaseModel):
     phone: Optional[str] = None
     relationship: Optional[str] = None
     change_reason: str
+
+
+class AddRefereeRequest(BaseModel):
+    """Request to add referee details (no change_reason required for new entries)"""
+    name: str
+    email: str
+    phone: Optional[str] = None
+    organisation: Optional[str] = None
+    position: Optional[str] = None
+    relationship: Optional[str] = None
+
+
+@api_router.post("/employees/{employee_id}/references/{ref_num}")
+async def add_referee_details(
+    employee_id: str,
+    ref_num: int,
+    request: AddRefereeRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Add referee details for an employee reference slot.
+    
+    This is simpler than change_referee - intended for initial entry.
+    If details already exist, use change_referee instead.
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Check if details already exist
+    existing_name = employee.get(f"{prefix}name")
+    existing_email = employee.get(f"{prefix}email")
+    
+    if existing_name and existing_email:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Reference {ref_num} details already exist. Use change-referee endpoint instead."
+        )
+    
+    # Validate email format
+    import re
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, request.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    
+    # Build update
+    update_fields = {
+        f"{prefix}name": request.name.strip(),
+        f"{prefix}email": request.email.strip().lower(),
+        f"{prefix}added_by": user['user_id'],
+        f"{prefix}added_at": now
+    }
+    
+    if request.phone:
+        update_fields[f"{prefix}phone"] = request.phone.strip()
+    if request.organisation:
+        update_fields[f"{prefix}company"] = request.organisation.strip()
+    if request.position:
+        update_fields[f"{prefix}job_title"] = request.position.strip()
+    if request.relationship:
+        update_fields[f"{prefix}relationship"] = request.relationship.strip()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_fields}
+    )
+    
+    # Also update db.references for normalized access
+    ref_key = f"ref{ref_num}"
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {
+            "$set": {
+                f"{ref_key}.declared": {
+                    "name": request.name.strip(),
+                    "email": request.email.strip().lower(),
+                    "phone": request.phone.strip() if request.phone else None,
+                    "organisation": request.organisation.strip() if request.organisation else None,
+                    "job_title": request.position.strip() if request.position else None,
+                    "relationship": request.relationship.strip() if request.relationship else None
+                }
+            }
+        },
+        upsert=True
+    )
+    
+    await log_audit_action(user['user_id'], "add_referee", "employee", employee_id, {
+        "reference_num": ref_num,
+        "referee_name": request.name,
+        "referee_email": request.email
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Referee details added for Reference {ref_num}",
+        "reference_num": ref_num,
+        "referee": {
+            "name": request.name,
+            "email": request.email,
+            "phone": request.phone,
+            "organisation": request.organisation,
+            "position": request.position
+        }
+    }
 
 
 @api_router.post("/references/{employee_id}/{ref_num}/change-referee")

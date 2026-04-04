@@ -5,11 +5,13 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
 import { toast } from 'sonner';
 import { 
   User, Mail, Phone, Building, Briefcase, Clock, CheckCircle, 
   XCircle, Send, AlertTriangle, Loader2, RefreshCw, Calendar,
-  MessageSquare, FileText
+  MessageSquare, FileText, Plus, Edit
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -31,6 +33,19 @@ export default function ReferencesPanel({ employeeId, onRefresh }) {
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [selectedRef, setSelectedRef] = useState(null);
   const [customMessage, setCustomMessage] = useState('');
+  
+  // Add referee dialog state
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addRefNum, setAddRefNum] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [refereeForm, setRefereeForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    organisation: '',
+    position: '',
+    relationship: ''
+  });
 
   const fetchReferences = async () => {
     try {
@@ -86,6 +101,54 @@ export default function ReferencesPanel({ employeeId, onRefresh }) {
     setSelectedRef(refNum);
     setCustomMessage('');
     setSendDialogOpen(true);
+  };
+  
+  const openAddDialog = (refNum) => {
+    setAddRefNum(refNum);
+    setRefereeForm({
+      name: '',
+      email: '',
+      phone: '',
+      organisation: '',
+      position: '',
+      relationship: ''
+    });
+    setAddDialogOpen(true);
+  };
+  
+  const handleAddReferee = async () => {
+    // Validate
+    if (!refereeForm.name.trim() || !refereeForm.email.trim()) {
+      toast.error('Name and email are required');
+      return;
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(refereeForm.email)) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API}/employees/${employeeId}/references/${addRefNum}`,
+        refereeForm,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(`Referee ${addRefNum} details added successfully`);
+      setAddDialogOpen(false);
+      fetchReferences();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      const msg = error.response?.data?.detail || 'Failed to add referee';
+      toast.error(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (loading) {
@@ -307,10 +370,19 @@ export default function ReferencesPanel({ employeeId, onRefresh }) {
                         )}
                       </div>
                     ) : (
-                      <div className="text-center py-6 text-gray-500">
-                        <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                        <p>No referee declared for Reference {refNum}</p>
-                        <p className="text-xs mt-1">Referee details should be provided in the application form</p>
+                      <div className="text-center py-6">
+                        <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-amber-400" />
+                        <p className="text-gray-600 font-medium">No referee declared for Reference {refNum}</p>
+                        <p className="text-xs text-gray-500 mt-1 mb-4">Add referee details manually or extract from application form</p>
+                        <Button
+                          size="sm"
+                          onClick={() => openAddDialog(refNum)}
+                          className="rounded-lg"
+                          data-testid={`add-referee-btn-${refNum}`}
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          Add Referee Details
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -333,7 +405,7 @@ export default function ReferencesPanel({ employeeId, onRefresh }) {
 
       {/* Send Request Dialog */}
       <Dialog open={sendDialogOpen} onOpenChange={setSendDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-white">
           <DialogHeader>
             <DialogTitle>Send Reference Request</DialogTitle>
             <DialogDescription>
@@ -372,6 +444,93 @@ export default function ReferencesPanel({ employeeId, onRefresh }) {
                 <Send className="h-4 w-4 mr-2" />
               )}
               Send Request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Add Referee Dialog */}
+      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle>Add Referee Details</DialogTitle>
+            <DialogDescription>
+              Enter the referee's contact information. You can then send them a reference request.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Full Name *</Label>
+              <Input
+                value={refereeForm.name}
+                onChange={(e) => setRefereeForm({...refereeForm, name: e.target.value})}
+                placeholder="e.g., Jane Smith"
+                data-testid="referee-name-input"
+              />
+            </div>
+            
+            <div>
+              <Label>Email Address *</Label>
+              <Input
+                type="email"
+                value={refereeForm.email}
+                onChange={(e) => setRefereeForm({...refereeForm, email: e.target.value})}
+                placeholder="e.g., jane.smith@company.com"
+                data-testid="referee-email-input"
+              />
+            </div>
+            
+            <div>
+              <Label>Phone Number</Label>
+              <Input
+                value={refereeForm.phone}
+                onChange={(e) => setRefereeForm({...refereeForm, phone: e.target.value})}
+                placeholder="e.g., 01onal234 567890"
+              />
+            </div>
+            
+            <div>
+              <Label>Organisation</Label>
+              <Input
+                value={refereeForm.organisation}
+                onChange={(e) => setRefereeForm({...refereeForm, organisation: e.target.value})}
+                placeholder="e.g., Previous Care Home Ltd"
+              />
+            </div>
+            
+            <div>
+              <Label>Job Title / Position</Label>
+              <Input
+                value={refereeForm.position}
+                onChange={(e) => setRefereeForm({...refereeForm, position: e.target.value})}
+                placeholder="e.g., Care Manager"
+              />
+            </div>
+            
+            <div>
+              <Label>Relationship to Applicant</Label>
+              <Input
+                value={refereeForm.relationship}
+                onChange={(e) => setRefereeForm({...refereeForm, relationship: e.target.value})}
+                placeholder="e.g., Line Manager"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleAddReferee}
+              disabled={isSubmitting}
+              data-testid="submit-referee-btn"
+            >
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4 mr-2" />
+              )}
+              Add Referee
             </Button>
           </DialogFooter>
         </DialogContent>

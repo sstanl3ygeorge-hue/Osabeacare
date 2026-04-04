@@ -27,6 +27,146 @@ const formatDate = (dateStr) => {
   }
 };
 
+// Forms Section Component
+function FormsSection() {
+  const [forms, setForms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchForms();
+  }, []);
+
+  const fetchForms = async () => {
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/forms`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setForms(response.data.forms || []);
+    } catch (error) {
+      console.error('Failed to fetch forms:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusBadge = (form) => {
+    switch (form.status) {
+      case 'submitted':
+        return <Badge className="bg-blue-100 text-blue-700">Submitted</Badge>;
+      case 'verified':
+        return <Badge className="bg-green-100 text-green-700"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
+      case 'in_progress':
+        return <Badge className="bg-amber-100 text-amber-700"><Clock className="h-3 w-3 mr-1" />{form.progress_percentage}% Done</Badge>;
+      default:
+        return <Badge className="bg-gray-100 text-gray-600">Not Started</Badge>;
+    }
+  };
+
+  const handleFormClick = (formId) => {
+    navigate(`/worker/forms/${formId}`);
+  };
+
+  if (loading) {
+    return (
+      <Card className="shadow-md border-0">
+        <CardContent className="py-8 flex justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const pendingForms = forms.filter(f => f.status !== 'submitted' && f.status !== 'verified');
+  const completedForms = forms.filter(f => f.status === 'submitted' || f.status === 'verified');
+
+  if (pendingForms.length === 0 && completedForms.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="shadow-md border-0" data-testid="forms-section">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <FileText className="h-5 w-5 text-blue-500" />
+          Forms to Complete
+          {pendingForms.length > 0 && (
+            <Badge className="bg-blue-100 text-blue-700 ml-2">{pendingForms.length} pending</Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          {/* Pending Forms */}
+          {pendingForms.map((form) => (
+            <div 
+              key={form.id} 
+              className="flex items-center justify-between p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              onClick={() => handleFormClick(form.id)}
+              data-testid={`form-${form.id}`}
+            >
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  form.status === 'in_progress' ? 'bg-amber-100' : 'bg-blue-100'
+                }`}>
+                  <FileText className={`h-5 w-5 ${
+                    form.status === 'in_progress' ? 'text-amber-600' : 'text-blue-600'
+                  }`} />
+                </div>
+                <div>
+                  <span className="font-medium text-slate-800">{form.name}</span>
+                  {form.status === 'in_progress' && form.saved_at && (
+                    <p className="text-xs text-slate-500">Last saved: {formatDate(form.saved_at)}</p>
+                  )}
+                  {!form.required && (
+                    <p className="text-xs text-slate-400">Optional</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {getStatusBadge(form)}
+                <Button 
+                  size="sm"
+                  className={form.status === 'in_progress' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}
+                >
+                  {form.status === 'in_progress' ? 'Continue' : 'Start'}
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          {/* Completed Forms */}
+          {completedForms.length > 0 && pendingForms.length > 0 && (
+            <div className="border-t border-slate-200 pt-3 mt-3">
+              <p className="text-xs text-slate-500 mb-2">Completed</p>
+            </div>
+          )}
+          {completedForms.map((form) => (
+            <div 
+              key={form.id} 
+              className="flex items-center justify-between p-4 bg-green-50 rounded-xl"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                </div>
+                <div>
+                  <span className="font-medium text-slate-800">{form.name}</span>
+                  {form.submitted_at && (
+                    <p className="text-xs text-green-600">Submitted: {formatDate(form.submitted_at)}</p>
+                  )}
+                </div>
+              </div>
+              {getStatusBadge(form)}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function WorkerDashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -192,6 +332,9 @@ export default function WorkerDashboard() {
             </p>
           </CardContent>
         </Card>
+
+        {/* Forms Section */}
+        <FormsSection />
 
         {/* Urgent Alerts */}
         {alerts.length > 0 && (

@@ -7554,6 +7554,251 @@ async def worker_upload_document(
 
 
 # ===========================================================================
+# WORKER PORTAL FORMS - SAVE/RESUME FUNCTIONALITY
+# ===========================================================================
+
+WORKER_FORM_DEFINITIONS = {
+    "health_questionnaire": {
+        "name": "Health Questionnaire",
+        "description": "Complete your health and wellbeing declaration",
+        "required": True
+    },
+    "personal_info": {
+        "name": "Staff Personal Information",
+        "description": "Your personal details for HR records",
+        "required": True
+    },
+    "hmrc_starter": {
+        "name": "HMRC Starter Checklist",
+        "description": "Tax information for payroll setup",
+        "required": True
+    },
+    "equal_opportunities": {
+        "name": "Equal Opportunities Monitoring",
+        "description": "Optional diversity monitoring form",
+        "required": False
+    },
+    "emergency_contacts": {
+        "name": "Emergency Contacts",
+        "description": "Who to contact in case of emergency",
+        "required": True
+    }
+}
+
+class FormSaveRequest(BaseModel):
+    form_data: dict
+
+class FormSubmitRequest(BaseModel):
+    form_data: dict
+
+
+@api_router.get("/worker/forms")
+async def get_worker_forms(worker: dict = Depends(get_current_worker)):
+    """Get all forms and their status for the worker"""
+    employee_id = worker.get("employee_id")
+    
+    forms = []
+    for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+        # Check if there's saved progress
+        progress = await db.form_progress.find_one({
+            "employee_id": employee_id,
+            "form_id": form_id
+        }, {"_id": 0})
+        
+        # Check if already submitted
+        submission = await db.form_submissions.find_one({
+            "employee_id": employee_id,
+            "form_type": form_id,
+            "status": {"$in": ["submitted", "verified"]}
+        }, {"_id": 0})
+        
+        status = "not_started"
+        saved_at = None
+        submitted_at = None
+        progress_percentage = 0
+        
+        if submission:
+            status = "submitted" if submission.get("status") == "submitted" else "verified"
+            submitted_at = submission.get("submitted_at")
+        elif progress:
+            status = "in_progress"
+            saved_at = progress.get("last_saved")
+            # Estimate progress based on filled fields
+            form_data = progress.get("data", {})
+            if form_data:
+                filled_fields = sum(1 for v in form_data.values() if v)
+                total_fields = len(form_data) or 1
+                progress_percentage = int((filled_fields / total_fields) * 100)
+        
+        forms.append({
+            "id": form_id,
+            "name": form_def["name"],
+            "description": form_def["description"],
+            "required": form_def["required"],
+            "status": status,
+            "saved_at": saved_at,
+            "submitted_at": submitted_at,
+            "progress_percentage": progress_percentage
+        })
+    
+    return {"forms": forms}
+
+
+@api_router.get("/worker/forms/{form_id}")
+async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_worker)):
+    """Get saved form data for resuming"""
+    employee_id = worker.get("employee_id")
+    
+    if form_id not in WORKER_FORM_DEFINITIONS:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    # Check if already submitted
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": form_id
+    }, {"_id": 0})
+    
+    if submission and submission.get("status") in ["submitted", "verified"]:
+        return {
+            "form_id": form_id,
+            "status": "submitted",
+            "data": submission.get("form_data", {}),
+            "submitted_at": submission.get("submitted_at"),
+            "can_edit": False
+        }
+    
+    # Get saved progress
+    progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": form_id
+    }, {"_id": 0})
+    
+    return {
+        "form_id": form_id,
+        "form_definition": WORKER_FORM_DEFINITIONS[form_id],
+        "status": "in_progress" if progress else "not_started",
+        "data": progress.get("data", {}) if progress else {},
+        "last_saved": progress.get("last_saved") if progress else None,
+        "can_edit": True
+    }
+
+
+@api_router.post("/worker/forms/{form_id}/save")
+async def save_form_progress(
+    form_id: str,
+    request: FormSaveRequest,
+    worker: dict = Depends(get_current_worker)
+):
+    """Auto-save form progress without submitting"""
+    employee_id = worker.get("employee_id")
+    
+    if form_id not in WORKER_FORM_DEFINITIONS:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    # Check if already submitted
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": form_id,
+        "status": {"$in": ["submitted", "verified"]}
+    })
+    
+    if submission:
+        raise HTTPException(status_code=400, detail="Form already submitted")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.form_progress.update_one(
+        {
+            "employee_id": employee_id,
+            "form_id": form_id
+        },
+        {
+            "$set": {
+                "data": request.form_data,
+                "last_saved": now,
+                "status": "in_progress"
+            },
+            "$setOnInsert": {
+                "created_at": now
+            }
+        },
+        upsert=True
+    )
+    
+    return {
+        "success": True,
+        "saved_at": now,
+        "message": "Progress saved. You can return and continue later."
+    }
+
+
+@api_router.post("/worker/forms/{form_id}/submit")
+async def submit_worker_form(
+    form_id: str,
+    request: FormSubmitRequest,
+    worker: dict = Depends(get_current_worker)
+):
+    """Final submit - form becomes read-only"""
+    employee_id = worker.get("employee_id")
+    employee_name = worker.get("name", "Unknown")
+    
+    if form_id not in WORKER_FORM_DEFINITIONS:
+        raise HTTPException(status_code=404, detail="Form not found")
+    
+    # Check if already submitted
+    existing = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": form_id,
+        "status": {"$in": ["submitted", "verified"]}
+    })
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Form already submitted")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create submission
+    submission = {
+        "id": f"form_{uuid.uuid4().hex[:12]}",
+        "employee_id": employee_id,
+        "form_type": form_id,
+        "form_data": request.form_data,
+        "submitted_at": now,
+        "submitted_by_name": employee_name,
+        "status": "submitted",
+        "awaiting_admin_review": True,
+        "created_at": now
+    }
+    
+    await db.form_submissions.insert_one(submission)
+    
+    # Clear progress
+    await db.form_progress.delete_one({
+        "employee_id": employee_id,
+        "form_id": form_id
+    })
+    
+    # Audit log
+    await log_audit_action(
+        employee_id,
+        "worker_form_submitted",
+        "form_submission",
+        submission["id"],
+        {
+            "form_id": form_id,
+            "form_name": WORKER_FORM_DEFINITIONS[form_id]["name"]
+        }
+    )
+    
+    return {
+        "success": True,
+        "submission_id": submission["id"],
+        "submitted_at": now,
+        "message": f"{WORKER_FORM_DEFINITIONS[form_id]['name']} submitted successfully. Awaiting admin review."
+    }
+
+
+# ===========================================================================
 # CONTRACT DIGITAL SIGNATURE
 # ===========================================================================
 
@@ -17706,10 +17951,10 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
         raise HTTPException(status_code=404, detail="No file uploaded for this document")
     
     try:
-        content, content_type = get_object(file_path)
+        content, storage_content_type = get_object(file_path)
         filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
         
-        # Add "_stamped" suffix if serving stamped version
+        # Add "_verified" suffix if serving stamped version
         if doc.get("stamped_file_url") and file_path == doc.get("stamped_file_url"):
             name_parts = filename.rsplit(".", 1)
             if len(name_parts) == 2:
@@ -17719,17 +17964,39 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
         
         safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
         
+        # CRITICAL: Determine correct content-type from file extension
+        # Storage might return wrong content-type, so we override based on extension
+        extension = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else ""
+        
+        CONTENT_TYPES = {
+            "pdf": "application/pdf",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+            "gif": "image/gif",
+            "doc": "application/msword",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        }
+        
+        # Use extension-based content type, fall back to storage content type, then octet-stream
+        content_type = CONTENT_TYPES.get(extension, storage_content_type or "application/octet-stream")
+        
+        logger.info(f"Downloading document {doc_id}: filename={safe_filename}, content_type={content_type}, size={len(content)} bytes")
+        
         return Response(
             content=content,
             media_type=content_type,
             headers={
                 "Content-Disposition": f'attachment; filename="{safe_filename}"',
+                "Content-Type": content_type,
+                "Content-Length": str(len(content)),
                 "Cache-Control": "private, max-age=3600"
             }
         )
     except Exception as e:
-        logger.error(f"Failed to download employee document file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve file")
+        logger.error(f"Failed to download employee document file {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
 
 async def download_file(path: str, authorization: str = Header(None), auth: str = Query(None)):
     auth_header = authorization or (f"Bearer {auth}" if auth else None)

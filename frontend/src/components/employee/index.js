@@ -5,3 +5,11 @@ export { default as PreEmploymentGatesPanel } from './PreEmploymentGatesPanel';
 export { default as ReferenceEmploymentComparison } from './ReferenceEmploymentComparison';
 export { default as HealthCompetencySection } from './HealthCompetencySection';
 export { default as SpotCheckPanel } from './SpotCheckPanel';
+
+// Tab content components (extracted from EmployeeProfilePage)
+export { 
+  PoliciesTabContent, 
+  TrainingTabContent, 
+  AuditTabContent, 
+  ReferencesTabContent 
+} from './tabs';

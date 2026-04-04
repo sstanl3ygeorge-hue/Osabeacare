@@ -1,0 +1,28 @@
+import ReferenceEmploymentComparison from '../ReferenceEmploymentComparison';
+import { ReferencesPanel } from '../../compliance';
+
+/**
+ * ReferencesTabContent - Displays employee references
+ * Includes reference-employment cross check and references panel
+ */
+export default function ReferencesTabContent({ 
+  employeeId, 
+  onRefresh 
+}) {
+  return (
+    <div data-testid="references-tab-content">
+      {/* Reference-Employment Cross Check - CQC Requirement */}
+      <div className="mb-6">
+        <ReferenceEmploymentComparison 
+          employeeId={employeeId}
+          onRefresh={onRefresh}
+        />
+      </div>
+      
+      <ReferencesPanel 
+        employeeId={employeeId}
+        onRefresh={onRefresh}
+      />
+    </div>
+  );
+}

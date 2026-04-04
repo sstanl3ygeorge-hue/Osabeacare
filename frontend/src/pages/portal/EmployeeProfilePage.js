@@ -31,7 +31,11 @@ import {
   CompetencyRecordsPanel, 
   PreEmploymentGatesPanel, 
   ReferenceEmploymentComparison,
-  HealthCompetencySection 
+  HealthCompetencySection,
+  PoliciesTabContent,
+  TrainingTabContent,
+  AuditTabContent,
+  ReferencesTabContent
 } from '../../components/employee';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
@@ -4069,247 +4073,15 @@ export default function EmployeeProfilePage() {
           </Card>
         </TabsContent>
 
-        {/* Policies Tab */}
-
-        {/* Policies Tab */}
+        {/* Policies Tab - Extracted to PoliciesTabContent */}
         <TabsContent value="policies">
-          <Card className="border-[#E4E8EB] shadow-sm">
-            <CardContent className="p-6">
-              {/* Header with stats */}
-              <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#E4E8EB]">
-                <div>
-                  <h3 className="font-heading text-lg font-semibold text-text-primary">Assigned Policies</h3>
-                  <p className="text-sm text-text-muted">
-                    {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} of {policies.length} acknowledged
-                  </p>
-                  <p className="text-xs text-text-muted mt-1">
-                    Employees must read and acknowledge assigned policies.
-                  </p>
-                </div>
-                {policies.length > 0 && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-600">
-                      <Clock className="w-3 h-3" /> {policies.filter(p => p.status === 'assigned' || p.status === 'viewed').length} Not Read
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-100 text-green-700">
-                      <CheckCircle className="w-3 h-3" /> {policies.filter(p => p.status === 'acknowledged' || p.status === 'signed').length} Acknowledged
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {policies.length === 0 ? (
-                <div className="text-center py-12 text-text-muted">
-                  <FileCheck className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No policies assigned yet</p>
-                  <p className="text-sm mt-1">Policies can be assigned from the Compliance Centre</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {policies.map((policy) => (
-                    <div key={policy.id} className={`p-4 rounded-xl border ${
-                      policy.admin_reviewed ? 'bg-green-50 border-green-200' :
-                      (policy.status === 'acknowledged' || policy.status === 'signed') ? 'bg-blue-50 border-blue-200' :
-                      policy.status === 'viewed' ? 'bg-amber-50 border-amber-200' :
-                      'bg-[#F8FAFA] border-[#E4E8EB]'
-                    }`}>
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-text-primary">{policy.policy_title}</p>
-                            <span className="text-xs px-2 py-0.5 bg-gray-200 rounded text-gray-600">
-                              v{policy.policy_version || '1.0'}
-                            </span>
-                          </div>
-                          <p className="text-sm text-text-muted mt-1">
-                            Assigned: {formatBackendDate(policy.assigned_at)} 
-                            {policy.assigned_by_name && ` by ${policy.assigned_by_name}`}
-                          </p>
-                          
-                          {/* Signature Information Display */}
-                          {(policy.status === 'acknowledged' || policy.status === 'signed') && (
-                            <div className="mt-3 p-3 bg-white/80 rounded-lg border border-green-200">
-                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Employee Acknowledgement</p>
-                              <p className="text-sm font-medium text-green-800">
-                                {policy.acknowledged_by_employee_name || policy.employee_name || 'Employee'}
-                              </p>
-                              <p className="text-xs text-green-600">
-                                {policy.acknowledged_at ? formatBackendDateTime(policy.acknowledged_at) : 
-                                 policy.signed_at ? formatBackendDateTime(policy.signed_at) : ''}
-                              </p>
-                            </div>
-                          )}
-                          
-                          {policy.admin_reviewed && (
-                            <div className="mt-2 p-3 bg-white/80 rounded-lg border border-green-200">
-                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Admin Review</p>
-                              <p className="text-sm font-medium text-green-800">
-                                {policy.admin_reviewed_by_name || 'Admin'}
-                              </p>
-                              <p className="text-xs text-green-600">
-                                {policy.admin_reviewed_at ? formatBackendDateTime(policy.admin_reviewed_at) : ''}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="flex flex-col items-end gap-2">
-                          {/* Status Badge */}
-                          <span className={`status-chip ${
-                            policy.admin_reviewed ? 'status-success' :
-                            (policy.status === 'acknowledged' || policy.status === 'signed') ? 'bg-green-100 text-green-700 border-green-200' :
-                            'bg-gray-100 text-gray-600 border-gray-200'
-                          }`}>
-                            {policy.admin_reviewed ? 'Reviewed & Approved' :
-                             (policy.status === 'acknowledged' || policy.status === 'signed') ? 'Acknowledged' :
-                             'Not Read'}
-                          </span>
-                          
-                          {/* Action Buttons */}
-                          <div className="flex items-center gap-2 flex-wrap justify-end">
-                            {/* View Policy Button */}
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-lg text-xs"
-                              onClick={async () => {
-                                try {
-                                  // Mark as viewed if not already
-                                  if (policy.status === 'assigned') {
-                                    await axios.put(`${API}/policy-assignments/${policy.id}/view`, {}, {
-                                      headers: { Authorization: `Bearer ${token}` }
-                                    });
-                                  }
-                                  // Open policy file
-                                  const response = await axios.get(`${API}/policies/${policy.policy_id}/file`, {
-                                    headers: { Authorization: `Bearer ${token}` },
-                                    responseType: 'blob'
-                                  });
-                                  const url = window.URL.createObjectURL(response.data);
-                                  window.open(url, '_blank');
-                                  await fetchData();
-                                } catch (error) {
-                                  if (error.response?.status === 404) {
-                                    toast.error('Policy document not found');
-                                  } else {
-                                    toast.error('Failed to open policy');
-                                  }
-                                }
-                              }}
-                              data-testid={`view-policy-${policy.id}`}
-                            >
-                              <Eye className="w-3 h-3 mr-1" />
-                              View Policy
-                            </Button>
-                            
-                            {/* Acknowledge Button - only if not yet acknowledged */}
-                            {policy.status !== 'acknowledged' && policy.status !== 'signed' && !isAuditor() && (
-                              <Button
-                                size="sm"
-                                className="rounded-lg text-xs bg-primary hover:bg-primary-hover text-white"
-                                onClick={async () => {
-                                  try {
-                                    await axios.put(`${API}/policy-assignments/${policy.id}/acknowledge`, {}, {
-                                      headers: { Authorization: `Bearer ${token}` }
-                                    });
-                                    toast.success('Policy acknowledged successfully');
-                                    await fetchData();
-                                  } catch (error) {
-                                    toast.error(error.response?.data?.detail || 'Failed to acknowledge policy');
-                                  }
-                                }}
-                                data-testid={`acknowledge-policy-${policy.id}`}
-                              >
-                                <CheckCircle className="w-3 h-3 mr-1" />
-                                Mark as Read & Understood
-                              </Button>
-                            )}
-                            
-                            {/* Admin Review Button - only if acknowledged but not reviewed */}
-                            {(policy.status === 'acknowledged' || policy.status === 'signed') && !policy.admin_reviewed && isAdmin() && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg text-xs border-green-300 text-green-700 hover:bg-green-50"
-                                onClick={async () => {
-                                  try {
-                                    await axios.put(`${API}/policy-assignments/${policy.id}/admin-review`, {}, {
-                                      headers: { Authorization: `Bearer ${token}` }
-                                    });
-                                    toast.success('Policy reviewed and approved');
-                                    await fetchData();
-                                  } catch (error) {
-                                    toast.error(error.response?.data?.detail || 'Failed to review policy');
-                                  }
-                                }}
-                                data-testid={`admin-review-policy-${policy.id}`}
-                              >
-                                <Shield className="w-3 h-3 mr-1" />
-                                Reviewed and Approved
-                              </Button>
-                            )}
-                            
-                            {/* Unassign Button - only for unacknowledged policies (admin/manager only) */}
-                            {policy.status !== 'acknowledged' && policy.status !== 'signed' && 
-                             policy.status !== 'unassigned' && policy.status !== 'withdrawn' && 
-                             isAdmin() && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
-                                onClick={async () => {
-                                  if (!window.confirm('Remove this policy from the employee\'s active policy list?')) return;
-                                  try {
-                                    await axios.put(`${API}/policy-assignments/${policy.id}/unassign`, {}, {
-                                      headers: { Authorization: `Bearer ${token}` }
-                                    });
-                                    toast.success('Policy unassigned');
-                                    await fetchData();
-                                  } catch (error) {
-                                    toast.error(error.response?.data?.detail || 'Failed to unassign policy');
-                                  }
-                                }}
-                                data-testid={`unassign-policy-${policy.id}`}
-                              >
-                                <XCircle className="w-3 h-3 mr-1" />
-                                Unassign
-                              </Button>
-                            )}
-                            
-                            {/* Withdraw Button - only for acknowledged policies (admin only) */}
-                            {(policy.status === 'acknowledged' || policy.status === 'signed') && 
-                             policy.status !== 'withdrawn' && isAdmin() && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="rounded-lg text-xs border-red-300 text-red-700 hover:bg-red-50"
-                                onClick={async () => {
-                                  if (!window.confirm('Withdraw this policy? The acknowledgement history will be preserved for audit purposes.')) return;
-                                  try {
-                                    await axios.put(`${API}/policy-assignments/${policy.id}/withdraw`, {}, {
-                                      headers: { Authorization: `Bearer ${token}` }
-                                    });
-                                    toast.success('Policy assignment withdrawn');
-                                    await fetchData();
-                                  } catch (error) {
-                                    toast.error(error.response?.data?.detail || 'Failed to withdraw policy');
-                                  }
-                                }}
-                                data-testid={`withdraw-policy-${policy.id}`}
-                              >
-                                <RotateCcw className="w-3 h-3 mr-1" />
-                                Withdraw
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <PoliciesTabContent
+            policies={policies}
+            token={token}
+            isAuditor={isAuditor()}
+            isAdmin={isAdmin()}
+            onRefresh={fetchData}
+          />
         </TabsContent>
 
         {/* Training Tab */}
@@ -4321,7 +4093,7 @@ export default function EmployeeProfilePage() {
               employeeName={`${employee?.first_name} ${employee?.last_name}`}
               isAuditor={isAuditor()}
               onRefresh={() => {
-                fetchTraining();
+                fetchTrainingEvaluation();
                 fetchComplianceFile();
               }}
             />
@@ -4340,32 +4112,21 @@ export default function EmployeeProfilePage() {
               handleViewTrainingCertificate(documentId, 'training_certificate');
             }}
             onRefresh={() => {
-              fetchTraining();
+              fetchTrainingEvaluation();
               fetchProposedTrainingItems();
             }}
           />
         </TabsContent>
 
-        {/* Audit Log Tab */}
+        {/* Audit Log Tab - Extracted to AuditTabContent */}
         <TabsContent value="audit">
-          <AuditTrailPanel employeeId={employeeId} />
+          <AuditTabContent employeeId={employeeId} />
         </TabsContent>
 
 
-        {/* References Tab */}
+        {/* References Tab - Extracted to ReferencesTabContent */}
         <TabsContent value="references">
-          {/* Reference-Employment Cross Check - CQC Requirement */}
-          <div className="mb-6">
-            <ReferenceEmploymentComparison 
-              employeeId={employeeId}
-              onRefresh={() => {
-                fetchComplianceFile();
-                fetchRecruitmentStatus();
-              }}
-            />
-          </div>
-          
-          <ReferencesPanel 
+          <ReferencesTabContent 
             employeeId={employeeId}
             onRefresh={() => {
               fetchComplianceFile();

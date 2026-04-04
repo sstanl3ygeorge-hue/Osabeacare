@@ -18,6 +18,11 @@ import DocumentUploadPage from "./pages/public/DocumentUploadPage";
 import LoginPage from "./pages/auth/LoginPage";
 import AuthCallback from "./pages/auth/AuthCallback";
 
+// Worker Portal Pages
+import WorkerLoginPage from "./pages/worker/WorkerLoginPage";
+import WorkerVerifyPage from "./pages/worker/WorkerVerifyPage";
+import WorkerDashboard from "./pages/worker/WorkerDashboard";
+
 // Portal Pages
 import PortalLayout from "./components/portal/PortalLayout";
 import DashboardPage from "./pages/portal/DashboardPage";
@@ -78,6 +83,11 @@ function AppRouter() {
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
+      
+      {/* Worker Portal Routes (No Admin Auth Required) */}
+      <Route path="/worker/login" element={<WorkerLoginPage />} />
+      <Route path="/worker/verify" element={<WorkerVerifyPage />} />
+      <Route path="/worker/dashboard" element={<WorkerDashboard />} />
       
       {/* Portal Routes - Protected */}
       <Route path="/portal" element={

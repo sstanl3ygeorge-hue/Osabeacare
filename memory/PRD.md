@@ -520,3 +520,95 @@ Documents now receive **permanent visual verification stamps** embedded directly
 
 ## Last Updated
 April 4, 2026 - Physical Digital Stamp Implementation completed and verified
+
+---
+
+## Worker Portal & Training Enhancements (April 4, 2026)
+
+### Worker Portal - Magic Link Authentication (COMPLETED)
+Workers can now access their own compliance dashboard without passwords.
+
+**Backend Endpoints:**
+- `POST /api/worker/request-login` - Send magic link to worker email
+- `POST /api/worker/verify-login` - Verify token, return JWT session
+- `GET /api/worker/dashboard` - Worker's compliance progress data
+- `POST /api/worker/upload-document/{requirement_id}` - Worker uploads their own docs
+
+**Frontend Pages:**
+- `/worker/login` - Magic link request page
+- `/worker/verify?token=xxx` - Token verification page
+- `/worker/dashboard` - Worker compliance dashboard
+
+**Worker Dashboard Features:**
+- Progress percentage (e.g., "82% - 9 of 11 requirements")
+- Status banner (Ready/In Progress)
+- Missing documents with Upload buttons
+- Missing training certificates
+- Expired training alerts
+- Expiry alerts (DBS, RTW, Training)
+- Completed items summary
+- Contract signing status
+
+### Training Enhancements (COMPLETED)
+
+**1. Bulk Training Certificate Upload:**
+- `POST /api/employees/{id}/training/bulk-upload`
+- Upload up to 10 certificates at once
+- AI extraction (Gemini) identifies training names, dates, expiry
+- Regex fallback for when AI unavailable
+- Auto-calculates expiry based on training type
+
+**2. Training Deduplication:**
+- `POST /api/employees/{id}/training/deduplicate`
+- Removes duplicate training records
+- Keeps most recent completion per training type
+
+**3. AI Training Extraction Patterns:**
+- Safeguarding Adults/Children
+- Manual Handling
+- Fire Safety
+- Health & Safety
+- Infection Control
+- Basic Life Support
+- Medication Administration
+- First Aid
+- Data Protection/GDPR
+
+### Work Readiness Engine Updates (COMPLETED)
+
+Added new blocker checks:
+1. **Verification Stamps** - Documents need "Original Seen" stamp
+2. **References Verified** - Both references must be verified
+3. **Proof of Address Count** - NHS requires 2 POA documents
+4. **Mandatory Training** - All required training must be completed and not expired
+
+### Database Migrations Applied
+- Synced employee references to `references` collection
+- Added `verification_stamp` field to all documents
+- Created indexes on `employee_documents` and `references`
+
+### Files Created/Modified
+- `/app/frontend/src/pages/worker/WorkerLoginPage.js` (NEW)
+- `/app/frontend/src/pages/worker/WorkerVerifyPage.js` (NEW)
+- `/app/frontend/src/pages/worker/WorkerDashboard.js` (NEW)
+- `/app/frontend/src/App.js` (Updated with worker routes)
+- `/app/backend/server.py` (Worker endpoints, Training endpoints)
+- `/app/backend/work_readiness_engine.py` (New blocker checks)
+
+---
+
+## Pending Tasks
+
+### P1 - High Priority
+- [ ] Role-Based Compliance Configuration using `role_compliance_profiles`
+- [ ] Supervision Records tracking UI
+- [ ] Contract digital signature (draw signature feature)
+
+### P2 - Medium Priority
+- [ ] server.py modular split (currently 45k+ lines)
+- [ ] Refactor frontend per ChatGPT review
+
+### P3 - Future
+- [ ] Supabase Auth integration
+- [ ] Phase out MongoDB
+

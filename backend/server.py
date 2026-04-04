@@ -7052,6 +7052,511 @@ async def exchange_session(session_id: str = Header(None, alias="X-Session-ID"))
         logger.error(f"OAuth session exchange failed: {e}")
         raise HTTPException(status_code=400, detail="Failed to exchange session")
 
+
+# ===========================================================================
+# WORKER PORTAL - MAGIC LINK AUTHENTICATION
+# ===========================================================================
+
+class WorkerLoginRequest(BaseModel):
+    email: EmailStr
+
+class WorkerVerifyRequest(BaseModel):
+    token: str
+
+class WorkerDocumentUpload(BaseModel):
+    requirement_id: str
+    
+async def get_current_worker(authorization: str = Header(None)):
+    """Dependency to get current worker from JWT"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = authorization.replace("Bearer ", "")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if payload.get("role") != "worker":
+            raise HTTPException(status_code=403, detail="Not authorized as worker")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+@api_router.post("/worker/request-login")
+async def worker_request_login(request: WorkerLoginRequest):
+    """
+    Send magic link to worker's email (the one from their application).
+    No password required - link expires in 24 hours.
+    """
+    # Find employee by email
+    employee = await db.employees.find_one({
+        "email": {"$regex": f"^{re.escape(request.email)}$", "$options": "i"}
+    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
+    
+    if not employee:
+        # Don't reveal that email doesn't exist (security)
+        return {"success": True, "message": "If an account exists, you will receive a login link"}
+    
+    # Generate magic token
+    token_data = {
+        "employee_id": employee["id"],
+        "email": request.email.lower(),
+        "type": "worker_login",
+        "exp": datetime.now(timezone.utc) + timedelta(hours=24)
+    }
+    magic_token = jwt.encode(token_data, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    
+    # Store token for tracking
+    await db.magic_tokens.insert_one({
+        "token": magic_token,
+        "employee_id": employee["id"],
+        "email": request.email.lower(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+        "used": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+    
+    # Send email
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    login_url = f"{frontend_url}/worker/verify?token={magic_token}"
+    
+    email_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #0F172A; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0;">Osabea Healthcare</h1>
+        </div>
+        <div style="padding: 30px; background: #f8fafc;">
+            <h2 style="color: #1e293b;">Hi {employee.get('first_name', 'there')},</h2>
+            <p style="color: #475569; line-height: 1.6;">
+                Click the button below to access your compliance dashboard:
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{login_url}" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                    Access My Dashboard
+                </a>
+            </div>
+            <p style="color: #64748b; font-size: 14px;">
+                This link expires in 24 hours. If you didn't request this, please ignore this email.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="color: #94a3b8; font-size: 12px; text-align: center;">
+                Osabea Healthcare Solutions | Compliance Portal
+            </p>
+        </div>
+    </div>
+    """
+    
+    # Send email using resend
+    if resend.api_key:
+        try:
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": SENDER_EMAIL,
+                "to": [request.email],
+                "subject": "Your Osabea Healthcare Login Link",
+                "html": email_content
+            })
+            logger.info(f"Magic link sent to {request.email} for worker login")
+        except Exception as e:
+            logger.error(f"Failed to send magic link email: {e}")
+            # Don't expose error to user
+    
+    return {"success": True, "message": "If an account exists, you will receive a login link"}
+
+@api_router.post("/worker/verify-login")
+async def worker_verify_login(request: WorkerVerifyRequest):
+    """
+    Verify magic link and return JWT for worker session.
+    Token is single-use and expires after 24 hours.
+    """
+    try:
+        # Verify JWT token
+        payload = jwt.decode(request.token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        
+        if payload.get("type") != "worker_login":
+            raise HTTPException(status_code=400, detail="Invalid token type")
+        
+        employee_id = payload.get("employee_id")
+        email = payload.get("email")
+        
+        # Check token in database (prevent reuse)
+        token_record = await db.magic_tokens.find_one({
+            "token": request.token,
+            "used": False
+        })
+        
+        if not token_record:
+            raise HTTPException(status_code=400, detail="Token already used or invalid")
+        
+        # Mark token as used
+        await db.magic_tokens.update_one(
+            {"token": request.token},
+            {"$set": {"used": True, "used_at": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        # Get employee
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        # Create worker JWT session (7 day expiry)
+        access_token = jwt.encode({
+            "sub": email,
+            "user_id": f"worker_{employee_id}",
+            "employee_id": employee_id,
+            "role": "worker",
+            "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "exp": datetime.now(timezone.utc) + timedelta(days=7)
+        }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        
+        # Log the login
+        await log_audit_action(f"worker_{employee_id}", "worker_login", "employee", employee_id, {
+            "login_method": "magic_link"
+        })
+        
+        return {
+            "success": True,
+            "access_token": access_token,
+            "token_type": "bearer",
+            "employee": {
+                "id": employee_id,
+                "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+                "email": employee.get("email"),
+                "employee_code": employee.get("employee_code")
+            }
+        }
+        
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Login link has expired. Please request a new one.")
+    except jwt.JWTError as e:
+        logger.error(f"JWT verification failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid login link")
+
+@api_router.get("/worker/dashboard")
+async def worker_dashboard(worker: dict = Depends(get_current_worker)):
+    """
+    Get worker's compliance dashboard data.
+    Shows progress, missing items, alerts, and completed items.
+    """
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to account")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get documents
+    documents = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "status": {"$nin": ["deleted", "superseded"]}
+    }).to_list(length=200)
+    
+    # Required document types
+    required_docs = {
+        "right_to_work": "Right to Work",
+        "dbs": "DBS Certificate", 
+        "identity": "Identity (Passport/ID)",
+        "proof_of_address": "Proof of Address"
+    }
+    
+    missing_docs = []
+    completed_docs = []
+    
+    for doc_type, doc_name in required_docs.items():
+        # Find active document of this type
+        matching = [d for d in documents if doc_type in (d.get("requirement_id", "") or "").lower()]
+        
+        if matching:
+            doc = matching[0]
+            is_verified = doc.get("verification_stamp") not in [None, "", "not_verified"]
+            completed_docs.append({
+                "type": doc_type,
+                "name": doc_name,
+                "verified": is_verified,
+                "uploaded_at": doc.get("uploaded_at"),
+                "file_name": doc.get("file_name")
+            })
+        else:
+            missing_docs.append({
+                "type": doc_type,
+                "name": doc_name,
+                "action": "upload"
+            })
+    
+    # Check POA needs 2 documents
+    poa_docs = [d for d in documents if "proof_of_address" in (d.get("requirement_id", "") or "").lower()]
+    if len(poa_docs) < 2:
+        # Remove existing POA from completed if only 1
+        if len(poa_docs) == 1:
+            completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]
+            completed_docs.append({
+                "type": "proof_of_address",
+                "name": "Proof of Address (1 of 2)",
+                "verified": poa_docs[0].get("verification_stamp") not in [None, "", "not_verified"],
+                "uploaded_at": poa_docs[0].get("uploaded_at"),
+                "partial": True
+            })
+        missing_docs.append({
+            "type": "proof_of_address_second",
+            "name": f"Second Proof of Address (need {2 - len(poa_docs)} more)",
+            "action": "upload"
+        })
+    
+    # Get training
+    trainings = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$ne": "superseded"}
+    }).to_list(length=100)
+    
+    mandatory_trainings = {
+        "safeguarding": "Safeguarding",
+        "manual_handling": "Manual Handling", 
+        "fire_safety": "Fire Safety",
+        "health_safety": "Health & Safety",
+        "bls": "Basic Life Support",
+        "infection_control": "Infection Control"
+    }
+    
+    missing_trainings = []
+    completed_trainings = []
+    expired_trainings = []
+    now = datetime.now(timezone.utc)
+    
+    for training_id, training_name in mandatory_trainings.items():
+        # Find matching training
+        record = None
+        for t in trainings:
+            t_name = (t.get("training_name") or "").lower()
+            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
+                record = t
+                break
+        
+        if record:
+            expiry_str = record.get("expiry_date")
+            is_expired = False
+            
+            if expiry_str:
+                try:
+                    if isinstance(expiry_str, str):
+                        expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                    else:
+                        expiry = expiry_str
+                    is_expired = expiry < now
+                except:
+                    pass
+            
+            if is_expired:
+                expired_trainings.append({
+                    "id": training_id,
+                    "name": training_name,
+                    "expiry_date": expiry_str,
+                    "action": "upload_certificate"
+                })
+            else:
+                completed_trainings.append({
+                    "id": training_id,
+                    "name": training_name,
+                    "completion_date": record.get("completion_date"),
+                    "expiry_date": expiry_str,
+                    "verified": record.get("verified", False)
+                })
+        else:
+            missing_trainings.append({
+                "id": training_id,
+                "name": training_name,
+                "action": "upload_certificate"
+            })
+    
+    # Get expiry alerts (within 90 days)
+    alerts = []
+    
+    # DBS expiry
+    dbs_check = await db.dbs_checks.find_one({"employee_id": employee_id}, {"_id": 0})
+    if dbs_check and dbs_check.get("next_check_due"):
+        due_str = dbs_check["next_check_due"]
+        try:
+            if isinstance(due_str, str):
+                due_date = datetime.fromisoformat(due_str.replace('Z', '+00:00'))
+            else:
+                due_date = due_str
+            days_left = (due_date - now).days
+            if days_left < 90:
+                alerts.append({
+                    "type": "dbs",
+                    "title": "DBS Update Service Check Due",
+                    "date": due_str,
+                    "days_left": max(0, days_left),
+                    "urgent": days_left < 30
+                })
+        except:
+            pass
+    
+    # RTW expiry
+    rtw_check = await db.rtw_checks.find_one({"employee_id": employee_id}, {"_id": 0})
+    if rtw_check and rtw_check.get("expiry_date"):
+        exp_str = rtw_check["expiry_date"]
+        try:
+            if isinstance(exp_str, str):
+                exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+            else:
+                exp_date = exp_str
+            days_left = (exp_date - now).days
+            if days_left < 90:
+                alerts.append({
+                    "type": "rtw",
+                    "title": "Right to Work Expiring",
+                    "date": exp_str,
+                    "days_left": max(0, days_left),
+                    "urgent": days_left < 30
+                })
+        except:
+            pass
+    
+    # Training expiry alerts
+    for t in completed_trainings:
+        if t.get("expiry_date"):
+            try:
+                exp_str = t["expiry_date"]
+                if isinstance(exp_str, str):
+                    exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                else:
+                    exp_date = exp_str
+                days_left = (exp_date - now).days
+                if 0 < days_left < 60:
+                    alerts.append({
+                        "type": "training",
+                        "title": f"{t['name']} Training Expiring",
+                        "date": exp_str,
+                        "days_left": days_left,
+                        "urgent": days_left < 30
+                    })
+            except:
+                pass
+    
+    # Check contract status
+    contract_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": "contract_acceptance",
+        "verification_status": "verified"
+    })
+    contract_signed = bool(contract_ack)
+    
+    # Calculate overall progress
+    total_required = len(required_docs) + 1 + len(mandatory_trainings)  # +1 for second POA
+    total_completed = len([d for d in completed_docs if not d.get("partial")]) + len(completed_trainings)
+    if len(poa_docs) >= 2:
+        total_completed += 1
+    progress_percentage = round((total_completed / total_required) * 100) if total_required > 0 else 0
+    
+    # Determine work readiness status
+    has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
+    status = "NOT_READY" if has_blockers else "READY"
+    
+    return {
+        "employee": {
+            "id": employee_id,
+            "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "code": employee.get("employee_code"),
+            "email": employee.get("email"),
+            "status": status
+        },
+        "progress": {
+            "percentage": progress_percentage,
+            "completed": total_completed,
+            "required": total_required
+        },
+        "missing_documents": missing_docs,
+        "completed_documents": completed_docs,
+        "missing_trainings": missing_trainings,
+        "completed_trainings": completed_trainings,
+        "expired_trainings": expired_trainings,
+        "alerts": sorted(alerts, key=lambda x: x.get("days_left", 999)),
+        "contract_signed": contract_signed
+    }
+
+@api_router.post("/worker/upload-document/{requirement_id}")
+async def worker_upload_document(
+    requirement_id: str,
+    file: UploadFile = File(...),
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Upload a document from the worker portal.
+    Worker can only upload their own documents.
+    """
+    employee_id = worker.get("employee_id")
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate file type
+    allowed_types = ['.pdf', '.jpg', '.jpeg', '.png', '.webp']
+    if not any(file.filename.lower().endswith(ext) for ext in allowed_types):
+        raise HTTPException(status_code=400, detail="File type not allowed. Use PDF, JPG, or PNG.")
+    
+    # Read file
+    contents = await file.read()
+    
+    if len(contents) > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(status_code=400, detail="File too large. Maximum 10MB.")
+    
+    # Save file
+    upload_dir = Path("/app/uploads/documents") / employee_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    safe_filename = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = upload_dir / safe_filename
+    
+    with open(file_path, "wb") as f:
+        f.write(contents)
+    
+    file_url = f"/uploads/documents/{employee_id}/{safe_filename}"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create document record
+    doc_id = str(uuid.uuid4())
+    doc_record = {
+        "id": doc_id,
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "document_type_id": requirement_id,
+        "file_name": file.filename,
+        "original_filename": file.filename,
+        "file_url": file_url,
+        "file_type": file.content_type or "application/octet-stream",
+        "uploaded_at": now,
+        "uploaded_by": f"worker_{employee_id}",
+        "uploaded_by_worker": True,
+        "status": "pending",
+        "verification_stamp": "not_verified",
+        "is_active": True,
+        "created_at": now
+    }
+    
+    await db.employee_documents.insert_one(doc_record)
+    
+    # Log the upload
+    await log_audit_action(f"worker_{employee_id}", "worker_document_upload", "employee", employee_id, {
+        "requirement_id": requirement_id,
+        "document_id": doc_id,
+        "file_name": file.filename
+    })
+    
+    return {
+        "success": True,
+        "document_id": doc_id,
+        "requirement_id": requirement_id,
+        "file_name": file.filename,
+        "message": "Document uploaded successfully. Awaiting admin verification."
+    }
+
+
+# ===========================================================================
+# END WORKER PORTAL ENDPOINTS
+# ===========================================================================
+
 # ==================== EMPLOYEE ROUTES ====================
 
 async def generate_employee_code():
@@ -8766,6 +9271,357 @@ async def reject_training(
         "message": f"Training '{record.get('training_name')}' rejected",
         "rejected_by": user['email'],
         "rejection_reason": reason
+    }
+
+
+# ===========================================================================
+# TRAINING BULK UPLOAD & AI EXTRACTION
+# ===========================================================================
+
+# Training expiry periods in months
+TRAINING_EXPIRY_MONTHS = {
+    "safeguarding": 12,
+    "manual handling": 12,
+    "fire safety": 12,
+    "health & safety": 12,
+    "health and safety": 12,
+    "basic life support": 12,
+    "bls": 12,
+    "cpr": 12,
+    "infection control": 12,
+    "medication": 12,
+    "food hygiene": 24,
+    "first aid": 36,
+}
+
+MANDATORY_TRAININGS = [
+    "safeguarding", "manual handling", "fire safety", 
+    "health & safety", "basic life support", "infection control"
+]
+
+def get_expiry_months_for_training(training_name: str) -> int:
+    """Return expiry period in months for a training type"""
+    name_lower = training_name.lower()
+    for key, months in TRAINING_EXPIRY_MONTHS.items():
+        if key in name_lower:
+            return months
+    return 12  # Default 12 months
+
+def is_mandatory_training(training_name: str) -> bool:
+    """Check if training is mandatory for work readiness"""
+    name_lower = training_name.lower()
+    return any(mandatory in name_lower for mandatory in MANDATORY_TRAININGS)
+
+async def extract_training_from_certificate(file_bytes: bytes, filename: str) -> List[dict]:
+    """
+    Extract training information from certificate PDF/Image using AI + regex fallback.
+    Returns list of trainings found in the certificate.
+    """
+    extracted_trainings = []
+    text = ""
+    
+    # Extract text from PDF
+    if filename.lower().endswith('.pdf'):
+        try:
+            pdf_reader = PdfReader(io.BytesIO(file_bytes))
+            for page in pdf_reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        except Exception as e:
+            logger.warning(f"Failed to extract text from PDF: {e}")
+    
+    # Try AI extraction with Gemini if configured
+    gemini_key = os.environ.get('GEMINI_API_KEY')
+    if gemini_key and len(file_bytes) < 5 * 1024 * 1024:  # Under 5MB
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            
+            # For PDFs, use text; for images, use the file directly
+            if text:
+                prompt = f"""Analyze this training certificate text and extract ALL training courses mentioned.
+                
+For EACH training found, provide:
+- training_name: The name of the training/course
+- completion_date: Date completed (ISO format YYYY-MM-DD if found)
+- expiry_date: Expiry date if mentioned (ISO format)
+
+Return as JSON array. Example:
+[{{"training_name": "Safeguarding Adults Level 2", "completion_date": "2024-01-15", "expiry_date": "2025-01-15"}}]
+
+Certificate text:
+{text[:4000]}"""
+                
+                response = model.generate_content(prompt)
+                
+                # Parse JSON from response
+                response_text = response.text.strip()
+                # Extract JSON array
+                json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                if json_match:
+                    extracted = json.loads(json_match.group())
+                    if isinstance(extracted, list):
+                        for item in extracted:
+                            if isinstance(item, dict) and item.get('training_name'):
+                                extracted_trainings.append({
+                                    "training_name": item.get('training_name'),
+                                    "completion_date": item.get('completion_date'),
+                                    "expiry_date": item.get('expiry_date'),
+                                    "certificate_file": filename,
+                                    "extracted_by": "gemini_ai"
+                                })
+                        if extracted_trainings:
+                            return extracted_trainings
+        except Exception as e:
+            logger.warning(f"AI extraction failed, using regex fallback: {e}")
+    
+    # Fallback: Regex-based extraction
+    training_patterns = {
+        "Safeguarding Adults": r"Safeguarding.*Adults|Adult\s+Safeguarding",
+        "Safeguarding Children": r"Safeguarding.*Children|Child\s+Safeguarding",
+        "Manual Handling": r"Manual\s*Handling|Moving\s*and\s*Handling",
+        "Fire Safety": r"Fire\s*Safety|Fire\s*Awareness|Fire\s*Marshal",
+        "Health & Safety": r"Health\s*(?:&|and)?\s*Safety",
+        "Infection Control": r"Infection\s*(?:Control|Prevention)",
+        "Basic Life Support": r"Basic\s*Life\s*Support|BLS|CPR|Resuscitation",
+        "Medication Administration": r"Medication|Medicine\s*Administration",
+        "Food Hygiene": r"Food\s*(?:Hygiene|Safety)",
+        "Equality & Diversity": r"Equality|Diversity|EDI",
+        "Data Protection": r"Data\s*Protection|GDPR|Information\s*Governance",
+        "First Aid": r"First\s*Aid",
+        "Dementia Awareness": r"Dementia\s*Awareness",
+        "Mental Health Awareness": r"Mental\s*Health\s*Awareness"
+    }
+    
+    # Find dates in text
+    date_patterns = [
+        r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})",
+        r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})",
+    ]
+    
+    completion_date = None
+    for pattern in date_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        if matches:
+            try:
+                match = matches[0]
+                if len(match) == 3:
+                    if isinstance(match[1], str) and match[1].isalpha():
+                        # Month name format
+                        date_str = f"{match[0]} {match[1]} {match[2]}"
+                        completion_date = datetime.strptime(date_str, "%d %b %Y")
+                    else:
+                        # DD/MM/YYYY format
+                        completion_date = datetime(int(match[2]), int(match[1]), int(match[0]))
+                    break
+            except:
+                pass
+    
+    # Find which trainings are present
+    for training_name, pattern in training_patterns.items():
+        if re.search(pattern, text, re.IGNORECASE):
+            extracted_trainings.append({
+                "training_name": training_name,
+                "completion_date": completion_date.isoformat() if completion_date else None,
+                "expiry_date": None,
+                "certificate_file": filename,
+                "extracted_by": "regex"
+            })
+    
+    # If nothing found but we have text, add as "Unknown Training"
+    if not extracted_trainings and text.strip():
+        extracted_trainings.append({
+            "training_name": "Training Certificate",
+            "completion_date": completion_date.isoformat() if completion_date else None,
+            "expiry_date": None,
+            "certificate_file": filename,
+            "extracted_by": "unknown",
+            "needs_review": True
+        })
+    
+    return extracted_trainings
+
+
+@api_router.post("/employees/{employee_id}/training/bulk-upload")
+async def bulk_upload_training_certificates(
+    employee_id: str,
+    files: List[UploadFile] = File(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Upload multiple training certificates at once.
+    AI extracts all training information from each certificate.
+    """
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 files at once")
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    all_extracted_trainings = []
+    
+    for file in files:
+        # Validate file type
+        if not file.filename.lower().endswith(('.pdf', '.jpg', '.jpeg', '.png', '.webp')):
+            continue
+        
+        # Read file
+        contents = await file.read()
+        
+        # Extract training info using AI
+        extracted = await extract_training_from_certificate(contents, file.filename)
+        
+        # Save certificate to local storage
+        upload_dir = Path("/app/uploads/training") / employee_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        safe_filename = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+        file_path = upload_dir / safe_filename
+        
+        with open(file_path, "wb") as f:
+            f.write(contents)
+        
+        file_url = f"/uploads/training/{employee_id}/{safe_filename}"
+        
+        for training in extracted:
+            # Calculate expiry date based on training type
+            expiry_date = None
+            if training.get("completion_date"):
+                try:
+                    completion = datetime.fromisoformat(training["completion_date"].replace('Z', '+00:00'))
+                    expiry_months = get_expiry_months_for_training(training["training_name"])
+                    expiry_date = (completion + timedelta(days=expiry_months * 30)).isoformat()
+                except:
+                    pass
+            
+            # Use provided expiry if available
+            if training.get("expiry_date"):
+                expiry_date = training["expiry_date"]
+            
+            now = datetime.now(timezone.utc).isoformat()
+            
+            # Check for existing record to avoid duplicates
+            existing = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "training_name": {"$regex": f"^{re.escape(training['training_name'])}$", "$options": "i"},
+                "record_status": {"$ne": "superseded"}
+            })
+            
+            training_record = {
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "training_name": training["training_name"],
+                "mandatory": is_mandatory_training(training["training_name"]),
+                "status": "completed",
+                "completion_date": training.get("completion_date") or now,
+                "expiry_date": expiry_date,
+                "certificate_url": file_url,
+                "original_filename": file.filename,
+                "uploaded_at": now,
+                "verified": False,
+                "verified_by": None,
+                "verified_at": None,
+                "created_at": now,
+                "extracted_by_ai": training.get("extracted_by") in ["gemini_ai", "regex"],
+                "needs_manual_review": training.get("needs_review", False)
+            }
+            
+            if existing:
+                # Supersede existing and create new
+                await db.training_records.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {
+                        "record_status": "superseded",
+                        "superseded_at": now,
+                        "superseded_by": training_record["id"]
+                    }}
+                )
+            
+            await db.training_records.insert_one(training_record)
+            all_extracted_trainings.append({
+                "id": training_record["id"],
+                "training_name": training["training_name"],
+                "completion_date": training.get("completion_date"),
+                "expiry_date": expiry_date,
+                "mandatory": training_record["mandatory"],
+                "file": file.filename,
+                "needs_review": training.get("needs_review", False)
+            })
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "training_bulk_upload", "employee", employee_id, {
+        "files_uploaded": len(files),
+        "trainings_extracted": len(all_extracted_trainings),
+        "trainings": [t["training_name"] for t in all_extracted_trainings]
+    })
+    
+    return {
+        "success": True,
+        "files_uploaded": len(files),
+        "trainings_extracted": len(all_extracted_trainings),
+        "trainings": all_extracted_trainings,
+        "message": f"Extracted {len(all_extracted_trainings)} training(s) from {len(files)} file(s)"
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/deduplicate")
+async def deduplicate_training_records(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Remove duplicate training records for the same employee.
+    Keeps the most recent (by completion_date) for each training type.
+    """
+    # Get all active training records for this employee
+    records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$ne": "superseded"}
+    }).sort("completion_date", -1).to_list(length=200)
+    
+    seen_names = {}
+    to_supersede = []
+    
+    for record in records:
+        training_name = record.get("training_name", "").strip().lower()
+        
+        # Normalize training names to catch duplicates
+        normalized = training_name
+        for variant in ["training", "course", "certificate", "awareness"]:
+            normalized = normalized.replace(variant, "").strip()
+        
+        if normalized in seen_names:
+            # This is a duplicate - supersede it
+            to_supersede.append(record["id"])
+        else:
+            seen_names[normalized] = record["id"]
+    
+    # Supersede duplicates
+    if to_supersede:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.training_records.update_many(
+            {"id": {"$in": to_supersede}},
+            {"$set": {
+                "record_status": "superseded",
+                "superseded_at": now,
+                "superseded_reason": "duplicate_cleanup"
+            }}
+        )
+        
+        await log_audit_action(user['user_id'], "training_deduplicate", "employee", employee_id, {
+            "duplicates_removed": len(to_supersede),
+            "records_superseded": to_supersede
+        })
+    
+    return {
+        "success": True,
+        "duplicates_removed": len(to_supersede),
+        "records_kept": len(seen_names),
+        "message": f"Removed {len(to_supersede)} duplicate training record(s)"
     }
 
 

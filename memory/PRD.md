@@ -472,3 +472,51 @@ Work readiness now BLOCKS if:
 - Pre-Employment Gates showing on Overview tab
 - Reference-Employment Comparison showing on References tab
 - Induction/Competency tabs showing on Training tab
+
+## Physical Digital Stamp Implementation (COMPLETED Apr 4)
+
+### Overview
+Documents now receive **permanent visual verification stamps** embedded directly into PDF and image files using PyPDF2 and Pillow. This ensures CQC compliance by providing visible, tamper-proof evidence of document verification.
+
+### Backend Implementation
+- **PyPDF2** for PDF stamp overlay merging
+- **Pillow** for image stamp compositing (RGBA alpha blend)
+- `add_verification_stamp_to_pdf()` - Creates overlay with verification box on first page
+- `add_verification_stamp_to_image()` - Composites semi-transparent stamp box on images
+- Stamped files saved to `/app/uploads/stamped/`
+
+### API Endpoints
+- `POST /api/employee-documents/{doc_id}/verify-with-digital-stamp` - Applies visual stamp
+  - Request: `{stamp_type: "original_seen"|"copy_verified"|"online_check", notes: "..."}`
+  - Response: `{success, verification_id, stamped_file_url, has_visual_stamp: true}`
+- `GET /api/employee-documents/{doc_id}/download-stamped` - Downloads stamped version (falls back to original)
+
+### Stamp Types
+1. **Original Document Seen** (Green) - Physical original verified
+2. **Copy Verified with Original** (Blue) - Copy compared to original
+3. **Online Check Completed** (Purple) - Verified via GOV.UK Share Code, DBS Update Service, etc.
+
+### Visual Stamp Content
+- Checkmark icon with stamp type header
+- Document type and employee name
+- Verified by (admin name) and date/time
+- Unique Verification ID (e.g., "34F6A80F-6E3")
+
+### Frontend Integration
+- `DigitalStampDialog.js` - Modal for selecting stamp type and notes
+- `EvidenceRow.js` - "Verify & Apply Digital Stamp" in dropdown menu
+- Verification badges shown on evidence files (ORIGINAL VERIFIED, ONLINE VERIFIED, etc.)
+- Edit Stamp button for already-stamped files
+
+### Testing Verification
+- Backend: 90% tests passed
+- Frontend: 100% tests passed (login, navigation, compliance tab, stamp badges)
+- E2E flow verified: Upload → Stamp → Download stamped file with visible overlay
+
+### Files Modified
+- `/app/backend/server.py` - Lines 2467-2725 (stamping functions), 15620-15815 (endpoints)
+- `/app/frontend/src/components/compliance/DigitalStampDialog.js` (NEW)
+- `/app/frontend/src/components/compliance/EvidenceRow.js` (Updated)
+
+## Last Updated
+April 4, 2026 - Physical Digital Stamp Implementation completed and verified

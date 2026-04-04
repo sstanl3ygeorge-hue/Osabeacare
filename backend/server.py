@@ -16762,7 +16762,7 @@ async def download_form_pdf(submission_id: str, user: dict = Depends(get_current
     
     # No export exists - generate one (requires admin)
     # For non-admins, return error
-    if not user.get('role') == 'admin':
+    if user.get('role') not in ['admin', 'super_admin']:
         raise HTTPException(status_code=404, detail="No PDF export found. Admin can generate one.")
     
     # Generate PDF on-the-fly and return the file bytes directly

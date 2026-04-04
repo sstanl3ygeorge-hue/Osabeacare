@@ -73,7 +73,7 @@ export default function InterviewFormPanel({ employeeId, employeeName }) {
       const token = localStorage.getItem('token');
       
       const response = await axios.get(
-        `${API}/form-submissions/${submissionId}/export-pdf`,
+        `${API}/form-submissions/${submissionId}/download-pdf`,
         {
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'

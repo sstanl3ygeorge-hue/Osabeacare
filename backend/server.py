@@ -2084,6 +2084,71 @@ async def calculate_work_readiness_3tier(
                     })
     
     # =========================================================================
+    # HARD BLOCK F: PRE-EMPLOYMENT GATES (CQC/Medway Requirements)
+    # =========================================================================
+    
+    # F1. Verification Stamps - Critical documents MUST have "Original Seen" stamps
+    critical_doc_types = ["right_to_work", "dbs", "identity"]
+    missing_stamps = []
+    
+    for doc_type in critical_doc_types:
+        # Find active document for this type
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": doc_type},
+                {"requirement_id": f"{doc_type}_evidence"},
+                {"document_type": doc_type}
+            ],
+            "status": {"$in": ["active", "uploaded", "approved", "accepted"]}
+        }, {"_id": 0, "verification_stamp": 1})
+        
+        if doc:
+            stamp = doc.get("verification_stamp")
+            if not stamp or stamp in ["not_verified", None, ""]:
+                missing_stamps.append(doc_type.replace("_", " ").title())
+    
+    if missing_stamps:
+        hard_block_reasons.append({
+            "type": "hard_block",
+            "code": "verification_stamps_missing",
+            "message": f"Document verification required: {', '.join(missing_stamps)}"
+        })
+    
+    # F2. Induction Checklist - Must be completed before work
+    induction = await db.induction_checklists.find_one({
+        "employee_id": employee_id,
+        "overall_status": "completed"
+    }, {"_id": 0, "overall_status": 1})
+    
+    if not induction:
+        # Check if induction exists but incomplete
+        partial_induction = await db.induction_checklists.find_one({
+            "employee_id": employee_id
+        }, {"_id": 0, "overall_status": 1})
+        
+        if partial_induction:
+            conditional_reasons.append({
+                "type": "conditional",
+                "code": "induction_incomplete",
+                "message": f"Induction checklist: {partial_induction.get('overall_status', 'pending')}"
+            })
+        # Note: Missing induction is not a hard block as it may not be required for all employees
+    
+    # F3. Critical Competencies - Check for missing critical competencies
+    missing_competencies = await db.competency_records.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["not_competent", "training_required"]}
+    }, {"_id": 0, "competency_name": 1, "status": 1}).to_list(10)
+    
+    for comp in missing_competencies:
+        conditional_reasons.append({
+            "type": "conditional",
+            "code": "competency_not_met",
+            "message": f"Competency: {comp.get('competency_name', 'Unknown')} - {comp.get('status', 'unknown').replace('_', ' ')}"
+        })
+    
+    # =========================================================================
     # DETERMINE FINAL STATUS
     # =========================================================================
     
@@ -42546,6 +42611,240 @@ async def get_missing_competencies(
 async def get_competency_types(user: dict = Depends(get_current_user)):
     """Return all available competency types"""
     return {"competency_types": COMPETENCY_TYPES}
+
+
+# ========== SPOT CHECK ENDPOINTS ==========
+
+# Spot check types and areas
+SPOT_CHECK_TYPES = [
+    {"value": "observation", "label": "Direct Observation"},
+    {"value": "document_review", "label": "Document Review"},
+    {"value": "competency_check", "label": "Competency Check"},
+    {"value": "medication_check", "label": "Medication Check"}
+]
+
+SPOT_CHECK_AREAS = [
+    {"value": "moving_handling", "label": "Moving & Handling"},
+    {"value": "medication", "label": "Medication Administration"},
+    {"value": "record_keeping", "label": "Record Keeping"},
+    {"value": "communication", "label": "Communication"},
+    {"value": "infection_control", "label": "Infection Control"},
+    {"value": "dignity_respect", "label": "Dignity & Respect"},
+    {"value": "safeguarding", "label": "Safeguarding"}
+]
+
+
+class SpotCheckCreateRequest(BaseModel):
+    employee_name: Optional[str] = None
+    type: str  # observation, document_review, competency_check, medication_check
+    area: str  # moving_handling, medication, record_keeping, etc.
+    outcome: str  # pass, needs_improvement, fail
+    notes: Optional[str] = None
+    follow_up_required: bool = False
+    follow_up_date: Optional[str] = None
+
+
+@api_router.get("/employees/{employee_id}/spot-checks")
+async def get_spot_checks(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get all spot checks for an employee"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    checks = await db.spot_checks.find({
+        "employee_id": employee_id
+    }).sort("date", -1).to_list(100)
+    
+    # Format for JSON serialization
+    formatted = []
+    for c in checks:
+        c.pop("_id", None)
+        formatted.append(c)
+    
+    return {"spot_checks": formatted}
+
+
+@api_router.post("/employees/{employee_id}/spot-checks")
+async def create_spot_check(
+    employee_id: str,
+    payload: SpotCheckCreateRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Record a new spot check"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = payload.employee_name or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get assessor name
+    assessor = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    assessor_name = assessor.get('name') if assessor else user.get('email', 'Admin')
+    if not assessor_name and assessor:
+        assessor_name = f"{assessor.get('first_name', '')} {assessor.get('last_name', '')}".strip() or assessor.get('email', 'Admin')
+    
+    spot_check_id = str(uuid.uuid4())
+    
+    spot_check = {
+        "id": spot_check_id,
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "date": now,
+        "type": payload.type,
+        "area": payload.area,
+        "outcome": payload.outcome,
+        "notes": payload.notes,
+        "follow_up_required": payload.follow_up_required,
+        "follow_up_date": payload.follow_up_date,
+        "assessed_by": user['user_id'],
+        "assessed_by_name": assessor_name,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.spot_checks.insert_one(spot_check)
+    
+    # Update recurring compliance tracking
+    # Calculate next spot check due date (monthly)
+    next_due = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    await db.recurring_compliance.update_one(
+        {"employee_id": employee_id, "item_type": "spot_check"},
+        {
+            "$set": {
+                "employee_id": employee_id,
+                "item_type": "spot_check",
+                "item_name": "Spot Check",
+                "next_due_date": next_due,
+                "last_completed_date": now,
+                "last_completed_by": user['user_id'],
+                "last_completed_by_name": assessor_name,
+                "is_active": True,
+                "updated_at": now
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "created_at": now
+            }
+        },
+        upsert=True
+    )
+    
+    # Audit log
+    await log_audit_action(user['user_id'], "spot_check_recorded", "spot_check", spot_check_id, {
+        "employee_id": employee_id,
+        "outcome": payload.outcome,
+        "type": payload.type,
+        "area": payload.area
+    })
+    
+    return {"success": True, "id": spot_check_id, "outcome": payload.outcome}
+
+
+@api_router.get("/spot-check-options")
+async def get_spot_check_options(user: dict = Depends(get_current_user)):
+    """Return available spot check types and areas"""
+    return {
+        "types": SPOT_CHECK_TYPES,
+        "areas": SPOT_CHECK_AREAS
+    }
+
+
+# ========== ADMIN TASK QUEUE ENDPOINT ==========
+
+@api_router.get("/admin/task-queue")
+async def get_admin_task_queue(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all pending admin tasks across all employees.
+    Used for dashboard task summary.
+    """
+    now = datetime.now(timezone.utc)
+    thirty_days_later = now + timedelta(days=30)
+    seven_days_later = now + timedelta(days=7)
+    
+    # 1. Documents awaiting verification (no valid stamp)
+    docs_pending = await db.employee_documents.count_documents({
+        "$or": [
+            {"verification_stamp": {"$in": [None, "", "not_verified"]}},
+            {"verification_stamp": {"$exists": False}}
+        ],
+        "status": {"$in": ["active", "uploaded", "approved", "accepted"]}
+    })
+    
+    # 2. References awaiting response
+    refs_pending = 0
+    # Check employees with pending reference requests
+    employees_with_pending_refs = await db.employees.count_documents({
+        "$or": [
+            {"reference_1_request_status": {"$in": ["pending_send", "sent", "opened", "clicked"]}},
+            {"reference_2_request_status": {"$in": ["pending_send", "sent", "opened", "clicked"]}}
+        ]
+    })
+    refs_pending = employees_with_pending_refs
+    
+    # 3. Expiring DBS (next 30 days)
+    dbs_expiring = 0
+    # Check dbs_checks collection for expiring items
+    dbs_checks_expiring = await db.dbs_checks.count_documents({
+        "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()}
+    })
+    # Also check employee documents
+    dbs_docs_expiring = await db.employee_documents.count_documents({
+        "requirement_id": {"$in": ["dbs", "dbs_evidence"]},
+        "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()},
+        "status": {"$in": ["active", "approved"]}
+    })
+    dbs_expiring = max(dbs_checks_expiring, dbs_docs_expiring)
+    
+    # 4. RTW expiring (next 30 days)
+    rtw_expiring = await db.rtw_checks.count_documents({
+        "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()}
+    })
+    
+    # 5. Spot checks due this week
+    spot_checks_due = await db.recurring_compliance.count_documents({
+        "item_type": "spot_check",
+        "next_due_date": {"$lte": seven_days_later.isoformat()},
+        "is_active": True
+    })
+    
+    # 6. Supervision due this week
+    supervision_due = await db.recurring_compliance.count_documents({
+        "item_type": "supervision",
+        "next_due_date": {"$lte": seven_days_later.isoformat()},
+        "is_active": True
+    })
+    
+    # 7. Induction checklists incomplete
+    induction_incomplete = await db.induction_checklists.count_documents({
+        "overall_status": {"$in": ["pending", "in_progress"]}
+    })
+    
+    # 8. Interview records pending
+    interviews_pending = await db.employees.count_documents({
+        "status": {"$in": ["applicant", "onboarding"]},
+        "recruitment_approved": {"$ne": True}
+    })
+    
+    return {
+        "documents_pending_verification": docs_pending,
+        "references_pending_response": refs_pending,
+        "dbs_expiring_30_days": dbs_expiring,
+        "rtw_expiring_30_days": rtw_expiring,
+        "spot_checks_due_this_week": spot_checks_due,
+        "supervision_due_this_week": supervision_due,
+        "induction_incomplete": induction_incomplete,
+        "interviews_pending": interviews_pending,
+        "total_tasks": docs_pending + refs_pending + dbs_expiring + spot_checks_due
+    }
 
 
 # ========== PRE-EMPLOYMENT GATES ENDPOINTS ==========

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Progress } from '../../components/ui/progress';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
+import AdminTaskQueue from '../../components/admin/AdminTaskQueue';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
@@ -99,6 +100,9 @@ export default function DashboardPage() {
           This dashboard highlights what needs attention today. Start with expired items and required checks.
         </p>
       </div>
+
+      {/* Admin Task Queue - Pending Items */}
+      <AdminTaskQueue />
 
       {/* PRIMARY: Needs Attention */}
       <Card className={`border-2 ${needsAttentionTotal > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'} shadow-sm`}>

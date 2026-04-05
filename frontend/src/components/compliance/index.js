@@ -75,3 +75,11 @@ export { default as InterviewFormPanel } from './InterviewFormPanel';
 
 // Digital Stamp Dialog (CQC verification stamps)
 export { default as DigitalStampDialog } from './DigitalStampDialog';
+
+// Labeled Progress Metrics (P0 - Clear labels and tooltips)
+export { 
+  LabeledProgressBadge, 
+  LabeledProgressCard, 
+  ComplianceBreakdownCard,
+  PROGRESS_METRICS 
+} from './LabeledProgressMetrics';

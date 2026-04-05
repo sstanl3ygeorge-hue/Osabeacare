@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../ui/tooltip';
 import {
   CheckCircle,
   XCircle,
@@ -14,11 +15,13 @@ import {
   RefreshCw,
   Shield,
   Upload,
-  Mail
+  Mail,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { SendReminderButton, RequestRenewalButton } from './AdminActionButtons';
+import { ComplianceBreakdownCard, PROGRESS_METRICS } from '../compliance/LabeledProgressMetrics';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -112,7 +115,22 @@ export default function UnifiedProgressSection({
               )}
             </div>
             <div>
-              <CardTitle className="text-lg">Overall Compliance</CardTitle>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <CardTitle className="text-lg flex items-center gap-2 cursor-help">
+                      <span>✅</span> Full Compliance
+                      <Info className="h-4 w-4 text-slate-400" />
+                    </CardTitle>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs bg-slate-900 text-white">
+                    <p className="font-medium mb-1">Full Compliance</p>
+                    <p className="text-sm text-slate-300">
+                      All requirements including documents, forms, training, induction, and competencies.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <CardDescription>
                 {is_work_ready ? 'Cleared for work' : `${blockers?.length || 0} items blocking work readiness`}
               </CardDescription>
@@ -163,40 +181,13 @@ export default function UnifiedProgressSection({
           </p>
         </div>
         
-        {/* Category Breakdown */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {Object.entries(categories || {}).map(([key, value]) => {
-            const isComplete = value.completed >= value.total && value.total > 0;
-            const percentage = value.total > 0 ? Math.round((value.completed / value.total) * 100) : 0;
-            
-            const categoryLabels = {
-              documents: 'Documents',
-              forms: 'Forms',
-              training: 'Training',
-              references: 'References',
-              agreements: 'Agreements',
-              induction: 'Induction'
-            };
-            
-            return (
-              <div 
-                key={key}
-                className={cn(
-                  "p-2 rounded-lg border text-center",
-                  isComplete ? "bg-emerald-50 border-emerald-200" : "bg-white border-gray-200"
-                )}
-              >
-                <p className="text-xs text-gray-500 mb-0.5">{categoryLabels[key] || key}</p>
-                <p className={cn(
-                  "font-semibold",
-                  isComplete ? "text-emerald-700" : "text-gray-700"
-                )}>
-                  {value.completed}/{value.total}
-                </p>
-              </div>
-            );
-          })}
-        </div>
+        {/* Category Breakdown - Using ComplianceBreakdownCard */}
+        <ComplianceBreakdownCard 
+          categories={categories}
+          totalCompleted={completed_requirements}
+          totalRequired={total_requirements}
+          className="border-0 p-0 bg-transparent"
+        />
         
         {/* Blockers */}
         {priorityBlockers.length > 0 && (

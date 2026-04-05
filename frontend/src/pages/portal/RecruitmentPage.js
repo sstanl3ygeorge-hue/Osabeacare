@@ -22,6 +22,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../components/ui/dropdown-menu';
+import { LabeledProgressBadge } from '../../components/compliance/LabeledProgressMetrics';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../components/ui/tooltip';
+import { Info } from 'lucide-react';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import { cn } from '../../lib/utils';
 
@@ -245,33 +248,42 @@ export default function RecruitmentPage() {
         </Button>
       </div>
 
-      {/* Pipeline Summary Cards */}
+      {/* Summary - Simplified (Pipeline stages removed) */}
       {pipeline && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {pipeline.stages.map((stage) => (
-            <Card 
-              key={stage.status}
-              className={cn(
-                "cursor-pointer hover:shadow-md transition-shadow",
-                statusFilter === stage.status && "ring-2 ring-primary"
-              )}
-              onClick={() => setStatusFilter(statusFilter === stage.status ? '' : stage.status)}
-              data-testid={`pipeline-stage-${stage.status}`}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-text-muted">{stage.label}</span>
-                  <Badge variant="outline" className={STAGE_COLORS[stage.status]}>
-                    {stage.applicants.length}
-                  </Badge>
+        <Card className="border-blue-200 bg-blue-50/30">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                  <Users className="h-6 w-6 text-blue-600" />
                 </div>
-                <div className="mt-2 text-2xl font-bold">
-                  {stage.applicants.length}
+                <div>
+                  <h3 className="font-semibold text-blue-800">All Applicants</h3>
+                  <p className="text-sm text-blue-600">
+                    {pipeline?.summary?.total_applicants || 0} applicants awaiting review
+                  </p>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+              </div>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge className="bg-blue-100 text-blue-700 border border-blue-200 cursor-help">
+                      <Info className="h-3 w-3 mr-1" />
+                      What is Recruitment Progress?
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs bg-slate-900 text-white">
+                    <p className="font-medium mb-1">📋 Recruitment Progress</p>
+                    <p className="text-sm text-slate-300">
+                      Shows documents, references, and forms completed before promotion. 
+                      Does NOT include training or induction - those are tracked separately after promotion.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Filters */}
@@ -381,24 +393,29 @@ export default function RecruitmentPage() {
                       </div>
                     </div>
 
-                    {/* Middle Row: Quick Review Summary */}
+                    {/* Middle Row: Quick Review Summary with Labeled Progress */}
                     <div className="mb-4 px-3 py-2 bg-gray-50 rounded-lg">
                       {approval ? (
-                        <div className="flex items-center gap-4 text-sm">
-                          {approval.canApprove ? (
-                            <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
-                              <CheckCircle className="w-4 h-4" />
-                              Ready for approval
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1.5 text-amber-600 font-medium">
-                              <AlertTriangle className="w-4 h-4" />
-                              Blocked by {approval.blockerCount} item{approval.blockerCount !== 1 ? 's' : ''}
-                            </span>
-                          )}
-                          <span className="text-text-muted">
-                            Progress: {approval.verifiedCount}/{approval.requiredCount}
-                          </span>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4 text-sm">
+                            {approval.canApprove ? (
+                              <span className="flex items-center gap-1.5 text-emerald-600 font-medium">
+                                <CheckCircle className="w-4 h-4" />
+                                Ready for approval
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1.5 text-amber-600 font-medium">
+                                <AlertTriangle className="w-4 h-4" />
+                                Blocked by {approval.blockerCount} item{approval.blockerCount !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                          <LabeledProgressBadge
+                            metricType="recruitment"
+                            completed={approval.verifiedCount}
+                            total={approval.requiredCount}
+                            size="sm"
+                          />
                         </div>
                       ) : (
                         <div className="flex items-center gap-2 text-sm text-text-muted">

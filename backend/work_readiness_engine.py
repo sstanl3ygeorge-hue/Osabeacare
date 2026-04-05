@@ -482,6 +482,50 @@ async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
     if reg_error:
         checks["professional_registration_error"] = reg_error
     
+    # 11. Interview Record completed
+    interview = await db.form_submissions.find_one({
+        "employee_id": emp_id_str,
+        "form_type": {"$in": ["interview_record", "interview", "interview_form"]},
+        "status": {"$in": ["submitted", "verified", "approved"]}
+    })
+    checks["interview_record"] = bool(interview)
+    
+    # 12. Employment gaps explained (all gaps over 28 days must have explanation)
+    gaps = employee.get("employment_gaps", [])
+    gaps_explained = True
+    unexplained_gaps = []
+    for gap in gaps:
+        duration_months = gap.get("duration_months", 0)
+        # If gap is more than ~1 month (28 days)
+        if duration_months >= 1:
+            if not gap.get("explanation") or gap.get("status") in ["not_explained", "needs_info"]:
+                gaps_explained = False
+                unexplained_gaps.append({
+                    "gap_id": gap.get("gap_id"),
+                    "duration_months": duration_months
+                })
+    # Also check the employment_gaps collection
+    gap_docs = await db.employment_gaps.find({
+        "employee_id": emp_id_str,
+        "duration_months": {"$gte": 1},
+        "$or": [
+            {"explanation": {"$exists": False}},
+            {"explanation": None},
+            {"explanation": ""},
+            {"status": {"$in": ["not_explained", "needs_info"]}}
+        ]
+    }).to_list(length=20)
+    if gap_docs:
+        gaps_explained = False
+        for g in gap_docs:
+            unexplained_gaps.append({
+                "gap_id": g.get("id"),
+                "duration_months": g.get("duration_months", 0)
+            })
+    checks["employment_gaps_explained"] = gaps_explained
+    if unexplained_gaps:
+        checks["unexplained_gaps"] = unexplained_gaps
+    
     # Determine if all checks pass
     can_promote = all([
         checks.get("right_to_work"),
@@ -492,7 +536,9 @@ async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
         checks.get("contract"),
         checks.get("induction"),
         checks.get("health_declaration"),
-        checks.get("professional_registration")
+        checks.get("professional_registration"),
+        checks.get("interview_record"),
+        checks.get("employment_gaps_explained")
     ])
     
     return (can_promote, checks)

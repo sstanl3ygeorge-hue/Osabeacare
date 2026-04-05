@@ -48441,113 +48441,140 @@ async def get_pre_employment_gates(
 ):
     """
     Get pre-employment gates status for an employee.
-    These are REQUIRED before work readiness can be achieved.
+    These are the 12 REQUIRED checks before an employee can be promoted to Active status.
     
-    Gates:
-    - interview_completed: Interview record exists and is verified
-    - contract_signed: Employment contract signed/acknowledged
-    - verification_stamps_complete: All critical documents have verification stamps
-    - induction_complete: Induction checklist completed
+    Gates (12 total):
+    1. Interview Record completed
+    2. Contract signed
+    3. DBS verified + stamped
+    4. Right to Work verified + stamped
+    5. Identity verified + stamped
+    6. Proof of Address (2 documents) verified + stamped
+    7. Reference 1 verified
+    8. Reference 2 verified
+    9. Induction Checklist complete
+    10. Mandatory Training complete + not expired
+    11. Health Questionnaire completed
+    12. Employment gaps explained
+    
+    For Nurse role, adds: NMC registration verified
     """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Check interview completed (from form_submissions)
-    interview = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "form_type": {"$in": ["interview_record", "interview", "interview_form"]},
-        "status": {"$in": ["submitted", "verified", "approved"]}
-    }, {"_id": 0, "id": 1, "status": 1, "submitted_at": 1})
-    interview_completed = interview is not None
+    # Use the work readiness engine for comprehensive checks
+    can_promote, checks = await can_promote_to_active(employee_id, db)
     
-    # Check contract signed (from acknowledgements)
-    contract = await db.acknowledgements.find_one({
-        "employee_id": employee_id,
-        "agreement_type": "contract_acceptance",
-        "verification_status": "verified"
-    }, {"_id": 0, "id": 1, "verified_at": 1})
-    contract_signed = contract is not None
+    role = employee.get("role", "Healthcare Assistant")
+    is_nurse = "nurse" in role.lower()
     
-    # Check verification stamps on critical documents
-    critical_requirements = ["right_to_work", "dbs", "identity"]
-    stamps_complete = True
-    stamps_detail = []
+    # Build detailed gates response matching user's 12 requirements
+    gates = {
+        "interview_record": {
+            "num": 1,
+            "passed": checks.get("interview_record", False),
+            "label": "Interview Record",
+            "requirement": "Must be completed by admin"
+        },
+        "contract_signed": {
+            "num": 2,
+            "passed": checks.get("contract", False),
+            "label": "Contract Signed",
+            "requirement": "Must be signed by worker"
+        },
+        "dbs_verified": {
+            "num": 3,
+            "passed": checks.get("dbs", False),
+            "label": "DBS Verified + Stamped",
+            "requirement": "Must have verification stamp"
+        },
+        "right_to_work": {
+            "num": 4,
+            "passed": checks.get("right_to_work", False),
+            "label": "Right to Work Verified + Stamped",
+            "requirement": "Must have verification stamp"
+        },
+        "identity": {
+            "num": 5,
+            "passed": checks.get("identity", False),
+            "label": "Identity Verified + Stamped",
+            "requirement": "Must have verification stamp"
+        },
+        "proof_of_address": {
+            "num": 6,
+            "passed": checks.get("proof_of_address", False),
+            "label": "Proof of Address (2 documents) Verified + Stamped",
+            "requirement": "Both must have verification stamps"
+        },
+        "reference_1": {
+            "num": 7,
+            "passed": checks.get("references", False),  # Both refs together
+            "label": "Reference 1 Verified",
+            "requirement": "Must be verified by admin"
+        },
+        "reference_2": {
+            "num": 8,
+            "passed": checks.get("references", False),
+            "label": "Reference 2 Verified",
+            "requirement": "Must be verified by admin"
+        },
+        "induction": {
+            "num": 9,
+            "passed": checks.get("induction", False),
+            "label": "Induction Checklist",
+            "requirement": "All 14 items complete"
+        },
+        "mandatory_training": {
+            "num": 10,
+            "passed": checks.get("mandatory_training", False),
+            "label": "Mandatory Training (6 items)",
+            "requirement": "All complete, not expired"
+        },
+        "health_questionnaire": {
+            "num": 11,
+            "passed": checks.get("health_declaration", False),
+            "label": "Health Questionnaire",
+            "requirement": "Completed by worker"
+        },
+        "employment_gaps": {
+            "num": 12,
+            "passed": checks.get("employment_gaps_explained", True),  # Default True if no gaps
+            "label": "Employment Gaps Explained",
+            "requirement": "All gaps have explanations"
+        }
+    }
     
-    for req_key in critical_requirements:
-        # Find accepted evidence for this requirement
-        evidence = await db.employee_documents.find_one({
-            "employee_id": employee_id,
-            "requirement_id": {"$in": [req_key, f"{req_key}_evidence"]},
-            "status": {"$in": ["active", "uploaded", "approved", "accepted"]},
-            "verification_stamp": {"$in": ["original_seen", "copy_verified", "online_check"]}
-        }, {"_id": 0, "id": 1, "verification_stamp": 1, "verification_stamp_at": 1})
-        
-        if evidence:
-            stamps_detail.append({
-                "requirement": req_key,
-                "has_stamp": True,
-                "stamp_type": evidence.get("verification_stamp"),
-                "stamp_at": evidence.get("verification_stamp_at")
-            })
-        else:
-            stamps_complete = False
-            stamps_detail.append({
-                "requirement": req_key,
-                "has_stamp": False,
-                "stamp_type": None,
-                "stamp_at": None
-            })
+    # Add NMC for nurses
+    if is_nurse:
+        gates["nmc_registration"] = {
+            "num": 13,
+            "passed": checks.get("professional_registration", False),
+            "label": "NMC Registration Verified",
+            "requirement": "For Nurse role only"
+        }
     
-    # Check induction complete
-    induction = await db.induction_checklists.find_one({
-        "employee_id": employee_id,
-        "overall_status": "completed"
-    }, {"_id": 0, "completed_at": 1})
-    induction_complete = induction is not None
+    gates_list = list(gates.values())
+    gates_passed = sum(1 for g in gates_list if g["passed"])
+    total_gates = len(gates_list)
+    all_gates_passed = gates_passed == total_gates
     
-    # Calculate overall readiness
-    gates_passed = sum([
-        interview_completed,
-        contract_signed,
-        stamps_complete,
-        induction_complete
-    ])
-    all_gates_passed = gates_passed == 4
+    # Build blockers list
+    blockers = [
+        {"gate": k, "label": v["label"]}
+        for k, v in gates.items() if not v["passed"]
+    ]
     
     return {
         "employee_id": employee_id,
-        "gates": {
-            "interview_completed": {
-                "passed": interview_completed,
-                "label": "Interview Record",
-                "detail": interview if interview_completed else None
-            },
-            "contract_signed": {
-                "passed": contract_signed,
-                "label": "Employment Contract Signed",
-                "detail": {"verified_at": contract.get("verified_at")} if contract_signed else None
-            },
-            "verification_stamps_complete": {
-                "passed": stamps_complete,
-                "label": "Document Verification Stamps",
-                "detail": stamps_detail
-            },
-            "induction_complete": {
-                "passed": induction_complete,
-                "label": "Induction Checklist",
-                "detail": {"completed_at": induction.get("completed_at")} if induction_complete else None
-            }
-        },
+        "role": role,
+        "gates": gates,
         "gates_passed": gates_passed,
-        "total_gates": 4,
+        "total_gates": total_gates,
         "all_gates_passed": all_gates_passed,
-        "blockers": [
-            {"gate": "interview_completed", "message": "Interview record not completed"} if not interview_completed else None,
-            {"gate": "contract_signed", "message": "Employment contract not signed"} if not contract_signed else None,
-            {"gate": "verification_stamps_complete", "message": "Critical documents missing verification stamps"} if not stamps_complete else None,
-            {"gate": "induction_complete", "message": "Induction checklist not completed"} if not induction_complete else None
-        ]
+        "can_promote": can_promote,
+        "blockers": blockers,
+        "raw_checks": checks
     }
 
 

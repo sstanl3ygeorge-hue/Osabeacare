@@ -556,5 +556,51 @@ Training certificates often contain 40+ training items in a single document (e.g
 
 ---
 
+## COMPLETED: CQC Compliance Overhaul Part 1 (April 2026)
+
+### P0 Changes Implemented
+
+#### 1. Remove [Request] Button
+- Changed `UploadRequirementCard.js` to show "Send Reminder" instead of separate Request/Resend buttons
+- Workers now upload documents themselves; admins only send reminders
+
+#### 2. Employment Gap Explanation Interface
+- Added reason dropdown to EmploymentGapPanel: career_break, education, health, travel, unemployed, family, volunteering, self_employed, other
+- Added supporting document upload for gap explanations
+- Backend: Updated `/api/employees/{id}/employment-gaps/{gap_id}/explain` to accept `reason_type`
+- Backend: New `/api/employees/{id}/employment-gaps/{gap_id}/upload-document` endpoint
+
+#### 3. Reference Mismatch Verification
+- Added mismatch reason dropdown to ReferenceResponseDrawer: earlier_employment, personal_reference, employer_changed, agency_reference, name_change, other
+- Full reason logged with audit trail
+
+#### 4. Audit Trail Enhancement
+- Created `AuditReasonDialog` component for logging admin changes
+- Backend: New `log_audit_change()` function captures before/after values + reason
+- Backend: `POST /api/admin/audit-change` for logging changes
+- Backend: `GET /api/admin/audit-trail/{entity_type}/{entity_id}` for retrieving history
+
+### P1 Changes Implemented
+
+#### 1. Admin Dashboard Actionable Tasks
+- Created `ActionableTaskQueue.js` showing:
+  - PENDING VERIFICATIONS with [Verify] button
+  - REFERENCES TO SEND with [Send Request] button
+  - REFERENCE RESPONSES TO REVIEW with [Review] button
+  - EXPIRING SOON with [Send Reminder] button
+  - WORKERS STUCK IN ONBOARDING with [Remind] button
+- Enhanced `/api/admin/task-queue` endpoint with detailed actionable items
+
+#### 2. Document Stamp Burning
+- Already implemented: `add_verification_stamp_to_pdf()` burns visible stamp into PDFs
+- `add_verification_stamp_to_image()` for images
+- Stores `stamped_file_url` served for downloads
+
+### Test Results (iteration_156)
+- Backend: 100% (20/20 tests passed)
+- Frontend: 100% (All UI elements verified)
+
+---
+
 ## Last Updated
-April 5, 2026 - Training expiry auto-reminder system completed - daily scheduled emails, admin dashboard alerts, manual trigger button
+April 5, 2026 - CQC Compliance Overhaul Part 1 completed - removed Request button, added gap/mismatch reason dropdowns, enhanced audit trail, actionable task queue dashboard

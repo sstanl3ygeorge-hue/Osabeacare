@@ -26,7 +26,6 @@ import EnhancedTrainingTab from '../../components/training/EnhancedTrainingTab';
 import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
 import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
-import UnifiedProgressSection from '../../components/admin/UnifiedProgressSection';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import { 
   InductionChecklistPanel, 
@@ -3685,61 +3684,17 @@ export default function EmployeeProfilePage() {
         </TabsList>
 
         {/* ========== TAB 1: WORK READINESS ========== */}
-        {/* Unified progress + blocker list + promote button */}
+        {/* NOTE: Progress/blockers/actions are shown in ConsolidatedStatusPanel above tabs */}
+        {/* This tab only shows supplementary details not in the main panel */}
         <TabsContent value="work_readiness">
           <div className="space-y-6">
-            {/* Unified Progress Section - Single Source of Truth */}
-            <UnifiedProgressSection 
-              employeeId={employeeId}
-              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
-              onNavigateToRequirement={(reqKey) => {
-                setActiveTab('compliance');
-                setTimeout(() => {
-                  const el = document.querySelector(`[data-requirement="${reqKey}"]`);
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }, 100);
-              }}
-            />
-            
-            {/* Recruitment Approval Panel - for applicants */}
-            {employee?.person_stage === 'applicant' && (
-              <RecruitmentApprovalPanel 
-                employeeId={employeeId}
-                employeeName={`${employee.first_name} ${employee.last_name}`}
-                role={employee.role}
-                stageIdentity={employee.person_stage}
-                onApprovalSuccess={(data) => {
-                  // Refresh employee data after approval
-                  fetchEmployee();
-                  fetchComplianceFile();
-                }}
-                onNavigateToRequirement={(reqKey, section) => {
-                  setActiveTab('compliance');
-                }}
-              />
-            )}
-            
-            {/* Work Readiness Panel - for employees */}
-            {employee?.person_stage === 'employee' && (
-              <WorkReadinessPanel 
-                employeeId={employeeId}
-                employeeName={`${employee.first_name} ${employee.last_name}`}
-                role={employee.role}
-                stageIdentity={employee.person_stage}
-                recruitmentApproved={employee.recruitment_approved}
-                onNavigateToRequirement={(reqKey, section) => {
-                  setActiveTab('compliance');
-                }}
-              />
-            )}
-            
-            {/* Pre-Employment Gates - CQC Critical Check */}
+            {/* Pre-Employment Gates Detail View */}
             <PreEmploymentGatesPanel 
               employeeId={employeeId}
               onNavigate={(hash) => {
-                if (hash === '#compliance') setActiveTab('compliance');
+                if (hash === '#compliance') setActiveTab('checklist');
                 else if (hash === '#training') setActiveTab('training');
-                else if (hash === '#policies') setActiveTab('compliance');
+                else if (hash === '#policies') setActiveTab('checklist');
               }}
               onRefresh={fetchComplianceFile}
             />

@@ -7,7 +7,8 @@ import { ReferencesPanel } from '../../compliance';
  */
 export default function ReferencesTabContent({ 
   employeeId, 
-  onRefresh 
+  onRefresh,
+  onEditReference
 }) {
   return (
     <div data-testid="references-tab-content">
@@ -22,6 +23,7 @@ export default function ReferencesTabContent({
       <ReferencesPanel 
         employeeId={employeeId}
         onRefresh={onRefresh}
+        onEditReference={onEditReference}
       />
     </div>
   );

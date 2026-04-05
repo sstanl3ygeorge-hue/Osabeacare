@@ -4116,6 +4116,19 @@ export default function EmployeeProfilePage() {
               fetchComplianceFile();
               fetchRecruitmentStatus();
             }}
+            onEditReference={(refNum, refData) => {
+              setSelectedReferenceId(refNum);
+              setSelectedReferenceData({
+                ...refData,
+                referee_name: refData.name,
+                referee_email: refData.email,
+                referee_phone: refData.phone,
+                referee_organisation: refData.organisation,
+                referee_position: refData.job_title || refData.position,
+                referee_relationship: refData.relationship
+              });
+              setEditReferenceOpen(true);
+            }}
           />
         </TabsContent>
       </Tabs>

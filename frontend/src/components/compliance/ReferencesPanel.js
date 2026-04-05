@@ -26,7 +26,7 @@ const STATUS_CONFIG = {
   rejected: { label: 'Rejected', color: 'bg-red-100 text-red-700', icon: XCircle }
 };
 
-export default function ReferencesPanel({ employeeId, onRefresh }) {
+export default function ReferencesPanel({ employeeId, onRefresh, onEditReference }) {
   const [references, setReferences] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sendingRequest, setSendingRequest] = useState(null);
@@ -219,10 +219,23 @@ export default function ReferencesPanel({ employeeId, onRefresh }) {
                     <h3 className="font-medium flex items-center gap-2">
                       Reference {refNum}
                     </h3>
-                    <Badge className={`${config.color} flex items-center gap-1`}>
-                      <StatusIcon className="h-3 w-3" />
-                      {config.label}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      {declared.name && onEditReference && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEditReference(refNum, declared)}
+                          className="h-7 px-2 text-gray-500 hover:text-primary"
+                          data-testid={`edit-reference-btn-${refNum}`}
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Badge className={`${config.color} flex items-center gap-1`}>
+                        <StatusIcon className="h-3 w-3" />
+                        {config.label}
+                      </Badge>
+                    </div>
                   </div>
 
                   {/* Content */}

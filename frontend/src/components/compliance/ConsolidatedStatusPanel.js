@@ -10,7 +10,7 @@
  * 
  * Shows ONE view with:
  * - Status header (BLOCKED/READY)
- * - ONE blocker list
+ * - ONE blocker list with color-coded severity
  * - ONE progress summary
  * - Quick actions
  */
@@ -27,7 +27,8 @@ import {
   AlertTriangle, CheckCircle, XCircle, ChevronRight,
   FileText, Users, GraduationCap, ClipboardCheck,
   Send, Eye, Plus, RefreshCw, Loader2, Shield,
-  FileCheck, UserCheck, Briefcase, Heart, Calendar
+  FileCheck, UserCheck, Briefcase, Heart, Calendar,
+  Clock, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -48,6 +49,57 @@ const BLOCKER_ICONS = {
   'training': GraduationCap,
   'gaps': Calendar,
   'default': AlertTriangle
+};
+
+// Blocker severity classification
+// Critical: Missing/unverified required documents
+// Pending: Uploaded but awaiting verification
+// Complete: Fully verified (not shown in blockers)
+const BLOCKER_SEVERITY = {
+  CRITICAL: {
+    label: 'Critical',
+    bgColor: 'bg-red-50',
+    borderColor: 'border-red-200',
+    textColor: 'text-red-700',
+    iconColor: 'text-red-600',
+    iconBg: 'bg-red-100',
+    dot: '🔴'
+  },
+  PENDING: {
+    label: 'Pending',
+    bgColor: 'bg-amber-50',
+    borderColor: 'border-amber-200',
+    textColor: 'text-amber-700',
+    iconColor: 'text-amber-600',
+    iconBg: 'bg-amber-100',
+    dot: '🟡'
+  },
+  COMPLETE: {
+    label: 'Complete',
+    bgColor: 'bg-green-50',
+    borderColor: 'border-green-200',
+    textColor: 'text-green-700',
+    iconColor: 'text-green-600',
+    iconBg: 'bg-green-100',
+    dot: '🟢'
+  }
+};
+
+// Determine blocker severity based on gate status
+const getBlockerSeverity = (blocker, gateData) => {
+  // Check if there's evidence uploaded but not verified
+  const hasUploaded = gateData?.has_uploaded || blocker.has_evidence;
+  const isPending = gateData?.status === 'pending' || 
+                    gateData?.status === 'uploaded' ||
+                    gateData?.status === 'under_review' ||
+                    blocker.status === 'pending';
+  
+  if (hasUploaded || isPending) {
+    return 'PENDING';
+  }
+  
+  // Default to critical for missing items
+  return 'CRITICAL';
 };
 
 const getBlockerIcon = (blockerKey) => {
@@ -252,7 +304,7 @@ export default function ConsolidatedStatusPanel({
         </CardContent>
       </Card>
 
-      {/* BLOCKING ITEMS - ONE LIST */}
+      {/* BLOCKING ITEMS - ONE LIST WITH COLOR CODING */}
       {blockers.length > 0 && (
         <Card className="border border-gray-200 shadow-sm">
           <CardHeader className="py-3 px-4 bg-red-50/50 border-b border-red-100">
@@ -260,11 +312,18 @@ export default function ConsolidatedStatusPanel({
               <XCircle className="h-5 w-5" />
               WHAT'S BLOCKING PROMOTION ({blockers.length} items)
             </CardTitle>
+            <p className="text-xs text-gray-600 mt-1">
+              🔴 Critical = Missing/Unverified &nbsp;|&nbsp; 🟡 Pending = Awaiting Verification
+            </p>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-gray-100">
               {blockers.map((blocker, idx) => {
                 const Icon = getBlockerIcon(blocker.gate);
+                const gateData = gates.gates?.[blocker.gate];
+                const severity = getBlockerSeverity(blocker, gateData);
+                const severityConfig = BLOCKER_SEVERITY[severity];
+                
                 const getAction = () => {
                   if (blocker.gate?.includes('reference')) return { label: 'Review', tab: 'references' };
                   if (blocker.gate?.includes('interview')) return { label: 'Complete', tab: 'forms' };
@@ -273,23 +332,48 @@ export default function ConsolidatedStatusPanel({
                   if (blocker.gate?.includes('health')) return { label: 'Send to Worker', tab: 'forms' };
                   if (blocker.gate?.includes('training')) return { label: 'View Training', tab: 'training' };
                   if (blocker.gate?.includes('gaps')) return { label: 'Review Gaps', tab: 'employment' };
-                  return { label: 'View', tab: 'compliance' };
+                  return { label: severity === 'PENDING' ? 'Verify' : 'View', tab: 'compliance' };
                 };
                 const action = getAction();
 
                 return (
                   <div 
                     key={idx} 
-                    className="flex items-center justify-between px-4 py-3 hover:bg-gray-50"
+                    className={cn(
+                      "flex items-center justify-between px-4 py-3 hover:bg-gray-50",
+                      severityConfig.bgColor
+                    )}
+                    data-testid={`blocker-item-${idx}`}
+                    data-severity={severity}
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center">
-                        <Icon className="h-4 w-4 text-red-600" />
+                      <div className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center",
+                        severityConfig.iconBg
+                      )}>
+                        <Icon className={cn("h-4 w-4", severityConfig.iconColor)} />
                       </div>
                       <div>
-                        <p className="font-medium text-gray-800">{blocker.label}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">{severityConfig.dot}</span>
+                          <p className={cn("font-medium", severityConfig.textColor)}>
+                            {blocker.label}
+                          </p>
+                          <Badge 
+                            variant="outline" 
+                            className={cn(
+                              "text-[10px] px-1.5 py-0 h-4",
+                              severity === 'CRITICAL' ? 'border-red-300 text-red-600' : 'border-amber-300 text-amber-600'
+                            )}
+                          >
+                            {severityConfig.label}
+                          </Badge>
+                        </div>
                         <p className="text-sm text-gray-500">
-                          {gates.gates?.[blocker.gate]?.requirement || 'Required for promotion'}
+                          {severity === 'PENDING' 
+                            ? 'Uploaded - awaiting admin verification'
+                            : (gateData?.requirement || 'Required for promotion')
+                          }
                         </p>
                       </div>
                     </div>
@@ -297,7 +381,11 @@ export default function ConsolidatedStatusPanel({
                       size="sm"
                       variant="outline"
                       onClick={() => onNavigateToTab?.(action.tab)}
-                      className="text-red-600 border-red-200 hover:bg-red-50"
+                      className={cn(
+                        severity === 'CRITICAL' 
+                          ? "text-red-600 border-red-200 hover:bg-red-50"
+                          : "text-amber-600 border-amber-200 hover:bg-amber-50"
+                      )}
                     >
                       {action.label}
                       <ChevronRight className="h-3.5 w-3.5 ml-1" />

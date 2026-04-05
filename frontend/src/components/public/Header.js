@@ -67,25 +67,25 @@ export default function Header() {
                 Staff Login
               </Button>
             </Link>
-            <Link to="/apply">
+            <Link to="/contact">
               <Button 
                 className="bg-primary hover:bg-primary-hover text-white rounded-full px-6"
-                data-testid="apply-now-btn"
+                data-testid="request-staffing-btn"
               >
-                Apply Now
+                Request Staffing
               </Button>
             </Link>
           </div>
 
           {/* Mobile Menu */}
           <div className="lg:hidden flex items-center gap-2">
-            <Link to="/apply">
+            <Link to="/contact">
               <Button 
                 size="sm" 
                 className="bg-primary hover:bg-primary-hover text-white rounded-full"
-                data-testid="mobile-apply-btn"
+                data-testid="mobile-staffing-btn"
               >
-                Apply
+                Get Staff
               </Button>
             </Link>
             <Sheet open={isOpen} onOpenChange={setIsOpen}>

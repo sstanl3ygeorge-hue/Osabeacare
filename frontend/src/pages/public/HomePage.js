@@ -5,32 +5,72 @@ import { Button } from '../../components/ui/button';
 import { 
   BadgeCheck, GraduationCap, FileCheck, HeartHandshake, 
   UserPlus, ShieldCheck, ClipboardList, BriefcaseMedical,
-  ArrowRight, CheckCircle, ShieldAlert, Users, Clock, Award
+  ArrowRight, CheckCircle, ShieldAlert, Users, Clock, Award,
+  Building2, Phone, FileText, UserCheck, CalendarCheck, Shield
 } from 'lucide-react';
 
-const whyChooseUs = [
-  {
-    icon: ShieldAlert,
-    title: 'Safer Recruitment',
-    description: 'DBS, right to work, identity verification and reference checks - documented and reviewed before any placement.'
+// Trust indicators for care homes
+const trustIndicators = [
+  { icon: Users, value: '500+', label: 'Staff Placed' },
+  { icon: Building2, value: '50+', label: 'Care Homes Served' },
+  { icon: Award, value: '10+', label: 'Years Experience' },
+  { icon: Shield, value: '100%', label: 'CQC Compliant' }
+];
+
+// How it works for care homes
+const howItWorks = [
+  { 
+    step: 1, 
+    icon: Phone, 
+    title: 'Tell Us Your Needs', 
+    description: 'Share your staffing requirements - role, shifts, location and any specific care needs.' 
   },
-  {
-    icon: ClipboardList,
-    title: 'Accountable Onboarding',
-    description: 'Structured induction, mandatory training records and compliance checks before staff are deployed.'
+  { 
+    step: 2, 
+    icon: UserCheck, 
+    title: 'We Find Compliant Staff', 
+    description: 'We match you with DBS-checked, trained professionals from our vetted pool.' 
   },
-  {
-    icon: FileCheck,
-    title: 'Audit-Ready Records',
-    description: 'Digital compliance files with verification status, document expiry tracking and policy acknowledgements.'
+  { 
+    step: 3, 
+    icon: ClipboardList, 
+    title: 'You Review & Approve', 
+    description: 'Review candidate profiles and compliance files before confirming placement.' 
   },
-  {
-    icon: HeartHandshake,
-    title: 'Quality-Focused Care',
-    description: 'We prioritise dignity, professionalism and continuity - supporting both care providers and the people they serve.'
+  { 
+    step: 4, 
+    icon: CalendarCheck, 
+    title: 'Staff Deployed', 
+    description: 'Fully compliant staff start when you need them - no delays, no gaps.' 
+  },
+  { 
+    step: 5, 
+    icon: FileCheck, 
+    title: 'Ongoing Compliance', 
+    description: 'We track expiry dates, handle renewals and keep records audit-ready.' 
   }
 ];
 
+// Why care homes trust us
+const whyTrustUs = [
+  {
+    icon: FileCheck,
+    title: 'Audit-Ready Records',
+    description: 'Digital compliance files for every staff member with verification status and expiry tracking.'
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Full Compliance',
+    description: 'DBS, Right to Work, References and mandatory training verified before any placement.'
+  },
+  {
+    icon: Clock,
+    title: 'Fast Placement',
+    description: 'Fully vetted, compliant staff ready to deploy when you need them - no waiting.'
+  }
+];
+
+// Services offered
 const services = [
   'Mental Health Support',
   'Learning Disabilities',
@@ -42,32 +82,28 @@ const services = [
   'Waking & Overnight Care'
 ];
 
-const recruitmentSteps = [
-  { icon: UserPlus, title: 'Application & Screening', description: 'Applications reviewed for experience, suitability and role fit.' },
-  { icon: BadgeCheck, title: 'Identity & Eligibility', description: 'Right to work documents verified and identity confirmed.' },
-  { icon: ShieldCheck, title: 'DBS & References', description: 'Enhanced DBS checks and professional references obtained and reviewed.' },
-  { icon: ClipboardList, title: 'Interview & Assessment', description: 'Structured interviews with competency and values-based questions.' },
-  { icon: GraduationCap, title: 'Mandatory Training', description: 'Core training completed: safeguarding, manual handling, infection control.' },
-  { icon: FileCheck, title: 'Compliance Review', description: 'Full file reviewed for completeness, verification and audit readiness.' },
-  { icon: BriefcaseMedical, title: 'Safe to Deploy', description: 'Only fully compliant staff are cleared for care placements.' }
+// Testimonials from care homes
+const testimonials = [
+  {
+    quote: "Osabea provides us with reliable, fully-vetted staff. Their compliance records are always ready for inspection.",
+    author: "Care Home Manager",
+    company: "Supported Living Provider, London"
+  },
+  {
+    quote: "The recruitment process is thorough. We've never had compliance issues with any of their staff.",
+    author: "Operations Director",
+    company: "Care Home Group, Midlands"
+  }
 ];
 
-const saferRecruitmentPillars = [
-  'Enhanced DBS checks with update service verification',
-  'Right to work verification with share code checks',
-  'Professional references from care sector employers',
-  'Employment history with gap explanations',
-  'Structured interviews with competency assessment',
-  'Mandatory training before placement'
-];
-
+// Compliance features
 const complianceFeatures = [
-  'Digital employee compliance files',
-  'Document verification and approval workflow',
-  'Expiry tracking with automated alerts',
-  'Policy acknowledgement records',
-  'Training records with certificate storage',
-  'Read-only auditor access for inspections'
+  'Every candidate DBS checked and verified',
+  'Right to Work documented and stamped',
+  'Professional references confirmed',
+  'Mandatory training completed and tracked',
+  'Full compliance file available for inspection',
+  'Expiry tracking with automated renewals'
 ];
 
 export default function HomePage() {
@@ -75,44 +111,49 @@ export default function HomePage() {
     <div className="min-h-screen bg-[#F8FAFA]">
       <Header />
       
-      {/* Hero Section */}
+      {/* Hero Section - Care Home Focused */}
       <section className="relative overflow-hidden bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 lg:py-24">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div className="space-y-8">
               <div>
-                <span className="inline-block px-4 py-2 bg-accent text-primary text-sm font-medium rounded-full mb-6">
-                  Safer Recruitment & Care Staffing Partner
-                </span>
+                {/* CQC Compliant Badge */}
+                <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 text-green-700 text-sm font-medium rounded-full mb-6">
+                  <Shield className="h-4 w-4" />
+                  CQC Compliant Staffing Agency
+                </div>
                 <h1 className="font-heading text-4xl sm:text-5xl lg:text-6xl font-bold text-text-primary tracking-tight leading-tight">
-                  Safeguarded staffing for <span className="text-primary">quality care delivery</span>
+                  Fully Compliant Care Staff - <span className="text-primary">Ready When You Need Them</span>
                 </h1>
               </div>
               <p className="text-lg text-text-muted leading-relaxed max-w-xl">
-                Osabea Healthcare Solutions provides care providers with thoroughly vetted, compliant professionals through a structured safer recruitment process - supporting quality, continuity and accountability in care.
+                We provide thoroughly vetted, CQC-ready healthcare professionals to care homes and supported living services across the UK.
               </p>
+              
+              {/* Trust badges - key compliance points */}
+              <div className="grid grid-cols-2 gap-3">
+                {complianceFeatures.slice(0, 4).map((feature, idx) => (
+                  <div key={idx} className="flex items-center gap-2 text-sm text-text-primary">
+                    <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0" />
+                    <span>{feature}</span>
+                  </div>
+                ))}
+              </div>
+              
+              {/* CTAs - Care Home Primary */}
               <div className="flex flex-col sm:flex-row gap-4">
-                <Link to="/apply">
-                  <Button size="lg" className="bg-primary hover:bg-primary-hover text-white rounded-full px-8 h-14 text-base" data-testid="hero-apply-btn">
-                    Apply to Join Our Team
+                <Link to="/contact">
+                  <Button size="lg" className="bg-primary hover:bg-primary-hover text-white rounded-full px-8 h-14 text-base" data-testid="hero-staffing-btn">
+                    Request Staffing Support
                     <ArrowRight className="ml-2 h-5 w-5" />
                   </Button>
                 </Link>
-                <Link to="/contact">
-                  <Button size="lg" variant="outline" className="border-[#E4E8EB] hover:bg-[#F8FAFA] rounded-full px-8 h-14 text-base" data-testid="hero-contact-btn">
-                    Request Staffing Support
+                <a href="/compliance-guide.pdf" target="_blank" rel="noopener noreferrer">
+                  <Button size="lg" variant="outline" className="border-[#E4E8EB] hover:bg-[#F8FAFA] rounded-full px-8 h-14 text-base" data-testid="hero-guide-btn">
+                    <FileText className="mr-2 h-5 w-5" />
+                    Download Compliance Guide
                   </Button>
-                </Link>
-              </div>
-              
-              {/* Trust badges */}
-              <div className="flex flex-wrap gap-4 pt-4">
-                {['DBS Verified', 'Right to Work Checked', 'References Confirmed', 'Training Tracked'].map((badge) => (
-                  <div key={badge} className="flex items-center gap-2 text-sm text-text-muted">
-                    <CheckCircle className="h-4 w-4 text-success" />
-                    <span>{badge}</span>
-                  </div>
-                ))}
+                </a>
               </div>
             </div>
             
@@ -129,23 +170,40 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Why Choose Us - Repositioned */}
+      {/* Trust Indicators - Stats Bar */}
+      <section className="py-12 bg-secondary">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+            {trustIndicators.map((stat, idx) => (
+              <div key={idx} className="text-center" data-testid={`stat-${idx}`}>
+                <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mx-auto mb-3">
+                  <stat.icon className="h-6 w-6 text-white" />
+                </div>
+                <div className="text-3xl font-bold text-white mb-1">{stat.value}</div>
+                <div className="text-sm text-white/70">{stat.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Why Care Homes Trust Us */}
       <section className="py-20 lg:py-28">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
-              Why care providers trust Osabea
+              Why Care Homes Trust Osabea
             </h2>
             <p className="text-lg text-text-muted">
-              We deliver staffing support built around governance, safeguarding and accountability - ensuring every placement meets the standards expected in regulated care.
+              We understand what CQC inspectors look for. Every placement comes with complete, verified documentation.
             </p>
           </div>
           
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {whyChooseUs.map((item, idx) => (
-              <div key={idx} className="card-public group" data-testid={`why-card-${idx}`}>
-                <div className="w-14 h-14 bg-accent rounded-2xl flex items-center justify-center mb-6 group-hover:bg-primary transition-colors">
-                  <item.icon className="h-7 w-7 text-primary group-hover:text-white transition-colors" />
+          <div className="grid md:grid-cols-3 gap-8">
+            {whyTrustUs.map((item, idx) => (
+              <div key={idx} className="card-public group text-center" data-testid={`trust-card-${idx}`}>
+                <div className="w-16 h-16 bg-accent rounded-2xl flex items-center justify-center mb-6 mx-auto group-hover:bg-primary transition-colors">
+                  <item.icon className="h-8 w-8 text-primary group-hover:text-white transition-colors" />
                 </div>
                 <h3 className="font-heading text-xl font-semibold text-text-primary mb-3">{item.title}</h3>
                 <p className="text-text-muted leading-relaxed">{item.description}</p>
@@ -155,49 +213,44 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Safer Recruitment Section - NEW */}
+      {/* How It Works - For Care Homes */}
       <section className="py-20 lg:py-28 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <ShieldAlert className="h-6 w-6 text-primary" />
-                <span className="text-primary font-medium">Safer Recruitment</span>
-              </div>
-              <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-text-primary mb-6">
-                Thorough checks before any placement
-              </h2>
-              <p className="text-lg text-text-muted mb-8">
-                Every candidate goes through a structured recruitment process with documented checks at each stage. We do not deploy staff until their compliance file is complete and verified.
-              </p>
-              
-              <ul className="space-y-4 mb-8">
-                {saferRecruitmentPillars.map((item, idx) => (
-                  <li key={idx} className="flex items-start gap-3">
-                    <div className="w-6 h-6 bg-support-accent rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <CheckCircle className="h-4 w-4 text-success" />
-                    </div>
-                    <span className="text-text-primary">{item}</span>
-                  </li>
-                ))}
-              </ul>
-              
-              <Link to="/apply">
-                <Button className="bg-primary hover:bg-primary-hover text-white rounded-full" data-testid="safer-recruitment-cta">
-                  Start Your Application
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
-            </div>
+          <div className="text-center max-w-3xl mx-auto mb-16">
+            <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
+              How It Works
+            </h2>
+            <p className="text-lg text-text-muted">
+              From your first call to ongoing compliance management - we handle everything.
+            </p>
+          </div>
+          
+          <div className="relative">
+            {/* Connection line */}
+            <div className="hidden lg:block absolute top-12 left-[10%] right-[10%] h-0.5 bg-[#E4E8EB]"></div>
             
-            <div className="relative">
-              <div className="absolute -top-4 -right-4 w-32 h-32 bg-accent rounded-full blur-2xl opacity-60"></div>
-              <img
-                src="https://images.pexels.com/photos/7176026/pexels-photo-7176026.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
-                alt="Document verification and compliance review"
-                className="relative rounded-3xl shadow-lg w-full object-cover aspect-square"
-              />
+            <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-8 lg:gap-4">
+              {howItWorks.map((step, idx) => (
+                <div key={idx} className="relative text-center" data-testid={`step-${step.step}`}>
+                  {/* Step number */}
+                  <div className="relative z-10 w-24 h-24 bg-white border-2 border-[#E4E8EB] rounded-2xl flex flex-col items-center justify-center mx-auto mb-4 group-hover:border-primary transition-colors">
+                    <step.icon className="h-8 w-8 text-primary mb-1" />
+                    <span className="text-xs font-bold text-primary">STEP {step.step}</span>
+                  </div>
+                  <h3 className="font-heading font-semibold text-text-primary mb-2">{step.title}</h3>
+                  <p className="text-sm text-text-muted">{step.description}</p>
+                </div>
+              ))}
             </div>
+          </div>
+          
+          <div className="text-center mt-12">
+            <Link to="/contact">
+              <Button size="lg" className="bg-primary hover:bg-primary-hover text-white rounded-full px-8" data-testid="how-it-works-cta">
+                Get Started Today
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </Button>
+            </Link>
           </div>
         </div>
       </section>
@@ -208,14 +261,14 @@ export default function HomePage() {
           <div className="grid lg:grid-cols-2 gap-12 items-start">
             <div>
               <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
-                Care services we support
+                Care Services We Support
               </h2>
               <p className="text-lg text-text-muted mb-8">
-                We provide staffing for a range of care settings - from supported living and complex care to respite and mental health services. Our focus is on continuity, reliability and quality.
+                We provide staffing for a range of care settings - from supported living and complex care to respite and mental health services.
               </p>
               <Link to="/services">
                 <Button className="bg-primary hover:bg-primary-hover text-white rounded-full" data-testid="view-services-btn">
-                  View all services
+                  View All Services
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </Link>
@@ -223,7 +276,7 @@ export default function HomePage() {
             
             <div className="grid sm:grid-cols-2 gap-4">
               {services.map((service, idx) => (
-                <div key={idx} className="bg-white rounded-2xl p-5 border border-[#E4E8EB] hover:border-primary/30 transition-colors">
+                <div key={idx} className="bg-white rounded-2xl p-5 border border-[#E4E8EB] hover:border-primary/30 hover:shadow-sm transition-all">
                   <h3 className="font-heading font-medium text-text-primary">{service}</h3>
                 </div>
               ))}
@@ -232,44 +285,34 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Recruitment Process */}
+      {/* Testimonials */}
       <section className="py-20 lg:py-28 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-16">
             <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-text-primary mb-4">
-              Our recruitment and onboarding pathway
+              What Care Homes Say
             </h2>
-            <p className="text-lg text-text-muted">
-              Every candidate follows a structured process - reviewed, documented and verified before they are cleared to work.
-            </p>
           </div>
           
-          <div className="relative">
-            {/* Timeline line */}
-            <div className="hidden lg:block absolute top-1/2 left-0 right-0 h-0.5 bg-[#E4E8EB] -translate-y-1/2"></div>
-            
-            <div className="grid sm:grid-cols-2 lg:grid-cols-7 gap-6 lg:gap-4">
-              {recruitmentSteps.map((step, idx) => (
-                <div key={idx} className="relative text-center group">
-                  <div className="lg:absolute lg:left-1/2 lg:-translate-x-1/2 bg-white w-16 h-16 rounded-2xl border-2 border-[#E4E8EB] flex items-center justify-center mb-4 mx-auto group-hover:border-primary transition-colors">
-                    <step.icon className="h-7 w-7 text-primary" />
-                  </div>
-                  <div className="lg:pt-24">
-                    <h3 className="font-heading font-medium text-text-primary mb-2">{step.title}</h3>
-                    <p className="text-sm text-text-muted">{step.description}</p>
-                  </div>
+          <div className="grid md:grid-cols-2 gap-8">
+            {testimonials.map((testimonial, idx) => (
+              <div key={idx} className="bg-[#F8FAFA] rounded-3xl p-8 border border-[#E4E8EB]" data-testid={`testimonial-${idx}`}>
+                <p className="text-lg text-text-primary italic mb-6">"{testimonial.quote}"</p>
+                <div>
+                  <p className="font-semibold text-text-primary">{testimonial.author}</p>
+                  <p className="text-sm text-text-muted">{testimonial.company}</p>
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Compliance & Governance Section */}
+      {/* Compliance & Documentation Section */}
       <section className="py-20 lg:py-28">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div className="order-2 lg:order-1 relative">
+            <div className="relative">
               <div className="absolute -top-4 -left-4 w-32 h-32 bg-support-accent rounded-full blur-2xl opacity-60"></div>
               <img
                 src="https://images.pexels.com/photos/7511751/pexels-photo-7511751.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
@@ -278,23 +321,23 @@ export default function HomePage() {
               />
             </div>
             
-            <div className="order-1 lg:order-2">
+            <div>
               <div className="flex items-center gap-2 mb-4">
                 <Award className="h-6 w-6 text-primary" />
-                <span className="text-primary font-medium">Compliance & Governance</span>
+                <span className="text-primary font-medium">CQC Ready Documentation</span>
               </div>
               <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-text-primary mb-6">
-                Audit-ready records for inspection confidence
+                Inspection-Ready Records for Every Staff Member
               </h2>
               <p className="text-lg text-text-muted mb-8">
-                We maintain digital compliance files for every staff member with clear verification status, document expiry tracking and policy acknowledgements. Our records are organised for CQC and regulatory review.
+                We maintain digital compliance files with clear verification status, document stamps and expiry tracking. Our records are organised for CQC and regulatory review.
               </p>
               
               <ul className="space-y-4 mb-8">
                 {complianceFeatures.map((item, idx) => (
                   <li key={idx} className="flex items-center gap-3">
-                    <div className="w-6 h-6 bg-support-accent rounded-full flex items-center justify-center flex-shrink-0">
-                      <CheckCircle className="h-4 w-4 text-success" />
+                    <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
                     </div>
                     <span className="text-text-primary">{item}</span>
                   </li>
@@ -303,7 +346,7 @@ export default function HomePage() {
               
               <Link to="/contact">
                 <Button className="bg-primary hover:bg-primary-hover text-white rounded-full" data-testid="compliance-cta-btn">
-                  Speak to our team
+                  Request a Compliance Pack
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </Link>
@@ -312,26 +355,50 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* CTA Band */}
+      {/* Join Our Team Section - Secondary for Workers */}
+      <section className="py-16 bg-[#F8FAFA] border-t border-[#E4E8EB]">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="bg-white rounded-3xl p-8 lg:p-12 border border-[#E4E8EB] text-center">
+            <div className="w-14 h-14 bg-accent rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <UserPlus className="h-7 w-7 text-primary" />
+            </div>
+            <h2 className="font-heading text-2xl sm:text-3xl font-semibold text-text-primary mb-4">
+              Looking for Care Work?
+            </h2>
+            <p className="text-text-muted mb-6 max-w-xl mx-auto">
+              We're always looking for dedicated healthcare assistants to join our team. Competitive rates, flexible shifts and full compliance support.
+            </p>
+            <Link to="/apply">
+              <Button variant="outline" className="border-primary text-primary hover:bg-primary hover:text-white rounded-full px-8" data-testid="join-team-btn">
+                Apply to Join Our Team
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Final CTA - Care Home Focused */}
       <section className="py-20 lg:py-28 bg-secondary">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="font-heading text-3xl sm:text-4xl font-semibold text-white mb-4">
-            Need compliant care staff or looking to join our team?
+            Ready for Compliant Care Staffing?
           </h2>
           <p className="text-lg text-white/80 mb-8">
-            Whether you need dependable, safeguarded care professionals or want to apply for care work with a provider that values quality and governance.
+            Get in touch today. We'll discuss your needs and show you how our compliant staff can support your care home.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link to="/contact">
               <Button size="lg" className="bg-white text-secondary hover:bg-white/90 rounded-full px-8 h-14" data-testid="cta-staffing-btn">
+                <Phone className="mr-2 h-5 w-5" />
                 Request Staffing Support
               </Button>
             </Link>
-            <Link to="/apply">
-              <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10 rounded-full px-8 h-14" data-testid="cta-apply-btn">
-                Start Your Application
+            <a href="tel:+441onal" className="inline-flex">
+              <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10 rounded-full px-8 h-14" data-testid="cta-call-btn">
+                Book a Call
               </Button>
-            </Link>
+            </a>
           </div>
         </div>
       </section>

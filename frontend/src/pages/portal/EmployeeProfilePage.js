@@ -26,6 +26,7 @@ import EnhancedTrainingTab from '../../components/training/EnhancedTrainingTab';
 import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
 import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
+import CompetencyAssessmentsPanel from '../../components/compliance/CompetencyAssessmentsPanel';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
 import EditEmploymentHistoryDialog from '../../components/admin/EditEmploymentHistoryDialog';
@@ -3697,6 +3698,10 @@ export default function EmployeeProfilePage() {
             <History className="h-4 w-4 mr-2" />
             Audit
           </TabsTrigger>
+          <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <ClipboardCheck className="h-4 w-4 mr-2" />
+            Competencies
+          </TabsTrigger>
         </TabsList>
 
         {/* ========== TAB 1: WORK READINESS ========== */}
@@ -4133,6 +4138,18 @@ export default function EmployeeProfilePage() {
                 referee_relationship: refData.relationship
               });
               setEditReferenceOpen(true);
+            }}
+          />
+        </TabsContent>
+
+        {/* ========== TAB: COMPETENCIES ========== */}
+        <TabsContent value="competencies">
+          <CompetencyAssessmentsPanel
+            employeeId={employeeId}
+            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            onRefresh={() => {
+              fetchComplianceFile();
+              fetchRecruitmentStatus();
             }}
           />
         </TabsContent>

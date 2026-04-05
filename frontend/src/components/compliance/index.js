@@ -83,3 +83,6 @@ export {
   ComplianceBreakdownCard,
   PROGRESS_METRICS 
 } from './LabeledProgressMetrics';
+
+// Competency Assessments Panel (CQC Compliant)
+export { default as CompetencyAssessmentsPanel } from './CompetencyAssessmentsPanel';

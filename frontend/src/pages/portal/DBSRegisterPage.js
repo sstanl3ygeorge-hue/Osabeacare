@@ -267,13 +267,13 @@ export default function DBSRegisterPage() {
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
                           <span className={`text-sm ${
-                            item.days_until_review !== null && item.days_until_review < 0 ? 'text-red-600 font-medium' :
-                            item.days_until_review !== null && item.days_until_review <= 30 ? 'text-amber-600 font-medium' :
+                            item.days_until_review != null && item.days_until_review < 0 ? 'text-red-600 font-medium' :
+                            item.days_until_review != null && item.days_until_review <= 30 ? 'text-amber-600 font-medium' :
                             'text-text-primary'
                           }`}>
-                            {formatDate(item.next_dbs_review_due)}
+                            {item.next_dbs_review_due ? formatDate(item.next_dbs_review_due) : 'Not set'}
                           </span>
-                          {item.days_until_review !== null && (
+                          {item.days_until_review != null && item.days_until_review !== undefined && (
                             <span className={`text-xs ${
                               item.days_until_review < 0 ? 'text-red-500' :
                               item.days_until_review <= 30 ? 'text-amber-500' :

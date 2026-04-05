@@ -24,8 +24,7 @@ import TrainingRequestDialog from '../../components/training/TrainingRequestDial
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
 import EnhancedTrainingTab from '../../components/training/EnhancedTrainingTab';
 import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
-import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
-import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
+import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import UnifiedProgressSection from '../../components/admin/UnifiedProgressSection';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
@@ -3634,62 +3633,23 @@ export default function EmployeeProfilePage() {
         </CardContent>
       </Card>
 
-      {/* RECRUITMENT APPROVAL PANEL - Show for applicants before tabs */}
-      {employee?.person_stage === 'applicant' && !employee?.recruitment_approved && (
-        <>
-          {/* Next Steps Panel REMOVED - All actions now inside compliance requirement cards */}
-          
-          <div className="mb-6">
-            <RecruitmentApprovalPanel
-            employeeId={employee.id}
-            employeeName={`${employee.first_name} ${employee.last_name}`}
-            role={employee.role}
-            stageIdentity={employee.person_stage}
-            onApprovalSuccess={(result) => {
-              // Refresh employee data
-              toast.success(`${employee.first_name} ${employee.last_name} has been approved for recruitment!`);
-              // Update local state
-              setEmployee(prev => ({
-                ...prev,
-                recruitment_approved: true,
-                status: 'onboarding',
-                employee_code: result.employee_code,
-                person_stage: 'employee'
-              }));
-              // Navigate to employee view
-              navigate(`/portal/employees/${employee.id}`);
-            }}
-            onNavigateToRequirement={(requirementKey, section) => {
-              // Navigate to compliance tab
-              setActiveTab('checklist');
-              toast.info(`Navigate to: ${requirementKey.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase())}`);
-            }}
-          />
-          </div>
-        </>
-      )}
-
-      {/* WORK READINESS PANEL (GATE 2) - Show for approved employees */}
-      {employee?.recruitment_approved && (
-        <div className="mb-6">
-          <WorkReadinessPanel
-            employeeId={employee.id}
-            employeeName={`${employee.first_name} ${employee.last_name}`}
-            role={employee.role}
-            stageIdentity={employee.person_stage}
-            recruitmentApproved={employee.recruitment_approved}
-            onNavigateToRequirement={(requirementKey, section) => {
-              // Navigate to compliance or training tab based on section
-              if (section === 'training') {
-                setActiveTab('training');
-              } else {
-                setActiveTab('checklist');
-              }
-              toast.info(`Navigate to: ${requirementKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}`);
-            }}
-          />
-        </div>
-      )}
+      {/* CONSOLIDATED STATUS PANEL - Single source of truth */}
+      <div className="mb-6">
+        <ConsolidatedStatusPanel
+          employeeId={employee?.id}
+          employeeName={`${employee?.first_name} ${employee?.last_name}`}
+          role={employee?.role}
+          personStage={employee?.person_stage}
+          recruitmentApproved={employee?.recruitment_approved}
+          onNavigateToTab={(tab) => {
+            setActiveTab(tab === 'compliance' ? 'checklist' : tab);
+          }}
+          onRefresh={() => {
+            fetchEmployee();
+            fetchComplianceFile();
+          }}
+        />
+      </div>
 
       {/* Tabs - 7 Section Structure */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">

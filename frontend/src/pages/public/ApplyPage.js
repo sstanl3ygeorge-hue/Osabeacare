@@ -15,10 +15,13 @@ import axios from 'axios';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const roles = [
+  'Healthcare Assistant',
+  'Senior Healthcare Assistant',
+  'Nurse (Registered)',
+  'Senior Nurse',
   'Care Assistant',
   'Senior Care Assistant',
   'Support Worker',
-  'Healthcare Assistant',
   'Live-in Carer',
   'Night Carer',
   'Team Leader',

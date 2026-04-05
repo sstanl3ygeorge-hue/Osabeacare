@@ -614,13 +614,32 @@ export default function WorkerDashboard() {
         {!isActiveEmployee && missing_trainings?.length > 0 && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <FileText className="h-5 w-5 text-amber-500" />
-                Training Certificates Needed
-              </CardTitle>
-              <p className="text-xs text-slate-500 mt-1">
-                AI will automatically extract training name, completion date, and expiry date from your certificates
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <FileText className="h-5 w-5 text-amber-500" />
+                    Training Certificates Needed
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    AI will automatically extract training name, completion date, and expiry date from your certificates
+                  </p>
+                </div>
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  onClick={() => triggerFileInput('training_bulk')}
+                  disabled={uploading === 'training_bulk'}
+                  className="gap-1.5"
+                  data-testid="bulk-upload-training-btn"
+                >
+                  {uploading === 'training_bulk' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4" />
+                  )}
+                  Bulk Upload
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">

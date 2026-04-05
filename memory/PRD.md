@@ -602,5 +602,30 @@ Training certificates often contain 40+ training items in a single document (e.g
 
 ---
 
+## COMPLETED: Pre-Employment Gates (12 Requirements) (April 2026)
+
+### Gate Requirements
+1. Interview Record completed
+2. Contract signed  
+3. DBS verified + stamped
+4. Right to Work verified + stamped
+5. Identity verified + stamped
+6. Proof of Address (2 documents) verified + stamped
+7. Reference 1 verified
+8. Reference 2 verified
+9. Induction Checklist complete (14 items)
+10. Mandatory Training complete + not expired (6 items)
+11. Health Questionnaire completed
+12. Employment gaps explained
+
+For Nurse role: 13th requirement - NMC registration verified
+
+### Implementation
+- `work_readiness_engine.py`: `can_promote_to_active()` enforces all 12 gates
+- `server.py`: `GET /api/employees/{id}/pre-employment-gates` returns detailed status
+- Promotion button only enabled when ALL gates are ✅
+
+---
+
 ## Last Updated
-April 5, 2026 - CQC Compliance Overhaul Part 1 completed - removed Request button, added gap/mismatch reason dropdowns, enhanced audit trail, actionable task queue dashboard
+April 5, 2026 - Pre-employment gates updated to enforce 12 requirements before promotion

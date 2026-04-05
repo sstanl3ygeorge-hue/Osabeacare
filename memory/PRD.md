@@ -1009,5 +1009,54 @@ System already enforces 2 Proof of Address documents requirement:
 
 ---
 
+## COMPLETED: P2 Feature - Bulk PDF Import UI (April 5, 2026)
+
+### AI-Powered PDF Application Import
+
+**New Components:**
+- `BulkImportPanel.js` - Full import UI
+- `BulkImportPage.js` - Page wrapper
+- Sidebar navigation link at `/portal/bulk-import`
+
+**3-Step Workflow:**
+
+1. **Step 1: Upload PDF Applications**
+   - Drag & drop or click-to-upload
+   - Multiple PDF files supported
+   - File list with remove buttons
+   - "Extract Data from X PDFs" button with Sparkles icon
+
+2. **Step 2: Review Extracted Data**
+   - Table showing: File, Name, Email, Role, Confidence, Status
+   - Confidence badges: High (green), Medium (amber), Low (red)
+   - Edit button to correct extracted data
+   - Delete button to remove records
+   - Select/Deselect All functionality
+
+3. **Step 3: Import as Drafts**
+   - Creates employees with `send_magic_link=false`
+   - Shows import results with applicant reference numbers
+   - Link to Recruitment page for manual magic link sending
+
+**AI Extraction (Gemini 2.5 Flash):**
+- Personal details (name, email, phone, DOB, address, NI)
+- Role applied for
+- Employment history
+- References
+- Declarations (criminal, health, DBS consent)
+- Qualifications
+
+**Backend Endpoint:**
+- `POST /api/admin/employees/extract-from-pdf`
+- Uses emergentintegrations with EMERGENT_LLM_KEY
+- Returns structured JSON with confidence score
+
+### Test Results:
+- Backend: 100% (8/8 tests)
+- Frontend: 100% (all UI features verified)
+- Test report: `/app/test_reports/iteration_165.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - P2 Spot Checks UI completed
+April 5, 2026 - P2 Bulk PDF Import UI completed

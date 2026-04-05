@@ -948,5 +948,66 @@ System already enforces 2 Proof of Address documents requirement:
 
 ---
 
+## COMPLETED: P2 Feature - Spot Checks UI (April 5, 2026)
+
+### Full CQC-Compliant Spot Check & Observation Module
+
+**New Component:** `SpotChecksPanel.js`
+
+**Features Implemented:**
+
+1. **Spot Checks Tab** - New tab in Employee Profile (after Competencies tab)
+
+2. **Summary Stats Grid:**
+   - Pass (green)
+   - Needs Improvement (amber)
+   - Fail (red)
+   - Follow-ups Soon (orange when > 0)
+   - Follow-ups Due (red when > 0)
+
+3. **4 Check Types:**
+   - Direct Observation
+   - Document Review
+   - Competency Check
+   - Medication Check
+
+4. **7 Observation Areas:**
+   - Moving & Handling
+   - Medication Administration
+   - Record Keeping
+   - Communication
+   - Infection Control
+   - Dignity & Respect
+   - Safeguarding
+
+5. **Outcome Options:**
+   - Pass (green badge with checkmark)
+   - Needs Improvement (amber badge with warning)
+   - Fail (red badge with X)
+
+6. **Follow-up Tracking:**
+   - Optional follow-up required checkbox
+   - Follow-up date field (conditional)
+   - Amber highlight for due within 7 days
+   - Red highlight for overdue
+   - Soon/Due badges on table rows
+
+7. **Dialogs:**
+   - Record Spot Check (type, area, outcome, notes required min 5 chars, follow-up)
+   - Edit Spot Check (pre-filled data)
+
+8. **Backend Endpoints:**
+   - `GET /api/employees/{id}/spot-checks`
+   - `POST /api/employees/{id}/spot-checks`
+   - `PUT /api/employees/{id}/spot-checks/{id}` (NEW)
+   - `GET /api/spot-check-options`
+
+### Test Results:
+- Backend: 100% (14/14 tests)
+- Frontend: 100% (all UI features verified)
+- Test report: `/app/test_reports/iteration_164.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - P2 Competency Assessments UI completed
+April 5, 2026 - P2 Spot Checks UI completed

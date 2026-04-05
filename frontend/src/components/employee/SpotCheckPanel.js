@@ -12,7 +12,7 @@ import { Checkbox } from '../ui/checkbox';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { 
   ClipboardCheck, Plus, Loader2, RefreshCw, AlertCircle, 
-  CheckCircle, XCircle, Calendar, Eye, User
+  CheckCircle, XCircle, Calendar, Eye, User, Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -108,6 +108,40 @@ export default function SpotCheckPanel({ employeeId, employeeName, isAuditor = f
       toast.error(error.response?.data?.detail || 'Failed to record spot check');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const [downloading, setDownloading] = useState(null);
+
+  const handleDownloadPDF = async (checkId) => {
+    try {
+      setDownloading(checkId);
+      const token = localStorage.getItem('token');
+      
+      const response = await axios.get(
+        `${API}/employees/${employeeId}/spot-checks/${checkId}/download-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+      
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `spot_check_${employeeName?.replace(/\s+/g, '_') || 'employee'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Spot check PDF downloaded');
+    } catch (error) {
+      console.error('PDF download failed:', error);
+      toast.error('Failed to download PDF');
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -266,6 +300,20 @@ export default function SpotCheckPanel({ employeeId, employeeName, isAuditor = f
                         )}
                       </div>
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadPDF(check.id)}
+                      disabled={downloading === check.id}
+                      className="rounded-lg shrink-0"
+                      data-testid={`download-spot-check-${idx}`}
+                    >
+                      {downloading === check.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
                 </div>
               ))}

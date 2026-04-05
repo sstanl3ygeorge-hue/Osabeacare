@@ -46176,6 +46176,429 @@ async def get_spot_check_options(user: dict = Depends(get_current_user)):
     }
 
 
+
+# ========== ADMIN INTERNAL FORMS - INTERVIEW RECORD ==========
+
+class InterviewRecordRequest(BaseModel):
+    """Request model for creating/updating interview records"""
+    interview_date: str
+    interview_method: str  # phone, video, in_person
+    interviewer_name: Optional[str] = None  # Auto-filled from logged admin if not provided
+    communication_score: int  # 1-5
+    experience_score: int  # 1-5
+    values_score: int  # 1-5
+    availability: Optional[str] = None
+    strengths: Optional[str] = None
+    areas_for_development: Optional[str] = None
+    decision: str  # Approve, Reject, On Hold
+    notes: Optional[str] = None
+    is_draft: bool = False
+
+
+@api_router.get("/employees/{employee_id}/interview-records")
+async def get_interview_records(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get all interview records for an employee (admin only view)"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    records = await db.form_submissions.find({
+        "employee_id": employee_id,
+        "requirement_id": "interview_record"
+    }).sort("created_at", -1).to_list(50)
+    
+    formatted = []
+    for r in records:
+        r.pop("_id", None)
+        formatted.append(r)
+    
+    return {"records": formatted}
+
+
+@api_router.post("/employees/{employee_id}/interview-records")
+async def create_interview_record(
+    employee_id: str,
+    payload: InterviewRecordRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Create a new interview record (admin only)"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    record_id = f"interview_{uuid.uuid4().hex[:12]}"
+    
+    # Build form data
+    form_data = {
+        "interview_date": payload.interview_date,
+        "interview_method": payload.interview_method,
+        "interviewer_name": payload.interviewer_name or user.get('name', 'System Admin'),
+        "communication_score": payload.communication_score,
+        "experience_score": payload.experience_score,
+        "values_score": payload.values_score,
+        "availability": payload.availability,
+        "strengths": payload.strengths,
+        "areas_for_development": payload.areas_for_development,
+        "decision": payload.decision,
+        "notes": payload.notes,
+    }
+    
+    # Calculate average score
+    avg_score = round((payload.communication_score + payload.experience_score + payload.values_score) / 3, 1)
+    form_data["average_score"] = avg_score
+    
+    record = {
+        "id": record_id,
+        "employee_id": employee_id,
+        "requirement_id": "interview_record",
+        "form_type": "interview_record",
+        "form_data": form_data,
+        "data": form_data,  # Compatibility
+        "status": "draft" if payload.is_draft else "submitted",
+        "created_at": now,
+        "created_by": user['user_id'],
+        "created_by_name": user.get('name', 'System Admin'),
+        "submitted_at": None if payload.is_draft else now,
+        "submitted_by": None if payload.is_draft else user['user_id'],
+        "submitted_by_name": None if payload.is_draft else user.get('name', 'System Admin'),
+        "admin_only": True  # Never visible to workers
+    }
+    
+    await db.form_submissions.insert_one(record)
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "interview_record_created", "form_submissions", record_id, {
+        "employee_id": employee_id,
+        "decision": payload.decision,
+        "is_draft": payload.is_draft
+    })
+    
+    # If decision is Approve and not draft, could trigger next steps here
+    if not payload.is_draft and payload.decision == "Approve":
+        # Update employee status if needed
+        current_status = employee.get('status')
+        if current_status in ['new', 'screening', 'interview']:
+            await db.employees.update_one(
+                {"id": employee_id},
+                {"$set": {"status": "compliance_review", "updated_at": now}}
+            )
+    
+    record.pop("_id", None)
+    return {"success": True, "record": record}
+
+
+@api_router.put("/employees/{employee_id}/interview-records/{record_id}")
+async def update_interview_record(
+    employee_id: str,
+    record_id: str,
+    payload: InterviewRecordRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Update an existing interview record (admin only)"""
+    existing = await db.form_submissions.find_one({
+        "id": record_id,
+        "employee_id": employee_id,
+        "requirement_id": "interview_record"
+    })
+    
+    if not existing:
+        raise HTTPException(status_code=404, detail="Interview record not found")
+    
+    # Can only update if still in draft
+    if existing.get('status') == 'submitted' and not payload.is_draft:
+        # Allow updating submitted records but mark as revised
+        pass
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    form_data = {
+        "interview_date": payload.interview_date,
+        "interview_method": payload.interview_method,
+        "interviewer_name": payload.interviewer_name or user.get('name', 'System Admin'),
+        "communication_score": payload.communication_score,
+        "experience_score": payload.experience_score,
+        "values_score": payload.values_score,
+        "availability": payload.availability,
+        "strengths": payload.strengths,
+        "areas_for_development": payload.areas_for_development,
+        "decision": payload.decision,
+        "notes": payload.notes,
+        "average_score": round((payload.communication_score + payload.experience_score + payload.values_score) / 3, 1)
+    }
+    
+    update_data = {
+        "form_data": form_data,
+        "data": form_data,
+        "updated_at": now,
+        "updated_by": user['user_id'],
+        "updated_by_name": user.get('name', 'System Admin'),
+    }
+    
+    if existing.get('status') == 'draft' and not payload.is_draft:
+        # Submitting draft
+        update_data["status"] = "submitted"
+        update_data["submitted_at"] = now
+        update_data["submitted_by"] = user['user_id']
+        update_data["submitted_by_name"] = user.get('name', 'System Admin')
+    
+    await db.form_submissions.update_one(
+        {"id": record_id},
+        {"$set": update_data}
+    )
+    
+    await log_audit_action(user['user_id'], "interview_record_updated", "form_submissions", record_id, {
+        "employee_id": employee_id,
+        "decision": payload.decision
+    })
+    
+    return {"success": True, "message": "Interview record updated"}
+
+
+@api_router.get("/employees/{employee_id}/interview-records/{record_id}/download-pdf")
+async def download_interview_pdf(
+    employee_id: str,
+    record_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Download interview record as PDF with company logo"""
+    # Import PDF service
+    from services.pdf_service import generate_admin_form_pdf
+    
+    record = await db.form_submissions.find_one({
+        "id": record_id,
+        "employee_id": employee_id,
+        "requirement_id": "interview_record"
+    })
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Interview record not found")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    form_data = record.get('form_data', {}) or record.get('data', {})
+    
+    admin_data = {
+        "name": record.get('submitted_by_name') or record.get('created_by_name', 'System Admin')
+    }
+    
+    # Generate PDF
+    pdf_bytes = generate_admin_form_pdf(
+        form_type='interview_record',
+        form_data=form_data,
+        employee_data=employee,
+        admin_data=admin_data
+    )
+    
+    # Create filename
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"interview_record_{employee_name}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
+
+
+# ========== ADMIN INTERNAL FORMS - INDUCTION COMPLETION ==========
+
+class InductionCompletionRequest(BaseModel):
+    """Request model for submitting induction completion"""
+    start_date: str
+    completion_date: str
+    inductor_name: Optional[str] = None
+    checklist_items: List[dict] = []  # List of {name, completed, completed_date}
+    notes: Optional[str] = None
+    is_draft: bool = False
+
+
+@api_router.post("/employees/{employee_id}/induction-completion")
+async def submit_induction_completion(
+    employee_id: str,
+    payload: InductionCompletionRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Submit induction completion certificate (admin only)"""
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    submission_id = f"induction_{uuid.uuid4().hex[:12]}"
+    
+    form_data = {
+        "start_date": payload.start_date,
+        "completion_date": payload.completion_date,
+        "inductor_name": payload.inductor_name or user.get('name', 'System Admin'),
+        "checklist_items": payload.checklist_items,
+        "notes": payload.notes
+    }
+    
+    submission = {
+        "id": submission_id,
+        "employee_id": employee_id,
+        "requirement_id": "induction_checklist",
+        "form_type": "induction_checklist",
+        "form_data": form_data,
+        "data": form_data,
+        "status": "draft" if payload.is_draft else "submitted",
+        "created_at": now,
+        "created_by": user['user_id'],
+        "created_by_name": user.get('name', 'System Admin'),
+        "submitted_at": None if payload.is_draft else now,
+        "submitted_by": None if payload.is_draft else user['user_id'],
+        "submitted_by_name": None if payload.is_draft else user.get('name', 'System Admin'),
+        "admin_only": True
+    }
+    
+    await db.form_submissions.insert_one(submission)
+    
+    # Update induction checklist status if not draft
+    if not payload.is_draft:
+        await db.induction_checklists.update_one(
+            {"employee_id": employee_id},
+            {"$set": {
+                "overall_status": "completed",
+                "completed_at": now,
+                "completed_by": user['user_id'],
+                "completed_by_name": user.get('name', 'System Admin')
+            }},
+            upsert=True
+        )
+    
+    await log_audit_action(user['user_id'], "induction_completion_submitted", "form_submissions", submission_id, {
+        "employee_id": employee_id
+    })
+    
+    submission.pop("_id", None)
+    return {"success": True, "submission": submission}
+
+
+@api_router.get("/employees/{employee_id}/induction-completion/download-pdf")
+async def download_induction_pdf(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Download induction completion certificate as PDF"""
+    from services.pdf_service import generate_admin_form_pdf
+    
+    # Get latest induction submission
+    submission = await db.form_submissions.find_one(
+        {
+            "employee_id": employee_id,
+            "requirement_id": "induction_checklist",
+            "status": "submitted"
+        },
+        sort=[("submitted_at", -1)]
+    )
+    
+    if not submission:
+        # Fallback: build from induction checklist
+        checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+        if not checklist or checklist.get('overall_status') != 'completed':
+            raise HTTPException(status_code=404, detail="Induction not completed yet")
+        
+        form_data = {
+            "completion_date": checklist.get('completed_at', datetime.now(timezone.utc).isoformat()),
+            "inductor_name": checklist.get('completed_by_name', 'System Admin'),
+            "checklist_items": checklist.get('items', [])
+        }
+    else:
+        form_data = submission.get('form_data', {}) or submission.get('data', {})
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    admin_data = {
+        "name": form_data.get('inductor_name', 'System Admin')
+    }
+    
+    pdf_bytes = generate_admin_form_pdf(
+        form_type='induction_checklist',
+        form_data=form_data,
+        employee_data=employee,
+        admin_data=admin_data
+    )
+    
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"induction_certificate_{employee_name}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
+
+
+# ========== ADMIN INTERNAL FORMS - SPOT CHECK PDF ==========
+
+@api_router.get("/employees/{employee_id}/spot-checks/{check_id}/download-pdf")
+async def download_spotcheck_pdf(
+    employee_id: str,
+    check_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Download spot check record as PDF with company logo"""
+    from services.pdf_service import generate_admin_form_pdf
+    
+    check = await db.spot_checks.find_one({
+        "id": check_id,
+        "employee_id": employee_id
+    })
+    
+    if not check:
+        raise HTTPException(status_code=404, detail="Spot check not found")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    form_data = {
+        "date": check.get('date'),
+        "type": check.get('type'),
+        "area": check.get('area'),
+        "outcome": check.get('outcome'),
+        "notes": check.get('notes'),
+        "assessor_name": check.get('assessed_by_name'),
+        "follow_up_required": check.get('follow_up_required', False),
+        "follow_up_date": check.get('follow_up_date')
+    }
+    
+    admin_data = {
+        "name": check.get('assessed_by_name', 'System Admin')
+    }
+    
+    pdf_bytes = generate_admin_form_pdf(
+        form_type='spot_check',
+        form_data=form_data,
+        employee_data=employee,
+        admin_data=admin_data
+    )
+    
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"spot_check_{employee_name}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
+
+
+
 # ========== ADMIN TASK QUEUE ENDPOINT ==========
 
 @api_router.get("/admin/task-queue")

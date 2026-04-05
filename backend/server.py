@@ -96,6 +96,12 @@ from work_readiness_engine import (
     ROLE_WORK_REQUIREMENTS,
     get_work_readiness_label
 )
+from interview_questions import (
+    get_interview_questions_for_role,
+    get_role_interview_config,
+    get_role_requirements,
+    ROLE_REQUIREMENTS_SUMMARY
+)
 from poa_freshness_engine import (
     calculate_document_freshness,
     evaluate_poa_compliance,
@@ -1073,6 +1079,15 @@ MANDATORY_ITEMS = {
          "priority": "start_required", "priority_order": 9,
          "status_group": "start_status",
          "description": "NMC PIN card, registration letter",
+         "work_ready_hint": "Required before nurse can start work"},
+        
+        {"id": "professional_indemnity", "name": "Professional Indemnity Insurance", 
+         "category": "1_Legal_Safety", "type": "document", "source": "employee",
+         "document_types": ["professional_indemnity", "indemnity_insurance"],
+         "allow_multiple_files": True, "min_files": 1,
+         "priority": "start_required", "priority_order": 10,
+         "status_group": "start_status",
+         "description": "Professional indemnity insurance certificate (annual renewal)",
          "work_ready_hint": "Required before nurse can start work"},
         
         # ======== NURSE COMPETENCY & HEALTH ========
@@ -48020,6 +48035,77 @@ async def download_interview_pdf(
     )
 
 
+# ========== ROLE-SPECIFIC INTERVIEW QUESTIONS & REQUIREMENTS ==========
+
+@api_router.get("/roles/{role}/interview-questions")
+async def get_role_interview_questions(
+    role: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get role-specific interview questions.
+    
+    - Healthcare Assistant: 10 questions (adult care focused)
+    - Nurse: 16 questions (10 standard + 6 clinical)
+    
+    Note: Adults only - no children's safeguarding questions.
+    """
+    config = get_role_interview_config(role)
+    return {
+        "role": role,
+        "normalized_role": "nurse" if "nurse" in role.lower() else "healthcare_assistant",
+        "question_count": config["question_counts"]["total"],
+        "questions": config["questions"],
+        "scoring": config["scoring"]
+    }
+
+
+@api_router.get("/roles/{role}/requirements")
+async def get_role_requirements_endpoint(
+    role: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get complete requirements for a role.
+    
+    Returns:
+    - Professional registration requirements
+    - Mandatory training items
+    - Document requirements
+    - Interview question count
+    - Total gates for promotion
+    """
+    requirements = get_role_requirements(role)
+    is_nurse = "nurse" in role.lower()
+    
+    return {
+        "role": role,
+        "is_nurse_role": is_nurse,
+        "requirements": requirements,
+        "total_gates": 14 if is_nurse else 12,
+        "gates_breakdown": {
+            "base_gates": 12,
+            "nurse_additional": 2 if is_nurse else 0,
+            "nurse_additions": ["NMC Registration", "Professional Indemnity Insurance"] if is_nurse else []
+        }
+    }
+
+
+@api_router.get("/roles/summary")
+async def get_all_roles_summary(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get summary of all role requirements.
+    
+    Useful for admin dashboard to show role comparison.
+    """
+    return {
+        "roles": ROLE_REQUIREMENTS_SUMMARY,
+        "note": "Osabea Healthcare Solutions - Adults Only Care Services"
+    }
+
+
 # ========== ADMIN INTERNAL FORMS - INDUCTION COMPLETION ==========
 
 class InductionCompletionRequest(BaseModel):
@@ -48441,9 +48527,9 @@ async def get_pre_employment_gates(
 ):
     """
     Get pre-employment gates status for an employee.
-    These are the 12 REQUIRED checks before an employee can be promoted to Active status.
+    These are the REQUIRED checks before an employee can be promoted to Active status.
     
-    Gates (12 total):
+    Gates for Healthcare Assistant (12 total):
     1. Interview Record completed
     2. Contract signed
     3. DBS verified + stamped
@@ -48453,11 +48539,13 @@ async def get_pre_employment_gates(
     7. Reference 1 verified
     8. Reference 2 verified
     9. Induction Checklist complete
-    10. Mandatory Training complete + not expired
+    10. Mandatory Training complete + not expired (6 items)
     11. Health Questionnaire completed
     12. Employment gaps explained
     
-    For Nurse role, adds: NMC registration verified
+    Additional Gates for Nurse role (14 total):
+    13. NMC registration verified
+    14. Professional Indemnity Insurance
     """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
@@ -48545,13 +48633,19 @@ async def get_pre_employment_gates(
         }
     }
     
-    # Add NMC for nurses
+    # Add NMC and Professional Indemnity for nurses (14 gates total)
     if is_nurse:
         gates["nmc_registration"] = {
             "num": 13,
             "passed": checks.get("professional_registration", False),
             "label": "NMC Registration Verified",
             "requirement": "For Nurse role only"
+        }
+        gates["professional_indemnity"] = {
+            "num": 14,
+            "passed": checks.get("professional_indemnity", False),
+            "label": "Professional Indemnity Insurance",
+            "requirement": "Annual insurance certificate required"
         }
     
     gates_list = list(gates.values())

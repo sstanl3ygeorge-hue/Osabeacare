@@ -70,6 +70,7 @@ ROLE_WORK_REQUIREMENTS = {
             "dbs",
             "identity",
             "nmc_registration",  # Nurse-specific
+            "professional_indemnity",  # Annual insurance certificate
         ],
         "training_blockers": True,
     },
@@ -198,6 +199,7 @@ WORK_READINESS_LABELS = {
     "dbs": "DBS Certificate",
     "identity": "Identity Documents",
     "nmc_registration": "NMC Registration",
+    "professional_indemnity": "Professional Indemnity Insurance",
     "proof_of_address": "Proof of Address",
     # Professional Registration
     "professional_registration": "Professional Registration",
@@ -482,6 +484,32 @@ async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
     if reg_error:
         checks["professional_registration_error"] = reg_error
     
+    # 10b. Professional Indemnity Insurance (for nurses only)
+    if role_normalized == "nurse":
+        indemnity_docs = await db.employee_documents.find({
+            "employee_id": emp_id_str,
+            "requirement_id": {"$in": ["professional_indemnity", "indemnity_insurance", "professional_indemnity_insurance"]},
+            "status": {"$in": ["active", "approved", "verified"]}
+        }).to_list(length=5)
+        indemnity_ok = len(indemnity_docs) > 0
+        # Check expiry
+        for doc in indemnity_docs:
+            if doc.get("expiry_date"):
+                try:
+                    expiry_str = doc["expiry_date"]
+                    if isinstance(expiry_str, str):
+                        expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                    else:
+                        expiry = expiry_str
+                    if expiry < datetime.now(timezone.utc):
+                        indemnity_ok = False
+                        break
+                except Exception:
+                    pass
+        checks["professional_indemnity"] = indemnity_ok
+    else:
+        checks["professional_indemnity"] = True  # Not required for non-nurses
+    
     # 11. Interview Record completed
     interview = await db.form_submissions.find_one({
         "employee_id": emp_id_str,
@@ -537,6 +565,7 @@ async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
         checks.get("induction"),
         checks.get("health_declaration"),
         checks.get("professional_registration"),
+        checks.get("professional_indemnity"),  # For nurses
         checks.get("interview_record"),
         checks.get("employment_gaps_explained")
     ])

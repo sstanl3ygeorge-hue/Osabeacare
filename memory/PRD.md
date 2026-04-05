@@ -458,5 +458,59 @@ COMPANY_LOGO_URL=  # Set to company logo URL when available
 
 ---
 
+## COMPLETED: AI Multi-Training Extraction (April 2026)
+
+### Problem Solved
+Training certificates often contain 40+ training items in a single document (e.g., table format certificates). The previous system assumed 1 certificate = 1 training record, requiring manual entry for each item. This feature enables bulk extraction of ALL trainings from a single certificate upload.
+
+### Implementation Details
+
+#### Backend (`/app/backend/server.py`)
+1. **GET /api/employees/{employee_id}/training-records**
+   - Returns all training records with `is_mandatory` and `blocks_promotion` flags
+   - Categorizes trainings based on role-specific mandatory requirements
+   - Mandatory keywords: safeguarding, manual handling, fire safety, health & safety, basic life support, infection control
+
+2. **POST /api/employees/{employee_id}/training/bulk-upload**
+   - Accepts single PDF/JPG/PNG certificate
+   - Uses Gemini AI to extract ALL training items from certificate
+   - Categorizes each training as Mandatory vs Additional based on employee role
+   - Creates individual training records for each extracted item
+   - Returns summary: total extracted, mandatory count, additional count
+
+#### Service (`/app/backend/services/multi_training_extraction.py`)
+- `MANDATORY_TRAINING_BY_ROLE`: Role-specific mandatory training requirements
+- `TRAINING_NAME_MAPPING`: Normalizes certificate training names to standard IDs
+- `is_mandatory_for_role()`: Determines if training blocks promotion
+- `categorize_extracted_trainings()`: Splits trainings into mandatory/additional
+- `extract_multiple_trainings_from_certificate()`: Processes AI extraction result
+
+#### Frontend (`/app/frontend/src/components/training/EnhancedTrainingTab.js`)
+1. **MandatoryTrainingSection**
+   - Displays 6 mandatory training types with icons
+   - Shows completion status (Complete/Missing/Expired)
+   - "BLOCKS" badge indicating promotion blockers
+   - "Upload" button for missing trainings
+
+2. **BulkUploadSection**
+   - Drag-and-drop certificate upload
+   - "Select Certificate (PDF/JPG)" button
+   - Shows extraction result summary after upload
+
+3. **AdditionalTrainingSection**
+   - Collapsible section with "BONUS" badge
+   - Lists non-mandatory trainings
+
+### Integration
+- `EnhancedTrainingTab` added to Training tab in `EmployeeProfilePage.js`
+- Appears above existing `HealthCompetencySection` and `AuditReadyTrainingMatrix`
+
+### Test Results
+- Backend: 100% (23/23 tests passed)
+- Frontend: 100% (10/10 UI elements verified)
+- Test report: `/app/test_reports/iteration_155.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - Admin UX Audit completed - removed duplicate content from tabs, clarified progress labels, added NHS-standard document guidance
+April 5, 2026 - AI Multi-Training Extraction completed - bulk certificate upload with AI extraction, mandatory/additional categorization, EnhancedTrainingTab UI

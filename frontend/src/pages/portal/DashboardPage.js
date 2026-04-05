@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Progress } from '../../components/ui/progress';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import AdminTaskQueue from '../../components/admin/AdminTaskQueue';
+import ActionableTaskQueue from '../../components/admin/ActionableTaskQueue';
 import TrainingExpiryAlerts from '../../components/admin/TrainingExpiryAlerts';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
@@ -213,8 +214,13 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Admin Task Queue - Pending Items */}
-      <AdminTaskQueue />
+      {/* ACTIONABLE TASK QUEUE - New CQC-compliant task list */}
+      <ActionableTaskQueue />
+
+      {/* Admin Task Queue (Summary counts) */}
+      <div className="mt-4">
+        <AdminTaskQueue />
+      </div>
 
       {/* PRIMARY: Needs Attention */}
       <Card className={`border-2 ${needsAttentionTotal > 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'} shadow-sm`}>

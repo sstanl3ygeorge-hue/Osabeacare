@@ -100,6 +100,7 @@ export default function ReferenceResponseDrawer({
   const [showResetForm, setShowResetForm] = useState(false);
   const [showChangeRefereeForm, setShowChangeRefereeForm] = useState(false);
   const [showAlternativePathForm, setShowAlternativePathForm] = useState(false);
+  const [mismatchReasonType, setMismatchReasonType] = useState('');
   const [alternativePathData, setAlternativePathData] = useState({
     attempts: [{ date: '', method: '', notes: '' }],
     reason: '',
@@ -187,20 +188,43 @@ export default function ReferenceResponseDrawer({
 
   // Handle override mismatch
   const handleOverrideMismatch = async () => {
-    if (!overrideReason || overrideReason.trim().length < 10) {
-      toast.error('Please provide an override reason (min 10 characters)');
+    if (!mismatchReasonType) {
+      toast.error('Please select a reason for the mismatch');
       return;
     }
+    if (mismatchReasonType === 'other' && (!overrideReason || overrideReason.trim().length < 10)) {
+      toast.error('Please provide an explanation (min 10 characters)');
+      return;
+    }
+    
     setActionLoading('override');
     try {
+      // Build full reason from type and additional notes
+      const reasonLabels = {
+        'earlier_employment': 'Referee is from earlier employment (not in declared history)',
+        'personal_reference': 'Referee is personal/professional reference (not employment)',
+        'employer_changed': 'Applicant has changed employers since declaration',
+        'agency_reference': 'Reference is from recruitment agency, not direct employer',
+        'name_change': 'Organisation has changed name since employment',
+        'other': overrideReason.trim()
+      };
+      
+      const fullReason = mismatchReasonType === 'other' 
+        ? overrideReason.trim()
+        : `${reasonLabels[mismatchReasonType]}${overrideReason.trim() ? '. Notes: ' + overrideReason.trim() : ''}`;
+      
       await axios.post(
         `${API}/references/${employeeId}/${referenceNum}/override-mismatch`,
-        { override_reason: overrideReason.trim() },
+        { 
+          override_reason: fullReason,
+          reason_type: mismatchReasonType
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`Mismatch overridden for Reference ${referenceNum}`);
       setShowOverrideForm(false);
       setOverrideReason('');
+      setMismatchReasonType('');
       fetchReferenceData();
       if (onOverrideMismatch) onOverrideMismatch(referenceNum);
       if (onRefresh) onRefresh();
@@ -832,11 +856,30 @@ export default function ReferenceResponseDrawer({
                         </Button>
                       ) : (
                         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
-                          <p className="text-sm font-medium text-amber-800">Override Mismatch</p>
+                          <p className="text-sm font-medium text-amber-800">Reason for Mismatch (required)</p>
+                          
+                          {/* Mismatch Reason Dropdown */}
+                          <div className="space-y-2">
+                            <select
+                              value={mismatchReasonType}
+                              onChange={(e) => setMismatchReasonType(e.target.value)}
+                              className="w-full h-9 px-3 text-sm border border-amber-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-amber-200"
+                              data-testid="mismatch-reason-select"
+                            >
+                              <option value="">Select a reason...</option>
+                              <option value="earlier_employment">Referee is from earlier employment (not in declared history)</option>
+                              <option value="personal_reference">Referee is personal/professional reference (not employment)</option>
+                              <option value="employer_changed">Applicant has changed employers since declaration</option>
+                              <option value="agency_reference">Reference is from recruitment agency, not direct employer</option>
+                              <option value="name_change">Organisation has changed name since employment</option>
+                              <option value="other">Other (please specify)</option>
+                            </select>
+                          </div>
+                          
                           <Textarea
                             value={overrideReason}
                             onChange={(e) => setOverrideReason(e.target.value)}
-                            placeholder="Explain why this mismatch is acceptable (min 10 characters)..."
+                            placeholder={mismatchReasonType === 'other' ? "Please explain why this mismatch is acceptable..." : "Additional notes (optional)..."}
                             className="min-h-[80px]"
                             data-testid="override-reason-input"
                           />
@@ -844,7 +887,7 @@ export default function ReferenceResponseDrawer({
                             <Button
                               size="sm"
                               onClick={handleOverrideMismatch}
-                              disabled={actionLoading === 'override' || overrideReason.length < 10}
+                              disabled={actionLoading === 'override' || !mismatchReasonType || (mismatchReasonType === 'other' && overrideReason.length < 10)}
                               className="bg-amber-600 hover:bg-amber-700 text-white"
                               data-testid="confirm-override-btn"
                             >
@@ -853,7 +896,7 @@ export default function ReferenceResponseDrawer({
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => { setShowOverrideForm(false); setOverrideReason(''); }}
+                              onClick={() => { setShowOverrideForm(false); setOverrideReason(''); setMismatchReasonType(''); }}
                             >
                               Cancel
                             </Button>

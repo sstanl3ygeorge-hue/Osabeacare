@@ -100,7 +100,7 @@ export default function EmployeeProfilePage() {
   const isRecruitmentView = location.pathname.startsWith('/portal/recruitment/');
   
   // Initialize active tab from URL for navigation state persistence
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'overview');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'work_readiness');
   const [employee, setEmployee] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);

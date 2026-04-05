@@ -424,28 +424,17 @@ export default function UploadRequirementCard({
                     <UploadIcon className="h-3.5 w-3.5 mr-1" />
                     Upload
                   </Button>
-                  {!hasPendingRequest && !hasFiles && (
+                  {/* Send Reminder - replaces Request/Resend buttons */}
+                  {!hasFiles && (
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={onRequest}
-                      className="h-8 text-xs rounded-lg"
-                      data-testid={`${key}-evidence-request-btn`}
+                      onClick={onResend || onRequest}
+                      className="h-8 text-xs rounded-lg text-amber-600 border-amber-200 hover:bg-amber-50"
+                      data-testid={`${key}-send-reminder-btn`}
                     >
                       <Send className="h-3.5 w-3.5 mr-1" />
-                      Request
-                    </Button>
-                  )}
-                  {hasPendingRequest && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={onResend}
-                      className="h-8 text-xs rounded-lg text-amber-600 border-amber-200 hover:bg-amber-50"
-                      data-testid={`${key}-evidence-resend-btn`}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                      Resend
+                      Send Reminder
                     </Button>
                   )}
                   <Button

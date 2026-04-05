@@ -84,6 +84,8 @@ export default function EmploymentGapPanel({
   
   // Form states
   const [explanation, setExplanation] = useState('');
+  const [gapReason, setGapReason] = useState('');
+  const [gapDocument, setGapDocument] = useState(null);
   const [verifyNotes, setVerifyNotes] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
   const [infoRequest, setInfoRequest] = useState('');
@@ -126,22 +128,49 @@ export default function EmploymentGapPanel({
   
   // Submit explanation
   const handleSubmitExplanation = async () => {
-    if (!selectedGap || !explanation.trim()) return;
+    if (!selectedGap || !explanation.trim() || !gapReason) return;
     
     setIsSubmitting(true);
     try {
+      // Build explanation with reason
+      const fullExplanation = `[${gapReason.replace('_', ' ').toUpperCase()}] ${explanation.trim()}`;
+      
       await axios.post(
         `${API}/api/employees/${employeeId}/employment-gaps/${selectedGap.gap_id}/explain`,
         null,
         { 
-          params: { explanation: explanation.trim() },
+          params: { 
+            explanation: fullExplanation,
+            reason_type: gapReason
+          },
           headers: { Authorization: `Bearer ${token}` } 
         }
       );
       
+      // Upload supporting document if provided
+      if (gapDocument) {
+        const formData = new FormData();
+        formData.append('file', gapDocument);
+        formData.append('gap_id', selectedGap.gap_id);
+        formData.append('document_type', 'gap_supporting_document');
+        
+        try {
+          await axios.post(
+            `${API}/api/employees/${employeeId}/employment-gaps/${selectedGap.gap_id}/upload-document`,
+            formData,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        } catch (uploadErr) {
+          console.error('Failed to upload supporting document:', uploadErr);
+          // Don't fail the whole operation if doc upload fails
+        }
+      }
+      
       toast.success('Gap explanation submitted');
       setExplainDialogOpen(false);
       setExplanation('');
+      setGapReason('');
+      setGapDocument(null);
       setSelectedGap(null);
       fetchGaps();
       onGapUpdate?.();
@@ -506,30 +535,100 @@ export default function EmploymentGapPanel({
           <DialogHeader>
             <DialogTitle>Explain Employment Gap</DialogTitle>
             <DialogDescription>
-              Please provide an explanation for the {selectedGap?.duration_months} month gap in your employment history.
+              Please provide an explanation for the {selectedGap?.duration_months} month gap in your employment history
+              ({selectedGap?.start_date && formatBackendDate(selectedGap.start_date, { format: 'short' })} - {selectedGap?.end_date && formatBackendDate(selectedGap.end_date, { format: 'short' })}).
             </DialogDescription>
           </DialogHeader>
           
-          <div className="py-4">
-            <Textarea
-              placeholder="Describe what you were doing during this period (e.g., education, travel, family responsibilities, career break)..."
-              value={explanation}
-              onChange={(e) => setExplanation(e.target.value)}
-              rows={5}
-              className="resize-none"
-            />
-            <p className="text-xs text-gray-500 mt-2">
-              Be specific and honest. This will be reviewed by our recruitment team.
-            </p>
+          <div className="py-4 space-y-4">
+            {/* Reason Dropdown */}
+            <div>
+              <label className="text-sm font-medium block mb-2">
+                Reason for gap <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={gapReason}
+                onChange={(e) => setGapReason(e.target.value)}
+                className="w-full h-10 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                data-testid="gap-reason-select"
+              >
+                <option value="">Select a reason...</option>
+                <option value="career_break">Career break / Personal development</option>
+                <option value="education">Education / Training</option>
+                <option value="health">Health / Medical reasons</option>
+                <option value="travel">Travel / Time abroad</option>
+                <option value="unemployed">Unemployed / Job seeking</option>
+                <option value="family">Family / Caring responsibilities</option>
+                <option value="volunteering">Volunteering / Unpaid work</option>
+                <option value="self_employed">Self-employment / Freelance</option>
+                <option value="other">Other (please specify)</option>
+              </select>
+            </div>
+            
+            {/* Explanation Text */}
+            <div>
+              <label className="text-sm font-medium block mb-2">
+                Explanation <span className="text-red-500">*</span>
+              </label>
+              <Textarea
+                placeholder="Provide details about what you were doing during this period..."
+                value={explanation}
+                onChange={(e) => setExplanation(e.target.value)}
+                rows={4}
+                className="resize-none"
+                data-testid="gap-explanation-textarea"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                Be specific and honest. This will be reviewed by our recruitment team.
+              </p>
+            </div>
+            
+            {/* Supporting Document Upload */}
+            <div>
+              <label className="text-sm font-medium block mb-2">
+                Supporting document (optional)
+              </label>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('gap-doc-upload')?.click()}
+                  className="text-xs"
+                >
+                  <Upload className="h-3.5 w-3.5 mr-1.5" />
+                  Upload Document
+                </Button>
+                {gapDocument && (
+                  <span className="text-xs text-gray-600">
+                    {gapDocument.name}
+                  </span>
+                )}
+              </div>
+              <input
+                id="gap-doc-upload"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => setGapDocument(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                E.g., university enrollment letter, medical certificate, travel documents
+              </p>
+            </div>
           </div>
           
           <DialogFooter>
-            <Button variant="outline" onClick={() => setExplainDialogOpen(false)}>
+            <Button variant="outline" onClick={() => {
+              setExplainDialogOpen(false);
+              setGapReason('');
+              setGapDocument(null);
+            }}>
               Cancel
             </Button>
             <Button 
               onClick={handleSubmitExplanation}
-              disabled={isSubmitting || !explanation.trim()}
+              disabled={isSubmitting || !explanation.trim() || !gapReason}
             >
               {isSubmitting ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

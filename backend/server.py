@@ -23897,6 +23897,100 @@ async def log_audit_action(user_id: str, action: str, entity_type: str, entity_i
     }
     await db.audit_logs.insert_one(audit_doc)
 
+
+async def log_audit_change(
+    user_id: str, 
+    action: str, 
+    entity_type: str, 
+    entity_id: str, 
+    field_name: str,
+    old_value: any,
+    new_value: any,
+    reason: str,
+    metadata: dict = None
+):
+    """
+    Enhanced audit logging for CQC compliance.
+    Captures before/after values and mandatory reason for change.
+    """
+    audit_doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "action": action,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "field_name": field_name,
+        "details": {
+            "before": str(old_value) if old_value is not None else None,
+            "after": str(new_value) if new_value is not None else None,
+            "reason": reason
+        },
+        "metadata": metadata or {},
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.audit_logs.insert_one(audit_doc)
+    return audit_doc
+
+
+@api_router.post("/admin/audit-change")
+async def record_audit_change(
+    entity_type: str = Query(...),
+    entity_id: str = Query(...),
+    field_name: str = Query(...),
+    old_value: str = Query(default=None),
+    new_value: str = Query(default=None),
+    reason: str = Query(..., min_length=10),
+    action: str = Query(default="field_updated"),
+    user: dict = Depends(require_admin)
+):
+    """
+    Record an admin change with before/after values and reason.
+    Used for CQC compliance audit trail.
+    """
+    audit_entry = await log_audit_change(
+        user_id=user['user_id'],
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        field_name=field_name,
+        old_value=old_value,
+        new_value=new_value,
+        reason=reason
+    )
+    
+    return {
+        "success": True,
+        "audit_id": audit_entry["id"],
+        "message": "Change recorded in audit trail"
+    }
+
+
+@api_router.get("/admin/audit-trail/{entity_type}/{entity_id}")
+async def get_entity_audit_trail(
+    entity_type: str,
+    entity_id: str,
+    limit: int = Query(default=50, ge=1, le=200),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get audit trail for a specific entity.
+    """
+    audit_entries = await db.audit_logs.find(
+        {
+            "entity_type": entity_type,
+            "entity_id": entity_id
+        },
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(limit)
+    
+    return {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "entries": audit_entries,
+        "total": len(audit_entries)
+    }
+
+
 # Define compliance-relevant audit actions
 COMPLIANCE_AUDIT_ACTIONS = {
     # Document actions
@@ -37440,6 +37534,7 @@ async def explain_employment_gap(
     employee_id: str,
     gap_id: str,
     explanation: str,
+    reason_type: Optional[str] = None,
     evidence_document_id: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
@@ -37447,6 +37542,10 @@ async def explain_employment_gap(
     Provide explanation for an employment gap.
     
     Can be called by applicant during application or by admin.
+    
+    Args:
+        reason_type: One of: career_break, education, health, travel, unemployed, 
+                     family, volunteering, self_employed, other
     """
     # Verify employee exists
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -37464,6 +37563,9 @@ async def explain_employment_gap(
         "updated_at": now
     }
     
+    if reason_type:
+        update_data["reason_type"] = reason_type
+    
     if evidence_document_id:
         update_data["evidence_document_id"] = evidence_document_id
     
@@ -37479,7 +37581,8 @@ async def explain_employment_gap(
             "employment_gaps.$.explanation": explanation,
             "employment_gaps.$.explanation_provided_at": now,
             "employment_gaps.$.status": GapStatus.EXPLAINED.value,
-            "employment_gaps.$.evidence_document_id": evidence_document_id
+            "employment_gaps.$.evidence_document_id": evidence_document_id,
+            "employment_gaps.$.reason_type": reason_type
         }}
     )
     
@@ -37493,6 +37596,7 @@ async def explain_employment_gap(
         "performed_by": user.get("user_id", "unknown"),
         "details": {
             "gap_id": gap_id,
+            "reason_type": reason_type,
             "explanation_length": len(explanation),
             "has_evidence": bool(evidence_document_id)
         },
@@ -37503,7 +37607,85 @@ async def explain_employment_gap(
         "status": "success",
         "message": "Gap explanation submitted",
         "gap_id": gap_id,
-        "new_status": GapStatus.EXPLAINED.value
+        "new_status": GapStatus.EXPLAINED.value,
+        "reason_type": reason_type
+    }
+
+
+@api_router.post("/employees/{employee_id}/employment-gaps/{gap_id}/upload-document")
+async def upload_gap_supporting_document(
+    employee_id: str,
+    gap_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Upload a supporting document for an employment gap explanation.
+    E.g., university enrollment letter, medical certificate, travel documents.
+    """
+    # Validate file type
+    allowed_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp']
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"File type not allowed. Use: {', '.join(allowed_extensions)}")
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Save file
+    contents = await file.read()
+    upload_dir = Path("/app/uploads/gap_documents") / employee_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    safe_filename = f"{gap_id}_{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = upload_dir / safe_filename
+    
+    with open(file_path, "wb") as f:
+        f.write(contents)
+    
+    file_url = f"/uploads/gap_documents/{employee_id}/{safe_filename}"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update gap record with document
+    gap_record_id = f"{employee_id}_{gap_id}"
+    await db.employment_gaps.update_one(
+        {"id": gap_record_id},
+        {"$set": {
+            "supporting_document_url": file_url,
+            "supporting_document_name": file.filename,
+            "supporting_document_uploaded_at": now
+        }}
+    )
+    
+    # Also update in employee.employment_gaps array
+    await db.employees.update_one(
+        {"id": employee_id, "employment_gaps.gap_id": gap_id},
+        {"$set": {
+            "employment_gaps.$.supporting_document_url": file_url,
+            "employment_gaps.$.supporting_document_name": file.filename
+        }}
+    )
+    
+    # Audit log
+    await log_audit_action(
+        user.get("user_id", "unknown"),
+        "gap_supporting_document_uploaded",
+        "employment_gap",
+        gap_record_id,
+        {
+            "gap_id": gap_id,
+            "filename": file.filename,
+            "file_size": len(contents)
+        }
+    )
+    
+    return {
+        "status": "success",
+        "message": "Supporting document uploaded",
+        "file_url": file_url,
+        "filename": file.filename
     }
 
 
@@ -48037,86 +48219,216 @@ async def get_admin_task_queue(
 ):
     """
     Get all pending admin tasks across all employees.
-    Used for dashboard task summary.
+    Used for dashboard task summary and actionable task list.
     """
     now = datetime.now(timezone.utc)
+    fourteen_days_later = now + timedelta(days=14)
     thirty_days_later = now + timedelta(days=30)
+    sixty_days_later = now + timedelta(days=60)
     seven_days_later = now + timedelta(days=7)
     
     # 1. Documents awaiting verification (no valid stamp)
-    docs_pending = await db.employee_documents.count_documents({
+    docs_pending = await db.employee_documents.find({
         "$or": [
             {"verification_stamp": {"$in": [None, "", "not_verified"]}},
             {"verification_stamp": {"$exists": False}}
         ],
         "status": {"$in": ["active", "uploaded", "approved", "accepted"]}
-    })
+    }, {"_id": 0, "id": 1, "employee_id": 1, "document_type": 1, "uploaded_at": 1, "requirement_id": 1}).to_list(100)
     
-    # 2. References awaiting response
-    refs_pending = 0
-    # Check employees with pending reference requests
-    employees_with_pending_refs = await db.employees.count_documents({
+    # Enrich with employee names
+    pending_verifications = []
+    for doc in docs_pending[:10]:
+        emp = await db.employees.find_one({"id": doc.get("employee_id")}, {"_id": 0, "first_name": 1, "last_name": 1})
+        if emp:
+            pending_verifications.append({
+                "document_id": doc.get("id"),
+                "employee_id": doc.get("employee_id"),
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "document_type": doc.get("document_type") or doc.get("requirement_id", "Document"),
+                "uploaded_at": doc.get("uploaded_at")
+            })
+    
+    # 2. References to send (referee declared but not sent)
+    references_to_send = []
+    employees_refs = await db.employees.find({
         "$or": [
-            {"reference_1_request_status": {"$in": ["pending_send", "sent", "opened", "clicked"]}},
-            {"reference_2_request_status": {"$in": ["pending_send", "sent", "opened", "clicked"]}}
+            {"reference_1.name": {"$exists": True, "$ne": None, "$ne": ""}, "reference_1_request_status": {"$in": [None, "not_sent", ""]}},
+            {"reference_2.name": {"$exists": True, "$ne": None, "$ne": ""}, "reference_2_request_status": {"$in": [None, "not_sent", ""]}}
         ]
-    })
-    refs_pending = employees_with_pending_refs
+    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "reference_1": 1, "reference_2": 1, "reference_1_request_status": 1, "reference_2_request_status": 1}).to_list(50)
     
-    # 3. Expiring DBS (next 30 days)
-    dbs_expiring = 0
-    # Check dbs_checks collection for expiring items
-    dbs_checks_expiring = await db.dbs_checks.count_documents({
-        "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()}
-    })
-    # Also check employee documents
-    dbs_docs_expiring = await db.employee_documents.count_documents({
+    for emp in employees_refs[:10]:
+        if emp.get("reference_1", {}).get("name") and emp.get("reference_1_request_status") in [None, "not_sent", ""]:
+            references_to_send.append({
+                "employee_id": emp["id"],
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "reference_num": 1,
+                "referee_name": emp["reference_1"].get("name", "Unknown")
+            })
+        if emp.get("reference_2", {}).get("name") and emp.get("reference_2_request_status") in [None, "not_sent", ""]:
+            references_to_send.append({
+                "employee_id": emp["id"],
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "reference_num": 2,
+                "referee_name": emp["reference_2"].get("name", "Unknown")
+            })
+    
+    # 3. Reference responses to review (received but not verified)
+    references_to_review = []
+    employees_received = await db.employees.find({
+        "$or": [
+            {"reference_1_status": "received", "reference_1_verified": {"$ne": True}},
+            {"reference_2_status": "received", "reference_2_verified": {"$ne": True}}
+        ]
+    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "reference_1_status": 1, "reference_2_status": 1, "reference_1_verified": 1, "reference_2_verified": 1}).to_list(50)
+    
+    for emp in employees_received[:10]:
+        if emp.get("reference_1_status") == "received" and not emp.get("reference_1_verified"):
+            references_to_review.append({
+                "employee_id": emp["id"],
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "reference_num": 1
+            })
+        if emp.get("reference_2_status") == "received" and not emp.get("reference_2_verified"):
+            references_to_review.append({
+                "employee_id": emp["id"],
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "reference_num": 2
+            })
+    
+    # 4. Expiring soon (documents + training, next 60 days)
+    expiring_soon = []
+    
+    # Check documents expiring
+    docs_expiring = await db.employee_documents.find({
+        "expiry_date": {"$lte": sixty_days_later.isoformat(), "$gt": now.isoformat()},
+        "status": {"$in": ["active", "approved", "verified"]}
+    }, {"_id": 0, "id": 1, "employee_id": 1, "requirement_id": 1, "document_type": 1, "expiry_date": 1}).to_list(50)
+    
+    for doc in docs_expiring[:10]:
+        emp = await db.employees.find_one({"id": doc.get("employee_id")}, {"_id": 0, "first_name": 1, "last_name": 1})
+        if emp:
+            exp_date = doc.get("expiry_date", "")
+            days_left = 0
+            try:
+                exp_dt = datetime.fromisoformat(exp_date.replace('Z', '+00:00'))
+                days_left = (exp_dt - now).days
+            except:
+                pass
+            expiring_soon.append({
+                "type": "document",
+                "item_name": doc.get("document_type") or doc.get("requirement_id", "Document"),
+                "employee_id": doc.get("employee_id"),
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "expiry_date": exp_date,
+                "days_left": days_left
+            })
+    
+    # Check training expiring
+    training_expiring = await db.training_records.find({
+        "expiry_date": {"$lte": sixty_days_later.isoformat(), "$gt": now.isoformat()},
+        "record_status": {"$ne": "superseded"}
+    }, {"_id": 0, "id": 1, "employee_id": 1, "training_name": 1, "expiry_date": 1}).to_list(50)
+    
+    for trn in training_expiring[:10]:
+        emp = await db.employees.find_one({"id": trn.get("employee_id")}, {"_id": 0, "first_name": 1, "last_name": 1})
+        if emp:
+            exp_date = trn.get("expiry_date", "")
+            days_left = 0
+            try:
+                exp_dt = datetime.fromisoformat(exp_date.replace('Z', '+00:00'))
+                days_left = (exp_dt - now).days
+            except:
+                pass
+            expiring_soon.append({
+                "type": "training",
+                "item_name": trn.get("training_name", "Training"),
+                "employee_id": trn.get("employee_id"),
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "expiry_date": exp_date,
+                "days_left": days_left
+            })
+    
+    # Sort by days_left
+    expiring_soon.sort(key=lambda x: x.get("days_left", 999))
+    
+    # 5. Workers stuck in onboarding (>7 days, <50% complete)
+    stuck_workers = []
+    seven_days_ago = now - timedelta(days=7)
+    onboarding_employees = await db.employees.find({
+        "status": "onboarding",
+        "created_at": {"$lt": seven_days_ago.isoformat()}
+    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "created_at": 1, "unified_progress": 1}).to_list(50)
+    
+    for emp in onboarding_employees:
+        progress = emp.get("unified_progress", {}).get("percentage", 0)
+        if progress < 80:  # Less than 80% complete after 7 days
+            stuck_workers.append({
+                "employee_id": emp["id"],
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}",
+                "progress": progress,
+                "started_at": emp.get("created_at")
+            })
+    
+    # 6. DBS/RTW specific counts
+    dbs_expiring = await db.employee_documents.count_documents({
         "requirement_id": {"$in": ["dbs", "dbs_evidence"]},
         "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()},
         "status": {"$in": ["active", "approved"]}
     })
-    dbs_expiring = max(dbs_checks_expiring, dbs_docs_expiring)
     
-    # 4. RTW expiring (next 30 days)
     rtw_expiring = await db.rtw_checks.count_documents({
         "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()}
     })
     
-    # 5. Spot checks due this week
+    # 7. Spot checks due this week
     spot_checks_due = await db.recurring_compliance.count_documents({
         "item_type": "spot_check",
         "next_due_date": {"$lte": seven_days_later.isoformat()},
         "is_active": True
     })
     
-    # 6. Supervision due this week
+    # 8. Supervision due this week
     supervision_due = await db.recurring_compliance.count_documents({
         "item_type": "supervision",
         "next_due_date": {"$lte": seven_days_later.isoformat()},
         "is_active": True
     })
     
-    # 7. Induction checklists incomplete
+    # 9. Induction checklists incomplete
     induction_incomplete = await db.induction_checklists.count_documents({
         "overall_status": {"$in": ["pending", "in_progress"]}
     })
     
-    # 8. Interview records pending
+    # 10. Interview records pending
     interviews_pending = await db.employees.count_documents({
         "status": {"$in": ["applicant", "onboarding"]},
         "recruitment_approved": {"$ne": True}
     })
     
     return {
-        "documents_pending_verification": docs_pending,
-        "references_pending_response": refs_pending,
+        # Counts
+        "documents_pending_verification": len(docs_pending),
+        "references_to_send_count": len(references_to_send),
+        "references_to_review_count": len(references_to_review),
+        "expiring_soon_count": len(expiring_soon),
+        "stuck_workers_count": len(stuck_workers),
         "dbs_expiring_30_days": dbs_expiring,
         "rtw_expiring_30_days": rtw_expiring,
         "spot_checks_due_this_week": spot_checks_due,
         "supervision_due_this_week": supervision_due,
         "induction_incomplete": induction_incomplete,
         "interviews_pending": interviews_pending,
-        "total_tasks": docs_pending + refs_pending + dbs_expiring + spot_checks_due
+        
+        # Detailed lists for dashboard
+        "pending_verifications": pending_verifications[:5],
+        "references_to_send": references_to_send[:5],
+        "references_to_review": references_to_review[:5],
+        "expiring_soon": expiring_soon[:5],
+        "stuck_workers": stuck_workers[:5],
+        
+        "total_tasks": len(docs_pending) + len(references_to_send) + len(references_to_review) + dbs_expiring
     }
 
 

@@ -46184,13 +46184,13 @@ class InterviewRecordRequest(BaseModel):
     interview_date: str
     interview_method: str  # phone, video, in_person
     interviewer_name: Optional[str] = None  # Auto-filled from logged admin if not provided
-    communication_score: int  # 1-5
-    experience_score: int  # 1-5
-    values_score: int  # 1-5
+    communication_score: int = 3  # 1-5
+    experience_score: int = 3  # 1-5
+    values_score: int = 3  # 1-5
     availability: Optional[str] = None
     strengths: Optional[str] = None
     areas_for_development: Optional[str] = None
-    decision: str  # Approve, Reject, On Hold
+    decision: Optional[str] = None  # Approve, Reject, On Hold - optional for drafts
     notes: Optional[str] = None
     is_draft: bool = False
 

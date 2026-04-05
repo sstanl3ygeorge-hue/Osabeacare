@@ -125,7 +125,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ### P1 (High)
 - [x] Worker Portal complete flow - COMPLETED Dec 2025
 - [x] Admin UX Audit - Tab duplicates fixed - COMPLETED Apr 2026
-- [ ] Admin Internal-Only Forms (Interview Record, Induction Checklist, Spot Check)
+- [x] Admin Internal-Only Forms (Interview Record, Spot Check) with PDF - COMPLETED Apr 2026
+- [ ] Induction Checklist completion certificate PDF
 - [ ] Role-Based Compliance Configuration using `role_compliance_profiles`
 - [ ] Supervision Records tracking UI
 
@@ -136,6 +137,47 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ### P3 (Future)
 - [ ] Supabase Auth integration with RLS policies
 - [ ] Phase out MongoDB entirely (PostgreSQL migration)
+
+---
+
+## COMPLETED: Admin Internal-Only Forms (April 2026)
+
+### Interview Record Form
+- **Location:** Overview tab → Interview Records panel (right side)
+- **Features:**
+  - "Record Interview" button for admins
+  - Create dialog with all fields: date, method, scores (1-5 stars), decision, notes
+  - Save as Draft / Submit options
+  - Decision options: Approve, On Hold, Reject
+  - PDF download with company logo
+  - Automatic status update when decision = "Approve"
+
+### Spot Check Record
+- **Location:** Training tab → Health & Competency section → Spot Checks sub-tab
+- **Features:**
+  - "Record Spot Check" button for admins
+  - Fields: type, area, outcome (pass/needs improvement/fail), notes, follow-up
+  - PDF download with company logo
+  - Summary stats (Passed/Needs Work/Failed counts)
+
+### PDF Service
+- **File:** `/app/backend/services/pdf_service.py`
+- **Features:**
+  - Company logo support via `COMPANY_LOGO_URL` environment variable
+  - Professional PDF layout with branding
+  - Supports: Interview Record, Induction Certificate, Spot Check
+  - Footer with timestamp and compliance note
+
+### Key Files
+- `/app/backend/services/pdf_service.py` - PDF generation with logo
+- `/app/backend/server.py` (lines 46178-46500) - Admin forms API endpoints
+- `/app/frontend/src/components/compliance/InterviewFormPanel.js`
+- `/app/frontend/src/components/employee/SpotCheckPanel.js`
+
+### Environment Variable
+```
+COMPANY_LOGO_URL=  # Set to company logo URL when available
+```
 
 ---
 

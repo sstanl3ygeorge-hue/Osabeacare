@@ -627,5 +627,49 @@ For Nurse role: 13th requirement - NMC registration verified
 
 ---
 
+## COMPLETED: Employee Profile UI Consolidation (April 5, 2026)
+
+### Problem
+Admin users reported that "Blocking Items", "Recruitment Readiness %", and "Full Compliance" sections were appearing 3-4 times on the Employee Profile page. This caused:
+- Severe admin confusion
+- Duplicate content overlapping with tab navigation layout
+- Users had to scroll past duplicate panels to find the tabs
+
+### Solution
+Created `ConsolidatedStatusPanel.js` as a single source of truth that renders ONCE above the tabs, containing:
+1. **Status Header** - BLOCKED/READY indicator with employee details
+2. **Blocker List** - "WHAT'S BLOCKING PROMOTION" with actionable items
+3. **Progress Summary** - Category breakdown (Documents, Forms, Training, References, Agreements, Induction)
+4. **Quick Actions** - Send Reminder, View Full Compliance, View Training, View References
+
+### Components Removed from EmployeeProfilePage.js
+- ❌ `RecruitmentApprovalPanel` (was rendering duplicate status/blockers)
+- ❌ `WorkReadinessPanel` (was rendering duplicate status/blockers)
+- ❌ `UnifiedProgressSection` (was rendering duplicate progress)
+
+### Current Structure
+```
+Employee Profile Page
+├── ConsolidatedStatusPanel (ONCE - above tabs)
+│   ├── Status Header (BLOCKED/READY)
+│   ├── Blocker List (10 items)
+│   ├── Progress Summary (0/12)
+│   └── Quick Actions
+├── 7-Tab Navigation
+│   ├── Work Readiness (PreEmploymentGatesPanel only)
+│   ├── Compliance
+│   ├── Forms
+│   ├── Training
+│   ├── References
+│   ├── Employment
+│   └── Audit
+```
+
+### Test Results
+- Frontend: 100% (8/8 UI tests passed)
+- Test report: `/app/test_reports/iteration_157.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - Pre-employment gates updated to enforce 12 requirements before promotion
+April 5, 2026 - Employee Profile UI Consolidation completed - removed duplicate panels

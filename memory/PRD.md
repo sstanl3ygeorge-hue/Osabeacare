@@ -865,5 +865,40 @@ System already enforces 2 Proof of Address documents requirement:
 
 ---
 
+## COMPLETED: P1 UI Fixes (April 5, 2026)
+
+### P1 Issues Fixed:
+
+1. **Missing Nurse Role in Application Form** ✅ FIXED
+   - Added "Nurse (Registered)" and "Senior Nurse" to role dropdown
+   - Full list: Healthcare Assistant, Senior Healthcare Assistant, Nurse (Registered), Senior Nurse, Care Assistant, Senior Care Assistant, Support Worker, Live-in Carer, Night Carer, Team Leader, Care Coordinator
+
+2. **Gap Explanation Field** ✅ ALREADY EXISTS
+   - Textarea appears when "I have gaps in my employment history" checkbox is checked
+   - Placeholder: "Please explain any gaps in your employment (e.g., education, caring responsibilities, travel, illness)..."
+
+3. **Bulk Upload for Training Certificates** ✅ FIXED
+   - Added "Bulk Upload" button in WorkerDashboard.js
+   - data-testid: "bulk-upload-training-btn"
+   - Allows workers to upload multiple training certificates at once
+
+4. **Required Field Indicators** ✅ ALREADY EXISTS
+   - Red asterisks (*) shown for required fields in WorkerFormPage.js
+   - Validation error toast shows missing required fields on submit
+
+5. **Send Reminder Button Text** ✅ ALREADY FIXED
+   - All buttons say "Send Reminder" (not "Send to Employee")
+   - Verified across AdminActionButtons.js, FormRequirementRow.js, UploadRequirementCard.js, ConsolidatedStatusPanel.js
+
+6. **Recruitment Progress Percentage** ✅ ALREADY EXISTS
+   - Shows LabeledProgressBadge with format "Recruitment: X/Y (Z%)"
+   - Blocker count displayed for applicants with issues
+
+### Test Results:
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_162.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - P0 UI Audit Fixes completed
+April 5, 2026 - P1 UI Fixes completed

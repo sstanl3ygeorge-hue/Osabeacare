@@ -5,4 +5,5 @@ export { default as EditReasonDialog } from './EditReasonDialog';
 export { default as EditPersonalDetailsDialog } from './EditPersonalDetailsDialog';
 export { default as EditEmploymentHistoryDialog } from './EditEmploymentHistoryDialog';
 export { default as EditReferenceDialog } from './EditReferenceDialog';
+export { default as EditDeclarationsDialog } from './EditDeclarationsDialog';
 export { default as SupersedeContractDialog } from './SupersedeContractDialog';

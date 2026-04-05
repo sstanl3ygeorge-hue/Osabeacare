@@ -9953,6 +9953,62 @@ async def update_reference(
     }
 
 
+class DeclarationsUpdate(BaseModel):
+    """Declarations update with required reason"""
+    declarations: dict  # All declarations fields
+    edit_reason: str  # Required
+
+@api_router.put("/employees/{employee_id}/declarations")
+async def update_declarations(
+    employee_id: str,
+    data: DeclarationsUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update employee declarations with reason logging.
+    
+    NHS/CQC Required Declaration Fields:
+    - Criminal convictions
+    - Health conditions  
+    - DBS consent
+    - Right to work restrictions
+    - Driving licence
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    old_declarations = employee.get('declarations', {})
+    
+    # Update declarations
+    update_data = {
+        'declarations': data.declarations,
+        'updated_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    # Log audit with reason
+    await log_audit_action(
+        user['user_id'],
+        "edit_declarations",
+        "employee",
+        employee_id,
+        {
+            "old_values": old_declarations,
+            "new_values": data.declarations,
+            "reason": data.edit_reason,
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}"
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Declarations updated",
+        "edit_logged": True
+    }
+
+
 class SupersedeContractInput(BaseModel):
     """Input for superseding a contract"""
     reason: str  # Required - minimum 20 chars
@@ -11477,6 +11533,57 @@ async def reject_training(
         "message": f"Training '{record.get('training_name')}' rejected",
         "rejected_by": user['email'],
         "rejection_reason": reason
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/{record_id}/unverify")
+async def unverify_training(
+    employee_id: str,
+    record_id: str,
+    reason: str = Body(..., embed=True, min_length=5),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Unverify a training record (requires reason for audit trail).
+    This reverts a previously verified training back to pending status.
+    """
+    record = await db.training_records.find_one({
+        "id": record_id,
+        "employee_id": employee_id,
+        "record_status": {"$ne": "deleted"}
+    })
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    
+    if not record.get('verified') and record.get('verification_status') != 'verified':
+        raise HTTPException(status_code=400, detail="Training is not currently verified")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.training_records.update_one(
+        {"id": record_id},
+        {"$set": {
+            "verified": False,
+            "verification_status": "pending",
+            "unverified_by": user['email'],
+            "unverified_at": now,
+            "unverify_reason": reason,
+            "updated_at": now
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "unverify_training", "employee", employee_id, {
+        "record_id": record_id,
+        "training_name": record.get('training_name'),
+        "reason": reason
+    })
+    
+    return {
+        "status": "success",
+        "message": f"Training '{record.get('training_name')}' unverified",
+        "unverified_by": user['email'],
+        "reason": reason
     }
 
 
@@ -47744,20 +47851,22 @@ async def set_manual_system_role(
 
 # Default induction checklist items for all care roles
 DEFAULT_INDUCTION_ITEMS = [
-    {"name": "Safeguarding Adults", "mandatory": True, "order": 1},
-    {"name": "Safeguarding Children", "mandatory": True, "order": 2},
-    {"name": "Fire Safety", "mandatory": True, "order": 3},
-    {"name": "Health & Safety", "mandatory": True, "order": 4},
-    {"name": "Infection Prevention & Control", "mandatory": True, "order": 5},
-    {"name": "Data Protection (GDPR)", "mandatory": True, "order": 6},
-    {"name": "Equality & Diversity", "mandatory": True, "order": 7},
-    {"name": "Moving & Handling", "mandatory": True, "order": 8},
-    {"name": "Basic Life Support", "mandatory": True, "order": 9},
-    {"name": "Medication Awareness", "mandatory": False, "order": 10},
-    {"name": "Food Hygiene", "mandatory": False, "order": 11},
-    {"name": "Communication Skills", "mandatory": False, "order": 12},
-    {"name": "Company Policies Review", "mandatory": True, "order": 13},
-    {"name": "Shadow Shift Completed", "mandatory": True, "order": 14},
+    # Care Certificate 15 Standards (NHS/CQC Required)
+    {"name": "1. Understand your role", "mandatory": True, "order": 1},
+    {"name": "2. Your personal development", "mandatory": True, "order": 2},
+    {"name": "3. Duty of care", "mandatory": True, "order": 3},
+    {"name": "4. Equality and diversity", "mandatory": True, "order": 4},
+    {"name": "5. Work in a person-centred way", "mandatory": True, "order": 5},
+    {"name": "6. Communication", "mandatory": True, "order": 6},
+    {"name": "7. Privacy and dignity", "mandatory": True, "order": 7},
+    {"name": "8. Fluids and nutrition", "mandatory": True, "order": 8},
+    {"name": "9. Awareness of mental health, dementia and learning disabilities", "mandatory": True, "order": 9},
+    {"name": "10. Safeguarding adults", "mandatory": True, "order": 10},
+    {"name": "11. Basic life support", "mandatory": True, "order": 11},
+    {"name": "12. Health and safety", "mandatory": True, "order": 12},
+    {"name": "13. Handling information", "mandatory": True, "order": 13},
+    {"name": "14. Infection prevention and control", "mandatory": True, "order": 14},
+    {"name": "15. Shadow shift completed", "mandatory": True, "order": 15},
 ]
 
 # Default competency types required for different roles

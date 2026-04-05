@@ -6,7 +6,7 @@ import { Button } from '../ui/button';
 import { 
   Briefcase, Calendar, AlertTriangle, CheckCircle, XCircle, 
   Clock, FileText, ChevronDown, ChevronUp, Shield, Heart,
-  GraduationCap, Loader2, AlertCircle
+  GraduationCap, Loader2, AlertCircle, Edit
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -16,7 +16,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
  * ApplicationDataPanel - Displays application form data in compliance tab
  * Shows: Employment History, Employment Gaps, Declarations, Qualifications
  */
-export default function ApplicationDataPanel({ employeeId, onRefresh }) {
+export default function ApplicationDataPanel({ employeeId, onRefresh, onEditDeclarations }) {
   const [employee, setEmployee] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedSections, setExpandedSections] = useState({
@@ -289,11 +289,28 @@ export default function ApplicationDataPanel({ employeeId, onRefresh }) {
               <Shield className="h-5 w-5 text-primary" />
               Applicant Declarations
             </CardTitle>
-            {expandedSections.declarations ? (
-              <ChevronUp className="h-5 w-5 text-gray-400" />
-            ) : (
-              <ChevronDown className="h-5 w-5 text-gray-400" />
-            )}
+            <div className="flex items-center gap-2">
+              {onEditDeclarations && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditDeclarations(employee);
+                  }}
+                  className="h-7 px-2 text-gray-500 hover:text-primary"
+                  data-testid="edit-declarations-btn"
+                >
+                  <Edit className="h-3.5 w-3.5 mr-1" />
+                  Edit
+                </Button>
+              )}
+              {expandedSections.declarations ? (
+                <ChevronUp className="h-5 w-5 text-gray-400" />
+              ) : (
+                <ChevronDown className="h-5 w-5 text-gray-400" />
+              )}
+            </div>
           </div>
         </CardHeader>
         

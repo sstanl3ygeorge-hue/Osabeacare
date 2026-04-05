@@ -254,6 +254,41 @@ export default function AuditReadyTrainingMatrix({
     }
   };
 
+  // Verify training record - Admin only
+  const handleVerifyTraining = async (item) => {
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/training/${item.code || item.id}/verify`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${item.title} verified`);
+      fetchTrainingData();
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to verify training');
+    }
+  };
+
+  // Unverify training record - Admin only, requires reason
+  const handleUnverifyTraining = async (item) => {
+    const reason = window.prompt('Reason for unverifying this training record:');
+    if (!reason) return;
+    
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/training/${item.code || item.id}/unverify`,
+        { reason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`${item.title} unverified`);
+      fetchTrainingData();
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to unverify training');
+    }
+  };
+
   // Re-run extraction on certificate
   const handleReExtract = async (documentId) => {
     try {
@@ -611,12 +646,13 @@ export default function AuditReadyTrainingMatrix({
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[280px]">Training Name</TableHead>
+                    <TableHead className="w-[240px]">Training Name</TableHead>
                     <TableHead>Source Certificate</TableHead>
                     <TableHead>Completed</TableHead>
                     <TableHead>Expires</TableHead>
                     <TableHead>Required?</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Verified By</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -678,15 +714,76 @@ export default function AuditReadyTrainingMatrix({
                         )}
                       </TableCell>
                       <TableCell>{renderStatusBadge(item.status)}</TableCell>
+                      <TableCell>
+                        {item.verified_by ? (
+                          <div className="text-xs">
+                            <p className="text-gray-700">{item.verified_by}</p>
+                            {item.verified_at && (
+                              <p className="text-gray-400">
+                                {formatBackendDate(item.verified_at, { format: 'short' })}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => handleOpenDetail(item)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {/* View Button */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleOpenDetail(item)}
+                            data-testid={`view-training-${item.code || item.id}`}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          
+                          {/* Edit Button - Admin only */}
+                          {isAdmin && item.completed_at && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-gray-500 hover:text-primary"
+                              onClick={() => {
+                                setEditingItem(item);
+                                setEditDialogOpen(true);
+                              }}
+                              data-testid={`edit-training-${item.code || item.id}`}
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                          
+                          {/* Verify/Unverify Button - Admin only */}
+                          {isAdmin && item.completed_at && (
+                            item.is_verified || item.status === 'verified' ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                onClick={() => handleUnverifyTraining(item)}
+                                data-testid={`unverify-training-${item.code || item.id}`}
+                              >
+                                <XCircle className="h-4 w-4 mr-1" />
+                                <span className="text-xs">Unverify</span>
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 px-2 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                onClick={() => handleVerifyTraining(item)}
+                                data-testid={`verify-training-${item.code || item.id}`}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                <span className="text-xs">Verify</span>
+                              </Button>
+                            )
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

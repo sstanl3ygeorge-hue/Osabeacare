@@ -30,6 +30,7 @@ import { SendReminderButton, RequestRenewalButton } from '../../components/admin
 import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
 import EditEmploymentHistoryDialog from '../../components/admin/EditEmploymentHistoryDialog';
 import EditReferenceDialog from '../../components/admin/EditReferenceDialog';
+import EditDeclarationsDialog from '../../components/admin/EditDeclarationsDialog';
 import SupersedeContractDialog from '../../components/admin/SupersedeContractDialog';
 import { 
   InductionChecklistPanel, 
@@ -142,6 +143,7 @@ export default function EmployeeProfilePage() {
   const [editPersonalOpen, setEditPersonalOpen] = useState(false);
   const [editEmploymentOpen, setEditEmploymentOpen] = useState(false);
   const [editReferenceOpen, setEditReferenceOpen] = useState(false);
+  const [editDeclarationsOpen, setEditDeclarationsOpen] = useState(false);
   const [selectedReferenceId, setSelectedReferenceId] = useState(null);
   const [selectedReferenceData, setSelectedReferenceData] = useState(null);
   const [supersedeContractOpen, setSupersedeContractOpen] = useState(false);
@@ -4038,6 +4040,9 @@ export default function EmployeeProfilePage() {
                         fetchData();
                         fetchCompliance();
                       }}
+                      onEditDeclarations={(emp) => {
+                        setEditDeclarationsOpen(true);
+                      }}
                     />
                   </div>
 
@@ -6777,6 +6782,18 @@ export default function EmployeeProfilePage() {
         employeeId={employeeId}
         employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
         currentContract={currentContract}
+        onSuccess={() => {
+          fetchEmployee();
+          fetchComplianceFile();
+        }}
+      />
+      
+      {/* Edit Declarations Dialog */}
+      <EditDeclarationsDialog
+        open={editDeclarationsOpen}
+        onClose={() => setEditDeclarationsOpen(false)}
+        employeeId={employeeId}
+        currentData={employee}
         onSuccess={() => {
           fetchEmployee();
           fetchComplianceFile();

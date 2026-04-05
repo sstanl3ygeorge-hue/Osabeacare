@@ -2840,16 +2840,37 @@ export default function EmployeeProfilePage() {
                   }`}>
                     {employee.status === 'compliance_review' ? 'Awaiting Approval' : employee.status?.replace('_', ' ')}
                   </span>
-                  {/* Recruitment Approval Status */}
-                  {employee.recruitment_approved ? (
-                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800">
-                      Recruitment Approved
-                    </span>
-                  ) : employee.person_stage === 'applicant' && (
-                    <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800">
-                      Awaiting Approval
-                    </span>
-                  )}
+                  {/* Recruitment Approval Status - Only show "Approved" if truly approved with zero blockers */}
+                  {(() => {
+                    // STRICT LOGIC: Only show "Recruitment Approved" badge if:
+                    // 1. recruitment_approved flag is true AND
+                    // 2. Zero blockers exist in compliance requirements
+                    const hasZeroBlockers = (complianceRequirements?.blockers?.length === 0) || 
+                                           (complianceRequirements?.pre_employment_gates?.blockers?.length === 0);
+                    const isFullyApproved = employee.recruitment_approved && hasZeroBlockers;
+                    
+                    if (isFullyApproved) {
+                      return (
+                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="recruitment-approved-badge">
+                          Recruitment Approved
+                        </span>
+                      );
+                    } else if (employee.recruitment_approved && !hasZeroBlockers) {
+                      // Approved but has blockers - show warning state
+                      return (
+                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="recruitment-conditional-badge">
+                          Conditionally Approved
+                        </span>
+                      );
+                    } else if (employee.person_stage === 'applicant') {
+                      return (
+                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="awaiting-approval-badge">
+                          Awaiting Approval
+                        </span>
+                      );
+                    }
+                    return null;
+                  })()}
                   {/* 3-Tier Work Readiness Status Badge */}
                   {employee.person_stage === 'employee' && (() => {
                     const workReadiness3tier = complianceRequirements?.work_readiness_3tier || {};

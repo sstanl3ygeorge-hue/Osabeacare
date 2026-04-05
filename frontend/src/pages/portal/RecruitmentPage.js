@@ -469,10 +469,18 @@ export default function RecruitmentPage() {
                           </Button>
                         )}
                         
-                        {applicant.recruitment_approved && (
-                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">
+                        {/* Show "Approved" badge ONLY if recruitment_approved=true AND zero blockers */}
+                        {applicant.recruitment_approved && approval?.canApprove && (
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200" data-testid={`approved-badge-${applicant.id}`}>
                             <CheckCircle className="w-3 h-3 mr-1" />
                             Approved
+                          </Badge>
+                        )}
+                        {/* Show conditional approval if approved but has blockers */}
+                        {applicant.recruitment_approved && approval && !approval.canApprove && (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-200" data-testid={`conditional-badge-${applicant.id}`}>
+                            <AlertTriangle className="w-3 h-3 mr-1" />
+                            Conditionally Approved
                           </Badge>
                         )}
                       </div>

@@ -96,7 +96,7 @@ from work_readiness_engine import (
     ROLE_WORK_REQUIREMENTS,
     get_work_readiness_label,
     can_sign_contract,
-    can_promote_to_active
+    can_promote_to_active_legacy as can_promote_to_active
 )
 from interview_questions import (
     get_interview_questions_for_role,
@@ -7459,6 +7459,204 @@ async def check_can_sign_contract(
     return result
 
 
+
+async def compute_unified_progress_internal(employee_id: str, employee: dict = None) -> dict:
+    """
+    Internal unified progress computation - SINGLE SOURCE OF TRUTH.
+    This is the same calculation as GET /employees/{id}/unified-progress but as a callable function.
+    Used by both Admin views and Worker Dashboard to ensure progress percentage consistency.
+    """
+    if not employee:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    
+    if not employee:
+        return {"overall_percentage": 0, "total_requirements": 0, "completed_requirements": 0, "blockers": []}
+    
+    job_role = (employee.get("job_role") or employee.get("role") or "").lower()
+    
+    # Initialize category counters
+    categories = {
+        "documents": {"completed": 0, "total": 0},
+        "forms": {"completed": 0, "total": 0},
+        "training": {"completed": 0, "total": 0},
+        "references": {"completed": 0, "total": 2},
+        "agreements": {"completed": 0, "total": 2},
+        "induction": {"completed": 0, "total": 0}
+    }
+    blockers = []
+    
+    # ========== DOCUMENTS ==========
+    required_docs = {
+        "right_to_work": "Right to Work",
+        "dbs": "DBS Certificate",
+        "identity": "Identity Document",
+        "proof_of_address": "Proof of Address (1)",
+        "proof_of_address_2": "Proof of Address (2)"
+    }
+    
+    # Add professional registration for clinical roles
+    if "nurse" in job_role or "midwife" in job_role:
+        required_docs["nmc_registration"] = "NMC Registration"
+    elif "doctor" in job_role or "physician" in job_role or "consultant" in job_role:
+        required_docs["gmc_registration"] = "GMC Registration"
+    elif "physio" in job_role or "occupational" in job_role or "paramedic" in job_role:
+        required_docs["hcpc_registration"] = "HCPC Registration"
+    elif "social worker" in job_role:
+        required_docs["swe_registration"] = "Social Work England Registration"
+    
+    categories["documents"]["total"] = len(required_docs)
+    
+    documents = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "status": {"$nin": ["deleted", "superseded"]}
+    }).to_list(200)
+    
+    for doc_type, doc_name in required_docs.items():
+        is_completed = False
+        for doc in documents:
+            req_id = (doc.get("requirement_id") or "").lower()
+            if doc_type.replace("_", "") in req_id.replace("_", "") or doc_type in req_id:
+                stamp = doc.get("verification_stamp", "")
+                if stamp and stamp not in ["", "not_verified"]:
+                    is_completed = True
+                    break
+                elif doc.get("status") == "verified" or doc.get("verified"):
+                    is_completed = True
+                    break
+        
+        if is_completed:
+            categories["documents"]["completed"] += 1
+        else:
+            blockers.append(doc_name)
+    
+    # ========== FORMS ==========
+    required_forms = {
+        "staff_health_questionnaire": "Health Questionnaire",
+        "staff_personal_info": "Personal Information",
+        "hmrc_starter_checklist": "HMRC Starter Checklist",
+        "emergency_contacts": "Emergency Contacts"
+    }
+    categories["forms"]["total"] = len(required_forms)
+    
+    form_submissions = await db.form_submissions.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["submitted", "verified"]}
+    }).to_list(20)
+    submitted_forms = {fs.get("form_type") for fs in form_submissions}
+    
+    for form_id, form_name in required_forms.items():
+        if form_id in submitted_forms:
+            categories["forms"]["completed"] += 1
+        else:
+            blockers.append(form_name)
+    
+    # ========== TRAINING ==========
+    mandatory_training = {
+        "safeguarding": "Safeguarding",
+        "manual_handling": "Manual Handling",
+        "fire_safety": "Fire Safety",
+        "health_safety": "Health & Safety",
+        "bls": "Basic Life Support",
+        "infection_control": "Infection Control"
+    }
+    categories["training"]["total"] = len(mandatory_training)
+    
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$ne": "superseded"}
+    }).to_list(100)
+    
+    now = datetime.now(timezone.utc)
+    
+    for training_id, training_name in mandatory_training.items():
+        is_completed = False
+        for t in training_records:
+            t_name = (t.get("training_name") or "").lower()
+            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
+                expiry_str = t.get("expiry_date")
+                if expiry_str:
+                    try:
+                        if isinstance(expiry_str, str):
+                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                        else:
+                            expiry = expiry_str
+                        if expiry >= now:
+                            is_completed = True
+                    except:
+                        is_completed = True
+                else:
+                    is_completed = True
+                break
+        
+        if is_completed:
+            categories["training"]["completed"] += 1
+        else:
+            blockers.append(training_name)
+    
+    # ========== REFERENCES ==========
+    references = employee.get("references", [])
+    verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
+    categories["references"]["completed"] = min(len(verified_refs), 2)
+    
+    if len(verified_refs) < 1:
+        blockers.append("Reference 1")
+    if len(verified_refs) < 2:
+        blockers.append("Reference 2")
+    
+    # ========== AGREEMENTS ==========
+    contract_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": {"$in": ["contract_acceptance", "employment_contract"]},
+        "verification_status": "verified"
+    })
+    
+    if contract_ack or employee.get("contract_signed", False):
+        categories["agreements"]["completed"] += 1
+    else:
+        blockers.append("Employment Contract")
+    
+    # Check handbook (optional, don't add to blockers)
+    handbook_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": {"$in": ["employee_handbook", "handbook"]},
+        "verification_status": {"$in": ["verified", "acknowledged"]}
+    })
+    if handbook_ack:
+        categories["agreements"]["completed"] += 1
+    
+    # ========== INDUCTION ==========
+    induction_items = await db.induction_checklist.find({"employee_id": employee_id}).to_list(50)
+    if induction_items:
+        categories["induction"]["total"] = len(induction_items)
+        categories["induction"]["completed"] = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+    else:
+        induction_data = employee.get("induction_checklist", {})
+        if induction_data:
+            items = induction_data.get("items", [])
+            categories["induction"]["total"] = len(items)
+            categories["induction"]["completed"] = len([i for i in items if i.get("completed")])
+        else:
+            categories["induction"]["total"] = 14
+            categories["induction"]["completed"] = 0
+    
+    if categories["induction"]["completed"] < categories["induction"]["total"]:
+        blockers.append(f"Induction ({categories['induction']['completed']}/{categories['induction']['total']} items)")
+    
+    # ========== CALCULATE TOTALS ==========
+    total_requirements = sum(cat["total"] for cat in categories.values())
+    completed_requirements = sum(cat["completed"] for cat in categories.values())
+    overall_percentage = round((completed_requirements / total_requirements) * 100) if total_requirements > 0 else 0
+    
+    return {
+        "overall_percentage": overall_percentage,
+        "completed_requirements": completed_requirements,
+        "total_requirements": total_requirements,
+        "categories": categories,
+        "blockers": blockers
+    }
+
+
+
 @api_router.get("/worker/dashboard")
 async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     """
@@ -7689,15 +7887,26 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     })
     contract_signed = bool(contract_ack)
     
-    # Calculate overall progress
-    total_required = len(required_docs) + 1 + len(mandatory_trainings)  # +1 for second POA
-    total_completed = len([d for d in completed_docs if not d.get("partial")]) + len(completed_trainings)
-    if len(poa_docs) >= 2:
-        total_completed += 1
-    progress_percentage = round((total_completed / total_required) * 100) if total_required > 0 else 0
+    # ========== UNIFIED PROGRESS (P0 FIX: Single Source of Truth) ==========
+    # Use the same unified progress calculation as Admin view for consistency
+    try:
+        unified_progress_data = await compute_unified_progress_internal(employee_id, employee)
+        progress_percentage = unified_progress_data.get("overall_percentage", 0)
+        total_required = unified_progress_data.get("total_requirements", 0)
+        total_completed = unified_progress_data.get("completed_requirements", 0)
+        unified_blockers = unified_progress_data.get("blockers", [])
+        has_blockers = len(unified_blockers) > 0 or not contract_signed
+    except Exception:
+        # Fallback to original calculation if unified progress fails
+        total_required = len(required_docs) + 1 + len(mandatory_trainings)  # +1 for second POA
+        total_completed = len([d for d in completed_docs if not d.get("partial")]) + len(completed_trainings)
+        if len(poa_docs) >= 2:
+            total_completed += 1
+        progress_percentage = round((total_completed / total_required) * 100) if total_required > 0 else 0
+        has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
+        unified_blockers = []
     
     # Determine work readiness status
-    has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
     
     # Get form status for onboarding employees
@@ -7807,6 +8016,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "completed": total_completed,
             "required": total_required
         },
+        "unified_blockers": unified_blockers,  # P0 FIX: Blockers from unified progress
         "forms": forms_status,  # Only populated for onboarding employees
         "missing_documents": missing_docs,
         "completed_documents": completed_docs,
@@ -10187,7 +10397,7 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
 # ============================================================================
 
 from work_readiness_engine import (
-    can_promote_to_active, 
+    can_promote_to_active_legacy as can_promote_to_active, 
     check_professional_registration,
     ROLE_REGISTRATION_REQUIREMENTS,
     EMPLOYEE_STATUS_APPLICANT,

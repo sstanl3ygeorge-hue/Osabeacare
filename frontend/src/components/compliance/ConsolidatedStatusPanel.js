@@ -258,9 +258,9 @@ export default function ConsolidatedStatusPanel({
                   isBlocked ? "text-amber-800" : "text-green-800"
                 )}>
                   {isBlocked ? (
-                    <>STATUS: BLOCKED - Cannot be promoted yet</>
+                    <>Cannot be promoted yet</>
                   ) : (
-                    <>STATUS: READY - All requirements complete</>
+                    <>All requirements complete</>
                   )}
                 </p>
                 <p className="text-sm text-gray-600">

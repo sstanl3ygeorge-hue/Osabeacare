@@ -122,6 +122,17 @@ export default function RecruitmentPage() {
     fetchApplicants();
   }, [token, search, statusFilter]);
 
+  // Fetch approval status for all visible applicants
+  useEffect(() => {
+    if (applicants.length > 0) {
+      applicants.forEach(applicant => {
+        if (!approvalData[applicant.id]) {
+          fetchApprovalStatus(applicant.id);
+        }
+      });
+    }
+  }, [applicants]);
+
   // Handle "Review Applicant" - navigate to recruitment context profile
   const handleReviewApplicant = (applicantId) => {
     navigate(`/portal/recruitment/${applicantId}`);

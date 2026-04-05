@@ -7667,7 +7667,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             form_status = "not_started"
             saved_at = None
             submitted_at = None
-            progress_percentage = 0
+            form_progress_pct = 0
             
             if submission:
                 form_status = "submitted" if submission.get("status") == "submitted" else "verified"
@@ -7679,7 +7679,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 if form_data:
                     filled_fields = sum(1 for v in form_data.values() if v)
                     total_fields = len(form_data) or 1
-                    progress_percentage = int((filled_fields / total_fields) * 100)
+                    form_progress_pct = int((filled_fields / total_fields) * 100)
             
             forms_status.append({
                 "id": form_id,
@@ -7689,7 +7689,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "status": form_status,
                 "saved_at": saved_at,
                 "submitted_at": submitted_at,
-                "progress_percentage": progress_percentage
+                "progress_percentage": form_progress_pct
             })
     
     # Get professional registration if applicable

@@ -220,6 +220,29 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ---
 
+## BUGS FIXED (April 2026 - Critical Fixes Session)
+
+### Bug 1: Worker Portal 0% Progress Bug (P0 CRITICAL)
+- **Issue**: Worker dashboard showed 0% progress but "9 of 11 requirements completed"
+- **Root Cause**: Variable name collision - `progress_percentage` was being overwritten inside form loop
+- **Fix**: Renamed inner variable to `form_progress_pct` in `/app/backend/server.py` line 7670
+- **Result**: Now correctly shows 82% for 9/11 requirements
+
+### Bug 2: "Loading approval status..." in Recruitment Pipeline (P0)
+- **Issue**: Some applicants showed "Loading approval status..." indefinitely
+- **Fix**: Added useEffect to automatically fetch approval status for all visible applicants
+- **File**: `/app/frontend/src/pages/portal/RecruitmentPage.js`
+
+### Bug 3: Multiple Conflicting Progress Numbers
+- **Issue**: Different pages showed 2/11, 15%, 50%, 33%, etc.
+- **Clarification**: These are INTENTIONALLY different:
+  - `2/11` = 11-item recruitment approval checklist (gates for promotion)
+  - `24%` = Unified overall compliance (all requirements)
+  - `66%` = Work readiness (subset of critical items)
+- **Recommendation**: Add tooltips/labels to clarify which number is which
+
+---
+
 ## COMPLETED: Worker Portal End-to-End Experience (April 2026)
 
 ### UI Enhancements Implemented

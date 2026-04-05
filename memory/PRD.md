@@ -900,5 +900,53 @@ System already enforces 2 Proof of Address documents requirement:
 
 ---
 
+## COMPLETED: P2 Feature - Competency Assessments UI (April 5, 2026)
+
+### Full CQC-Compliant Competency Management Module
+
+**New Component:** `CompetencyAssessmentsPanel.js`
+
+**Features Implemented:**
+
+1. **Competencies Tab** - New tab in Employee Profile (after Audit tab)
+
+2. **Summary Stats Grid:**
+   - Competent (green)
+   - Training Required (amber)
+   - Not Competent (red)
+   - Due Soon (orange when > 0)
+   - Overdue (red when > 0)
+
+3. **18 Competency Types:**
+   - Critical: Medication Administration, Moving & Handling, Safeguarding Adults, Clinical Competency
+   - Standard: Dementia Care, Learning Disabilities, Mental Health, End of Life Care, Catheter Care, Stoma Care, PEG Feeding, Wound Care, Diabetes Management, Epilepsy Management, Parkinson's Care, Choking Management, Challenging Behaviour, Staff Supervision
+
+4. **Assessment Status Options:**
+   - Competent (green badge)
+   - Not Competent (red badge)
+   - Training Required (amber badge)
+
+5. **Review Due Date Tracking:**
+   - Default: +1 year from assessment date
+   - Amber highlight for due within 30 days
+   - Red highlight for overdue
+
+6. **Dialogs:**
+   - Add Assessment (competency type, status, review date, notes)
+   - Edit Assessment (status, review date, notes - type locked)
+   - Assessment History (full audit trail with status changes)
+
+7. **Backend Endpoints (Pre-existing):**
+   - `GET /api/employees/{id}/competencies`
+   - `POST /api/employees/{id}/competencies`
+   - `PUT /api/employees/{id}/competencies/{competency_id}`
+
+### Test Results:
+- Backend: 100% (10/10 tests)
+- Frontend: 100% (all UI features verified)
+- Test report: `/app/test_reports/iteration_163.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - P1 UI Fixes completed
+April 5, 2026 - P2 Competency Assessments UI completed

@@ -138,6 +138,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ### P3 (Future)
 - [ ] Supabase Auth integration with RLS policies
 - [ ] Phase out MongoDB entirely (PostgreSQL migration)
+- [ ] Auto-delete employee data 3 years after termination (CQC requirement)
+- [ ] MFA for admin accounts (TOTP-based)
 
 ---
 

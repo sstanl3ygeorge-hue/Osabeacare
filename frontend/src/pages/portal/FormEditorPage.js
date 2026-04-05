@@ -576,7 +576,7 @@ export default function FormEditorPage() {
                         data-testid="send-form"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Send to Employee
+                        Send Reminder
                       </Button>
                     )}
 

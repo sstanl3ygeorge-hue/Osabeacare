@@ -419,7 +419,7 @@ export default function FormRequirementRow({
                 ) : (
                   <Send className="h-4 w-4 mr-1.5" />
                 )}
-                Send to Employee
+                Send Reminder
               </Button>
             )}
             

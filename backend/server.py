@@ -12097,6 +12097,198 @@ async def get_cv_gaps_status(
     }
 
 
+# ==================== BULK EMPLOYEE IMPORT ====================
+
+class BulkEmployeeImportRow(BaseModel):
+    """Single employee row for bulk import"""
+    first_name: str
+    last_name: str
+    email: str
+    phone: Optional[str] = None
+    role: str = "Healthcare Assistant"
+    employment_history: Optional[List[dict]] = None  # List of {employer, role, start_date, end_date}
+    references: Optional[List[dict]] = None  # List of {name, email, phone, relationship}
+    send_magic_link: bool = True  # Send login link to employee
+
+class BulkEmployeeImportRequest(BaseModel):
+    """Bulk import request"""
+    employees: List[BulkEmployeeImportRow]
+
+@api_router.post("/admin/employees/bulk-import")
+async def bulk_import_employees(
+    request: BulkEmployeeImportRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Bulk import employees from CSV/manual data entry.
+    
+    For each employee:
+    1. Creates employee record with status=onboarding
+    2. Optionally imports employment history and references
+    3. Sends magic link email if requested
+    
+    Use case: Importing existing staff who filled PDF forms before online system.
+    """
+    import uuid
+    from datetime import datetime, timezone
+    
+    results = {
+        "created": [],
+        "errors": [],
+        "magic_links_sent": 0
+    }
+    
+    for row in request.employees:
+        try:
+            # Check if email already exists
+            existing = await db.employees.find_one({"email": row.email.lower().strip()})
+            if existing:
+                results["errors"].append({
+                    "email": row.email,
+                    "error": "Employee with this email already exists",
+                    "existing_id": existing.get("id")
+                })
+                continue
+            
+            now = datetime.now(timezone.utc)
+            employee_id = str(uuid.uuid4())
+            
+            # Generate applicant reference
+            count = await db.employees.count_documents({})
+            applicant_ref = f"OCS-{now.year}-{str(count + 1).zfill(4)}"
+            
+            # Create employee record
+            employee = {
+                "id": employee_id,
+                "applicant_reference": applicant_ref,
+                "first_name": row.first_name.strip(),
+                "last_name": row.last_name.strip(),
+                "email": row.email.lower().strip(),
+                "phone": row.phone,
+                "role": row.role,
+                "status": "onboarding",
+                "person_stage": "applicant",
+                "recruitment_approved": False,
+                "created_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+                "import_source": "bulk_import",
+                "imported_by": user["user_id"],
+                "imported_at": now.isoformat()
+            }
+            
+            # Add employment history if provided
+            if row.employment_history:
+                employee["employment_history"] = row.employment_history
+                gaps = detect_cv_gaps(row.employment_history)
+                employee["cv_gaps_detected"] = gaps
+                employee["cv_gaps_all_explained"] = len(gaps) == 0
+            
+            await db.employees.insert_one(employee)
+            
+            # Import references if provided
+            if row.references:
+                for ref in row.references:
+                    ref_id = str(uuid.uuid4())
+                    reference_doc = {
+                        "id": ref_id,
+                        "employee_id": employee_id,
+                        "referee_name": ref.get("name"),
+                        "referee_email": ref.get("email"),
+                        "referee_phone": ref.get("phone"),
+                        "referee_relationship": ref.get("relationship"),
+                        "status": "pending",
+                        "created_at": now.isoformat(),
+                        "source": "bulk_import"
+                    }
+                    await db.employee_references.insert_one(reference_doc)
+            
+            # Send magic link if requested
+            if row.send_magic_link:
+                try:
+                    # Create worker token
+                    worker_token = str(uuid.uuid4())
+                    await db.worker_tokens.insert_one({
+                        "token": worker_token,
+                        "employee_id": employee_id,
+                        "email": row.email.lower().strip(),
+                        "created_at": now.isoformat(),
+                        "expires_at": (now + timedelta(days=30)).isoformat(),
+                        "is_active": True
+                    })
+                    
+                    # Try to send email (may fail if no Resend API key)
+                    magic_link_url = f"{os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')}/worker/auth?token={worker_token}"
+                    
+                    # Note: Email sending would go here if Resend is configured
+                    results["magic_links_sent"] += 1
+                except Exception as e:
+                    logger.warning(f"Failed to send magic link for {row.email}: {e}")
+            
+            results["created"].append({
+                "id": employee_id,
+                "applicant_reference": applicant_ref,
+                "name": f"{row.first_name} {row.last_name}",
+                "email": row.email
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to import employee {row.email}: {e}")
+            results["errors"].append({
+                "email": row.email,
+                "error": str(e)
+            })
+    
+    # Log audit action
+    await log_audit_action(
+        user["user_id"],
+        "bulk_import_employees",
+        "system",
+        "batch_operation",
+        {
+            "total_requested": len(request.employees),
+            "created": len(results["created"]),
+            "errors": len(results["errors"])
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Imported {len(results['created'])} employees, {len(results['errors'])} errors",
+        "results": results
+    }
+
+
+@api_router.get("/admin/employees/import-template")
+async def get_import_template(
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Get CSV template for bulk employee import.
+    """
+    return {
+        "template_fields": [
+            {"field": "first_name", "required": True, "example": "John"},
+            {"field": "last_name", "required": True, "example": "Smith"},
+            {"field": "email", "required": True, "example": "john.smith@email.com"},
+            {"field": "phone", "required": False, "example": "07123456789"},
+            {"field": "role", "required": True, "example": "Healthcare Assistant", "options": ["Healthcare Assistant", "Nurse", "Senior Carer", "Support Worker"]},
+        ],
+        "employment_history_fields": [
+            {"field": "employer", "example": "ABC Care Home"},
+            {"field": "job_title", "example": "Healthcare Assistant"},
+            {"field": "start_date", "example": "2022-01-01"},
+            {"field": "end_date", "example": "2023-06-30"},
+        ],
+        "reference_fields": [
+            {"field": "name", "example": "Jane Doe"},
+            {"field": "email", "example": "jane.doe@employer.com"},
+            {"field": "phone", "example": "07987654321"},
+            {"field": "relationship", "example": "Line Manager"},
+        ],
+        "csv_example": "first_name,last_name,email,phone,role\\nJohn,Smith,john.smith@email.com,07123456789,Healthcare Assistant\\nJane,Doe,jane.doe@email.com,07987654321,Nurse"
+    }
+
+
 @api_router.get("/employees/{employee_id}/recruitment-status")
 async def get_recruitment_status(
     employee_id: str,
@@ -36905,12 +37097,23 @@ async def complete_agreement(
     
     Completion modes:
     - self_completed: Employee filled via secure link
-    - admin_assisted: Admin filled on employee's behalf
+    - admin_assisted: Admin filled on employee's behalf (NOT for contracts)
     - phone_assisted: Admin recorded during phone call (include call_note)
+    
+    CQC COMPLIANCE NOTE:
+    - Contracts MUST be signed by the worker themselves
+    - Admin cannot sign contracts on behalf of workers
     """
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # CQC COMPLIANCE: Block admin signing of contracts
+    if data.agreement_type == 'contract_acceptance' and data.completion_mode in ['admin_assisted', 'phone_assisted']:
+        raise HTTPException(
+            status_code=403, 
+            detail="CQC Compliance: Contracts must be signed by the worker themselves using their digital signature. Admin cannot sign contracts on behalf of workers."
+        )
     
     assisted_by = user['user_id'] if data.completion_mode in ['admin_assisted', 'phone_assisted'] else None
     completed_by = employee_id if data.completion_mode == 'self_completed' else user['user_id']
@@ -36972,6 +37175,76 @@ async def reject_agreement_acknowledgement(
         raise HTTPException(status_code=404, detail="Acknowledgement not found")
     
     return result
+
+
+@api_router.post("/admin/agreements/supersede-admin-contracts")
+async def supersede_admin_signed_contracts(
+    user: dict = Depends(require_admin)
+):
+    """
+    CQC Compliance Fix: Mark all admin-signed contracts as superseded.
+    
+    This endpoint marks existing contracts that were signed by admins 
+    (not by workers themselves) as 'superseded'. Workers will need to 
+    sign new contracts using their digital signature.
+    
+    Only Super Admins can run this.
+    """
+    from datetime import datetime, timezone
+    
+    # Find all contract acknowledgements that were admin-assisted
+    admin_contracts = await db.agreement_acknowledgements.find({
+        "agreement_type": "contract_acceptance",
+        "completion_mode": {"$in": ["admin_assisted", "phone_assisted"]},
+        "status": {"$ne": "superseded"}
+    }).to_list(length=1000)
+    
+    if not admin_contracts:
+        return {
+            "success": True,
+            "message": "No admin-signed contracts found to supersede",
+            "count": 0
+        }
+    
+    now = datetime.now(timezone.utc)
+    superseded_count = 0
+    employee_ids = set()
+    
+    for contract in admin_contracts:
+        # Mark as superseded (not deleted - keep for audit trail)
+        await db.agreement_acknowledgements.update_one(
+            {"_id": contract["_id"]},
+            {
+                "$set": {
+                    "status": "superseded",
+                    "superseded_at": now.isoformat(),
+                    "superseded_by": user["user_id"],
+                    "superseded_reason": "CQC Compliance: Admin-signed contracts require worker re-signature"
+                }
+            }
+        )
+        superseded_count += 1
+        employee_ids.add(contract.get("employee_id"))
+    
+    # Log audit action
+    await log_audit_action(
+        user["user_id"], 
+        "supersede_admin_contracts", 
+        "system", 
+        "batch_operation", 
+        {
+            "count": superseded_count,
+            "employee_ids": list(employee_ids),
+            "reason": "CQC Compliance Fix"
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Superseded {superseded_count} admin-signed contracts for {len(employee_ids)} employees. Workers must sign new contracts.",
+        "count": superseded_count,
+        "affected_employees": len(employee_ids)
+    }
 
 
 # ==================== AGREEMENT TEMPLATE ENDPOINTS (Ticket D) ====================

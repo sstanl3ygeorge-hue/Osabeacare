@@ -36,8 +36,13 @@ const COMPLETION_MODES = [
  * CompleteAgreementDialog - Dialog for completing an agreement acknowledgement
  * 
  * Supports:
- * - admin_assisted: Admin fills on employee's behalf
+ * - admin_assisted: Admin fills on employee's behalf (NOT for contracts)
  * - phone_assisted: Admin records during phone call
+ * 
+ * CQC COMPLIANCE NOTE:
+ * - Contracts MUST be signed by the worker themselves (digital signature)
+ * - Admin cannot sign contracts on behalf of workers
+ * - Only handbook acknowledgements can be admin-assisted
  */
 export default function CompleteAgreementDialog({
   open,
@@ -56,6 +61,9 @@ export default function CompleteAgreementDialog({
   
   const { token } = useAuth();
 
+  // CQC COMPLIANCE: Block admin signing of contracts
+  const isContract = agreementKey === 'contract_acceptance';
+  
   // Get agreement config
   const agreementConfig = AGREEMENT_TYPES[agreementKey] || {
     type: agreementKey,
@@ -118,6 +126,45 @@ export default function CompleteAgreementDialog({
   };
 
   const ModeIcon = mode === 'phone_assisted' ? Phone : Edit;
+
+  // CQC COMPLIANCE: Contracts MUST be signed by worker - show warning
+  if (isContract) {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent className="bg-white sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2 text-red-600">
+              <FileSignature className="h-5 w-5" />
+              Contract Requires Worker Signature
+            </DialogTitle>
+            <DialogDescription className="text-red-600">
+              CQC Compliance Requirement
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-800 font-medium mb-2">
+                Contracts cannot be signed by admin on behalf of workers.
+              </p>
+              <p className="text-sm text-red-700">
+                For CQC compliance, the worker must sign their employment contract themselves using their digital signature in their Worker Portal.
+              </p>
+              <p className="text-sm text-red-700 mt-2">
+                Please send a reminder to the worker to sign their contract.
+              </p>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={handleClose}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>

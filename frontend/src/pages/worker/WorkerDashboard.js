@@ -32,10 +32,12 @@ const getDocumentGuidance = (docType) => {
   const guidance = {
     right_to_work: "Upload your UK passport, biometric residence permit, or share code screenshot from GOV.UK. Share code must be valid for at least 30 days.",
     dbs: "Upload your Enhanced DBS certificate (issued within last 3 years). If subscribed to DBS Update Service, please confirm.",
-    identity: "Upload a clear photo of your passport photo page or UK driving license (both sides).",
+    identity: "Upload a clear photo of your passport photo page or UK driving licence (both sides).",
     proof_of_address: "Upload a utility bill, bank statement, or council tax bill dated within last 3 months. Must show your full name and current address.",
     proof_of_address_2: "Upload a different document from the first. Examples: bank statement, HMRC letter, tenancy agreement, or voter registration.",
-    training: "Upload PDF or photo of your training certificate. AI will automatically extract the training name, completion date, and expiry date."
+    training: "Upload PDF or photo of your training certificate. AI will automatically extract the training name, completion date, and expiry date.",
+    nmc_registration: "Upload your NMC PIN card or registration letter. Your registration will be verified online.",
+    professional_indemnity: "Upload your professional indemnity insurance certificate. Must be valid for current year."
   };
   return guidance[docType] || "Upload a clear copy of the required document.";
 };

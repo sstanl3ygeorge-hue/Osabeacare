@@ -3746,21 +3746,10 @@ export default function EmployeeProfilePage() {
         {/* This tab only shows supplementary details not in the main panel */}
         <TabsContent value="work_readiness">
           <div className="space-y-6">
-            {/* Pre-Employment Gates Detail View */}
-            <PreEmploymentGatesPanel 
-              employeeId={employeeId}
-              onNavigate={(hash) => {
-                if (hash === '#compliance') setActiveTab('checklist');
-                else if (hash === '#training') setActiveTab('training');
-                else if (hash === '#policies') setActiveTab('checklist');
-              }}
-              onRefresh={fetchComplianceFile}
-            />
-            
-            {/* Personal Details Summary */}
+            {/* Employee Summary with Edit Button */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="font-heading text-lg">Employee Summary</CardTitle>
+                <CardTitle className="font-heading text-lg">Personal Details</CardTitle>
                 <Button 
                   variant="outline" 
                   size="sm" 
@@ -3798,6 +3787,100 @@ export default function EmployeeProfilePage() {
                     }>
                       {employee?.status?.replace(/_/g, ' ')}
                     </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Employment History Summary with Edit Button */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="font-heading text-lg">Employment History</CardTitle>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setEditEmploymentOpen(true)}
+                  data-testid="edit-employment-btn"
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {employee?.employment_history && employee.employment_history.length > 0 ? (
+                  <div className="space-y-2">
+                    {employee.employment_history.slice(0, 3).map((job, idx) => (
+                      <div key={idx} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                        <div>
+                          <p className="font-medium text-sm">{job.employer || job.company}</p>
+                          <p className="text-xs text-gray-500">{job.job_title || job.position}</p>
+                        </div>
+                        <p className="text-xs text-gray-400">{job.start_date} - {job.end_date || 'Present'}</p>
+                      </div>
+                    ))}
+                    {employee.employment_history.length > 3 && (
+                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 3} more</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No employment history recorded</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* References Summary with Edit Button */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="font-heading text-lg">References</CardTitle>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setEditReferenceOpen(true)}
+                  data-testid="edit-references-btn"
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Reference 1 */}
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-500 mb-1">Reference 1</p>
+                    {employee?.reference_1 || employee?.references?.[0] ? (
+                      <>
+                        <p className="font-medium text-sm">{employee?.reference_1?.name || employee?.references?.[0]?.name || 'Not provided'}</p>
+                        <p className="text-xs text-gray-500">{employee?.reference_1?.email || employee?.references?.[0]?.email}</p>
+                        <Badge className={
+                          (employee?.reference_1_status === 'verified' || employee?.references?.[0]?.verified) 
+                            ? 'bg-green-100 text-green-700 mt-1' 
+                            : 'bg-amber-100 text-amber-700 mt-1'
+                        }>
+                          {employee?.reference_1_status || (employee?.references?.[0]?.verified ? 'Verified' : 'Pending')}
+                        </Badge>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-500">Not provided</p>
+                    )}
+                  </div>
+                  {/* Reference 2 */}
+                  <div className="p-3 bg-gray-50 rounded-lg">
+                    <p className="text-xs text-gray-500 mb-1">Reference 2</p>
+                    {employee?.reference_2 || employee?.references?.[1] ? (
+                      <>
+                        <p className="font-medium text-sm">{employee?.reference_2?.name || employee?.references?.[1]?.name || 'Not provided'}</p>
+                        <p className="text-xs text-gray-500">{employee?.reference_2?.email || employee?.references?.[1]?.email}</p>
+                        <Badge className={
+                          (employee?.reference_2_status === 'verified' || employee?.references?.[1]?.verified) 
+                            ? 'bg-green-100 text-green-700 mt-1' 
+                            : 'bg-amber-100 text-amber-700 mt-1'
+                        }>
+                          {employee?.reference_2_status || (employee?.references?.[1]?.verified ? 'Verified' : 'Pending')}
+                        </Badge>
+                      </>
+                    ) : (
+                      <p className="text-sm text-gray-500">Not provided</p>
+                    )}
                   </div>
                 </div>
               </CardContent>

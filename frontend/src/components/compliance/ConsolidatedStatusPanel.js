@@ -28,10 +28,16 @@ import {
   FileText, Users, GraduationCap, ClipboardCheck,
   Send, Eye, Plus, RefreshCw, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar,
-  Clock, AlertCircle, Lock
+  Clock, AlertCircle, Lock, Info, Edit
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '../ui/tooltip';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -325,21 +331,79 @@ export default function ConsolidatedStatusPanel({
                 const severityConfig = BLOCKER_SEVERITY[severity];
                 
                 const getAction = () => {
-                  if (blocker.gate?.includes('reference')) return { label: 'Review', tab: 'references' };
-                  if (blocker.gate?.includes('interview')) return { label: 'Complete Interview', tab: 'forms' };
-                  // Contract: No button - worker signs via dashboard
-                  if (blocker.gate?.includes('contract')) return { label: 'Locked', tab: 'compliance', locked: true };
-                  if (blocker.gate?.includes('induction')) return { label: 'Start', tab: 'compliance' };
-                  if (blocker.gate?.includes('health')) return { label: 'Send to Worker', tab: 'forms' };
-                  if (blocker.gate?.includes('training')) return { label: 'View Training', tab: 'training' };
-                  if (blocker.gate?.includes('gaps')) return { label: 'Review Gaps', tab: 'employment' };
-                  // Documents: Change "View" to "Verify with Evidence" for pending items
+                  // Reference blockers
+                  if (blocker.gate?.includes('reference')) {
+                    return { 
+                      label: 'Review', 
+                      tab: 'references',
+                      tooltip: 'Review and verify the reference response'
+                    };
+                  }
+                  // Interview Record
+                  if (blocker.gate?.includes('interview')) {
+                    return { 
+                      label: 'Complete Interview', 
+                      tab: 'forms',
+                      tooltip: 'Complete the interview record form'
+                    };
+                  }
+                  // Contract: Locked until all other requirements complete
+                  if (blocker.gate?.includes('contract')) {
+                    return { 
+                      label: 'Locked', 
+                      tab: 'compliance', 
+                      locked: true,
+                      tooltip: 'Contract signing unlocks when all other requirements are complete. Worker signs via their dashboard.'
+                    };
+                  }
+                  // Induction Checklist
+                  if (blocker.gate?.includes('induction')) {
+                    return { 
+                      label: 'Start', 
+                      tab: 'compliance',
+                      tooltip: 'Start the 15-item induction checklist'
+                    };
+                  }
+                  // Health Questionnaire
+                  if (blocker.gate?.includes('health')) {
+                    return { 
+                      label: 'Send to Worker', 
+                      tab: 'forms',
+                      tooltip: 'Send health questionnaire link to worker'
+                    };
+                  }
+                  // Training
+                  if (blocker.gate?.includes('training')) {
+                    return { 
+                      label: 'View Training', 
+                      tab: 'training',
+                      tooltip: 'View and manage mandatory training records'
+                    };
+                  }
+                  // Employment Gaps
+                  if (blocker.gate?.includes('gaps')) {
+                    return { 
+                      label: 'Review Gaps', 
+                      tab: 'employment',
+                      tooltip: 'Review unexplained employment history gaps'
+                    };
+                  }
+                  // Document blockers: DBS, RTW, Identity, POA - use "Verify with Evidence"
                   if (blocker.gate?.includes('dbs') || blocker.gate?.includes('rtw') || 
                       blocker.gate?.includes('right_to_work') || blocker.gate?.includes('identity') || 
                       blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address')) {
-                    return { label: severity === 'PENDING' ? 'Verify with Evidence' : 'View', tab: 'compliance' };
+                    return { 
+                      label: 'Verify with Evidence', 
+                      tab: 'compliance',
+                      tooltip: 'Upload evidence and apply verification stamp'
+                    };
                   }
-                  return { label: severity === 'PENDING' ? 'Verify' : 'View', tab: 'compliance' };
+                  // Default action
+                  return { 
+                    label: severity === 'PENDING' ? 'Verify' : 'View', 
+                    tab: 'compliance',
+                    tooltip: 'View and verify this requirement'
+                  };
                 };
                 const action = getAction();
 
@@ -384,30 +448,41 @@ export default function ConsolidatedStatusPanel({
                         </p>
                       </div>
                     </div>
-                    {action.locked ? (
-                      // Contract is locked until all other requirements complete
-                      <Badge 
-                        variant="outline" 
-                        className="text-gray-500 border-gray-300 bg-gray-100"
-                      >
-                        <Lock className="h-3 w-3 mr-1" />
-                        Locked
-                      </Badge>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onNavigateToTab?.(action.tab)}
-                        className={cn(
-                          severity === 'CRITICAL' 
-                            ? "text-red-600 border-red-200 hover:bg-red-50"
-                            : "text-amber-600 border-amber-200 hover:bg-amber-50"
-                        )}
-                      >
-                        {action.label}
-                        <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                      </Button>
-                    )}
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          {action.locked ? (
+                            // Contract is locked until all other requirements complete
+                            <Badge 
+                              variant="outline" 
+                              className="text-gray-500 border-gray-300 bg-gray-100 cursor-help"
+                            >
+                              <Lock className="h-3 w-3 mr-1" />
+                              Locked
+                              <Info className="h-3 w-3 ml-1 opacity-50" />
+                            </Badge>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onNavigateToTab?.(action.tab)}
+                              className={cn(
+                                severity === 'CRITICAL' 
+                                  ? "text-red-600 border-red-200 hover:bg-red-50"
+                                  : "text-amber-600 border-amber-200 hover:bg-amber-50"
+                              )}
+                              data-testid={`action-btn-${blocker.gate}`}
+                            >
+                              {action.label}
+                              <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                            </Button>
+                          )}
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="max-w-xs">
+                          <p>{action.tooltip}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
                 );
               })}

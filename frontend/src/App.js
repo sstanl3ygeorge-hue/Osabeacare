@@ -44,6 +44,7 @@ import ServiceUsersPage from "./pages/portal/ServiceUsersPage";
 import ServiceUserProfilePage from "./pages/portal/ServiceUserProfilePage";
 import RecruitmentPipelinePage from "./pages/portal/RecruitmentPage";
 import ScheduledRequestsPage from "./pages/portal/ScheduledRequestsPage";
+import AdminUsersPage from "./pages/portal/AdminUsersPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -116,6 +117,7 @@ function AppRouter() {
         <Route path="service-users" element={<ServiceUsersPage />} />
         <Route path="service-users/:id" element={<ServiceUserProfilePage />} />
         <Route path="scheduled-requests" element={<ScheduledRequestsPage />} />
+        <Route path="admin-users" element={<AdminUsersPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>

@@ -15,7 +15,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, UserCog
 } from 'lucide-react';
 
 const navigation = [
@@ -31,6 +31,7 @@ const navigation = [
   { name: 'DBS Register', href: '/portal/dbs-register', icon: Shield },
   { name: 'Scheduled Requests', href: '/portal/scheduled-requests', icon: Calendar },
   { name: 'Audit View', href: '/portal/audit', icon: History },
+  { name: 'Admin Users', href: '/portal/admin-users', icon: UserCog },
   { name: 'Settings', href: '/portal/settings', icon: Settings },
 ];
 

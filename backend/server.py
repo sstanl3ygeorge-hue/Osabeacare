@@ -7018,6 +7018,153 @@ async def login(credentials: UserLogin, http_request: Request):
 async def get_me(user: dict = Depends(get_current_user)):
     return {k: v for k, v in user.items() if k != 'password'}
 
+
+# ========== ADMIN USER MANAGEMENT ==========
+
+@api_router.get("/admin/users")
+async def list_admin_users(user: dict = Depends(get_current_user)):
+    """
+    List all admin/manager users.
+    Only super_admin and admin can view this list.
+    """
+    if user.get('role') not in [UserRole.SUPER_ADMIN, UserRole.ADMIN]:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    # Get all privileged users
+    users = await db.users.find(
+        {"role": {"$in": ["super_admin", "admin", "manager", "auditor"]}},
+        {"_id": 0, "password": 0}
+    ).sort("created_at", -1).to_list(100)
+    
+    return {"users": users, "count": len(users)}
+
+
+@api_router.put("/admin/users/{user_id}")
+async def update_admin_user(
+    user_id: str,
+    update_data: dict = Body(...),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Update an admin user's details.
+    Only super_admin can update admin accounts.
+    """
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super administrators can update admin accounts")
+    
+    target_user = await db.users.find_one({"user_id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent modifying own super_admin status
+    if target_user['user_id'] == user['user_id'] and update_data.get('role') != 'super_admin':
+        raise HTTPException(status_code=400, detail="Cannot demote yourself")
+    
+    # Allowed fields to update
+    allowed_fields = ['name', 'role']
+    update_doc = {}
+    for field in allowed_fields:
+        if field in update_data:
+            update_doc[field] = update_data[field]
+    
+    if not update_doc:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    
+    update_doc['updated_at'] = datetime.now(timezone.utc).isoformat()
+    update_doc['updated_by'] = user.get('user_id')
+    
+    await db.users.update_one({"user_id": user_id}, {"$set": update_doc})
+    
+    await log_audit_action(
+        user.get('user_id'),
+        "update_admin_user",
+        "user",
+        user_id,
+        update_doc
+    )
+    
+    return {"message": "User updated", "user_id": user_id}
+
+
+@api_router.delete("/admin/users/{user_id}")
+async def delete_admin_user(user_id: str, user: dict = Depends(get_current_user)):
+    """
+    Delete an admin user.
+    Only super_admin can delete admin accounts.
+    Cannot delete yourself or the last super_admin.
+    """
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super administrators can delete admin accounts")
+    
+    # Prevent self-deletion
+    if user_id == user.get('user_id'):
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    
+    target_user = await db.users.find_one({"user_id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Prevent deleting last super_admin
+    if target_user.get('role') == 'super_admin':
+        super_admin_count = await db.users.count_documents({"role": "super_admin"})
+        if super_admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last super administrator")
+    
+    await db.users.delete_one({"user_id": user_id})
+    
+    await log_audit_action(
+        user.get('user_id'),
+        "delete_admin_user",
+        "user",
+        user_id,
+        {"deleted_email": target_user.get('email'), "deleted_role": target_user.get('role')}
+    )
+    
+    return {"message": "User deleted", "user_id": user_id}
+
+
+@api_router.post("/admin/users/{user_id}/reset-password")
+async def reset_admin_password(
+    user_id: str,
+    password_data: dict = Body(...),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Reset an admin user's password.
+    Only super_admin can reset passwords.
+    """
+    if user.get('role') != UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Only super administrators can reset passwords")
+    
+    target_user = await db.users.find_one({"user_id": user_id})
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    new_password = password_data.get('password')
+    if not new_password or len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    
+    hashed = hash_password(new_password)
+    
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "password": hashed,
+            "password_updated_at": datetime.now(timezone.utc).isoformat(),
+            "password_updated_by": user.get('user_id')
+        }}
+    )
+    
+    await log_audit_action(
+        user.get('user_id'),
+        "reset_admin_password",
+        "user",
+        user_id,
+        {"target_email": target_user.get('email')}
+    )
+    
+    return {"message": "Password reset successfully"}
+
 # Emergent Google OAuth session exchange
 @api_router.post("/auth/session")
 async def exchange_session(session_id: str = Header(None, alias="X-Session-ID")):

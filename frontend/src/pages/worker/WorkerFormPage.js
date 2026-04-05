@@ -232,15 +232,18 @@ export default function WorkerFormPage() {
     setSubmitting(true);
     try {
       const token = localStorage.getItem('workerToken');
-      await axios.post(
+      console.log('Submitting form:', formId, 'with data:', formData);
+      const response = await axios.post(
         `${API}/worker/forms/${formId}/submit`,
         { form_data: formData },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Form submitted successfully!');
+      console.log('Submit response:', response.data);
+      toast.success('Form submitted successfully! Admin has been notified.');
       navigate('/worker/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to submit');
+      console.error('Submit error:', error.response?.data || error);
+      toast.error(error.response?.data?.detail || 'Failed to submit form. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -415,19 +418,24 @@ export default function WorkerFormPage() {
 
         {/* Submit Button */}
         {canEdit && (
-          <div className="flex justify-end gap-3 pt-4">
-            <Button variant="outline" onClick={handleSave} disabled={saving}>
-              <Save className="h-4 w-4 mr-2" />
-              Save for Later
-            </Button>
-            <Button onClick={handleSubmit} disabled={submitting} className="bg-blue-600 hover:bg-blue-700">
-              {submitting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Send className="h-4 w-4 mr-2" />
-              )}
-              Submit Form
-            </Button>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <p className="text-sm text-blue-800 mb-3">
+              <strong>Ready to submit?</strong> Once submitted, this form cannot be edited and will be sent to the admin for review.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={handleSave} disabled={saving}>
+                <Save className="h-4 w-4 mr-2" />
+                Save Draft
+              </Button>
+              <Button onClick={handleSubmit} disabled={submitting} className="bg-green-600 hover:bg-green-700">
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4 mr-2" />
+                )}
+                Submit to Admin
+              </Button>
+            </div>
           </div>
         )}
       </div>

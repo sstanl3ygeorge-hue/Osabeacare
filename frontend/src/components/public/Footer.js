@@ -15,12 +15,12 @@ export default function Footer() {
               <span className="font-heading font-semibold text-xl">Osabea Healthcare</span>
             </div>
             <p className="text-white/70 text-sm leading-relaxed mb-6">
-              Recruiting compassionate care professionals with a safer, structured and people-first approach.
+              CQC-compliant care staffing for care homes and supported living services across the UK.
             </p>
             <div className="flex flex-col gap-3">
-              <a href="tel:+441onal" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors text-sm">
+              <a href="tel:01634306000" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors text-sm">
                 <Phone className="h-4 w-4" />
-                <span>0800 123 4567</span>
+                <span>01634 306 000</span>
               </a>
               <a href="mailto:info@osabea.care" className="flex items-center gap-3 text-white/70 hover:text-white transition-colors text-sm">
                 <Mail className="h-4 w-4" />
@@ -28,21 +28,20 @@ export default function Footer() {
               </a>
               <div className="flex items-start gap-3 text-white/70 text-sm">
                 <MapPin className="h-4 w-4 mt-0.5" />
-                <span>123 Care Street, London, UK</span>
+                <span>Kent, UK</span>
               </div>
             </div>
           </div>
 
           {/* Quick Links */}
           <div>
-            <h4 className="font-heading font-semibold text-lg mb-6">Quick Links</h4>
+            <h4 className="font-heading font-semibold text-lg mb-6">For Care Homes</h4>
             <ul className="space-y-3">
               {[
-                { href: '/about', label: 'About Us' },
+                { href: '/contact', label: 'Request Staffing Support' },
                 { href: '/services', label: 'Our Services' },
-                { href: '/recruitment', label: 'Join Our Team' },
-                { href: '/compliance', label: 'Compliance' },
-                { href: '/contact', label: 'Contact Us' },
+                { href: '/compliance', label: 'Compliance Standards' },
+                { href: '/about', label: 'About Us' },
               ].map((link) => (
                 <li key={link.href}>
                   <Link
@@ -76,12 +75,12 @@ export default function Footer() {
 
           {/* For Candidates */}
           <div>
-            <h4 className="font-heading font-semibold text-lg mb-6">For Candidates</h4>
+            <h4 className="font-heading font-semibold text-lg mb-6">Looking for Work?</h4>
             <ul className="space-y-3">
               {[
-                { href: '/apply', label: 'Apply Now' },
+                { href: '/apply', label: 'Apply to Join Our Team' },
                 { href: '/recruitment', label: 'Why Work With Us' },
-                { href: '/compliance', label: 'Our Standards' },
+                { href: '/worker/login', label: 'Applicant Portal' },
                 { href: '/login', label: 'Staff Portal Login' },
               ].map((link) => (
                 <li key={link.href}>

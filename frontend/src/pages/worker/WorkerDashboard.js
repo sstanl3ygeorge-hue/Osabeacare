@@ -9,7 +9,7 @@ import { Dialog, DialogContent } from '../../components/ui/dialog';
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool
+  Shield, X, PenTool, Lock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
@@ -190,6 +190,7 @@ export default function WorkerDashboard() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
+  const [contractEligibility, setContractEligibility] = useState(null);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -204,6 +205,19 @@ export default function WorkerDashboard() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDashboard(response.data);
+      
+      // Also check contract eligibility
+      const employeeId = response.data?.employee?.id;
+      if (employeeId && !response.data?.contract_signed) {
+        try {
+          const eligibilityRes = await axios.get(`${API}/employees/${employeeId}/can-sign-contract`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          setContractEligibility(eligibilityRes.data);
+        } catch (err) {
+          console.warn('Could not fetch contract eligibility:', err);
+        }
+      }
     } catch (error) {
       if (error.response?.status === 401 || error.response?.status === 403) {
         localStorage.removeItem('workerToken');
@@ -688,20 +702,65 @@ export default function WorkerDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between p-4 bg-red-50 rounded-xl">
-                <div>
-                  <span className="font-medium text-slate-800">Contract Not Signed</span>
-                  <p className="text-xs text-slate-500">You must sign your contract before you can start work</p>
+              {contractEligibility?.can_sign ? (
+                // CAN sign contract - all checks complete
+                <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-200">
+                  <div>
+                    <span className="font-medium text-green-800">Ready to Sign!</span>
+                    <p className="text-xs text-green-600">All compliance checks are complete. Please sign your contract to proceed.</p>
+                  </div>
+                  <Button 
+                    onClick={() => setShowSignaturePad(true)}
+                    className="gap-2 bg-green-600 hover:bg-green-700"
+                    data-testid="sign-contract-btn"
+                  >
+                    <PenTool className="h-4 w-4" />
+                    Sign Contract
+                  </Button>
                 </div>
-                <Button 
-                  onClick={() => setShowSignaturePad(true)}
-                  className="gap-2 bg-blue-600 hover:bg-blue-700"
-                  data-testid="sign-contract-btn"
-                >
-                  <PenTool className="h-4 w-4" />
-                  Sign Contract
-                </Button>
-              </div>
+              ) : (
+                // CANNOT sign contract - blockers remaining
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-4 bg-amber-50 rounded-xl border border-amber-200">
+                    <div>
+                      <span className="font-medium text-amber-800">Contract Locked</span>
+                      <p className="text-xs text-amber-600">
+                        Contract signing is the final step. Complete all requirements below first.
+                      </p>
+                    </div>
+                    <Button 
+                      disabled
+                      className="gap-2 bg-gray-300 cursor-not-allowed"
+                      data-testid="sign-contract-btn-locked"
+                    >
+                      <Lock className="h-4 w-4" />
+                      Locked
+                    </Button>
+                  </div>
+                  
+                  {/* Show remaining blockers */}
+                  {contractEligibility?.blockers?.length > 0 && (
+                    <div className="p-3 bg-gray-50 rounded-lg">
+                      <p className="text-xs font-medium text-gray-600 mb-2">
+                        Remaining requirements ({contractEligibility.blockers.length}):
+                      </p>
+                      <ul className="text-xs text-gray-500 space-y-1">
+                        {contractEligibility.blockers.slice(0, 5).map((blocker, idx) => (
+                          <li key={idx} className="flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            {blocker}
+                          </li>
+                        ))}
+                        {contractEligibility.blockers.length > 5 && (
+                          <li className="text-gray-400">
+                            + {contractEligibility.blockers.length - 5} more...
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

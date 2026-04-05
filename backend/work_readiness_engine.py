@@ -213,6 +213,190 @@ WORK_READINESS_LABELS = {
     "references": "Employment References",
 }
 
+# =============================================================================
+# CONTRACT SIGNING REQUIREMENTS (P0 COMPLIANCE)
+# =============================================================================
+# Contract must be the FINAL step - all these must be complete first
+
+REQUIRED_BEFORE_CONTRACT = [
+    "dbs_verified",           # DBS certificate verified with stamp
+    "rtw_verified",           # Right to Work verified with stamp
+    "identity_verified",      # Identity document verified with stamp
+    "poa_verified",           # 2 Proof of Address documents verified
+    "references_verified",    # Both references verified
+    "interview_completed",    # Interview record completed
+    "induction_complete",     # 15 Care Certificate standards complete
+    "mandatory_training_complete",  # All mandatory training items complete & valid
+]
+
+
+async def can_sign_contract(db, employee_id: str) -> dict:
+    """
+    Check if an employee can sign their contract.
+    Contract signing is the FINAL step before promotion.
+    
+    All pre-employment checks must be complete before contract can be signed.
+    
+    Returns:
+        {
+            "can_sign": bool,
+            "reason": str or None,
+            "blockers": list of remaining items,
+            "completed": list of completed items
+        }
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        return {"can_sign": False, "reason": "Employee not found", "blockers": [], "completed": []}
+    
+    blockers = []
+    completed = []
+    
+    # 1. Check DBS verified
+    dbs_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "dbs",
+        "status": "verified"
+    }).to_list(1)
+    if dbs_docs:
+        completed.append("DBS Certificate verified")
+    else:
+        blockers.append("DBS Certificate not verified")
+    
+    # 2. Check Right to Work verified
+    rtw_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "right_to_work",
+        "status": "verified"
+    }).to_list(1)
+    if rtw_docs:
+        completed.append("Right to Work verified")
+    else:
+        blockers.append("Right to Work not verified")
+    
+    # 3. Check Identity verified
+    identity_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "identity",
+        "status": "verified"
+    }).to_list(1)
+    if identity_docs:
+        completed.append("Identity verified")
+    else:
+        blockers.append("Identity not verified")
+    
+    # 4. Check Proof of Address (2 documents required)
+    poa_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": "proof_of_address",
+        "status": "verified"
+    }).to_list(2)
+    if len(poa_docs) >= 2:
+        completed.append("Proof of Address verified (2 documents)")
+    else:
+        blockers.append(f"Proof of Address - {len(poa_docs)} of 2 verified")
+    
+    # 5. Check References verified (both required)
+    ref_1_verified = employee.get("reference_1_status") == "verified"
+    ref_2_verified = employee.get("reference_2_status") == "verified"
+    
+    if ref_1_verified and ref_2_verified:
+        completed.append("Both references verified")
+    else:
+        if not ref_1_verified:
+            blockers.append("Reference 1 not verified")
+        if not ref_2_verified:
+            blockers.append("Reference 2 not verified")
+    
+    # 6. Check Interview completed
+    interview_form = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "requirement_id": {"$in": ["interview_record", "interview"]}
+    })
+    if interview_form:
+        completed.append("Interview completed")
+    else:
+        blockers.append("Interview record not completed")
+    
+    # 7. Check Induction complete (15 items)
+    induction = await db.induction_checklists.find_one({"employee_id": employee_id})
+    if induction:
+        items = induction.get("items", [])
+        completed_items = sum(1 for item in items if item.get("completed"))
+        total_items = len(items)
+        if completed_items >= 15:
+            completed.append("Induction checklist complete (15/15)")
+        else:
+            blockers.append(f"Induction checklist incomplete ({completed_items}/{total_items})")
+    else:
+        blockers.append("Induction checklist not started")
+    
+    # 8. Check Mandatory Training complete
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "is_mandatory": True,
+        "record_status": {"$ne": "deleted"}
+    }).to_list(100)
+    
+    # Check for mandatory training items
+    # Required: safeguarding_adults, moving_handling, fire_safety, health_safety, basic_life_support, infection_control
+    completed_training = set()
+    for record in training_records:
+        if record.get("completed_at") and not record.get("is_expired"):
+            completed_training.add(record.get("training_code") or record.get("training_name", "").lower().replace(" ", "_"))
+    
+    training_complete = len(completed_training) >= 6
+    if training_complete:
+        completed.append("Mandatory training complete")
+    else:
+        blockers.append(f"Mandatory training incomplete ({len(completed_training)}/6)")
+    
+    can_sign = len(blockers) == 0
+    
+    return {
+        "can_sign": can_sign,
+        "reason": None if can_sign else f"{len(blockers)} requirements remaining",
+        "blockers": blockers,
+        "completed": completed,
+        "total_requirements": 8,
+        "completed_count": len(completed)
+    }
+
+
+async def can_promote_to_active(db, employee_id: str) -> dict:
+    """
+    Check if an employee can be promoted to active status.
+    Requires: all pre-contract checks complete + contract signed
+    """
+    contract_check = await can_sign_contract(db, employee_id)
+    
+    if not contract_check["can_sign"]:
+        return {
+            "can_promote": False,
+            "reason": "Pre-contract requirements incomplete",
+            "blockers": contract_check["blockers"]
+        }
+    
+    # Check contract signed
+    agreements = await db.agreements.find({
+        "employee_id": employee_id,
+        "type": "employment_contract",
+        "status": "signed"
+    }).to_list(1)
+    
+    if not agreements:
+        return {
+            "can_promote": False,
+            "reason": "Contract not signed",
+            "blockers": ["Employment contract not signed by worker"]
+        }
+    
+    return {
+        "can_promote": True,
+        "reason": None,
+        "blockers": []
+    }
+
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -340,9 +524,10 @@ async def check_professional_registration(employee_id: str, role_normalized: str
     return (True, None)
 
 
-async def can_promote_to_active(employee_id: str, db) -> Tuple[bool, dict]:
+async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict]:
     """
-    Check if an employee can be automatically promoted to active_employee status.
+    LEGACY: Check if an employee can be automatically promoted to active_employee status.
+    Use can_promote_to_active(db, employee_id) instead for new code.
     
     NHS Employment Check Standards require ALL of the following:
     - Right to Work verified and stamped

@@ -28,7 +28,7 @@ import {
   FileText, Users, GraduationCap, ClipboardCheck,
   Send, Eye, Plus, RefreshCw, Loader2, Shield,
   FileCheck, UserCheck, Briefcase, Heart, Calendar,
-  Clock, AlertCircle
+  Clock, AlertCircle, Lock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -326,12 +326,19 @@ export default function ConsolidatedStatusPanel({
                 
                 const getAction = () => {
                   if (blocker.gate?.includes('reference')) return { label: 'Review', tab: 'references' };
-                  if (blocker.gate?.includes('interview')) return { label: 'Complete', tab: 'forms' };
-                  if (blocker.gate?.includes('contract')) return { label: 'Send Contract', tab: 'compliance' };
+                  if (blocker.gate?.includes('interview')) return { label: 'Complete Interview', tab: 'forms' };
+                  // Contract: No button - worker signs via dashboard
+                  if (blocker.gate?.includes('contract')) return { label: 'Locked', tab: 'compliance', locked: true };
                   if (blocker.gate?.includes('induction')) return { label: 'Start', tab: 'compliance' };
                   if (blocker.gate?.includes('health')) return { label: 'Send to Worker', tab: 'forms' };
                   if (blocker.gate?.includes('training')) return { label: 'View Training', tab: 'training' };
                   if (blocker.gate?.includes('gaps')) return { label: 'Review Gaps', tab: 'employment' };
+                  // Documents: Change "View" to "Verify with Evidence" for pending items
+                  if (blocker.gate?.includes('dbs') || blocker.gate?.includes('rtw') || 
+                      blocker.gate?.includes('right_to_work') || blocker.gate?.includes('identity') || 
+                      blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address')) {
+                    return { label: severity === 'PENDING' ? 'Verify with Evidence' : 'View', tab: 'compliance' };
+                  }
                   return { label: severity === 'PENDING' ? 'Verify' : 'View', tab: 'compliance' };
                 };
                 const action = getAction();
@@ -377,19 +384,30 @@ export default function ConsolidatedStatusPanel({
                         </p>
                       </div>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onNavigateToTab?.(action.tab)}
-                      className={cn(
-                        severity === 'CRITICAL' 
-                          ? "text-red-600 border-red-200 hover:bg-red-50"
-                          : "text-amber-600 border-amber-200 hover:bg-amber-50"
-                      )}
-                    >
-                      {action.label}
-                      <ChevronRight className="h-3.5 w-3.5 ml-1" />
-                    </Button>
+                    {action.locked ? (
+                      // Contract is locked until all other requirements complete
+                      <Badge 
+                        variant="outline" 
+                        className="text-gray-500 border-gray-300 bg-gray-100"
+                      >
+                        <Lock className="h-3 w-3 mr-1" />
+                        Locked
+                      </Badge>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onNavigateToTab?.(action.tab)}
+                        className={cn(
+                          severity === 'CRITICAL' 
+                            ? "text-red-600 border-red-200 hover:bg-red-50"
+                            : "text-amber-600 border-amber-200 hover:bg-amber-50"
+                        )}
+                      >
+                        {action.label}
+                        <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                      </Button>
+                    )}
                   </div>
                 );
               })}

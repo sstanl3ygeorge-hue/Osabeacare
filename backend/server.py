@@ -94,7 +94,9 @@ from approval_engine import (
 from work_readiness_engine import (
     evaluate_work_readiness,
     ROLE_WORK_REQUIREMENTS,
-    get_work_readiness_label
+    get_work_readiness_label,
+    can_sign_contract,
+    can_promote_to_active
 )
 from interview_questions import (
     get_interview_questions_for_role,
@@ -7432,6 +7434,30 @@ async def worker_verify_login(request: WorkerVerifyRequest):
     except jwt.PyJWTError as e:
         logger.error(f"JWT verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid login link")
+
+
+@api_router.get("/employees/{employee_id}/can-sign-contract")
+async def check_can_sign_contract(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Check if an employee is eligible to sign their contract.
+    Contract signing is the FINAL step before promotion.
+    
+    All pre-employment checks must be complete:
+    - DBS verified
+    - Right to Work verified
+    - Identity verified
+    - 2 Proof of Address verified
+    - Both references verified
+    - Interview completed
+    - Induction complete (15 items)
+    - Mandatory training complete (6 items)
+    """
+    result = await can_sign_contract(db, employee_id)
+    return result
+
 
 @api_router.get("/worker/dashboard")
 async def worker_dashboard(worker: dict = Depends(get_current_worker)):

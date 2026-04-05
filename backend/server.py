@@ -9719,6 +9719,330 @@ async def restore_employee(employee_id: str, user: dict = Depends(require_manage
     
     return {"message": "Employee restored successfully", "employee_id": employee_id, "status": restore_status}
 
+
+# ==================== UNIVERSAL EDIT ENDPOINTS WITH REASON LOGGING ====================
+
+class PersonalDetailsUpdate(BaseModel):
+    """Personal details update with required reason"""
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    ni_number: Optional[str] = None
+    address_line1: Optional[str] = None
+    address_line2: Optional[str] = None
+    city: Optional[str] = None
+    postcode: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    edit_reason: str  # Required
+
+@api_router.put("/employees/{employee_id}/personal-details")
+async def update_personal_details(
+    employee_id: str,
+    data: PersonalDetailsUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update employee personal details with reason logging.
+    
+    CQC Audit Trail: Logs who changed what, when, old value, new value, and reason.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Build update data (excluding edit_reason)
+    update_fields = {}
+    old_values = {}
+    
+    for field in ['first_name', 'last_name', 'email', 'phone', 'date_of_birth', 'ni_number',
+                  'address_line1', 'address_line2', 'city', 'postcode']:
+        value = getattr(data, field)
+        if value is not None:
+            old_values[field] = employee.get(field)
+            update_fields[field] = value
+    
+    # Handle emergency contact as nested object
+    emergency_update = {}
+    if data.emergency_contact_name is not None:
+        emergency_update['name'] = data.emergency_contact_name
+    if data.emergency_contact_phone is not None:
+        emergency_update['phone'] = data.emergency_contact_phone
+    if data.emergency_contact_relationship is not None:
+        emergency_update['relationship'] = data.emergency_contact_relationship
+    
+    if emergency_update:
+        old_values['emergency_contact'] = employee.get('emergency_contact', {})
+        update_fields['emergency_contact'] = {
+            **employee.get('emergency_contact', {}),
+            **emergency_update
+        }
+    
+    if not update_fields:
+        return {"message": "No fields to update"}
+    
+    update_fields['updated_at'] = datetime.now(timezone.utc).isoformat()
+    
+    # Perform update
+    await db.employees.update_one({"id": employee_id}, {"$set": update_fields})
+    
+    # Log audit with reason
+    await log_audit_action(
+        user['user_id'],
+        "edit_personal_details",
+        "employee",
+        employee_id,
+        {
+            "old_values": old_values,
+            "new_values": {k: v for k, v in update_fields.items() if k != 'updated_at'},
+            "reason": data.edit_reason,
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}"
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Personal details updated",
+        "fields_updated": list(update_fields.keys()),
+        "edit_logged": True
+    }
+
+
+class EmploymentHistoryUpdate(BaseModel):
+    """Employment history update with required reason"""
+    employment_history: List[dict]
+    edit_reason: str  # Required
+
+@api_router.post("/employees/{employee_id}/employment-history")
+async def update_employment_history(
+    employee_id: str,
+    data: EmploymentHistoryUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update employee employment history with reason logging.
+    
+    - Auto-detects CV gaps
+    - Logs all changes for CQC audit
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    old_history = employee.get('employment_history', [])
+    
+    # Detect gaps in new history
+    gaps = detect_cv_gaps(data.employment_history)
+    
+    # Update employee
+    update_data = {
+        'employment_history': data.employment_history,
+        'cv_gaps_detected': gaps,
+        'cv_gaps_all_explained': len([g for g in gaps if not g.get('explanation')]) == 0,
+        'updated_at': datetime.now(timezone.utc).isoformat()
+    }
+    
+    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+    
+    # Log audit with reason
+    await log_audit_action(
+        user['user_id'],
+        "edit_employment_history",
+        "employee",
+        employee_id,
+        {
+            "old_history_count": len(old_history),
+            "new_history_count": len(data.employment_history),
+            "gaps_detected": len(gaps),
+            "reason": data.edit_reason,
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}"
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Employment history updated",
+        "gaps_detected": len(gaps),
+        "edit_logged": True
+    }
+
+
+class ReferenceUpdate(BaseModel):
+    """Reference update with required reason"""
+    referee_name: Optional[str] = None
+    referee_email: Optional[str] = None
+    referee_phone: Optional[str] = None
+    referee_organisation: Optional[str] = None
+    referee_position: Optional[str] = None
+    referee_relationship: Optional[str] = None
+    referee_type: Optional[str] = None  # professional, character, personal
+    period_of_supervision: Optional[str] = None
+    is_direct_supervisor: Optional[bool] = None
+    can_contact_before_offer: Optional[bool] = None
+    edit_reason: str  # Required
+
+@api_router.put("/employees/{employee_id}/references/{reference_id}")
+async def update_reference(
+    employee_id: str,
+    reference_id: str,
+    data: ReferenceUpdate,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Update a reference with reason logging.
+    
+    Includes NHS-required fields:
+    - Referee type (Professional/Character/Personal)
+    - Period of supervision
+    - Direct supervisor flag
+    - Can contact before offer flag
+    """
+    reference = await db.employee_references.find_one({
+        "id": reference_id,
+        "employee_id": employee_id
+    }, {"_id": 0})
+    
+    if not reference:
+        raise HTTPException(status_code=404, detail="Reference not found")
+    
+    # Build update
+    update_fields = {}
+    old_values = {}
+    
+    for field in ['referee_name', 'referee_email', 'referee_phone', 'referee_organisation',
+                  'referee_position', 'referee_relationship', 'referee_type',
+                  'period_of_supervision', 'is_direct_supervisor', 'can_contact_before_offer']:
+        value = getattr(data, field)
+        if value is not None:
+            old_values[field] = reference.get(field)
+            update_fields[field] = value
+    
+    if not update_fields:
+        return {"message": "No fields to update"}
+    
+    update_fields['updated_at'] = datetime.now(timezone.utc).isoformat()
+    update_fields['last_edited_by'] = user['user_id']
+    update_fields['last_edit_reason'] = data.edit_reason
+    
+    await db.employee_references.update_one(
+        {"id": reference_id},
+        {"$set": update_fields}
+    )
+    
+    # Log audit
+    await log_audit_action(
+        user['user_id'],
+        "edit_reference",
+        "reference",
+        reference_id,
+        {
+            "employee_id": employee_id,
+            "old_values": old_values,
+            "new_values": {k: v for k, v in update_fields.items() if k not in ['updated_at', 'last_edited_by', 'last_edit_reason']},
+            "reason": data.edit_reason
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Reference updated",
+        "edit_logged": True
+    }
+
+
+class SupersedeContractInput(BaseModel):
+    """Input for superseding a contract"""
+    reason: str  # Required - minimum 20 chars
+    send_new_contract: bool = True
+
+@api_router.post("/employees/{employee_id}/contract/supersede")
+async def supersede_contract(
+    employee_id: str,
+    data: SupersedeContractInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Supersede an existing contract and optionally send new one to worker.
+    
+    CQC Compliance:
+    - Original contract is marked as "superseded", not deleted
+    - Full audit trail maintained
+    - Worker must sign new contract themselves
+    """
+    if len(data.reason.strip()) < 20:
+        raise HTTPException(status_code=400, detail="Reason must be at least 20 characters")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Find current contract
+    current_contract = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": "contract_acceptance",
+        "status": {"$ne": "superseded"}
+    }, {"_id": 0})
+    
+    if not current_contract:
+        raise HTTPException(status_code=404, detail="No active contract found to supersede")
+    
+    now = datetime.now(timezone.utc)
+    
+    # Mark current contract as superseded
+    await db.agreement_acknowledgements.update_one(
+        {"id": current_contract["id"]},
+        {
+            "$set": {
+                "status": "superseded",
+                "superseded_at": now.isoformat(),
+                "superseded_by": user["user_id"],
+                "superseded_reason": data.reason
+            }
+        }
+    )
+    
+    # Log audit
+    await log_audit_action(
+        user['user_id'],
+        "supersede_contract",
+        "agreement",
+        current_contract["id"],
+        {
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+            "original_completion_mode": current_contract.get("completion_mode"),
+            "original_signed_at": current_contract.get("completed_at"),
+            "reason": data.reason,
+            "send_new_contract": data.send_new_contract
+        }
+    )
+    
+    # If requested, send new contract notification to worker
+    if data.send_new_contract:
+        # Create notification for worker
+        notification_id = str(uuid.uuid4())
+        await db.worker_notifications.insert_one({
+            "id": notification_id,
+            "employee_id": employee_id,
+            "type": "contract_required",
+            "title": "New Contract Required",
+            "message": "Your previous contract has been superseded. Please sign the new employment contract.",
+            "created_at": now.isoformat(),
+            "read": False
+        })
+    
+    return {
+        "success": True,
+        "message": "Contract superseded successfully",
+        "original_contract_id": current_contract["id"],
+        "new_contract_notification_sent": data.send_new_contract,
+        "worker_action_required": "Worker must sign new contract in their portal"
+    }
+
+
 @api_router.delete("/employees/{employee_id}/permanent")
 async def permanent_delete_employee(employee_id: str, user: dict = Depends(require_admin)):
     """Permanently delete an employee and all related data. Super Admin only.

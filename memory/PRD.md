@@ -820,5 +820,50 @@ System already enforces 2 Proof of Address documents requirement:
 
 ---
 
+## COMPLETED: P0 UI Audit Fixes (April 5, 2026)
+
+### P0 Issues Fixed:
+
+1. **Employees List Shows 0 Employees** ✅ FIXED
+   - Staff page (`/portal/employees`) now correctly shows 4 employees with onboarding status
+   - Endpoint `/api/staff/employees` returns employees with status `onboarding` or `active_employee`
+
+2. **Worker Dashboard Progress Shows 0%** ✅ VERIFIED WORKING
+   - Progress shows actual percentages (66%, 62%, 50%, 4%)
+   - Calculation based on completed vs required items
+
+3. **Category Grid Shows 0/0** ✅ VERIFIED WORKING
+   - Grid shows actual numbers: 3/5 Documents, 0/4 Forms, 4/6 Training, 0/2 References, 1/2 Agreements, 0/14 Induction
+   - Data from `/api/employees/{id}/unified-progress` endpoint
+
+4. **Employment History Not Flowing from Application** ✅ FIXED
+   - Structured application submission now stores `employment_history` on employee document
+   - ApplicationDataPanel fetches from `form_submissions` if not on employee record
+   - Shows employment history: Current Healthcare Ltd, Care Home B, Care Home A
+
+5. **DBS Consent Not Flowing from Application** ✅ FIXED
+   - Declarations section now checks multiple fields: `declarations.dbs_consent_given`, `dbs_update_service_consent`, `has_dbs_declared`
+   - Shows "Consent Given for Enhanced DBS Check" instead of "No consent recorded"
+
+6. **[Approve] Button Appears Before Ready** ✅ FIXED
+   - Recruitment page now shows "[X] Blockers" button when applicant has blockers
+   - "Approve Recruitment" button ONLY shows when `canApprove=true`
+   - Clear separation of button states
+
+7. **Edit Buttons on Declarations** ✅ ALREADY DONE
+   - EditDeclarationsDialog implemented in previous session
+
+### Key Files Modified:
+- `/app/backend/server.py` - Structured application stores employment_history and declarations on employee (line 28590)
+- `/app/frontend/src/pages/portal/RecruitmentPage.js` - Approve button conditional logic
+- `/app/frontend/src/components/employee/ApplicationDataPanel.js` - Fetch from form_submissions, updated declarations display
+
+### Test Results:
+- Backend: 100%
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_161.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - P0 Compliance Checklist completed
+April 5, 2026 - P0 UI Audit Fixes completed

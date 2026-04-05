@@ -6593,6 +6593,10 @@ class DashboardStats(BaseModel):
     expiring_30_days: int = 0
     expiring_60_days: int = 0
     expiring_90_days: int = 0
+    # Training expiry alerts
+    training_expiring_critical: int = 0  # < 14 days
+    training_expiring_warning: int = 0   # 14-30 days
+    training_expiring_upcoming: int = 0  # 30-60 days
 
 # Email Request Model
 class EmailRequest(BaseModel):
@@ -22646,6 +22650,7 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     
     # Expiring documents
     now = datetime.now(timezone.utc)
+    exp_14 = (now + timedelta(days=14)).isoformat()
     exp_30 = (now + timedelta(days=30)).isoformat()
     exp_60 = (now + timedelta(days=60)).isoformat()
     exp_90 = (now + timedelta(days=90)).isoformat()
@@ -22653,6 +22658,20 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     expiring_30 = await db.employee_documents.count_documents({"expiry_date": {"$lte": exp_30, "$gt": now.isoformat()}})
     expiring_60 = await db.employee_documents.count_documents({"expiry_date": {"$lte": exp_60, "$gt": exp_30}})
     expiring_90 = await db.employee_documents.count_documents({"expiry_date": {"$lte": exp_90, "$gt": exp_60}})
+    
+    # Training expiry counts
+    training_exp_critical = await db.training_records.count_documents({
+        "expiry_date": {"$lte": exp_14, "$gt": now.isoformat()},
+        "record_status": {"$ne": "superseded"}
+    })
+    training_exp_warning = await db.training_records.count_documents({
+        "expiry_date": {"$lte": exp_30, "$gt": exp_14},
+        "record_status": {"$ne": "superseded"}
+    })
+    training_exp_upcoming = await db.training_records.count_documents({
+        "expiry_date": {"$lte": exp_60, "$gt": exp_30},
+        "record_status": {"$ne": "superseded"}
+    })
     
     return DashboardStats(
         total_employees=total_employees,
@@ -22666,7 +22685,10 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
         references_outstanding=refs_outstanding,
         expiring_30_days=expiring_30,
         expiring_60_days=expiring_60,
-        expiring_90_days=expiring_90
+        expiring_90_days=expiring_90,
+        training_expiring_critical=training_exp_critical,
+        training_expiring_warning=training_exp_warning,
+        training_expiring_upcoming=training_exp_upcoming
     )
 
 
@@ -42514,8 +42536,362 @@ def start_scheduler():
             replace_existing=True,
             misfire_grace_time=3600  # Allow catch-up within 1 hour
         )
+        
+        # Add daily training expiry reminder job (runs at 8am)
+        scheduler.add_job(
+            training_expiry_reminder_job,
+            CronTrigger(hour=8, minute=0),  # Daily at 8:00 AM
+            id="training_expiry_reminders",
+            replace_existing=True,
+            misfire_grace_time=7200  # Allow catch-up within 2 hours
+        )
+        
         scheduler.start()
-        logger.info("APScheduler started for scheduled bulk requests")
+        logger.info("APScheduler started for scheduled bulk requests and training expiry reminders")
+
+
+# ==================== TRAINING EXPIRY REMINDER SYSTEM ====================
+
+TRAINING_EXPIRY_REMINDER_DAYS = 60  # Send reminder when training expires within 60 days
+
+async def get_expiring_trainings(days_threshold: int = 60) -> List[dict]:
+    """
+    Get all trainings expiring within the specified number of days.
+    Returns list of trainings grouped by employee.
+    """
+    now = datetime.now(timezone.utc)
+    threshold_date = now + timedelta(days=days_threshold)
+    
+    # Get all active training records expiring within threshold
+    pipeline = [
+        {
+            "$match": {
+                "expiry_date": {
+                    "$exists": True,
+                    "$ne": None,
+                    "$lte": threshold_date.isoformat(),
+                    "$gt": now.isoformat()
+                },
+                "record_status": {"$ne": "superseded"}
+            }
+        },
+        {
+            "$lookup": {
+                "from": "employees",
+                "localField": "employee_id",
+                "foreignField": "id",
+                "as": "employee"
+            }
+        },
+        {
+            "$unwind": "$employee"
+        },
+        {
+            "$match": {
+                "employee.status": {"$ne": "archived"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "training_id": "$id",
+                "training_name": 1,
+                "expiry_date": 1,
+                "employee_id": 1,
+                "employee_name": {
+                    "$concat": ["$employee.first_name", " ", "$employee.last_name"]
+                },
+                "employee_email": "$employee.email",
+                "mandatory": 1,
+                "is_mandatory": 1
+            }
+        },
+        {
+            "$sort": {"expiry_date": 1}
+        }
+    ]
+    
+    expiring_trainings = await db.training_records.aggregate(pipeline).to_list(1000)
+    return expiring_trainings
+
+
+async def send_training_expiry_reminder_email(
+    employee_email: str,
+    employee_name: str,
+    expiring_trainings: List[dict],
+    portal_url: str = None
+) -> bool:
+    """
+    Send email reminder to worker about expiring trainings.
+    """
+    if not resend.api_key or not employee_email:
+        return False
+    
+    # Format training list for email
+    training_list_html = ""
+    for training in expiring_trainings:
+        expiry_date = training.get('expiry_date', 'Unknown')
+        if isinstance(expiry_date, str):
+            try:
+                exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                days_left = (exp_dt - datetime.now(timezone.utc)).days
+                expiry_date = exp_dt.strftime('%d %B %Y')
+            except:
+                days_left = 0
+        else:
+            days_left = 0
+        
+        urgency_color = "#dc2626" if days_left <= 14 else "#f59e0b" if days_left <= 30 else "#3b82f6"
+        training_list_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">{training.get('training_name', 'Training')}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">{expiry_date}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: {urgency_color}; font-weight: 600;">{days_left} days</td>
+        </tr>
+        """
+    
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    
+    email_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: white; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden;">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #0d9488, #14b8a6); padding: 32px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">Training Renewal Reminder</h1>
+                </div>
+                
+                <!-- Content -->
+                <div style="padding: 32px;">
+                    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                        Hi {employee_name},
+                    </p>
+                    
+                    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                        This is a reminder that the following training certifications are <strong>due for renewal</strong>:
+                    </p>
+                    
+                    <!-- Training Table -->
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; background: #f9fafb; border-radius: 8px; overflow: hidden;">
+                        <thead>
+                            <tr style="background: #f3f4f6;">
+                                <th style="padding: 12px; text-align: left; color: #6b7280; font-weight: 600;">Training</th>
+                                <th style="padding: 12px; text-align: left; color: #6b7280; font-weight: 600;">Expires</th>
+                                <th style="padding: 12px; text-align: left; color: #6b7280; font-weight: 600;">Time Left</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {training_list_html}
+                        </tbody>
+                    </table>
+                    
+                    <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 0 8px 8px 0; margin-bottom: 24px;">
+                        <p style="color: #92400e; margin: 0; font-size: 14px;">
+                            <strong>Important:</strong> Please upload your renewed training certificates as soon as possible to maintain your work readiness status.
+                        </p>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 32px;">
+                        <a href="{frontend_url}/worker/login" 
+                           style="display: inline-block; background: #0d9488; color: white; padding: 14px 32px; 
+                                  border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+                            Upload Renewed Certificates
+                        </a>
+                    </div>
+                </div>
+                
+                <!-- Footer -->
+                <div style="background: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                        This is an automated reminder from Osabea Healthcare Compliance Portal.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": "Osabea Healthcare <compliance@osabea.care>",
+            "to": [employee_email],
+            "subject": f"Training Renewal Reminder - {len(expiring_trainings)} Certificate(s) Expiring Soon",
+            "html": email_html
+        })
+        logger.info(f"Training expiry reminder sent to {employee_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send training expiry reminder to {employee_email}: {e}")
+        return False
+
+
+async def training_expiry_reminder_job():
+    """
+    Scheduled job to send training expiry reminders.
+    Runs daily to check for trainings expiring within 60 days.
+    """
+    try:
+        logger.info("Running training expiry reminder check...")
+        
+        # Get all expiring trainings
+        expiring_trainings = await get_expiring_trainings(TRAINING_EXPIRY_REMINDER_DAYS)
+        
+        if not expiring_trainings:
+            logger.info("No trainings expiring within 60 days")
+            return {"reminders_sent": 0, "employees_notified": 0}
+        
+        # Group by employee
+        employees_trainings = {}
+        for training in expiring_trainings:
+            emp_id = training.get('employee_id')
+            if emp_id not in employees_trainings:
+                employees_trainings[emp_id] = {
+                    "employee_id": emp_id,
+                    "employee_name": training.get('employee_name'),
+                    "employee_email": training.get('employee_email'),
+                    "trainings": []
+                }
+            employees_trainings[emp_id]["trainings"].append(training)
+        
+        # Check which employees need reminders (haven't been reminded in last 7 days)
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        reminders_sent = 0
+        employees_notified = 0
+        
+        for emp_id, emp_data in employees_trainings.items():
+            # Check last reminder sent
+            last_reminder = await db.training_expiry_reminders.find_one(
+                {"employee_id": emp_id},
+                sort=[("sent_at", -1)]
+            )
+            
+            if last_reminder and last_reminder.get('sent_at'):
+                try:
+                    last_sent = datetime.fromisoformat(last_reminder['sent_at'].replace('Z', '+00:00'))
+                    if last_sent > seven_days_ago:
+                        logger.info(f"Skipping {emp_id} - reminder sent within last 7 days")
+                        continue
+                except:
+                    pass
+            
+            # Send reminder
+            if emp_data.get('employee_email'):
+                success = await send_training_expiry_reminder_email(
+                    emp_data['employee_email'],
+                    emp_data['employee_name'],
+                    emp_data['trainings']
+                )
+                
+                if success:
+                    # Log the reminder
+                    await db.training_expiry_reminders.insert_one({
+                        "id": str(uuid.uuid4()),
+                        "employee_id": emp_id,
+                        "employee_email": emp_data['employee_email'],
+                        "trainings_reminded": [t.get('training_name') for t in emp_data['trainings']],
+                        "sent_at": datetime.now(timezone.utc).isoformat(),
+                        "reminder_type": "auto_scheduled"
+                    })
+                    reminders_sent += len(emp_data['trainings'])
+                    employees_notified += 1
+        
+        logger.info(f"Training expiry reminders: {employees_notified} employees notified, {reminders_sent} training reminders sent")
+        
+        # Log audit
+        await log_audit_action(
+            "system_scheduler",
+            "training_expiry_reminders_sent",
+            "system",
+            "scheduled_job",
+            {
+                "employees_notified": employees_notified,
+                "total_reminders": reminders_sent,
+                "run_at": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        
+        return {"reminders_sent": reminders_sent, "employees_notified": employees_notified}
+        
+    except Exception as e:
+        logger.error(f"Training expiry reminder job failed: {e}")
+        return {"error": str(e)}
+
+
+@api_router.post("/admin/training-expiry-reminders/send")
+async def trigger_training_expiry_reminders(
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Manually trigger training expiry reminder emails.
+    Sends reminders to all employees with trainings expiring within 60 days.
+    """
+    result = await training_expiry_reminder_job()
+    
+    await log_audit_action(
+        user['user_id'],
+        "training_expiry_reminders_manual_trigger",
+        "system",
+        "manual",
+        result
+    )
+    
+    return {
+        "success": True,
+        "message": f"Sent reminders to {result.get('employees_notified', 0)} employees",
+        **result
+    }
+
+
+@api_router.get("/admin/training-expiry-alerts")
+async def get_training_expiry_alerts(
+    days: int = Query(default=60, ge=1, le=365),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all trainings expiring within specified days for admin dashboard.
+    Returns trainings grouped by urgency (critical: <14 days, warning: <30 days, upcoming: <60 days).
+    """
+    expiring_trainings = await get_expiring_trainings(days)
+    
+    now = datetime.now(timezone.utc)
+    critical = []  # < 14 days
+    warning = []   # 14-30 days
+    upcoming = []  # 30-60 days
+    
+    for training in expiring_trainings:
+        expiry_str = training.get('expiry_date')
+        if expiry_str:
+            try:
+                expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                days_left = (expiry_dt - now).days
+                training['days_until_expiry'] = days_left
+                
+                if days_left <= 14:
+                    critical.append(training)
+                elif days_left <= 30:
+                    warning.append(training)
+                else:
+                    upcoming.append(training)
+            except:
+                upcoming.append(training)
+    
+    return {
+        "critical": critical,
+        "critical_count": len(critical),
+        "warning": warning,
+        "warning_count": len(warning),
+        "upcoming": upcoming,
+        "upcoming_count": len(upcoming),
+        "total_expiring": len(expiring_trainings),
+        "threshold_days": days
+    }
 
 
 # ==================== NHS-LEVEL REFEREE OUTREACH SYSTEM ====================

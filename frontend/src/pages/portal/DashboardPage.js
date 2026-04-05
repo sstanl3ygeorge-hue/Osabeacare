@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Progress } from '../../components/ui/progress';
 import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import AdminTaskQueue from '../../components/admin/AdminTaskQueue';
+import TrainingExpiryAlerts from '../../components/admin/TrainingExpiryAlerts';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
@@ -320,6 +321,9 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* TRAINING EXPIRY ALERTS */}
+      <TrainingExpiryAlerts />
 
       {/* SECONDARY: Workforce Readiness + Onboarding Progress */}
       <div className="grid lg:grid-cols-2 gap-6">

@@ -27,6 +27,22 @@ const formatDate = (dateStr) => {
   }
 };
 
+// NHS-compliant document guidance text
+const getDocumentGuidance = (docType) => {
+  const guidance = {
+    right_to_work: "Upload your UK passport, biometric residence permit, or share code screenshot from GOV.UK. Share code must be valid for at least 30 days.",
+    dbs: "Upload your Enhanced DBS certificate (issued within last 3 years). If subscribed to DBS Update Service, please confirm.",
+    identity: "Upload a clear photo of your passport photo page or UK driving license (both sides).",
+    proof_of_address: "Upload a utility bill, bank statement, or council tax bill dated within last 3 months. Must show your full name and current address.",
+    proof_of_address_2: "Upload a different document from the first. Examples: bank statement, HMRC letter, tenancy agreement, or voter registration.",
+    training: "Upload PDF or photo of your training certificate. AI will automatically extract the training name, completion date, and expiry date."
+  };
+  return guidance[docType] || "Upload a clear copy of the required document.";
+};
+
+// Accepted file formats text
+const ACCEPTED_FORMATS = "Accepted formats: PDF, JPG, PNG (max 10MB per file)";
+
 // Forms Section Component
 function FormsSection() {
   const [forms, setForms] = useState([]);
@@ -392,29 +408,37 @@ export default function WorkerDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {missing_documents.map((doc, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                        <X className="h-5 w-5 text-red-500" />
+                  <div key={idx} className="p-4 bg-slate-50 rounded-xl">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+                          <X className="h-5 w-5 text-red-500" />
+                        </div>
+                        <span className="font-medium text-slate-800">{doc.name}</span>
                       </div>
-                      <span className="font-medium text-slate-800">{doc.name}</span>
+                      <Button 
+                        size="sm" 
+                        onClick={() => triggerFileInput(doc.type)}
+                        disabled={uploading === doc.type}
+                        className="gap-1 bg-blue-600 hover:bg-blue-700"
+                        data-testid={`upload-${doc.type}`}
+                      >
+                        {uploading === doc.type ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        Upload
+                      </Button>
                     </div>
-                    <Button 
-                      size="sm" 
-                      onClick={() => triggerFileInput(doc.type)}
-                      disabled={uploading === doc.type}
-                      className="gap-1 bg-blue-600 hover:bg-blue-700"
-                      data-testid={`upload-${doc.type}`}
-                    >
-                      {uploading === doc.type ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Upload className="h-4 w-4" />
-                      )}
-                      Upload
-                    </Button>
+                    <p className="text-xs text-slate-500 ml-13 pl-1">
+                      {getDocumentGuidance(doc.type)}
+                    </p>
+                    <p className="text-xs text-slate-400 ml-13 pl-1 mt-1">
+                      {ACCEPTED_FORMATS}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -473,32 +497,40 @@ export default function WorkerDashboard() {
                 <FileText className="h-5 w-5 text-amber-500" />
                 Training Certificates Needed
               </CardTitle>
+              <p className="text-xs text-slate-500 mt-1">
+                AI will automatically extract training name, completion date, and expiry date from your certificates
+              </p>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {missing_trainings.map((training, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-                        <FileText className="h-5 w-5 text-amber-600" />
+                  <div key={idx} className="p-4 bg-slate-50 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                          <FileText className="h-5 w-5 text-amber-600" />
+                        </div>
+                        <span className="font-medium text-slate-800">{training.name}</span>
                       </div>
-                      <span className="font-medium text-slate-800">{training.name}</span>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => triggerFileInput(`training_${training.id}`)}
+                        disabled={uploading === `training_${training.id}`}
+                        className="gap-1"
+                        data-testid={`upload-training-${training.id}`}
+                      >
+                        {uploading === `training_${training.id}` ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        Upload
+                      </Button>
                     </div>
-                    <Button 
-                      size="sm" 
-                      variant="outline"
-                      onClick={() => triggerFileInput(`training_${training.id}`)}
-                      disabled={uploading === `training_${training.id}`}
-                      className="gap-1"
-                      data-testid={`upload-training-${training.id}`}
-                    >
-                      {uploading === `training_${training.id}` ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Upload className="h-4 w-4" />
-                      )}
-                      Upload
-                    </Button>
+                    <p className="text-xs text-slate-400 ml-13 pl-1 mt-2">
+                      {ACCEPTED_FORMATS}
+                    </p>
                   </div>
                 ))}
               </div>

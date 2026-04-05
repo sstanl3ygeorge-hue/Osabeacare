@@ -236,12 +236,12 @@ export default function RecruitmentApprovalPanel({
             )}
           </div>
           
-          {/* Progress */}
+          {/* Recruitment Approval Progress */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-gray-600">Verification Progress</span>
+              <span className="text-sm text-gray-600">Recruitment Readiness</span>
               <span className="text-sm font-medium">
-                {verified_count} / {required_count} required items
+                {verified_count} / {required_count} key items verified
               </span>
             </div>
             <Progress 
@@ -251,7 +251,9 @@ export default function RecruitmentApprovalPanel({
                 isReady ? "[&>div]:bg-emerald-500" : "[&>div]:bg-amber-500"
               )}
             />
-            <p className="text-xs text-gray-500 mt-1">{progressPercent}% complete</p>
+            <p className="text-xs text-gray-500 mt-1">
+              {progressPercent}% ready for recruitment approval
+            </p>
           </div>
           
           {/* Blockers Preview */}

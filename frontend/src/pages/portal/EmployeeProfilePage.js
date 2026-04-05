@@ -2876,10 +2876,13 @@ export default function EmployeeProfilePage() {
             <div className="flex flex-col items-end gap-4">
               <div className="flex items-center gap-3">
                 <div className="text-right">
-                  <p className="text-sm text-text-muted">Progress</p>
+                  <p className="text-sm text-text-muted">Overall Compliance</p>
                   {/* Use single source of truth from complianceRequirements */}
                   <p className="text-3xl font-heading font-bold text-text-primary">
                     {complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0}% Complete
+                  </p>
+                  <p className="text-xs text-text-muted mt-0.5">
+                    {complianceRequirements?.statuses?.overall_compliance?.complete ?? 0} of {complianceRequirements?.statuses?.overall_compliance?.total ?? 0} requirements
                   </p>
                 </div>
                 {!isAuditor() && (

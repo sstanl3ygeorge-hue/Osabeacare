@@ -749,17 +749,12 @@ export default function DualRowComplianceSection({
           {/* Agreements - Uses legacy section for now */}
           {sections.agreements && renderSection('agreements', sections.agreements)}
           
-          {/* References - Uses legacy section for now */}
-          {sections.references && sections.references.rows && renderSection('references', sections.references)}
-          
-          {/* Training */}
-          {sections.training && renderSection('training', sections.training)}
+          {/* NOTE: References REMOVED - Now ONLY in dedicated References tab */}
+          {/* NOTE: Training REMOVED - Now ONLY in dedicated Training tab */}
+          {/* NOTE: Health & Competency REMOVED - Now ONLY in Training tab's HealthCompetencySection */}
           
           {/* Recruitment Record - Form-type requirements */}
           {sections.recruitment_record && sections.recruitment_record.rows && renderSection('recruitment_record', sections.recruitment_record)}
-          
-          {/* Health & Competency - Form-type requirements */}
-          {sections.health_competency && sections.health_competency.rows && renderSection('health_competency', sections.health_competency)}
           
           {/* Admin Forms - Form-type requirements */}
           {sections.admin_forms && sections.admin_forms.rows && renderSection('admin_forms', sections.admin_forms)}

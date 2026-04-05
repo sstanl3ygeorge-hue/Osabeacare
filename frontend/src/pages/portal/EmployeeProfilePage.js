@@ -3690,28 +3690,32 @@ export default function EmployeeProfilePage() {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs - 7 Section Structure */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
-          <TabsTrigger value="overview" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <User className="h-4 w-4 mr-2" />
-            Overview
+          <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <Shield className="h-4 w-4 mr-2" />
+            Work Readiness
           </TabsTrigger>
           <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <CheckCircle className="h-4 w-4 mr-2" />
             Compliance
           </TabsTrigger>
-          <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <UserCheck className="h-4 w-4 mr-2" />
-            References
+          <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <FileText className="h-4 w-4 mr-2" />
+            Forms
           </TabsTrigger>
           <TabsTrigger value="training" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <GraduationCap className="h-4 w-4 mr-2" />
             Training
           </TabsTrigger>
-          <TabsTrigger value="policies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <FileCheck className="h-4 w-4 mr-2" />
-            Policies
+          <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <UserCheck className="h-4 w-4 mr-2" />
+            References
+          </TabsTrigger>
+          <TabsTrigger value="employment" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <Briefcase className="h-4 w-4 mr-2" />
+            Employment
           </TabsTrigger>
           <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <History className="h-4 w-4 mr-2" />
@@ -3719,239 +3723,214 @@ export default function EmployeeProfilePage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Overview Tab */}
-        <TabsContent value="overview">
-          <div className="grid lg:grid-cols-2 gap-6">
-            <Card className="border-[#E4E8EB] shadow-sm">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="font-heading text-lg">Personal Details</CardTitle>
-                  {!isAuditor() && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleExtractFromApplication}
-                      disabled={isExtracting}
-                      className="text-xs"
-                      data-testid="extract-from-app-btn"
-                    >
-                      {isExtracting ? (
-                        <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Extracting...</>
-                      ) : (
-                        <><FileText className="h-3 w-3 mr-1" /> Extract from App Form</>
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-text-muted">Full Name</p>
-                    <p className="font-medium text-text-primary">{employee.first_name} {employee.last_name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-text-muted">
-                      {employee.person_stage === 'applicant' ? 'Applicant Reference' : 'Employee ID'}
-                    </p>
-                    <p className="font-medium text-text-primary">
-                      {employee.employee_code || employee.applicant_reference || 'Not assigned'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-text-muted">Role</p>
-                    <p className="font-medium text-text-primary">{employee.role}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-text-muted">Onboarding Status</p>
-                    <p className="font-medium text-text-primary">{employee.onboarding_status || 'New'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-text-muted">Email</p>
-                    <p className="font-medium text-text-primary">{employee.email}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-text-muted">Phone</p>
-                    <p className="font-medium text-text-primary">{employee.phone || 'Not provided'}</p>
-                  </div>
-                  {employee.ni_number && (
-                    <div>
-                      <p className="text-sm text-text-muted">NI Number</p>
-                      <p className="font-medium text-text-primary">{employee.ni_number}</p>
-                    </div>
-                  )}
-                  {employee.date_of_birth && (
-                    <div>
-                      <p className="text-sm text-text-muted">Date of Birth</p>
-                      <p className="font-medium text-text-primary">{employee.date_of_birth}</p>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Address Section */}
-                {(employee.address_line_1 || employee.city || employee.postcode) && (
-                  <div className="pt-3 border-t border-gray-100">
-                    <p className="text-sm text-text-muted mb-1">Address</p>
-                    <p className="font-medium text-text-primary">
-                      {[employee.address_line_1, employee.address_line_2, employee.city, employee.county, employee.postcode, employee.country]
-                        .filter(Boolean)
-                        .join(', ')}
-                    </p>
-                  </div>
-                )}
-                
-                {/* Emergency Contact Section */}
-                {(employee.next_of_kin_name || employee.emergency_contact_name) && (
-                  <div className="pt-3 border-t border-gray-100">
-                    <p className="text-sm text-text-muted mb-1">Emergency Contact / Next of Kin</p>
-                    {employee.next_of_kin_name && (
-                      <p className="font-medium text-text-primary text-sm">
-                        {employee.next_of_kin_name} {employee.next_of_kin_relationship && `(${employee.next_of_kin_relationship})`}
-                        {employee.next_of_kin_phone && ` - ${employee.next_of_kin_phone}`}
-                      </p>
-                    )}
-                    {employee.emergency_contact_name && !employee.next_of_kin_name && (
-                      <p className="font-medium text-text-primary text-sm">
-                        {employee.emergency_contact_name} {employee.emergency_contact_relationship && `(${employee.emergency_contact_relationship})`}
-                        {employee.emergency_contact_phone && ` - ${employee.emergency_contact_phone}`}
-                      </p>
-                    )}
-                  </div>
-                )}
-                
-                {/* Driving Info */}
-                {(employee.has_driving_licence || employee.has_own_vehicle) && (
-                  <div className="pt-3 border-t border-gray-100">
-                    <p className="text-sm text-text-muted mb-1">Driving / Vehicle</p>
-                    <div className="flex gap-3 text-sm">
-                      {employee.has_driving_licence && (
-                        <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">
-                          {employee.driving_licence_type || 'Driving Licence'}
-                        </span>
-                      )}
-                      {employee.has_own_vehicle && (
-                        <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded">
-                          Own Vehicle {employee.vehicle_registration && `(${employee.vehicle_registration})`}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="border-[#E4E8EB] shadow-sm">
-              <CardHeader>
-                <CardTitle className="font-heading text-lg">Care Status</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="p-4 bg-success/10 border border-success/20 rounded-xl">
-                    <p className="text-sm text-success font-medium">Verified & Complete</p>
-                    <p className="text-2xl font-heading font-bold text-success">
-                      {complianceRequirements?.summary?.verified || 0}/{complianceRequirements?.summary?.total || 0}
-                    </p>
-                    <p className="text-[10px] text-success/70 mt-1">Checked, approved & current</p>
-                  </div>
-                  <div className="p-4 bg-info/10 border border-info/20 rounded-xl">
-                    <p className="text-sm text-info font-medium">Awaiting Review</p>
-                    <p className="text-2xl font-heading font-bold text-info">
-                      {(complianceRequirements?.summary?.completed || 0) - (complianceRequirements?.summary?.verified || 0)}
-                    </p>
-                    <p className="text-[10px] text-info/70 mt-1">Evidence uploaded, needs verification</p>
-                  </div>
-                  <div className="p-4 bg-error/10 border border-error/20 rounded-xl">
-                    <p className="text-sm text-error font-medium">Still Needed</p>
-                    <p className="text-2xl font-heading font-bold text-error">
-                      {complianceRequirements?.summary?.missing || 0}
-                    </p>
-                    <p className="text-[10px] text-error/70 mt-1">No evidence uploaded</p>
-                  </div>
-                  <div className="p-4 bg-[#F8FAFA] rounded-xl">
-                    <p className="text-sm text-text-muted">Policies Signed</p>
-                    <p className="text-2xl font-heading font-bold text-text-primary">
-                      {policies.filter(p => p.status === 'signed').length}/{policies.length}
-                    </p>
-                    <p className="text-[10px] text-text-muted mt-1">Staff policy acknowledgements</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Document Requests & Interview Records */}
-          <div className="grid lg:grid-cols-2 gap-6 mt-6">
-            <DocumentRequestsPanel 
-              employeeId={employeeId}
-              onRefresh={fetchComplianceFile}
-            />
-            <InterviewFormPanel 
-              employeeId={employeeId}
-              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
-            />
-          </div>
-
-          {/* Unified Progress - Single Source of Truth */}
-          <div className="mt-6">
+        {/* ========== TAB 1: WORK READINESS ========== */}
+        {/* Unified progress + blocker list + promote button */}
+        <TabsContent value="work_readiness">
+          <div className="space-y-6">
+            {/* Unified Progress Section - Single Source of Truth */}
             <UnifiedProgressSection 
               employeeId={employeeId}
               employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
               onNavigateToRequirement={(reqKey) => {
-                setActiveTab('checklist');
-                // Scroll to the requirement section after tab change
+                setActiveTab('compliance');
                 setTimeout(() => {
                   const el = document.querySelector(`[data-requirement="${reqKey}"]`);
                   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }, 100);
               }}
             />
-          </div>
-
-          {/* Pre-Employment Gates - CQC Critical Check */}
-          <div className="mt-6">
+            
+            {/* Recruitment Approval Panel - for applicants */}
+            {employee?.person_stage === 'applicant' && (
+              <RecruitmentApprovalPanel 
+                employeeId={employeeId}
+                employeeName={`${employee.first_name} ${employee.last_name}`}
+                role={employee.role}
+                stageIdentity={employee.person_stage}
+                onApprovalSuccess={(data) => {
+                  // Refresh employee data after approval
+                  fetchEmployee();
+                  fetchComplianceFile();
+                }}
+                onNavigateToRequirement={(reqKey, section) => {
+                  setActiveTab('compliance');
+                }}
+              />
+            )}
+            
+            {/* Work Readiness Panel - for employees */}
+            {employee?.person_stage === 'employee' && (
+              <WorkReadinessPanel 
+                employeeId={employeeId}
+                employeeName={`${employee.first_name} ${employee.last_name}`}
+                role={employee.role}
+                stageIdentity={employee.person_stage}
+                recruitmentApproved={employee.recruitment_approved}
+                onNavigateToRequirement={(reqKey, section) => {
+                  setActiveTab('compliance');
+                }}
+              />
+            )}
+            
+            {/* Pre-Employment Gates - CQC Critical Check */}
             <PreEmploymentGatesPanel 
               employeeId={employeeId}
               onNavigate={(hash) => {
-                // Navigate to specific tab based on gate
-                if (hash === '#compliance') setActiveTab('checklist');
+                if (hash === '#compliance') setActiveTab('compliance');
                 else if (hash === '#training') setActiveTab('training');
-                else if (hash === '#policies') setActiveTab('policies');
+                else if (hash === '#policies') setActiveTab('compliance');
               }}
               onRefresh={fetchComplianceFile}
             />
+            
+            {/* Personal Details Summary */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader>
+                <CardTitle className="font-heading text-lg">Employee Summary</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-sm text-text-muted">Full Name</p>
+                    <p className="font-medium text-text-primary">{employee?.first_name} {employee?.last_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-text-muted">
+                      {employee?.person_stage === 'applicant' ? 'Applicant Ref' : 'Employee ID'}
+                    </p>
+                    <p className="font-medium text-text-primary">
+                      {employee?.employee_code || employee?.applicant_reference || 'Not assigned'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-text-muted">Role</p>
+                    <p className="font-medium text-text-primary">{employee?.role}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-text-muted">Status</p>
+                    <Badge className={
+                      employee?.status === 'active_employee' ? 'bg-green-100 text-green-700' :
+                      employee?.status === 'onboarding' ? 'bg-amber-100 text-amber-700' :
+                      'bg-gray-100 text-gray-700'
+                    }>
+                      {employee?.status?.replace(/_/g, ' ')}
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
-
-          {/* Training & Compliance Overview */}
-          <ComplianceOverview
-            employee={employee}
-            documents={documents}
-            training={training}
-            policies={policies}
-            generatedForms={generatedForms}
-            complianceRequirements={complianceRequirements}
-            isAuditor={isAuditor()}
-            onCompleteTraining={(item) => {
-              // Map the ComplianceOverview item format to requirement format
-              // The trainingType corresponds to the requirement_id in MANDATORY_ITEMS
-              const trainingReqMapping = {
-                'safeguarding': { id: 'safeguarding', name: 'Safeguarding Training', category: 'N_Training' },
-                'manual_handling': { id: 'manual_handling', name: 'Manual Handling Training', category: 'N_Training' },
-                'infection_control': { id: 'infection_control', name: 'Infection Control Training', category: 'N_Training' },
-                'basic_life_support': { id: 'bls', name: 'Basic Life Support (BLS)', category: 'N_Training' },
-                'medication': { id: 'medication_competency', name: 'Medication Competency', category: 'N_Training' },
-                'induction': { id: 'induction', name: 'Induction & Competency Assessment', category: 'J_Induction_Shadowing_Observations' }
-              };
-              const reqData = trainingReqMapping[item.trainingType] || {
-                id: item.trainingType || item.id,
-                name: item.name,
-                category: 'N_Training'
-              };
-              openTrainingDialog(reqData);
-            }}
-          />
         </TabsContent>
 
-        {/* Compliance File Tab - Primary Requirements & Evidence Management */}
+        {/* ========== TAB 3: FORMS ========== */}
+        {/* Health Questionnaire, Personal Info, HMRC, Emergency Contacts */}
+        <TabsContent value="forms">
+          <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader>
+              <CardTitle className="font-heading text-lg">Employee Forms</CardTitle>
+              <p className="text-xs text-text-muted">
+                Health questionnaire, personal information, HMRC details, and emergency contacts.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Form status cards */}
+                {['Staff Health Questionnaire', 'Personal Information', 'HMRC Starter Checklist', 'Emergency Contacts'].map((formName, idx) => {
+                  const formSubmission = generatedForms?.find(f => 
+                    f.name?.toLowerCase().includes(formName.toLowerCase().split(' ')[0])
+                  );
+                  const isSubmitted = formSubmission?.status === 'submitted' || formSubmission?.status === 'verified';
+                  
+                  return (
+                    <div key={idx} className={`p-4 rounded-lg border ${
+                      isSubmitted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {isSubmitted ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : (
+                            <Clock className="h-5 w-5 text-gray-400" />
+                          )}
+                          <div>
+                            <p className="font-medium text-gray-800">{formName}</p>
+                            <p className="text-xs text-gray-500">
+                              {isSubmitted ? 'Submitted' : 'Pending submission'}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge className={isSubmitted ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}>
+                          {isSubmitted ? 'Complete' : 'Pending'}
+                        </Badge>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ========== TAB 6: EMPLOYMENT ========== */}
+        {/* Employment history + gap verification + declarations */}
+        <TabsContent value="employment">
+          <Card className="border-[#E4E8EB] shadow-sm">
+            <CardHeader>
+              <CardTitle className="font-heading text-lg">Employment History</CardTitle>
+              <p className="text-xs text-text-muted">
+                Work history, gap verification, and employment declarations.
+              </p>
+            </CardHeader>
+            <CardContent>
+              {/* Employment Gap Panel */}
+              {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
+                <EmploymentGapPanel
+                  employeeId={employeeId}
+                  employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                  initialData={{
+                    has_gaps: true,
+                    gaps: complianceFile.sections.employment_history.rows[0].gaps,
+                    evaluation: complianceFile.sections.employment_history.rows[0].gap_evaluation
+                  }}
+                  isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
+                  onGapUpdate={() => {
+                    fetchCompliance();
+                    fetchComplianceFile();
+                  }}
+                />
+              )}
+              
+              {/* Employment History from Application */}
+              {employee?.employment_history?.length > 0 && (
+                <div className="mt-6">
+                  <h4 className="font-medium text-gray-800 mb-3">Employment Records</h4>
+                  <div className="space-y-3">
+                    {employee.employment_history.map((job, idx) => (
+                      <div key={idx} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="font-medium text-gray-800">{job.employer || job.company}</p>
+                            <p className="text-sm text-gray-600">{job.job_title || job.position}</p>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {job.start_date} - {job.end_date || 'Present'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {!employee?.employment_history?.length && !complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
+                <div className="text-center py-8 text-gray-500">
+                  <Briefcase className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>No employment history recorded</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader className="pb-4">

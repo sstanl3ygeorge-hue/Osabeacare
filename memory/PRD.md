@@ -133,10 +133,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] Supervision Records tracking UI
 
 ### P2 (Medium)
+- [x] Remove duplicate sections from Employee Profile - COMPLETED Apr 2026
+- [x] Implement 7-section Employee Profile consolidation - COMPLETED Apr 2026
 - [ ] server.py modular split (currently 48k+ lines) - CRITICAL for maintainability
 - [ ] F811 duplicate function cleanup
-- [ ] Remove remaining duplicate sections from Employee Profile
-- [ ] Implement 7-section Employee Profile consolidation (Work Readiness, Compliance, Forms, Training, References, Employment, Audit)
 - [ ] MFA for admin accounts (RECOMMENDED)
 
 ### P3 (Future)
@@ -192,6 +192,31 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Backend: 100% (24/24 API tests passed)
 - Frontend: UnifiedProgressSection integrated and visible
 - Test report: `/app/test_reports/iteration_154.json`
+
+---
+
+## COMPLETED: 7-Section Employee Profile Consolidation (April 2026)
+
+### Tab Structure Implemented
+| Tab | Content | Purpose |
+|-----|---------|---------|
+| **Work Readiness** | UnifiedProgressSection + Recruitment/Work Readiness panels + Pre-Employment Gates | Single view of all blockers |
+| **Compliance** | DualRowComplianceSection - RTW, DBS, Identity, POA, Contract | Core evidence management |
+| **Forms** | Health Questionnaire, Personal Info, HMRC, Emergency Contacts status | Form tracking |
+| **Training** | Induction + Competencies + Mandatory Training + Spot Checks | All training in one place |
+| **References** | Reference 1 + Reference 2 full workflow | Reference management |
+| **Employment** | Employment history + gap verification + declarations | Employment records |
+| **Audit** | Full audit trail | Activity history |
+
+### Duplicate Sections Removed
+- ✅ Old "Overview" tab content (Personal Details card - moved to Work Readiness Summary)
+- ✅ Duplicate ComplianceOverview in overview tab
+- ✅ Multiple TabsContent for "checklist" (consolidated to one)
+- ✅ Duplicate progress sections (now using UnifiedProgressSection)
+
+### Files Modified
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` - Restructured to 7 tabs
+- Removed ~250 lines of duplicate content
 
 ---
 

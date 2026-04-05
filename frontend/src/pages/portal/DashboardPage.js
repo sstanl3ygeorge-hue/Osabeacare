@@ -61,6 +61,117 @@ export default function DashboardPage() {
     );
   }
 
+  // ========== EMPTY STATE: Get Started Guide ==========
+  if (employees.length === 0) {
+    return (
+      <div className="space-y-8" data-testid="dashboard-page-empty">
+        {/* Header */}
+        <div>
+          <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">
+            Welcome to Osabea Healthcare Compliance Portal
+          </h1>
+          <p className="text-text-muted mt-1">
+            Get started by adding your first employee or inviting applicants.
+          </p>
+        </div>
+
+        {/* Get Started Card */}
+        <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-white shadow-lg">
+          <CardContent className="pt-8 pb-8">
+            <div className="text-center max-w-md mx-auto">
+              <div className="w-20 h-20 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <Users className="h-10 w-10 text-primary" />
+              </div>
+              
+              <h2 className="text-xl font-heading font-bold text-text-primary mb-2">
+                No Employees Yet
+              </h2>
+              <p className="text-text-muted mb-8">
+                Add your first employee to start tracking compliance, or share your public application link to invite new applicants.
+              </p>
+
+              <div className="space-y-4">
+                <Link to="/portal/employees" className="block">
+                  <Button className="w-full bg-primary hover:bg-primary-hover text-white rounded-xl py-6 text-lg" data-testid="get-started-add-employee">
+                    <UserPlus className="mr-2 h-5 w-5" />
+                    Add New Employee
+                  </Button>
+                </Link>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200"></div>
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white px-2 text-text-muted">or</span>
+                  </div>
+                </div>
+
+                <Link to="/portal/applications" className="block">
+                  <Button variant="outline" className="w-full rounded-xl py-5" data-testid="get-started-applications">
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Share Application Link
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Quick Setup Checklist */}
+        <Card className="border-[#E4E8EB] shadow-sm">
+          <CardHeader>
+            <CardTitle className="font-heading text-lg">Quick Setup Checklist</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span className="text-blue-600 font-bold text-sm">1</span>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-text-primary">Add your first employee</p>
+                  <p className="text-sm text-text-muted">Enter their details and upload compliance documents</p>
+                </div>
+                <Link to="/portal/employees">
+                  <Button size="sm" variant="outline">Start</Button>
+                </Link>
+              </div>
+              
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span className="text-blue-600 font-bold text-sm">2</span>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-text-primary">Upload company policies</p>
+                  <p className="text-sm text-text-muted">Add policies for employees to acknowledge</p>
+                </div>
+                <Link to="/portal/compliance-centre?tab=policies">
+                  <Button size="sm" variant="outline">Setup</Button>
+                </Link>
+              </div>
+              
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <span className="text-blue-600 font-bold text-sm">3</span>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium text-text-primary">Configure training requirements</p>
+                  <p className="text-sm text-text-muted">Set up mandatory training for your staff</p>
+                </div>
+                <Link to="/portal/training">
+                  <Button size="sm" variant="outline">Configure</Button>
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // ========== NORMAL DASHBOARD (employees exist) ==========
+  
   // Calculate workforce readiness counts using 3-tier system (authoritative)
   const readyToWork = employees.filter(e => 
     e.work_readiness_3tier?.status === 'READY_TO_WORK'

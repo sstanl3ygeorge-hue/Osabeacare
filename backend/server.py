@@ -7908,6 +7908,369 @@ async def worker_upload_document(
 
 
 # ===========================================================================
+# ADMIN ACTIONS: SEND REMINDER & REQUEST RENEWAL
+# ===========================================================================
+
+class SendReminderRequest(BaseModel):
+    custom_message: Optional[str] = None
+
+@api_router.post("/workers/{employee_id}/send-reminder")
+async def send_worker_reminder(
+    employee_id: str,
+    request: SendReminderRequest = SendReminderRequest(),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send a reminder email to a worker with their magic link.
+    The email shows their outstanding compliance items.
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    email = employee.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    # Generate magic link token
+    token_payload = {
+        "employee_id": employee_id,
+        "email": email,
+        "type": "worker_login",
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+    }
+    magic_token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
+    
+    # Store token
+    await db.magic_tokens.update_one(
+        {"employee_id": employee_id, "email": email},
+        {"$set": {
+            "token": magic_token,
+            "employee_id": employee_id,
+            "email": email,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "used": False
+        }},
+        upsert=True
+    )
+    
+    # Get missing items for the email
+    unified_progress = await get_unified_progress(employee_id, user)
+    blockers = unified_progress.get("blockers", [])
+    overall_pct = unified_progress.get("overall_percentage", 0)
+    
+    # Build portal URL
+    frontend_url = os.environ.get("FRONTEND_URL", "https://caretrust-portal.preview.emergentagent.com")
+    portal_link = f"{frontend_url}/worker/verify?token={magic_token}"
+    
+    # Build blockers list HTML
+    blockers_html = ""
+    if blockers:
+        blockers_html = "<ul style='margin: 16px 0; padding-left: 20px;'>"
+        for blocker in blockers[:10]:  # Limit to 10 items
+            blockers_html += f"<li style='margin: 4px 0; color: #dc2626;'>{blocker}</li>"
+        blockers_html += "</ul>"
+    else:
+        blockers_html = "<p style='color: #16a34a;'>All items are complete! Please review your dashboard.</p>"
+    
+    custom_msg_html = ""
+    if request.custom_message:
+        custom_msg_html = f"""
+        <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 16px 0;">
+            <p style="margin: 0; color: #92400e;"><strong>Message from Admin:</strong></p>
+            <p style="margin: 8px 0 0 0; color: #92400e;">{request.custom_message}</p>
+        </div>
+        """
+    
+    email_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #3b82f6, #1d4ed8); padding: 32px; border-radius: 16px 16px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Compliance Reminder</h1>
+        </div>
+        
+        <div style="background: white; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 16px 16px;">
+            <p style="font-size: 18px; margin-bottom: 8px;">Hello {emp_name},</p>
+            
+            {custom_msg_html}
+            
+            <p>This is a reminder to complete your outstanding compliance items. Your current progress is <strong>{overall_pct}%</strong>.</p>
+            
+            <p><strong>Outstanding items:</strong></p>
+            {blockers_html}
+            
+            <div style="text-align: center; margin: 32px 0;">
+                <a href="{portal_link}" style="display: inline-block; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; padding: 16px 32px; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">
+                    Go to My Portal
+                </a>
+            </div>
+            
+            <p style="color: #6b7280; font-size: 14px;">This link will expire in 7 days. If you have any questions, please contact your manager.</p>
+            
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+            
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                Osabea Healthcare Solutions - Compliance Portal<br>
+                This is an automated reminder from your employer.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Send email
+    email_sent = False
+    try:
+        if resend.api_key:
+            resend.Emails.send({
+                "from": EMAIL_FROM,
+                "to": [email],
+                "subject": f"Compliance Reminder - {overall_pct}% Complete",
+                "html": email_html
+            })
+            email_sent = True
+        else:
+            logger.warning("Resend API key not configured - reminder email not sent")
+    except Exception as e:
+        logger.error(f"Failed to send reminder email: {e}")
+        # Don't fail the request, just log the error
+    
+    # Log the action
+    await log_audit_action(user.get("id", "admin"), "send_worker_reminder", "employee", employee_id, {
+        "email": email,
+        "custom_message": request.custom_message,
+        "blockers_count": len(blockers),
+        "progress_percentage": overall_pct,
+        "email_sent": email_sent
+    })
+    
+    return {
+        "success": True,
+        "message": f"Reminder {'sent to' if email_sent else 'prepared for'} {email}",
+        "employee_id": employee_id,
+        "blockers_sent": len(blockers),
+        "email_sent": email_sent,
+        "portal_link": portal_link
+    }
+
+
+class RequestRenewalRequest(BaseModel):
+    training_id: Optional[str] = None  # Required for training renewals
+
+@api_router.post("/employees/{employee_id}/request-renewal/{renewal_type}")
+async def request_renewal(
+    employee_id: str,
+    renewal_type: str,
+    request: RequestRenewalRequest = RequestRenewalRequest(),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send a renewal request email to a worker for an expiring/expired item.
+    Types: dbs, right_to_work, training, professional_registration
+    """
+    valid_types = ["dbs", "right_to_work", "training", "professional_registration", "identity", "proof_of_address"]
+    if renewal_type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"Invalid renewal type. Must be one of: {valid_types}")
+    
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    email = employee.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    # Determine item details based on type
+    item_name = ""
+    expiry_date = None
+    upload_requirement_id = renewal_type
+    
+    if renewal_type == "dbs":
+        item_name = "DBS Certificate"
+        dbs_check = await db.dbs_checks.find_one({"employee_id": employee_id}, {"_id": 0})
+        if dbs_check:
+            expiry_date = dbs_check.get("next_check_due") or dbs_check.get("expiry_date")
+    
+    elif renewal_type == "right_to_work":
+        item_name = "Right to Work"
+        rtw_check = await db.rtw_checks.find_one({"employee_id": employee_id}, {"_id": 0})
+        if rtw_check:
+            expiry_date = rtw_check.get("expiry_date")
+    
+    elif renewal_type == "training":
+        if not request.training_id:
+            raise HTTPException(status_code=400, detail="training_id required for training renewals")
+        
+        training = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "id": request.training_id
+        }, {"_id": 0})
+        
+        if not training:
+            # Try matching by training name/type
+            training = await db.training_records.find_one({
+                "employee_id": employee_id,
+                "training_name": {"$regex": request.training_id, "$options": "i"}
+            }, {"_id": 0})
+        
+        if training:
+            item_name = training.get("training_name", "Training Certificate")
+            expiry_date = training.get("expiry_date")
+        else:
+            item_name = "Training Certificate"
+        
+        upload_requirement_id = f"training_{request.training_id}"
+    
+    elif renewal_type == "professional_registration":
+        prof_regs = employee.get("professional_registrations", [])
+        if prof_regs:
+            reg = prof_regs[0]
+            item_name = f"{reg.get('registration_type', 'Professional')} Registration"
+            expiry_date = reg.get("expiry_date")
+        else:
+            item_name = "Professional Registration"
+    
+    elif renewal_type == "identity":
+        item_name = "Identity Document"
+    
+    elif renewal_type == "proof_of_address":
+        item_name = "Proof of Address"
+    
+    # Generate magic link for direct upload
+    token_payload = {
+        "employee_id": employee_id,
+        "email": email,
+        "type": "worker_login",
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+    }
+    magic_token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
+    
+    # Store token
+    await db.magic_tokens.update_one(
+        {"employee_id": employee_id, "email": email},
+        {"$set": {
+            "token": magic_token,
+            "employee_id": employee_id,
+            "email": email,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "used": False
+        }},
+        upsert=True
+    )
+    
+    frontend_url = os.environ.get("FRONTEND_URL", "https://caretrust-portal.preview.emergentagent.com")
+    portal_link = f"{frontend_url}/worker/verify?token={magic_token}"
+    
+    # Format expiry date
+    expiry_text = ""
+    if expiry_date:
+        try:
+            if isinstance(expiry_date, str):
+                exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+            else:
+                exp_dt = expiry_date
+            expiry_text = exp_dt.strftime("%d %B %Y")
+            
+            if exp_dt < datetime.now(timezone.utc):
+                expiry_status = f"<span style='color: #dc2626; font-weight: bold;'>EXPIRED on {expiry_text}</span>"
+            else:
+                days_left = (exp_dt - datetime.now(timezone.utc)).days
+                if days_left <= 30:
+                    expiry_status = f"<span style='color: #dc2626; font-weight: bold;'>Expires on {expiry_text} ({days_left} days)</span>"
+                else:
+                    expiry_status = f"<span style='color: #f59e0b;'>Expires on {expiry_text} ({days_left} days)</span>"
+        except:
+            expiry_status = "Expiry date unknown"
+    else:
+        expiry_status = "Please upload your renewed document"
+    
+    email_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px; border-radius: 16px 16px 0 0; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Renewal Required</h1>
+        </div>
+        
+        <div style="background: white; padding: 32px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 16px 16px;">
+            <p style="font-size: 18px; margin-bottom: 8px;">Hello {emp_name},</p>
+            
+            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 16px; margin: 16px 0;">
+                <p style="margin: 0; color: #92400e; font-weight: bold;">Your {item_name} requires renewal</p>
+                <p style="margin: 8px 0 0 0; color: #92400e;">{expiry_status}</p>
+            </div>
+            
+            <p>Please upload a new {item_name} as soon as possible to maintain your work readiness status.</p>
+            
+            <div style="text-align: center; margin: 32px 0;">
+                <a href="{portal_link}" style="display: inline-block; background: linear-gradient(135deg, #f59e0b, #d97706); color: white; padding: 16px 32px; text-decoration: none; border-radius: 12px; font-weight: 600; font-size: 16px;">
+                    Upload New {item_name}
+                </a>
+            </div>
+            
+            <p style="color: #6b7280; font-size: 14px;">This link will expire in 7 days. If you have any questions, please contact your manager.</p>
+            
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+            
+            <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                Osabea Healthcare Solutions - Compliance Portal<br>
+                This is an automated renewal request from your employer.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Send email
+    email_sent = False
+    try:
+        if resend.api_key:
+            resend.Emails.send({
+                "from": EMAIL_FROM,
+                "to": [email],
+                "subject": f"Renewal Required: {item_name}",
+                "html": email_html
+            })
+            email_sent = True
+        else:
+            logger.warning("Resend API key not configured - renewal email not sent")
+    except Exception as e:
+        logger.error(f"Failed to send renewal email: {e}")
+        # Don't fail the request, just log the error
+    
+    # Log the action
+    await log_audit_action(user.get("id", "admin"), "request_renewal", "employee", employee_id, {
+        "renewal_type": renewal_type,
+        "item_name": item_name,
+        "email": email,
+        "expiry_date": str(expiry_date) if expiry_date else None,
+        "training_id": request.training_id,
+        "email_sent": email_sent
+    })
+    
+    return {
+        "success": True,
+        "message": f"Renewal request {'sent to' if email_sent else 'prepared for'} {email}",
+        "employee_id": employee_id,
+        "renewal_type": renewal_type,
+        "item_name": item_name,
+        "email_sent": email_sent,
+        "portal_link": portal_link
+    }
+
+
+# ===========================================================================
 # WORKER PORTAL FORMS - SAVE/RESUME FUNCTIONALITY
 # ===========================================================================
 
@@ -22159,6 +22522,314 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
         expiring_60_days=expiring_60,
         expiring_90_days=expiring_90
     )
+
+
+# ==================== UNIFIED PROGRESS ENDPOINT ====================
+
+@api_router.get("/employees/{employee_id}/unified-progress")
+async def get_unified_progress(employee_id: str, user: dict = Depends(get_current_user)):
+    """
+    Get unified progress for an employee - SINGLE SOURCE OF TRUTH.
+    All UI components should use this endpoint for consistent progress display.
+    
+    Returns:
+    - overall_percentage: Single percentage for all compliance
+    - completed_requirements: Number of requirements completed
+    - total_requirements: Total requirements (role-aware)
+    - categories: Breakdown by category
+    - blockers: List of actionable items blocking work readiness
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    job_role = (employee.get("job_role") or employee.get("role") or "").lower()
+    
+    # Initialize category counters
+    categories = {
+        "documents": {"completed": 0, "total": 0, "items": []},
+        "forms": {"completed": 0, "total": 0, "items": []},
+        "training": {"completed": 0, "total": 0, "items": []},
+        "references": {"completed": 0, "total": 2, "items": []},  # Always need 2 references
+        "agreements": {"completed": 0, "total": 2, "items": []},  # Contract + Handbook
+        "induction": {"completed": 0, "total": 0, "items": []}
+    }
+    blockers = []
+    
+    # ========== DOCUMENTS ==========
+    # Required documents (mandatory for all roles)
+    required_docs = {
+        "right_to_work": "Right to Work",
+        "dbs": "DBS Certificate",
+        "identity": "Identity Document",
+        "proof_of_address": "Proof of Address (1)",
+        "proof_of_address_2": "Proof of Address (2)"
+    }
+    
+    # Add professional registration for clinical roles
+    requires_prof_reg = False
+    prof_reg_type = None
+    if "nurse" in job_role or "midwife" in job_role:
+        requires_prof_reg = True
+        prof_reg_type = "NMC"
+        required_docs["nmc_registration"] = "NMC Registration"
+    elif "doctor" in job_role or "physician" in job_role or "consultant" in job_role:
+        requires_prof_reg = True
+        prof_reg_type = "GMC"
+        required_docs["gmc_registration"] = "GMC Registration"
+    elif "physio" in job_role or "occupational" in job_role or "paramedic" in job_role:
+        requires_prof_reg = True
+        prof_reg_type = "HCPC"
+        required_docs["hcpc_registration"] = "HCPC Registration"
+    elif "social worker" in job_role:
+        requires_prof_reg = True
+        prof_reg_type = "SWE"
+        required_docs["swe_registration"] = "Social Work England Registration"
+    
+    categories["documents"]["total"] = len(required_docs)
+    
+    # Get all documents for this employee
+    documents = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "status": {"$nin": ["deleted", "superseded"]}
+    }).to_list(200)
+    
+    # Check each required document
+    for doc_type, doc_name in required_docs.items():
+        # Find matching document
+        is_completed = False
+        for doc in documents:
+            req_id = (doc.get("requirement_id") or "").lower()
+            if doc_type.replace("_", "") in req_id.replace("_", "") or doc_type in req_id:
+                # Check if verified
+                stamp = doc.get("verification_stamp", "")
+                if stamp and stamp not in ["", "not_verified"]:
+                    is_completed = True
+                    break
+                elif doc.get("status") == "verified" or doc.get("verified"):
+                    is_completed = True
+                    break
+        
+        categories["documents"]["items"].append({
+            "id": doc_type,
+            "name": doc_name,
+            "completed": is_completed
+        })
+        
+        if is_completed:
+            categories["documents"]["completed"] += 1
+        else:
+            blockers.append(doc_name)
+    
+    # Check POA needs 2 documents
+    poa_docs = [d for d in documents if "proof_of_address" in (d.get("requirement_id") or "").lower()]
+    poa_verified = [d for d in poa_docs if d.get("verification_stamp") not in [None, "", "not_verified"]]
+    if len(poa_verified) < 2:
+        # Adjust POA completion
+        if len(poa_verified) == 1:
+            # One verified, one missing
+            pass  # Already counted in loop above
+        elif len(poa_verified) == 0 and len(poa_docs) >= 1:
+            # Has uploads but not verified
+            pass
+    
+    # ========== FORMS ==========
+    # Required forms (exclude optional ones like Equal Opportunities)
+    required_forms = {
+        "staff_health_questionnaire": "Health Questionnaire",
+        "staff_personal_info": "Personal Information",
+        "hmrc_starter_checklist": "HMRC Starter Checklist",
+        "emergency_contacts": "Emergency Contacts"
+    }
+    # Note: equal_opportunities is OPTIONAL, not counted
+    
+    categories["forms"]["total"] = len(required_forms)
+    
+    # Get form submissions
+    form_submissions = await db.form_submissions.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["submitted", "verified"]}
+    }).to_list(20)
+    
+    submitted_forms = {fs.get("form_type") for fs in form_submissions}
+    
+    for form_id, form_name in required_forms.items():
+        is_completed = form_id in submitted_forms
+        categories["forms"]["items"].append({
+            "id": form_id,
+            "name": form_name,
+            "completed": is_completed
+        })
+        
+        if is_completed:
+            categories["forms"]["completed"] += 1
+        else:
+            blockers.append(form_name)
+    
+    # ========== TRAINING ==========
+    # Mandatory training
+    mandatory_training = {
+        "safeguarding": "Safeguarding",
+        "manual_handling": "Manual Handling",
+        "fire_safety": "Fire Safety",
+        "health_safety": "Health & Safety",
+        "bls": "Basic Life Support",
+        "infection_control": "Infection Control"
+    }
+    
+    categories["training"]["total"] = len(mandatory_training)
+    
+    # Get training records
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$ne": "superseded"}
+    }).to_list(100)
+    
+    now = datetime.now(timezone.utc)
+    
+    for training_id, training_name in mandatory_training.items():
+        is_completed = False
+        is_expired = False
+        
+        for t in training_records:
+            t_name = (t.get("training_name") or "").lower()
+            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
+                # Check if verified and not expired
+                expiry_str = t.get("expiry_date")
+                if expiry_str:
+                    try:
+                        if isinstance(expiry_str, str):
+                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                        else:
+                            expiry = expiry_str
+                        if expiry < now:
+                            is_expired = True
+                        else:
+                            is_completed = True
+                    except:
+                        is_completed = True  # No valid expiry, assume valid
+                else:
+                    is_completed = True  # No expiry date means perpetual
+                break
+        
+        categories["training"]["items"].append({
+            "id": training_id,
+            "name": training_name,
+            "completed": is_completed,
+            "expired": is_expired
+        })
+        
+        if is_completed and not is_expired:
+            categories["training"]["completed"] += 1
+        else:
+            if is_expired:
+                blockers.append(f"{training_name} (Expired)")
+            else:
+                blockers.append(training_name)
+    
+    # ========== REFERENCES ==========
+    references = employee.get("references", [])
+    verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
+    
+    categories["references"]["completed"] = min(len(verified_refs), 2)
+    
+    ref1_done = len(verified_refs) >= 1
+    ref2_done = len(verified_refs) >= 2
+    
+    categories["references"]["items"] = [
+        {"id": "reference_1", "name": "Reference 1", "completed": ref1_done},
+        {"id": "reference_2", "name": "Reference 2", "completed": ref2_done}
+    ]
+    
+    if not ref1_done:
+        blockers.append("Reference 1")
+    if not ref2_done:
+        blockers.append("Reference 2")
+    
+    # ========== AGREEMENTS ==========
+    # Contract and Employee Handbook
+    contract_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": {"$in": ["contract_acceptance", "employment_contract"]},
+        "verification_status": "verified"
+    })
+    
+    handbook_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": {"$in": ["employee_handbook", "handbook"]},
+        "verification_status": {"$in": ["verified", "acknowledged"]}
+    })
+    
+    contract_done = bool(contract_ack) or employee.get("contract_signed", False)
+    handbook_done = bool(handbook_ack)
+    
+    categories["agreements"]["items"] = [
+        {"id": "contract", "name": "Employment Contract", "completed": contract_done},
+        {"id": "handbook", "name": "Employee Handbook", "completed": handbook_done}
+    ]
+    
+    if contract_done:
+        categories["agreements"]["completed"] += 1
+    else:
+        blockers.append("Employment Contract")
+    
+    if handbook_done:
+        categories["agreements"]["completed"] += 1
+    # Note: Handbook may be optional for some orgs, don't add to blockers
+    
+    # ========== INDUCTION ==========
+    # Get induction checklist items
+    induction_items = await db.induction_checklist.find({
+        "employee_id": employee_id
+    }).to_list(50)
+    
+    if induction_items:
+        total_induction = len(induction_items)
+        completed_induction = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+        categories["induction"]["total"] = total_induction
+        categories["induction"]["completed"] = completed_induction
+        
+        if completed_induction < total_induction:
+            blockers.append(f"Induction ({completed_induction}/{total_induction} items)")
+    else:
+        # Check if induction exists in employee record
+        induction_data = employee.get("induction_checklist", {})
+        if induction_data:
+            items = induction_data.get("items", [])
+            categories["induction"]["total"] = len(items)
+            categories["induction"]["completed"] = len([i for i in items if i.get("completed")])
+        else:
+            # Default induction items (14 standard items)
+            categories["induction"]["total"] = 14
+            categories["induction"]["completed"] = 0
+            blockers.append("Induction Checklist (0/14 items)")
+    
+    # ========== CALCULATE TOTALS ==========
+    total_requirements = sum(cat["total"] for cat in categories.values())
+    completed_requirements = sum(cat["completed"] for cat in categories.values())
+    
+    overall_percentage = round((completed_requirements / total_requirements) * 100) if total_requirements > 0 else 0
+    
+    # Clean up categories for response (remove items list to keep response slim)
+    categories_summary = {}
+    for cat_name, cat_data in categories.items():
+        categories_summary[cat_name] = {
+            "completed": cat_data["completed"],
+            "total": cat_data["total"]
+        }
+    
+    return {
+        "employee_id": employee_id,
+        "overall_percentage": overall_percentage,
+        "completed_requirements": completed_requirements,
+        "total_requirements": total_requirements,
+        "categories": categories_summary,
+        "blockers": blockers,
+        "is_work_ready": len(blockers) == 0,
+        "role_requires_professional_registration": requires_prof_reg,
+        "professional_registration_type": prof_reg_type
+    }
+
 
 @api_router.get("/dashboard/audit-readiness")
 async def get_audit_readiness_dashboard(user: dict = Depends(require_manager_or_admin)):

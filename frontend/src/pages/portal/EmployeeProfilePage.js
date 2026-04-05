@@ -28,6 +28,7 @@ import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedSta
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import CompetencyAssessmentsPanel from '../../components/compliance/CompetencyAssessmentsPanel';
 import SpotChecksPanel from '../../components/compliance/SpotChecksPanel';
+import PendingVerificationBanner from '../../components/compliance/PendingVerificationBanner';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
 import EditEmploymentHistoryDialog from '../../components/admin/EditEmploymentHistoryDialog';
@@ -3687,6 +3688,17 @@ export default function EmployeeProfilePage() {
           }}
         />
       </div>
+
+      {/* Pending Verification Banner - Shows items needing admin attention */}
+      {isAuditor() && (
+        <PendingVerificationBanner
+          employeeId={employeeId}
+          employeeName={`${employee?.first_name} ${employee?.last_name}`}
+          onNavigateToItem={(tab) => {
+            setActiveTab(tab === 'compliance' ? 'work_readiness' : tab);
+          }}
+        />
+      )}
 
       {/* Tabs - 7 Section Structure */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">

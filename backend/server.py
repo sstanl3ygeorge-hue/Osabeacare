@@ -3371,6 +3371,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
         # Dates
         "certificate_issue_date": None,
         "update_service_last_checked": None,
+        "last_dbs_check_date": None,  # For DBS Register display
         "review_due_date": None,
         "days_remaining": None,
         
@@ -3451,6 +3452,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
         if check_date:
             summary["update_service_date"] = check_date.isoformat()
             summary["update_service_last_checked"] = check_date.isoformat()
+            summary["last_dbs_check_date"] = check_date.isoformat()  # For DBS Register display
             summary["source_date_used"] = check_date.isoformat()
             
             # Calculate next review due (12 months from last check)
@@ -3549,6 +3551,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
         if summary["certificate_date"]:
             summary["source_date_used"] = summary["certificate_date"]
             summary["update_service_last_checked"] = summary["certificate_date"]  # For display
+            summary["last_dbs_check_date"] = summary["certificate_date"]  # For DBS Register display
             
     elif summary["certificate_on_file"]:
         # Has certificate but not verified - WARNING only
@@ -49980,6 +49983,94 @@ async def get_admin_task_queue(
         "stuck_workers": stuck_workers[:5],
         
         "total_tasks": len(docs_pending) + len(references_to_send) + len(references_to_review) + dbs_expiring
+    }
+
+
+
+
+@api_router.get("/employees/{employee_id}/pending-verifications")
+async def get_employee_pending_verifications(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get items pending verification for a specific employee.
+    
+    Returns:
+    - Documents uploaded but not verified
+    - References received but not reviewed
+    - Forms submitted but not verified
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    items = []
+    
+    # 1. Documents pending verification
+    docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["uploaded", "pending", "active"]},
+        "verified": {"$ne": True},
+        "$or": [
+            {"verification_stamp": {"$exists": False}},
+            {"verification_stamp": None},
+            {"verification_stamp": ""},
+            {"verification_stamp": "not_verified"}
+        ]
+    }, {"_id": 0}).sort("uploaded_at", -1).to_list(50)
+    
+    for doc in docs:
+        items.append({
+            "type": "document",
+            "id": doc.get("id"),
+            "name": doc.get("requirement_id", "").replace("_", " ").title() or doc.get("document_type", "Document"),
+            "uploaded_at": doc.get("uploaded_at"),
+            "tab": "compliance"
+        })
+    
+    # 2. References received but not verified
+    if employee.get("reference_1_status") == "received" and not employee.get("reference_1_verified"):
+        items.append({
+            "type": "reference",
+            "id": "reference_1",
+            "name": f"Reference 1 - {employee.get('reference_1', {}).get('name', 'Unknown')}",
+            "uploaded_at": employee.get("reference_1_received_at"),
+            "tab": "references"
+        })
+    
+    if employee.get("reference_2_status") == "received" and not employee.get("reference_2_verified"):
+        items.append({
+            "type": "reference",
+            "id": "reference_2",
+            "name": f"Reference 2 - {employee.get('reference_2', {}).get('name', 'Unknown')}",
+            "uploaded_at": employee.get("reference_2_received_at"),
+            "tab": "references"
+        })
+    
+    # 3. Forms submitted but not verified
+    forms = await db.form_submissions.find({
+        "employee_id": employee_id,
+        "status": "submitted",
+        "verified": {"$ne": True}
+    }, {"_id": 0}).sort("submitted_at", -1).to_list(20)
+    
+    for form in forms:
+        items.append({
+            "type": "form",
+            "id": form.get("id"),
+            "name": form.get("form_type", "").replace("_", " ").title() or "Form",
+            "uploaded_at": form.get("submitted_at"),
+            "tab": "forms"
+        })
+    
+    # Sort by upload date (most recent first)
+    items.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
+    
+    return {
+        "employee_id": employee_id,
+        "total": len(items),
+        "items": items
     }
 
 

@@ -10417,11 +10417,68 @@ class ForcePromoteRequest(BaseModel):
     notes: Optional[str] = None
 
 
+
+async def send_promotion_email(employee: dict):
+    """Send promotion notification email to employee"""
+    emp_email = employee.get("email")
+    if not emp_email or not resend.api_key:
+        return
+    
+    try:
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
+        
+        promo_email_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #059669, #10b981); padding: 24px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 24px;">Congratulations!</h1>
+            </div>
+            <div style="padding: 32px; background: #f8fafc;">
+                <h2 style="color: #1e293b; margin-top: 0;">You're Ready to Work!</h2>
+                <p style="color: #475569; line-height: 1.6;">
+                    Great news, {employee.get('first_name')}! All your compliance requirements have been verified 
+                    and you are now cleared to work at Osabea Healthcare.
+                </p>
+                <div style="background: #d1fae5; border-left: 4px solid #059669; padding: 16px; margin: 24px 0;">
+                    <p style="color: #065f46; margin: 0; font-weight: bold;">
+                        Your status: ACTIVE EMPLOYEE
+                    </p>
+                    <p style="color: #065f46; margin: 8px 0 0 0;">
+                        You can now be assigned to shifts and client placements.
+                    </p>
+                </div>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{frontend_url}/worker/login" style="background: #059669; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                        View My Dashboard
+                    </a>
+                </div>
+                <p style="color: #64748b; font-size: 14px;">
+                    Remember to keep your documents up to date. You'll receive reminders when items are due for renewal.
+                </p>
+            </div>
+        </div>
+        """
+        
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [emp_email],
+            "subject": "You're Cleared to Work - Osabea Healthcare",
+            "html": promo_email_html
+        })
+        logger.info(f"Promotion notification sent to {emp_email}")
+    except Exception as e:
+        logger.warning(f"Failed to send promotion email: {e}")
+
+
+
 async def try_auto_promote_worker(employee_id: str):
     """
     Internal helper to check and auto-promote an employee after significant events.
     Called automatically after document uploads, form submissions, etc.
     Does not require user auth - runs as system background task.
+    
+    Auto-promotion triggers when:
+    1. Unified progress reaches 100% OR
+    2. All individual checks pass (can_promote_to_active)
     """
     try:
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -10434,7 +10491,47 @@ async def try_auto_promote_worker(employee_id: str):
         if current_status == EMPLOYEE_STATUS_ACTIVE:
             return
         
-        # Check if can promote
+        # Check unified progress first (primary method)
+        try:
+            unified_progress = await compute_unified_progress_internal(employee_id, employee)
+            progress_pct = unified_progress.get("overall_percentage", 0)
+            blockers = unified_progress.get("blockers", [])
+            
+            # If progress is 100% with no blockers, promote
+            if progress_pct >= 100 and len(blockers) == 0:
+                now = datetime.now(timezone.utc).isoformat()
+                update_data = {
+                    "status": EMPLOYEE_STATUS_ACTIVE,
+                    "promoted_at": now,
+                    "promoted_via": "auto_unified_progress",
+                    "updated_at": now
+                }
+                
+                await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+                
+                # Audit log
+                await log_audit_action(
+                    "system",
+                    "auto_promoted_to_active",
+                    "employee",
+                    employee_id,
+                    {
+                        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
+                        "previous_status": current_status,
+                        "new_status": EMPLOYEE_STATUS_ACTIVE,
+                        "progress_percentage": progress_pct,
+                        "triggered_by": "unified_progress_100"
+                    }
+                )
+                
+                # Send promotion email
+                await send_promotion_email(employee)
+                logger.info(f"Employee {employee_id} auto-promoted to active_employee (100% progress)")
+                return
+        except Exception as e:
+            logger.warning(f"Unified progress check failed, falling back to legacy: {e}")
+        
+        # Fallback: Check using legacy method
         can_promote, checks = await can_promote_to_active(employee_id, db)
         
         if not can_promote:
@@ -10445,7 +10542,7 @@ async def try_auto_promote_worker(employee_id: str):
         update_data = {
             "status": EMPLOYEE_STATUS_ACTIVE,
             "promoted_at": now,
-            "promoted_via": "auto_system",
+            "promoted_via": "auto_system_legacy",
             "updated_at": now
         }
         
@@ -10462,58 +10559,14 @@ async def try_auto_promote_worker(employee_id: str):
                 "previous_status": current_status,
                 "new_status": EMPLOYEE_STATUS_ACTIVE,
                 "checks_passed": [k for k, v in checks.items() if v is True],
-                "triggered_by": "system_auto"
+                "triggered_by": "system_auto_legacy"
             }
         )
         
-        # Send notification to employee about promotion
-        emp_email = employee.get("email")
-        if emp_email and resend.api_key:
-            try:
-                frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
-                
-                promo_email_html = f"""
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <div style="background: linear-gradient(135deg, #059669, #10b981); padding: 24px; text-align: center;">
-                        <h1 style="color: white; margin: 0; font-size: 24px;">Congratulations!</h1>
-                    </div>
-                    <div style="padding: 32px; background: #f8fafc;">
-                        <h2 style="color: #1e293b; margin-top: 0;">You're Ready to Work!</h2>
-                        <p style="color: #475569; line-height: 1.6;">
-                            Great news, {employee.get('first_name')}! All your compliance requirements have been verified 
-                            and you are now cleared to work at Osabea Healthcare.
-                        </p>
-                        <div style="background: #d1fae5; border-left: 4px solid #059669; padding: 16px; margin: 24px 0;">
-                            <p style="color: #065f46; margin: 0; font-weight: bold;">
-                                Your status: ACTIVE EMPLOYEE
-                            </p>
-                            <p style="color: #065f46; margin: 8px 0 0 0;">
-                                You can now be assigned to shifts and client placements.
-                            </p>
-                        </div>
-                        <div style="text-align: center; margin: 30px 0;">
-                            <a href="{frontend_url}/worker/login" style="background: #059669; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
-                                View My Dashboard
-                            </a>
-                        </div>
-                        <p style="color: #64748b; font-size: 14px;">
-                            Remember to keep your documents up to date. You'll receive reminders when items are due for renewal.
-                        </p>
-                    </div>
-                </div>
-                """
-                
-                await asyncio.to_thread(resend.Emails.send, {
-                    "from": SENDER_EMAIL,
-                    "to": [emp_email],
-                    "subject": "You're Cleared to Work - Osabea Healthcare",
-                    "html": promo_email_html
-                })
-                logger.info(f"Promotion notification sent to {emp_email}")
-            except Exception as e:
-                logger.warning(f"Failed to send promotion email: {e}")
+        # Send promotion email
+        await send_promotion_email(employee)
         
-        logger.info(f"Employee {employee_id} auto-promoted to active_employee")
+        logger.info(f"Employee {employee_id} auto-promoted to active_employee (legacy checks)")
         
     except Exception as e:
         logger.error(f"Auto-promotion check failed for {employee_id}: {e}")

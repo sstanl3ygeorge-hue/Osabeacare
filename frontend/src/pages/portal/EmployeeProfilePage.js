@@ -27,6 +27,10 @@ import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, Training
 import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
+import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
+import EditEmploymentHistoryDialog from '../../components/admin/EditEmploymentHistoryDialog';
+import EditReferenceDialog from '../../components/admin/EditReferenceDialog';
+import SupersedeContractDialog from '../../components/admin/SupersedeContractDialog';
 import { 
   InductionChecklistPanel, 
   CompetencyRecordsPanel, 
@@ -133,6 +137,16 @@ export default function EmployeeProfilePage() {
   const [complianceRequirements, setComplianceRequirements] = useState(null);
   const [selectedRequirement, setSelectedRequirement] = useState('');
   const [documentLabel, setDocumentLabel] = useState('');
+  
+  // Edit dialog states for universal editability
+  const [editPersonalOpen, setEditPersonalOpen] = useState(false);
+  const [editEmploymentOpen, setEditEmploymentOpen] = useState(false);
+  const [editReferenceOpen, setEditReferenceOpen] = useState(false);
+  const [selectedReferenceId, setSelectedReferenceId] = useState(null);
+  const [selectedReferenceData, setSelectedReferenceData] = useState(null);
+  const [supersedeContractOpen, setSupersedeContractOpen] = useState(false);
+  const [currentContract, setCurrentContract] = useState(null);
+  
   // Import document dialog states
   const [importDocOpen, setImportDocOpen] = useState(false);
   const [importDocType, setImportDocType] = useState('');
@@ -3701,8 +3715,17 @@ export default function EmployeeProfilePage() {
             
             {/* Personal Details Summary */}
             <Card className="border-[#E4E8EB] shadow-sm">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Employee Summary</CardTitle>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setEditPersonalOpen(true)}
+                  data-testid="edit-personal-btn"
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit
+                </Button>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -3791,11 +3814,22 @@ export default function EmployeeProfilePage() {
         {/* Employment history + gap verification + declarations */}
         <TabsContent value="employment">
           <Card className="border-[#E4E8EB] shadow-sm">
-            <CardHeader>
-              <CardTitle className="font-heading text-lg">Employment History</CardTitle>
-              <p className="text-xs text-text-muted">
-                Work history, gap verification, and employment declarations.
-              </p>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="font-heading text-lg">Employment History</CardTitle>
+                <p className="text-xs text-text-muted">
+                  Work history, gap verification, and employment declarations.
+                </p>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setEditEmploymentOpen(true)}
+                data-testid="edit-employment-btn"
+              >
+                <Edit className="h-4 w-4 mr-1" />
+                Edit History
+              </Button>
             </CardHeader>
             <CardContent>
               {/* Employment Gap Panel */}
@@ -6675,6 +6709,65 @@ export default function EmployeeProfilePage() {
           const evidenceRow = section.rows.find(r => r.row_type === 'evidence');
           return evidenceRow?.counts?.verified || 0;
         })()}
+      />
+
+      {/* ========== EDIT DIALOGS FOR UNIVERSAL EDITABILITY ========== */}
+      
+      {/* Edit Personal Details Dialog */}
+      <EditPersonalDetailsDialog
+        open={editPersonalOpen}
+        onClose={() => setEditPersonalOpen(false)}
+        employeeId={employeeId}
+        currentData={employee}
+        onSuccess={() => {
+          fetchEmployee();
+          fetchComplianceFile();
+        }}
+      />
+      
+      {/* Edit Employment History Dialog */}
+      <EditEmploymentHistoryDialog
+        open={editEmploymentOpen}
+        onClose={() => setEditEmploymentOpen(false)}
+        employeeId={employeeId}
+        currentHistory={employee?.employment_history || []}
+        onSuccess={() => {
+          fetchEmployee();
+          fetchComplianceFile();
+        }}
+      />
+      
+      {/* Edit Reference Dialog */}
+      <EditReferenceDialog
+        open={editReferenceOpen}
+        onClose={() => {
+          setEditReferenceOpen(false);
+          setSelectedReferenceId(null);
+          setSelectedReferenceData(null);
+        }}
+        employeeId={employeeId}
+        referenceId={selectedReferenceId}
+        currentData={selectedReferenceData}
+        onSuccess={() => {
+          fetchEmployee();
+          fetchComplianceFile();
+        }}
+      />
+      
+      {/* Supersede Contract Dialog */}
+      <SupersedeContractDialog
+        open={supersedeContractOpen}
+        onClose={() => {
+          setSupersedeContractOpen(false);
+          setCurrentContract(null);
+        }}
+        employeeId={employeeId}
+        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        currentContract={currentContract}
+        onSuccess={() => {
+          fetchEmployee();
+          fetchComplianceFile();
+        }}
       />
     </div>
   );

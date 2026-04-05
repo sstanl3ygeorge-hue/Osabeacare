@@ -5,7 +5,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { 
   CheckCircle, Circle, Loader2, RefreshCw, FileText, 
-  AlertTriangle, Clock, RotateCcw
+  AlertTriangle, Clock, RotateCcw, Download, Award
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatBackendDate } from '../../lib/dateUtils';
@@ -16,6 +16,7 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
   const [checklist, setChecklist] = useState(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(null);
+  const [downloading, setDownloading] = useState(false);
 
   const fetchChecklist = async () => {
     try {
@@ -57,6 +58,44 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
       toast.error(error.response?.data?.detail || 'Failed to update checklist');
     } finally {
       setUpdating(null);
+    }
+  };
+
+  const handleDownloadCertificate = async () => {
+    if (checklist?.overall_status !== 'completed') {
+      toast.error('Induction must be completed before downloading certificate');
+      return;
+    }
+
+    try {
+      setDownloading(true);
+      const token = localStorage.getItem('token');
+      
+      const response = await axios.get(
+        `${API}/employees/${employeeId}/induction-completion/download-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+      
+      // Create download link
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `induction_certificate_${employeeName?.replace(/\s+/g, '_') || 'employee'}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('Induction certificate downloaded');
+    } catch (error) {
+      console.error('PDF download failed:', error);
+      toast.error('Failed to download certificate');
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -105,6 +144,23 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
           </CardTitle>
           <div className="flex items-center gap-2">
             {getOverallStatusBadge(overallStatus)}
+            {overallStatus === 'completed' && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleDownloadCertificate}
+                disabled={downloading}
+                className="rounded-lg text-green-700 border-green-300 hover:bg-green-50"
+                data-testid="download-induction-certificate"
+              >
+                {downloading ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <Award className="h-4 w-4 mr-1" />
+                )}
+                Certificate
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={fetchChecklist} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>

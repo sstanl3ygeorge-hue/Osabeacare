@@ -117,7 +117,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # HSTS - only in production (when not preview environment)
         host = str(request.url)
-        if 'preview.emergentagent.com' not in host:
+        if 'preview.emergentagent.com' not in host and 'localhost' not in host:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         
         # Content Security Policy (basic)

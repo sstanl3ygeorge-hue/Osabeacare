@@ -128,12 +128,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Admin Internal-Only Forms with PDF - COMPLETED Apr 2026
 - [x] Cybersecurity Audit - All P0/P1 fixed - COMPLETED Apr 2026
 - [x] Worker Portal End-to-End Experience Enhancements - COMPLETED Apr 2026
+- [x] Dashboard & Employee Profile Unified Progress - COMPLETED Apr 2026
 - [ ] Role-Based Compliance Configuration using `role_compliance_profiles`
 - [ ] Supervision Records tracking UI
 
 ### P2 (Medium)
 - [ ] server.py modular split (currently 48k+ lines) - CRITICAL for maintainability
 - [ ] F811 duplicate function cleanup
+- [ ] Remove remaining duplicate sections from Employee Profile
+- [ ] Implement 7-section Employee Profile consolidation (Work Readiness, Compliance, Forms, Training, References, Employment, Audit)
 - [ ] MFA for admin accounts (RECOMMENDED)
 
 ### P3 (Future)
@@ -141,6 +144,54 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] Phase out MongoDB entirely (PostgreSQL migration)
 - [ ] Auto-delete employee data 3 years after termination (CQC requirement)
 - [ ] MFA for admin accounts (TOTP-based)
+
+---
+
+## COMPLETED: Dashboard & Employee Profile Unified Progress (April 2026)
+
+### New Backend Endpoints
+1. **GET /api/employees/{id}/unified-progress** - SINGLE SOURCE OF TRUTH
+   - Returns: `overall_percentage`, `completed_requirements`, `total_requirements`
+   - Category breakdown: documents, forms, training, references, agreements, induction
+   - Blockers list with actionable items
+   - Role-aware (adds professional registration requirements for clinical roles)
+   - Excludes optional items like Equal Opportunities from total
+
+2. **POST /api/workers/{employee_id}/send-reminder**
+   - Sends magic link email to worker
+   - Includes custom message option
+   - Shows outstanding compliance items in email
+   - Logs action in audit trail
+
+3. **POST /api/employees/{employee_id}/request-renewal/{type}**
+   - Types: dbs, right_to_work, training, professional_registration, identity, proof_of_address
+   - Sends renewal request email to worker
+   - Includes direct upload link
+   - Logs action in audit trail
+
+### New Frontend Components
+1. **UnifiedProgressSection** (`/app/frontend/src/components/admin/UnifiedProgressSection.js`)
+   - Displays single source of truth progress
+   - Shows category breakdown grid
+   - Lists blocking items with action buttons
+   - Integrated into Employee Profile Overview tab
+
+2. **AdminActionButtons** (`/app/frontend/src/components/admin/AdminActionButtons.js`)
+   - SendReminderButton - Opens modal with custom message option
+   - RequestRenewalButton - One-click renewal request
+
+3. **useUnifiedProgress Hook** (`/app/frontend/src/hooks/useUnifiedProgress.js`)
+   - Reusable hook for fetching unified progress data
+
+4. **Dashboard Empty State** (`/app/frontend/src/pages/portal/DashboardPage.js`)
+   - "Get Started" guide when no employees exist
+   - Quick setup checklist (Add employee, Upload policies, Configure training)
+   - Hidden attention/readiness sections until data exists
+
+### Test Results
+- Backend: 100% (24/24 API tests passed)
+- Frontend: UnifiedProgressSection integrated and visible
+- Test report: `/app/test_reports/iteration_154.json`
 
 ---
 

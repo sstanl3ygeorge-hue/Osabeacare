@@ -26,6 +26,8 @@ import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, Training
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
+import UnifiedProgressSection from '../../components/admin/UnifiedProgressSection';
+import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import { 
   InductionChecklistPanel, 
   CompetencyRecordsPanel, 
@@ -3886,6 +3888,22 @@ export default function EmployeeProfilePage() {
             <InterviewFormPanel 
               employeeId={employeeId}
               employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            />
+          </div>
+
+          {/* Unified Progress - Single Source of Truth */}
+          <div className="mt-6">
+            <UnifiedProgressSection 
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+              onNavigateToRequirement={(reqKey) => {
+                setActiveTab('checklist');
+                // Scroll to the requirement section after tab change
+                setTimeout(() => {
+                  const el = document.querySelector(`[data-requirement="${reqKey}"]`);
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 100);
+              }}
             />
           </div>
 

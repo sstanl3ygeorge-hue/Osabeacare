@@ -22,6 +22,7 @@ import DocumentExtractionReview from '../../components/documents/DocumentExtract
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
+import EnhancedTrainingTab from '../../components/training/EnhancedTrainingTab';
 import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
 import RecruitmentApprovalPanel from '../../components/compliance/RecruitmentApprovalPanel';
 import WorkReadinessPanel from '../../components/compliance/WorkReadinessPanel';
@@ -4111,6 +4112,15 @@ export default function EmployeeProfilePage() {
 
         {/* Training Tab */}
         <TabsContent value="training" ref={trainingSectionRef}>
+          {/* Enhanced Training Tab with AI Bulk Extraction */}
+          <div className="mb-6">
+            <EnhancedTrainingTab
+              employeeId={employeeId}
+              employeeRole={employee?.role || 'Healthcare Assistant'}
+              initialTrainings={training}
+            />
+          </div>
+          
           {/* Induction & Competency Section - CQC Requirement */}
           <div className="mb-6">
             <HealthCompetencySection

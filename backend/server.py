@@ -6617,6 +6617,11 @@ class DashboardStats(BaseModel):
     training_expiring_critical: int = 0  # < 14 days
     training_expiring_warning: int = 0   # 14-30 days
     training_expiring_upcoming: int = 0  # 30-60 days
+    # Applicant-specific metrics (P1 Dashboard fix)
+    pending_verifications: int = 0  # Documents from applicants waiting for review
+    applicants_stuck: int = 0  # Applicants with <50% progress
+    applicants_not_ready: int = 0  # Applicants with blockers (Not Ready count)
+    average_onboarding_progress: float = 0.0  # Average compliance % across all applicants
 
 # Email Request Model
 class EmailRequest(BaseModel):
@@ -23990,6 +23995,54 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
         "record_status": {"$ne": "superseded"}
     })
     
+    # ========== APPLICANT-SPECIFIC METRICS ==========
+    # Get all applicants (includes all non-active statuses)
+    all_applicants = await db.employees.find({
+        **assignment_filter,
+        "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, 
+                         EmployeeStatus.COMPLIANCE_REVIEW, EmployeeStatus.ONBOARDING, "applicant"]}
+    }, {"_id": 0, "id": 1, "status": 1, "first_name": 1, "last_name": 1}).to_list(500)
+    
+    # Pending verifications - documents from applicants waiting for admin review
+    pending_verifications = 0
+    applicants_stuck = 0  # <50% progress
+    applicants_not_ready = 0  # Has blockers
+    total_progress = 0
+    
+    for applicant in all_applicants:
+        # Count pending verification documents for this applicant
+        pending_docs = await db.employee_documents.count_documents({
+            "employee_id": applicant["id"],
+            "status": {"$in": ["uploaded", "pending", "active"]},
+            "$or": [
+                {"verification_stamp": {"$exists": False}},
+                {"verification_stamp": None},
+                {"verification_stamp": ""},
+                {"verification_stamp": "not_verified"}
+            ],
+            "verified": {"$ne": True}
+        })
+        pending_verifications += pending_docs
+        
+        # Calculate progress for this applicant using unified progress
+        try:
+            progress_data = await compute_unified_progress_internal(applicant["id"], None)
+            progress_pct = progress_data.get("overall_percentage", 0)
+            blockers = progress_data.get("blockers", [])
+            
+            total_progress += progress_pct
+            
+            if progress_pct < 50:
+                applicants_stuck += 1
+            
+            if len(blockers) > 0:
+                applicants_not_ready += 1
+        except Exception:
+            applicants_not_ready += 1  # Assume not ready if can't calculate
+    
+    # Calculate average progress
+    average_progress = (total_progress / len(all_applicants)) if all_applicants else 0
+    
     return DashboardStats(
         total_employees=total_employees,
         total_applicants=total_applicants,
@@ -24005,7 +24058,12 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
         expiring_90_days=expiring_90,
         training_expiring_critical=training_exp_critical,
         training_expiring_warning=training_exp_warning,
-        training_expiring_upcoming=training_exp_upcoming
+        training_expiring_upcoming=training_exp_upcoming,
+        # Applicant-specific metrics
+        pending_verifications=pending_verifications,
+        applicants_stuck=applicants_stuck,
+        applicants_not_ready=applicants_not_ready,
+        average_onboarding_progress=round(average_progress, 1)
     )
 
 

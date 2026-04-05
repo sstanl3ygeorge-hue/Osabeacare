@@ -22,6 +22,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [employees, setEmployees] = useState([]);
+  const [applicants, setApplicants] = useState([]);
   const [expiryAlerts, setExpiryAlerts] = useState(null);
   const [recurringCompliance, setRecurringCompliance] = useState(null);
   const [trainingSummary, setTrainingSummary] = useState(null);
@@ -30,10 +31,12 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [statsRes, employeesRes, expiryRes, recurringRes, trainingRes] = await Promise.all([
+        const [statsRes, employeesRes, applicantsRes, expiryRes, recurringRes, trainingRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-          // Use staff/employees endpoint for employee-only data (excludes applicants)
+          // Use staff/employees endpoint for employee-only data
           axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+          // Also fetch applicants for dashboard metrics
+          axios.get(`${API}/recruitment/applicants`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: [] })),
           axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
           axios.get(`${API}/recurring-compliance/dashboard-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
           axios.get(`${API}/dashboard/training-summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
@@ -43,6 +46,8 @@ export default function DashboardPage() {
         const staffOnly = (employeesRes.data?.employees || employeesRes.data || [])
           .filter(e => ['onboarding', 'active', 'inactive'].includes(e.status));
         setEmployees(staffOnly);
+        // Store applicants separately
+        setApplicants(applicantsRes.data?.applicants || applicantsRes.data || []);
         setExpiryAlerts(expiryRes.data);
         setRecurringCompliance(recurringRes.data);
         setTrainingSummary(trainingRes.data);
@@ -63,8 +68,9 @@ export default function DashboardPage() {
     );
   }
 
-  // ========== EMPTY STATE: Get Started Guide ==========
-  if (employees.length === 0) {
+  // ========== EMPTY STATE: Only show if NO employees AND NO applicants ==========
+  const totalPeople = employees.length + applicants.length;
+  if (totalPeople === 0) {
     return (
       <div className="space-y-8" data-testid="dashboard-page-empty">
         {/* Header */}
@@ -172,35 +178,50 @@ export default function DashboardPage() {
     );
   }
 
-  // ========== NORMAL DASHBOARD (employees exist) ==========
+  // ========== NORMAL DASHBOARD (employees/applicants exist) ==========
+  
+  // Combine employees and applicants for workforce stats
+  const allPeople = [...employees, ...applicants];
   
   // Calculate workforce readiness counts using 3-tier system (authoritative)
+  // For employees: use work_readiness_3tier
+  // For applicants: use unified progress or assume NOT_READY
   const readyToWork = employees.filter(e => 
     e.work_readiness_3tier?.status === 'READY_TO_WORK'
   ).length;
   const supervisedStart = employees.filter(e => 
     e.work_readiness_3tier?.status === 'READY_WITH_CONDITIONS'
   ).length;
-  const notReady = employees.filter(e => 
+  
+  // Not Ready includes employees without readiness AND all applicants (since they're not yet ready)
+  const employeesNotReady = employees.filter(e => 
     e.work_readiness_3tier?.status === 'NOT_READY' ||
     !e.work_readiness_3tier
   ).length;
+  // Use stats from API for applicants not ready count
+  const notReady = (stats?.applicants_not_ready || 0) + employeesNotReady;
 
-  // Calculate onboarding stats
-  const onboarding = employees.filter(e => e.status === 'onboarding').length;
-  const avgCompletion = employees.length > 0 
-    ? Math.round(employees.reduce((sum, e) => sum + (e.completion_percentage || 0), 0) / employees.length)
-    : 0;
+  // Calculate onboarding stats - include applicants
+  const onboarding = (stats?.onboarding_in_progress || 0) + applicants.length;
+  
+  // Average completion - use API stat which includes applicants
+  const avgCompletion = stats?.average_onboarding_progress || 
+    (allPeople.length > 0 
+      ? Math.round(allPeople.reduce((sum, e) => sum + (e.completion_percentage || 0), 0) / allPeople.length)
+      : 0);
 
   // Calculate attention items from expiry alerts API
   const expiredDocs = expiryAlerts?.expired?.total_items || 0;
   const expiringSoon = expiryAlerts?.expiring_soon?.total_items || stats?.expiring_30_days || 0;
   const policiesNotAcknowledged = stats?.unsigned_policies || 0;
   
+  // Pending verifications from stats (includes applicants)
+  const pendingVerifications = stats?.pending_verifications || 0;
+  
   // Calculate staff not ready to work
   const staffNotReady = notReady;
   
-  const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged + staffNotReady;
+  const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged + staffNotReady + pendingVerifications;
 
   return (
     <div className="space-y-8" data-testid="dashboard-page">
@@ -300,6 +321,26 @@ export default function DashboardPage() {
                   {staffNotReady > 0 && <ArrowRight className="h-4 w-4 text-red-400" />}
                 </div>
                 {staffNotReady > 0 && <p className="text-xs text-red-500 mt-2">View staff →</p>}
+              </div>
+              
+              {/* Pending Verifications → Recruitment page */}
+              <div 
+                onClick={() => pendingVerifications > 0 && navigate('/portal/recruitment')}
+                className={`p-4 rounded-xl transition-all ${pendingVerifications > 0 ? 'bg-purple-100 border border-purple-200 cursor-pointer hover:bg-purple-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
+                title={pendingVerifications > 0 ? 'Review pending documents' : ''}
+                data-testid="card-pending-verifications"
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${pendingVerifications > 0 ? 'bg-purple-200' : 'bg-gray-100'}`}>
+                    <Upload className={`h-5 w-5 ${pendingVerifications > 0 ? 'text-purple-600' : 'text-gray-400'}`} />
+                  </div>
+                  <div className="flex-1">
+                    <p className={`text-2xl font-heading font-bold ${pendingVerifications > 0 ? 'text-purple-700' : 'text-gray-400'}`}>{pendingVerifications}</p>
+                    <p className={`text-sm ${pendingVerifications > 0 ? 'text-purple-600' : 'text-gray-500'}`}>Pending Verifications</p>
+                  </div>
+                  {pendingVerifications > 0 && <ArrowRight className="h-4 w-4 text-purple-400" />}
+                </div>
+                {pendingVerifications > 0 && <p className="text-xs text-purple-500 mt-2">Review now →</p>}
               </div>
               
               {/* Policies Not Acknowledged → Compliance Centre policies tab */}
@@ -422,8 +463,8 @@ export default function DashboardPage() {
                 <Progress value={avgCompletion} className="h-3" />
               </div>
               <div className="flex justify-between items-center p-3 bg-[#F8FAFA] rounded-xl border border-[#E4E8EB]">
-                <span className="text-text-muted">Total Employees</span>
-                <span className="text-xl font-heading font-bold text-text-primary">{employees.length}</span>
+                <span className="text-text-muted">Total People (Employees + Applicants)</span>
+                <span className="text-xl font-heading font-bold text-text-primary">{employees.length + applicants.length}</span>
               </div>
             </div>
           </CardContent>

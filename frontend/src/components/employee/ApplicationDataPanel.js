@@ -34,10 +34,44 @@ export default function ApplicationDataPanel({ employeeId, onRefresh, onEditDecl
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
+      
+      // Fetch employee data
       const response = await axios.get(`${API}/employees/${employeeId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setEmployee(response.data);
+      let employeeData = response.data;
+      
+      // If employee doesn't have employment_history, try to fetch from application form submission
+      if (!employeeData.employment_history || employeeData.employment_history.length === 0) {
+        try {
+          const formResponse = await axios.get(`${API}/form-submissions?employee_id=${employeeId}&requirement_id=application_form`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          const appForm = formResponse.data?.[0];
+          if (appForm?.form_data?.employment_history) {
+            employeeData = {
+              ...employeeData,
+              employment_history: appForm.form_data.employment_history,
+              has_employment_gaps: appForm.form_data.has_employment_gaps,
+              employment_gap_explanation: appForm.form_data.employment_gap_explanation,
+              // Also get declarations if not present
+              declarations: employeeData.declarations || {
+                has_criminal_convictions: appForm.form_data.criminal_declaration?.has_criminal_convictions,
+                criminal_convictions_details: appForm.form_data.criminal_declaration?.conviction_details,
+                dbs_consent_given: appForm.form_data.criminal_declaration?.consents_to_dbs_check,
+                has_health_conditions: appForm.form_data.health_declaration?.has_health_conditions,
+                health_conditions_details: appForm.form_data.health_declaration?.health_condition_details,
+                has_rtw_restrictions: !appForm.form_data.right_to_work?.has_unlimited_right_to_work,
+                rtw_restrictions_details: appForm.form_data.right_to_work?.visa_type,
+              }
+            };
+          }
+        } catch (formError) {
+          console.warn('Could not fetch application form data:', formError);
+        }
+      }
+      
+      setEmployee(employeeData);
     } catch (error) {
       console.error('Failed to fetch employee data:', error);
     } finally {
@@ -319,18 +353,21 @@ export default function ApplicationDataPanel({ employeeId, onRefresh, onEditDecl
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Criminal Convictions */}
               <div className={`p-4 rounded-lg border ${
-                employee.criminal_offence_declared === 'Yes' ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'
+                (employee.declarations?.has_criminal_convictions || employee.criminal_offence_declared === 'Yes') 
+                  ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'
               }`}>
                 <div className="flex items-center gap-2">
                   <Shield className={`h-5 w-5 ${
-                    employee.criminal_offence_declared === 'Yes' ? 'text-amber-600' : 'text-green-600'
+                    (employee.declarations?.has_criminal_convictions || employee.criminal_offence_declared === 'Yes') 
+                      ? 'text-amber-600' : 'text-green-600'
                   }`} />
                   <span className="font-medium">Criminal Convictions</span>
                 </div>
                 <p className={`text-sm mt-2 ${
-                  employee.criminal_offence_declared === 'Yes' ? 'text-amber-700' : 'text-green-700'
+                  (employee.declarations?.has_criminal_convictions || employee.criminal_offence_declared === 'Yes') 
+                    ? 'text-amber-700' : 'text-green-700'
                 }`}>
-                  {employee.criminal_offence_declared === 'Yes' ? (
+                  {(employee.declarations?.has_criminal_convictions || employee.criminal_offence_declared === 'Yes') ? (
                     <>
                       <AlertTriangle className="h-4 w-4 inline mr-1" />
                       Declared - Requires Review
@@ -342,27 +379,30 @@ export default function ApplicationDataPanel({ employeeId, onRefresh, onEditDecl
                     </>
                   )}
                 </p>
-                {employee.criminal_offence_details && (
+                {(employee.declarations?.criminal_convictions_details || employee.criminal_offence_details) && (
                   <p className="text-xs text-gray-600 mt-2 p-2 bg-white/80 rounded">
-                    {employee.criminal_offence_details}
+                    {employee.declarations?.criminal_convictions_details || employee.criminal_offence_details}
                   </p>
                 )}
               </div>
 
               {/* Health Declaration */}
               <div className={`p-4 rounded-lg border ${
-                employee.health_issue_declared === 'Yes' ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'
+                (employee.declarations?.has_health_conditions || employee.health_issue_declared === 'Yes') 
+                  ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'
               }`}>
                 <div className="flex items-center gap-2">
                   <Heart className={`h-5 w-5 ${
-                    employee.health_issue_declared === 'Yes' ? 'text-amber-600' : 'text-green-600'
+                    (employee.declarations?.has_health_conditions || employee.health_issue_declared === 'Yes') 
+                      ? 'text-amber-600' : 'text-green-600'
                   }`} />
                   <span className="font-medium">Health Conditions</span>
                 </div>
                 <p className={`text-sm mt-2 ${
-                  employee.health_issue_declared === 'Yes' ? 'text-amber-700' : 'text-green-700'
+                  (employee.declarations?.has_health_conditions || employee.health_issue_declared === 'Yes') 
+                    ? 'text-amber-700' : 'text-green-700'
                 }`}>
-                  {employee.health_issue_declared === 'Yes' ? (
+                  {(employee.declarations?.has_health_conditions || employee.health_issue_declared === 'Yes') ? (
                     <>
                       <AlertTriangle className="h-4 w-4 inline mr-1" />
                       Declared - May Require Adjustments
@@ -374,30 +414,33 @@ export default function ApplicationDataPanel({ employeeId, onRefresh, onEditDecl
                     </>
                   )}
                 </p>
-                {employee.health_issue_details && (
+                {(employee.declarations?.health_conditions_details || employee.health_issue_details) && (
                   <p className="text-xs text-gray-600 mt-2 p-2 bg-white/80 rounded">
-                    {employee.health_issue_details}
+                    {employee.declarations?.health_conditions_details || employee.health_issue_details}
                   </p>
                 )}
               </div>
 
               {/* DBS Consent */}
               <div className={`p-4 rounded-lg border ${
-                employee.dbs_update_service_consent ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
+                (employee.declarations?.dbs_consent_given || employee.dbs_update_service_consent || employee.has_dbs_declared) 
+                  ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
               }`}>
                 <div className="flex items-center gap-2">
                   <FileText className={`h-5 w-5 ${
-                    employee.dbs_update_service_consent ? 'text-green-600' : 'text-gray-500'
+                    (employee.declarations?.dbs_consent_given || employee.dbs_update_service_consent || employee.has_dbs_declared) 
+                      ? 'text-green-600' : 'text-gray-500'
                   }`} />
-                  <span className="font-medium">DBS Update Service</span>
+                  <span className="font-medium">DBS Check Consent</span>
                 </div>
                 <p className={`text-sm mt-2 ${
-                  employee.dbs_update_service_consent ? 'text-green-700' : 'text-gray-600'
+                  (employee.declarations?.dbs_consent_given || employee.dbs_update_service_consent || employee.has_dbs_declared) 
+                    ? 'text-green-700' : 'text-gray-600'
                 }`}>
-                  {employee.dbs_update_service_consent ? (
+                  {(employee.declarations?.dbs_consent_given || employee.dbs_update_service_consent || employee.has_dbs_declared) ? (
                     <>
                       <CheckCircle className="h-4 w-4 inline mr-1" />
-                      Consent Given
+                      Consent Given for Enhanced DBS Check
                     </>
                   ) : (
                     'No consent recorded'

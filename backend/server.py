@@ -28587,6 +28587,34 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "reference_2_years_known": form.references[1].years_known if len(form.references) > 1 else None,
         "reference_2_is_professional": form.references[1].is_professional if len(form.references) > 1 else None,
         "reference_2_can_contact_before_offer": form.references[1].can_contact_before_offer if len(form.references) > 1 else None,
+        
+        # Employment history - stored on employee for direct access
+        "employment_history": [eh.model_dump() for eh in form.employment_history],
+        "has_employment_gaps": form.has_employment_gaps,
+        "employment_gap_explanation": form.employment_gap_explanation,
+        
+        # Declarations - stored on employee for direct access
+        "declarations": {
+            "has_criminal_convictions": form.criminal_declaration.has_criminal_convictions,
+            "criminal_convictions_details": form.criminal_declaration.conviction_details,
+            "dbs_consent_given": form.criminal_declaration.consents_to_dbs_check,
+            "understands_dbs_required": form.criminal_declaration.understands_dbs_required,
+            "has_health_conditions": form.health_declaration.has_health_conditions,
+            "health_conditions_details": form.health_declaration.health_condition_details,
+            "has_rtw_restrictions": not form.right_to_work.has_unlimited_right_to_work,
+            "rtw_restrictions_details": form.right_to_work.visa_type if not form.right_to_work.has_unlimited_right_to_work else None,
+            "rtw_expiry_date": form.right_to_work.visa_expiry if not form.right_to_work.has_unlimited_right_to_work else None,
+            "information_accurate_declared": form.declarations.information_accurate,
+            "consents_to_reference_checks": form.declarations.consents_to_reference_checks,
+            "consents_to_background_checks": form.declarations.consents_to_background_checks,
+            "consents_to_data_processing": form.declarations.consents_to_data_processing,
+        },
+        
+        # Qualifications
+        "highest_qualification": form.highest_qualification,
+        "relevant_qualifications": form.relevant_qualifications,
+        "care_certificate_completed": form.care_certificate_completed,
+        "mandatory_training_completed": form.mandatory_training_completed,
     }
     
     await db.employees.insert_one(employee_doc)

@@ -438,27 +438,34 @@ export default function RecruitmentPage() {
                           Review Applicant
                         </Button>
                         
-                        {/* SECONDARY: Approve Recruitment */}
-                        {!applicant.recruitment_approved && canApprove && (
+                        {/* SECONDARY: Approve Recruitment - Only show when ready */}
+                        {!applicant.recruitment_approved && canApprove && approval?.canApprove && (
                           <Button
-                            variant={approval?.canApprove ? "outline" : "ghost"}
-                            className={cn(
-                              approval?.canApprove 
-                                ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50" 
-                                : "text-gray-500"
-                            )}
+                            variant="outline"
+                            className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
                             onClick={() => handleApprovalClick(applicant)}
                             disabled={isLoadingApproval}
                             data-testid={`approve-btn-${applicant.id}`}
                           >
                             {isLoadingApproval ? (
                               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : approval?.canApprove ? (
-                              <CheckCircle className="w-4 h-4 mr-2" />
                             ) : (
-                              <Shield className="w-4 h-4 mr-2" />
+                              <CheckCircle className="w-4 h-4 mr-2" />
                             )}
-                            {approval?.canApprove ? 'Approve Recruitment' : 'View Blockers'}
+                            Approve Recruitment
+                          </Button>
+                        )}
+                        
+                        {/* View Blockers - Only show when NOT ready */}
+                        {!applicant.recruitment_approved && canApprove && approval && !approval.canApprove && (
+                          <Button
+                            variant="ghost"
+                            className="text-gray-500"
+                            onClick={() => handleApprovalClick(applicant)}
+                            data-testid={`view-blockers-btn-${applicant.id}`}
+                          >
+                            <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" />
+                            {approval.blockerCount} Blockers
                           </Button>
                         )}
                         

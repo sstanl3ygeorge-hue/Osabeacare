@@ -36723,8 +36723,13 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     sections = {}
     
     # ---- Right to Work ----
-    rtw_docs = [d for d in docs if d.get("requirement_id") == "right_to_work_documents" and d.get("status") != "superseded"]
-    rtw_verified = any(d.get("verified") for d in rtw_docs)
+    rtw_docs = [d for d in docs if d.get("requirement_id") in ["right_to_work_documents", "right_to_work", "right_to_work_evidence"] and d.get("status") not in ["superseded", "deleted", "rejected", "uploaded_in_error"]]
+    rtw_verified = any(
+        d.get("verified") or 
+        d.get("status") in ["verified", "approved"] or 
+        (d.get("verification_stamp") and d.get("verification_stamp") not in ["not_verified", None])
+        for d in rtw_docs
+    )
     sections["right_to_work"] = {
         "title": "Right to Work",
         "rows": [{
@@ -36736,8 +36741,13 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     }
     
     # ---- Identity ----
-    id_docs = [d for d in docs if d.get("requirement_id") == "identity_documents" and d.get("status") != "superseded"]
-    id_verified = any(d.get("verified") for d in id_docs)
+    id_docs = [d for d in docs if d.get("requirement_id") in ["identity_documents", "identity", "identity_evidence", "id_document"] and d.get("status") not in ["superseded", "deleted", "rejected", "uploaded_in_error"]]
+    id_verified = any(
+        d.get("verified") or 
+        d.get("status") in ["verified", "approved"] or 
+        (d.get("verification_stamp") and d.get("verification_stamp") not in ["not_verified", None])
+        for d in id_docs
+    )
     sections["identity"] = {
         "title": "Identity",
         "rows": [{
@@ -36749,8 +36759,13 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     }
     
     # ---- Proof of Address ----
-    poa_docs = [d for d in docs if d.get("requirement_id") == "proof_of_address" and d.get("status") != "superseded"]
-    poa_verified = any(d.get("verified") for d in poa_docs)
+    poa_docs = [d for d in docs if d.get("requirement_id") in ["proof_of_address", "poa", "address_proof", "address_verification"] and d.get("status") not in ["superseded", "deleted", "rejected", "uploaded_in_error"]]
+    poa_verified = any(
+        d.get("verified") or 
+        d.get("status") in ["verified", "approved"] or 
+        (d.get("verification_stamp") and d.get("verification_stamp") not in ["not_verified", None])
+        for d in poa_docs
+    )
     sections["proof_of_address"] = {
         "title": "Proof of Address",
         "rows": [{
@@ -36762,8 +36777,13 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     }
     
     # ---- DBS ----
-    dbs_docs = [d for d in docs if d.get("requirement_id") == "dbs_certificate" and d.get("status") != "superseded"]
-    dbs_verified = any(d.get("verified") for d in dbs_docs)
+    dbs_docs = [d for d in docs if d.get("requirement_id") in ["dbs_certificate", "dbs", "dbs_check"] and d.get("status") not in ["superseded", "deleted", "rejected", "uploaded_in_error"]]
+    dbs_verified = any(
+        d.get("verified") or 
+        d.get("status") in ["verified", "approved"] or 
+        (d.get("verification_stamp") and d.get("verification_stamp") not in ["not_verified", None])
+        for d in dbs_docs
+    )
     sections["dbs"] = {
         "title": "DBS",
         "rows": [{

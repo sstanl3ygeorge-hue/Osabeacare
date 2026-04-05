@@ -233,13 +233,57 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Fix**: Added useEffect to automatically fetch approval status for all visible applicants
 - **File**: `/app/frontend/src/pages/portal/RecruitmentPage.js`
 
-### Bug 3: Multiple Conflicting Progress Numbers
+### Bug 3: Multiple Conflicting Progress Numbers - RESOLVED WITH LABELS
 - **Issue**: Different pages showed 2/11, 15%, 50%, 33%, etc.
-- **Clarification**: These are INTENTIONALLY different:
-  - `2/11` = 11-item recruitment approval checklist (gates for promotion)
-  - `24%` = Unified overall compliance (all requirements)
-  - `66%` = Work readiness (subset of critical items)
-- **Recommendation**: Add tooltips/labels to clarify which number is which
+- **Resolution**: Added clear labels and tooltips to explain each metric:
+  - `📋 Recruitment Progress: 4/12` = Documents + references + forms before promotion
+  - `✅ Full Compliance: 24%` = All requirements including training + induction
+  - `🟢 Work Readiness: 66%` = CQC work readiness calculation
+
+---
+
+## COMPLETED: Labeled Progress Metrics & UI Cleanup (April 2026)
+
+### New Component: LabeledProgressMetrics.js
+Location: `/app/frontend/src/components/compliance/LabeledProgressMetrics.js`
+
+**Exported Components:**
+1. `LabeledProgressBadge` - Compact badge with label, tooltip, and info icon
+2. `LabeledProgressCard` - Full card with progress bar and optional breakdown
+3. `ComplianceBreakdownCard` - 6-category breakdown replacing "Care Status"
+4. `PROGRESS_METRICS` - Configuration for each metric type
+
+### Changes Implemented
+
+| Task | Status | File |
+|------|--------|------|
+| Add clear labels to all progress numbers | ✅ DONE | LabeledProgressMetrics.js |
+| Add tooltips explaining each metric | ✅ DONE | Uses Tooltip component |
+| Remove pipeline stages (New/Screening/Interview) | ✅ DONE | RecruitmentPage.js |
+| Replace "Care Status" with category breakdown | ✅ DONE | UnifiedProgressSection.js |
+
+### Visual Changes
+
+**Before (Recruitment Pipeline):**
+- New Applications (0), Screening (0), Interview (0), Compliance Review (0)
+- "Progress: 4/12"
+
+**After (Recruitment Pipeline):**
+- "All Applicants - 24 applicants awaiting review"
+- "📋 Recruitment: 4/12 (33%)" with tooltip
+
+**Before (Employee Profile):**
+- "Verified & Complete: 8/24", "Still Needed: 12", "Awaiting Review: 4"
+
+**After (Employee Profile):**
+- "📊 Compliance Breakdown" with:
+  - 📄 Documents: 3/5
+  - 📝 Forms: 0/4
+  - 🎓 Training: 4/6
+  - 👤 References: 0/2
+  - ✍️ Agreements: 1/2
+  - 📋 Induction: 0/14
+- Total: 8/33 (24%)
 
 ---
 

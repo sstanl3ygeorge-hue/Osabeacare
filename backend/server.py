@@ -48528,6 +48528,61 @@ async def create_spot_check(
     return {"success": True, "id": spot_check_id, "outcome": payload.outcome}
 
 
+@api_router.put("/employees/{employee_id}/spot-checks/{spot_check_id}")
+async def update_spot_check(
+    employee_id: str,
+    spot_check_id: str,
+    payload: SpotCheckCreateRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Update an existing spot check"""
+    existing = await db.spot_checks.find_one({
+        "id": spot_check_id,
+        "employee_id": employee_id
+    })
+    
+    if not existing:
+        raise HTTPException(status_code=404, detail="Spot check not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get assessor name
+    assessor = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]}, 
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    assessor_name = assessor.get('name') if assessor else user.get('email', 'Admin')
+    if not assessor_name and assessor:
+        assessor_name = f"{assessor.get('first_name', '')} {assessor.get('last_name', '')}".strip() or assessor.get('email', 'Admin')
+    
+    update_data = {
+        "type": payload.type,
+        "area": payload.area,
+        "outcome": payload.outcome,
+        "notes": payload.notes,
+        "follow_up_required": payload.follow_up_required,
+        "follow_up_date": payload.follow_up_date,
+        "updated_at": now,
+        "updated_by": user['user_id'],
+        "updated_by_name": assessor_name
+    }
+    
+    await db.spot_checks.update_one(
+        {"id": spot_check_id},
+        {"$set": update_data}
+    )
+    
+    # Audit log
+    await log_audit_action(user['user_id'], "spot_check_updated", "spot_check", spot_check_id, {
+        "employee_id": employee_id,
+        "old_outcome": existing.get('outcome'),
+        "new_outcome": payload.outcome,
+        "area": payload.area
+    })
+    
+    return {"success": True, "id": spot_check_id, "outcome": payload.outcome}
+
+
 @api_router.get("/spot-check-options")
 async def get_spot_check_options(user: dict = Depends(get_current_user)):
     """Return available spot check types and areas"""

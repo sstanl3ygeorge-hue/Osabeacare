@@ -86,3 +86,6 @@ export {
 
 // Competency Assessments Panel (CQC Compliant)
 export { default as CompetencyAssessmentsPanel } from './CompetencyAssessmentsPanel';
+
+// Spot Checks Panel (CQC Compliant)
+export { default as SpotChecksPanel } from './SpotChecksPanel';

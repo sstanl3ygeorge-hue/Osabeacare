@@ -27,6 +27,7 @@ import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, Training
 import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
 import CompetencyAssessmentsPanel from '../../components/compliance/CompetencyAssessmentsPanel';
+import SpotChecksPanel from '../../components/compliance/SpotChecksPanel';
 import { SendReminderButton, RequestRenewalButton } from '../../components/admin/AdminActionButtons';
 import EditPersonalDetailsDialog from '../../components/admin/EditPersonalDetailsDialog';
 import EditEmploymentHistoryDialog from '../../components/admin/EditEmploymentHistoryDialog';
@@ -3702,6 +3703,10 @@ export default function EmployeeProfilePage() {
             <ClipboardCheck className="h-4 w-4 mr-2" />
             Competencies
           </TabsTrigger>
+          <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <Eye className="h-4 w-4 mr-2" />
+            Spot Checks
+          </TabsTrigger>
         </TabsList>
 
         {/* ========== TAB 1: WORK READINESS ========== */}
@@ -4145,6 +4150,18 @@ export default function EmployeeProfilePage() {
         {/* ========== TAB: COMPETENCIES ========== */}
         <TabsContent value="competencies">
           <CompetencyAssessmentsPanel
+            employeeId={employeeId}
+            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            onRefresh={() => {
+              fetchComplianceFile();
+              fetchRecruitmentStatus();
+            }}
+          />
+        </TabsContent>
+
+        {/* ========== TAB: SPOT CHECKS ========== */}
+        <TabsContent value="spot_checks">
+          <SpotChecksPanel
             employeeId={employeeId}
             employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
             onRefresh={() => {

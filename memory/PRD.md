@@ -1105,4 +1105,89 @@ Already correct: Documents, Forms, Training, References, Agreements, Induction
 ---
 
 ## Last Updated
-April 5, 2026 - P0 Contract Signing Lock + Admin Button Fixes completed
+April 5, 2026
+
+---
+
+## COMPLETED: P0 Usability Audit Fixes - April 5, 2026
+
+### P0 Issue 1: Fix "Recruitment Approved" Badge Logic (FIXED)
+**Problem:** Badge showed "Recruitment Approved" based solely on `employee.recruitment_approved` flag, even if blockers existed.
+
+**Solution:** Updated `EmployeeProfilePage.js` and `RecruitmentPage.js` to:
+1. Check `recruitment_approved` AND zero blockers before showing green "Recruitment Approved" badge
+2. Show amber "Conditionally Approved" badge when `recruitment_approved=true` but blockers exist
+3. Show amber "Awaiting Approval" badge for applicants not yet approved
+
+**Files Modified:**
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` - Lines 2844-2873
+- `/app/frontend/src/pages/portal/RecruitmentPage.js` - Lines 472-485
+
+### P0 Issue 2: Unified Progress Consistency (FIXED)
+**Problem:** Worker Dashboard calculated progress differently than Admin view, causing inconsistent percentages.
+
+**Solution:** Created `compute_unified_progress_internal()` helper function in `server.py` and modified Worker Dashboard endpoint to use it, ensuring both Admin and Worker views share identical progress calculation logic.
+
+**Files Modified:**
+- `/app/backend/server.py` - Added `compute_unified_progress_internal()` function around line 7461
+- `/app/backend/server.py` - Updated `worker_dashboard` endpoint to use unified progress
+
+**API Changes:**
+- Worker dashboard response now includes `unified_blockers` array for consistency
+
+### P0 Issue 3: Audit Trail Logging (VERIFIED WORKING)
+**Status:** Already implemented and working. Endpoint `GET /api/employees/{id}/audit-trail` returns comprehensive audit events including:
+- Document uploads and verifications
+- Reference requests and verifications
+- Contract signatures
+- Status changes
+
+**Evidence:** API test shows events with action, timestamp, entity_type, and metadata fields.
+
+### P0 Issue 4: Remove Duplicate Content from Admin Compliance View (FIXED)
+**Problem:** ConsolidatedStatusPanel showed redundant "STATUS: BLOCKED" prefix.
+
+**Solution:** Simplified status text to show clean "Cannot be promoted yet" or "All requirements complete" messages.
+
+**Files Modified:**
+- `/app/frontend/src/components/compliance/ConsolidatedStatusPanel.js` - Lines 260-264
+
+### Bug Fix: Pre-Employment Gates 500 Error (FIXED BY TESTING AGENT)
+**Problem:** `GET /api/employees/{id}/pre-employment-gates` returned 500 error due to incorrect function argument order.
+
+**Solution:** Changed import to use `can_promote_to_active_legacy` which has the correct signature `(employee_id, db)` matching existing call sites.
+
+**Files Modified:**
+- `/app/backend/server.py` - Lines 94-100 and 10399-10406
+
+### Test Results:
+- **Backend:** 100% (12/12 tests passed)
+- **Frontend:** 100% (all P0 features verified)
+- **Test report:** `/app/test_reports/iteration_167.json`
+
+---
+
+## Next Tasks (Priority Order)
+
+### P1 Tasks (Upcoming)
+1. **Training Tab Redesign** - Remove duplicates, consolidate into ONE table, add auto-calculated "Recruitment Compliance Checklist"
+2. **Pending Verification Badge** - Add badge to Admin view for items awaiting verification
+3. **DBS Register Last Check Column** - Populate "Last DBS Check" data in DBS Register page
+
+### P2 Tasks
+1. **Admin Dashboard Task Queue** - Actionable task queue UI for admins
+2. **Remove Approve Button Until Ready** - Hide [Approve] button in Recruitment Pipeline until requirements complete
+
+### P3 Tasks (Future/Backlog)
+1. **server.py Refactoring** - Split 51k+ lines into modular routers (CRITICAL for maintenance)
+2. **Supabase Auth Integration** - Implement RLS policies
+3. **MongoDB to PostgreSQL Migration** - Phase out MongoDB
+4. **MFA for Admin Accounts** - Implement TOTP-based MFA
+
+---
+
+## Known Technical Debt
+- **F811 Duplicate Functions:** 140+ lint errors in `server.py` including duplicate function definitions
+- **server.py Size:** 51,000+ lines needs splitting into modular routers
+- **Bare Except Clauses:** Multiple bare `except:` statements should be replaced with specific exception handling
+

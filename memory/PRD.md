@@ -127,6 +127,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Admin UX Audit - Tab duplicates fixed - COMPLETED Apr 2026
 - [x] Admin Internal-Only Forms with PDF - COMPLETED Apr 2026
 - [x] Cybersecurity Audit - All P0/P1 fixed - COMPLETED Apr 2026
+- [x] Worker Portal End-to-End Experience Enhancements - COMPLETED Apr 2026
 - [ ] Role-Based Compliance Configuration using `role_compliance_profiles`
 - [ ] Supervision Records tracking UI
 
@@ -140,6 +141,60 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] Phase out MongoDB entirely (PostgreSQL migration)
 - [ ] Auto-delete employee data 3 years after termination (CQC requirement)
 - [ ] MFA for admin accounts (TOTP-based)
+
+---
+
+## COMPLETED: Worker Portal End-to-End Experience (April 2026)
+
+### UI Enhancements Implemented
+1. **"Cleared to Work" Messaging**
+   - Active employees see enhanced green banner with "Cleared to Work" headline
+   - Shows "All NHS compliance requirements verified. You are authorised to work."
+   - Mini stats showing "All documents current • No renewals due" when no alerts
+
+2. **Pending Verification vs Verified Badges**
+   - Documents/trainings show clear "Pending Verification" amber badge when uploaded but not verified
+   - Documents/trainings show green "Verified" badge with shield icon when verified
+   - Clock icon for pending, Shield icon for verified
+
+3. **View Verified Documents**
+   - Verified documents have a "View" button to open the stamped PDF
+   - Links to `file_url` (stamped version if available, otherwise original)
+
+4. **Expiry Tracking with Color-Coded Alerts**
+   - Red styling for < 30 days (urgent)
+   - Amber styling for < 60 days
+   - Yellow styling for < 90 days
+   - Animated pulse dot indicator
+   - Renamed section to "Upcoming Renewals"
+
+5. **Renewal Upload Buttons**
+   - Each alert now has an "Upload Renewal" button
+   - Urgent alerts (< 30 days) have prominent red styling
+   - Direct upload capability from the alerts section
+
+6. **Professional Registration Display**
+   - Shows NMC/GMC/HCPC/SWE registration status for applicable roles
+   - Displays registration number if submitted
+   - Shows "Required" badge if not submitted for clinical roles
+   - Color-coded based on status (green=verified, amber=pending, red=required)
+
+### Backend API Updates
+- `/api/worker/dashboard` now returns:
+  - `file_url` for each completed document (stamped version if verified)
+  - `verification_stamp` field for each document
+  - `professional_registration` object with type, number, verified, expiry_date, status
+  - `training_id` in alerts for training-specific renewal uploads
+  - `job_role` in employee object
+
+### Key Files Modified
+- `/app/frontend/src/pages/worker/WorkerDashboard.js` - Enhanced UI components
+- `/app/backend/server.py` (lines 7409-7760) - Updated worker_dashboard endpoint
+
+### Test Results
+- Backend: 13/13 tests passed (100%)
+- Frontend: 9/9 UI tests passed (100%)
+- Test report: `/app/test_reports/iteration_153.json`
 
 ---
 

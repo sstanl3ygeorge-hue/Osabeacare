@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response, Form, Body
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response, Form, Body, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -54,6 +54,14 @@ from email_automation import (
     RequestStatus,
     EventType,
     RequestFailureHandler
+)
+from security import (
+    SecurityHeadersMiddleware,
+    login_rate_limiter,
+    validate_file_content,
+    sanitize_filename,
+    sanitize_log_data,
+    get_allowed_origins
 )
 from google import genai
 import pytesseract
@@ -6985,10 +6993,22 @@ async def create_admin_user(user_data: AdminUserCreate, user: dict = Depends(get
     return {"message": "Admin user created", "user": user_response}
 
 @api_router.post("/auth/login")
-async def login(credentials: UserLogin):
+async def login(credentials: UserLogin, http_request: Request):
+    """Admin login with rate limiting and account lockout protection."""
+    # Rate limiting check
+    identifier = f"admin_{credentials.email.lower()}"
+    allowed, error_msg = login_rate_limiter.check_rate_limit(identifier)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=error_msg)
+    
     user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
     if not user or not verify_password(credentials.password, user['password']):
+        # Record failed attempt
+        login_rate_limiter.record_attempt(identifier, success=False)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Clear rate limit on successful login
+    login_rate_limiter.record_attempt(identifier, success=True)
     
     token = create_token(user['user_id'], user['email'], user['role'])
     user_response = {k: v for k, v in user.items() if k != 'password'}
@@ -7084,11 +7104,18 @@ async def get_current_worker(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 @api_router.post("/worker/request-login")
-async def worker_request_login(request: WorkerLoginRequest):
+async def worker_request_login(request: WorkerLoginRequest, http_request: Request):
     """
     Send magic link to worker's email (the one from their application).
     No password required - link expires in 24 hours.
+    Rate limited: 5 attempts per email per hour.
     """
+    # Rate limiting check
+    identifier = request.email.lower()
+    allowed, error_msg = login_rate_limiter.check_rate_limit(identifier)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=error_msg)
+    
     # Find employee by email
     employee = await db.employees.find_one({
         "email": {"$regex": f"^{re.escape(request.email)}$", "$options": "i"}
@@ -7538,6 +7565,7 @@ async def worker_upload_document(
     """
     Upload a document from the worker portal.
     Worker can only upload their own documents.
+    File type validated by content (magic bytes), not just extension.
     """
     employee_id = worker.get("employee_id")
     
@@ -7546,22 +7574,22 @@ async def worker_upload_document(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Validate file type
-    allowed_types = ['.pdf', '.jpg', '.jpeg', '.png', '.webp']
-    if not any(file.filename.lower().endswith(ext) for ext in allowed_types):
-        raise HTTPException(status_code=400, detail="File type not allowed. Use PDF, JPG, or PNG.")
-    
-    # Read file
+    # Read file first for content validation
     contents = await file.read()
     
-    if len(contents) > 10 * 1024 * 1024:  # 10MB limit
-        raise HTTPException(status_code=400, detail="File too large. Maximum 10MB.")
+    # Validate file content by magic bytes (not just extension)
+    is_valid, detected_type, error_msg = validate_file_content(contents, file.content_type)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Sanitize filename
+    safe_filename = sanitize_filename(file.filename)
+    safe_filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
     
     # Save file
     upload_dir = Path("/app/uploads/documents") / employee_id
     upload_dir.mkdir(parents=True, exist_ok=True)
     
-    safe_filename = f"{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = upload_dir / safe_filename
     
     with open(file_path, "wb") as f:
@@ -7580,7 +7608,7 @@ async def worker_upload_document(
         "file_name": file.filename,
         "original_filename": file.filename,
         "file_url": file_url,
-        "file_type": file.content_type or "application/octet-stream",
+        "file_type": detected_type,  # Use detected type, not claimed
         "uploaded_at": now,
         "uploaded_by": f"worker_{employee_id}",
         "uploaded_by_worker": True,
@@ -47275,13 +47303,17 @@ File available in system: {cert.get('file_url', 'Not uploaded')}
 
 
 # CORS middleware (router included after all routes are defined)
+# Use allowed origins from security module for production safety
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=get_allowed_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ==================== TRAINING INTAKE WIZARD (Step 10 - Phases 1-3) ====================

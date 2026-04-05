@@ -5286,9 +5286,10 @@ class FormSubmissionResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     employee_id: str
-    requirement_id: str
+    requirement_id: Optional[str] = None  # Made optional for legacy submissions
     form_type: str
-    data: dict
+    data: Optional[dict] = None  # Made optional - some use form_data instead
+    form_data: Optional[dict] = None  # Alternative field name
     submitted_at: str
     submitted_by: Optional[str] = None
     submitted_by_name: Optional[str] = None

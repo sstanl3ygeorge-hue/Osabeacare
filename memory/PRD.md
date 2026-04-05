@@ -124,6 +124,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ### P1 (High)
 - [x] Worker Portal complete flow - COMPLETED Dec 2025
+- [x] Admin UX Audit - Tab duplicates fixed - COMPLETED Apr 2026
+- [ ] Admin Internal-Only Forms (Interview Record, Induction Checklist, Spot Check)
 - [ ] Role-Based Compliance Configuration using `role_compliance_profiles`
 - [ ] Supervision Records tracking UI
 
@@ -137,9 +139,56 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ---
 
+## COMPLETED: Admin UX Audit (April 2026)
+
+### Tab Structure Fixed
+1. **Compliance Tab** - Now shows ONLY:
+   - Right to Work (documents + verification)
+   - DBS Certificate (documents + update service check)
+   - Identity (documents)
+   - Proof of Address (2 documents required)
+   - Agreements (Contract + Handbook)
+   - Recruitment Record (forms)
+   - Admin Forms
+
+2. **Removed from Compliance Tab** (now in dedicated tabs):
+   - References → References Tab
+   - Training → Training Tab
+   - Health & Competency → Training Tab (as sub-tabs)
+
+3. **References Tab** - Complete workflow:
+   - Referee details display
+   - Send Request button
+   - Status tracking (Not requested → Sent → Received → Verified)
+   - View Response button
+   - Mark Verified button
+
+4. **Training Tab** - Consolidated view:
+   - Induction sub-tab (checklist with mark complete)
+   - Competencies sub-tab
+   - Spot Checks sub-tab
+   - Training Matrix below
+
+### Progress Labels Clarified
+- **"Overall Compliance"** - Shows X% Complete with "X of Y requirements" sub-text
+- **"Recruitment Readiness"** - Shows X/11 key items verified (for recruitment approval)
+
+### Worker Portal - NHS Standard Improvements
+- Document guidance text added for each upload type
+- Accepted file formats displayed (PDF, JPG, PNG - max 10MB)
+- AI extraction note for training certificates
+
+### Key Files Modified
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js`
+- `/app/frontend/src/components/compliance/RecruitmentApprovalPanel.js`
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js`
+- `/app/frontend/src/pages/worker/WorkerDashboard.js`
+
+---
+
 ## Test Credentials
 - Admin: admin@osabea.care / admin123
-- Test Employee: isg1994@outlook.com (Ifedolapo George) - active_employee status
+- Test Employee: isg1994@outlook.com (Ifedolapo George) - ID: b1fdb4e3-cfc9-4579-9ee7-b5b624248de1
 
 ## Database
 - Production: Railway MongoDB (`caretrust_production`)
@@ -148,4 +197,4 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ---
 
 ## Last Updated
-December 4, 2025 - Worker Portal complete implementation with save/resume forms, auto-promotion, and email notifications
+April 5, 2026 - Admin UX Audit completed - removed duplicate content from tabs, clarified progress labels, added NHS-standard document guidance

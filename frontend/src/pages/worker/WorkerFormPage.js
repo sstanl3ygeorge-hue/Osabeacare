@@ -17,8 +17,9 @@ import {
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // Form field definitions for each form type
+// These IDs must match the admin compliance requirements
 const FORM_FIELDS = {
-  health_questionnaire: {
+  staff_health_questionnaire: {
     icon: Heart,
     sections: [
       {
@@ -47,7 +48,7 @@ const FORM_FIELDS = {
       }
     ]
   },
-  personal_info: {
+  staff_personal_info: {
     icon: User,
     sections: [
       {
@@ -80,7 +81,7 @@ const FORM_FIELDS = {
       }
     ]
   },
-  hmrc_starter: {
+  hmrc_starter_checklist: {
     icon: Briefcase,
     sections: [
       {

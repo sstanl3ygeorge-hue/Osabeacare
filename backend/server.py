@@ -7674,30 +7674,35 @@ async def worker_upload_document(
 # ===========================================================================
 
 WORKER_FORM_DEFINITIONS = {
-    "health_questionnaire": {
+    "staff_health_questionnaire": {
         "name": "Health Questionnaire",
         "description": "Complete your health and wellbeing declaration",
-        "required": True
+        "required": True,
+        "admin_requirement_id": "staff_health_questionnaire"
     },
-    "personal_info": {
+    "staff_personal_info": {
         "name": "Staff Personal Information",
         "description": "Your personal details for HR records",
-        "required": True
+        "required": True,
+        "admin_requirement_id": "staff_personal_info"
     },
-    "hmrc_starter": {
+    "hmrc_starter_checklist": {
         "name": "HMRC Starter Checklist",
         "description": "Tax information for payroll setup",
-        "required": True
+        "required": True,
+        "admin_requirement_id": "hmrc_starter_checklist"
     },
     "equal_opportunities": {
         "name": "Equal Opportunities Monitoring",
         "description": "Optional diversity monitoring form",
-        "required": False
+        "required": False,
+        "admin_requirement_id": "equal_opportunities"
     },
     "emergency_contacts": {
         "name": "Emergency Contacts",
         "description": "Who to contact in case of emergency",
-        "required": True
+        "required": True,
+        "admin_requirement_id": "emergency_contacts"
     }
 }
 
@@ -7873,16 +7878,25 @@ async def submit_worker_form(
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Create submission
+    # Get the admin requirement ID for this form
+    form_def = WORKER_FORM_DEFINITIONS[form_id]
+    requirement_id = form_def.get("admin_requirement_id", form_id)
+    
+    # Create submission - compatible with admin compliance view
     submission = {
         "id": f"form_{uuid.uuid4().hex[:12]}",
         "employee_id": employee_id,
         "form_type": form_id,
+        "requirement_id": requirement_id,  # Links to admin compliance requirement
         "form_data": request.form_data,
+        "data": request.form_data,  # Alternative field name used by some queries
         "submitted_at": now,
+        "submitted_by": f"worker_{employee_id}",
         "submitted_by_name": employee_name,
         "status": "submitted",
         "awaiting_admin_review": True,
+        "verified": False,
+        "version": 1,
         "created_at": now
     }
     

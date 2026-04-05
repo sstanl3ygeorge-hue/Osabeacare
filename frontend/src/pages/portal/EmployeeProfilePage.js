@@ -22,7 +22,7 @@ import DocumentExtractionReview from '../../components/documents/DocumentExtract
 import TrainingIntakeWizard from '../../components/training/TrainingIntakeWizard';
 import TrainingRequestDialog from '../../components/training/TrainingRequestDialog';
 import AuditReadyTrainingMatrix from '../../components/training/AuditReadyTrainingMatrix';
-import EnhancedTrainingTab from '../../components/training/EnhancedTrainingTab';
+// EnhancedTrainingTab removed - functionality consolidated into AuditReadyTrainingMatrix
 import { DualRowComplianceSection, RecordCheckDialog, WhatsNeededPanel, TrainingSummaryCard, ApplicantStageBanner, ReferencesPanel, AuditTrailPanel, DocumentRequestsPanel, InterviewFormPanel } from '../../components/compliance';
 import ConsolidatedStatusPanel from '../../components/compliance/ConsolidatedStatusPanel';
 import EmploymentGapPanel from '../../components/compliance/EmploymentGapPanel';
@@ -2840,36 +2840,35 @@ export default function EmployeeProfilePage() {
                   }`}>
                     {employee.status === 'compliance_review' ? 'Awaiting Approval' : employee.status?.replace('_', ' ')}
                   </span>
-                  {/* Recruitment Approval Status - Only show "Approved" if truly approved with zero blockers */}
+                  {/* Simplified Status Flow: Awaiting Approval → Ready → Active Employee */}
                   {(() => {
-                    // STRICT LOGIC: Only show "Recruitment Approved" badge if:
-                    // 1. recruitment_approved flag is true AND
-                    // 2. Zero blockers exist in compliance requirements
-                    const hasZeroBlockers = (complianceRequirements?.blockers?.length === 0) || 
-                                           (complianceRequirements?.pre_employment_gates?.blockers?.length === 0);
-                    const isFullyApproved = employee.recruitment_approved && hasZeroBlockers;
+                    // Get progress percentage from unified progress
+                    const progressPct = complianceRequirements?.unified_progress?.overall_percentage || 
+                                       complianceRequirements?.progress?.percentage || 0;
+                    const isComplete = progressPct === 100;
                     
-                    if (isFullyApproved) {
+                    // Active Employee - already promoted
+                    if (employee.status === 'active_employee') {
                       return (
-                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="recruitment-approved-badge">
-                          Recruitment Approved
-                        </span>
-                      );
-                    } else if (employee.recruitment_approved && !hasZeroBlockers) {
-                      // Approved but has blockers - show warning state
-                      return (
-                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="recruitment-conditional-badge">
-                          Conditionally Approved
-                        </span>
-                      );
-                    } else if (employee.person_stage === 'applicant') {
-                      return (
-                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="awaiting-approval-badge">
-                          Awaiting Approval
+                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="active-employee-badge">
+                          Active Employee
                         </span>
                       );
                     }
-                    return null;
+                    // Ready - 100% complete, pending promotion
+                    if (isComplete) {
+                      return (
+                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
+                          Ready
+                        </span>
+                      );
+                    }
+                    // Awaiting Approval - 0-99% complete (default for all applicants/onboarding)
+                    return (
+                      <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="awaiting-approval-badge">
+                        Awaiting Approval
+                      </span>
+                    );
                   })()}
                   {/* 3-Tier Work Readiness Status Badge */}
                   {employee.person_stage === 'employee' && (() => {
@@ -4097,29 +4096,8 @@ export default function EmployeeProfilePage() {
 
         {/* Training Tab */}
         <TabsContent value="training" ref={trainingSectionRef}>
-          {/* Enhanced Training Tab with AI Bulk Extraction */}
-          <div className="mb-6">
-            <EnhancedTrainingTab
-              employeeId={employeeId}
-              employeeRole={employee?.role || 'Healthcare Assistant'}
-              initialTrainings={training}
-            />
-          </div>
-          
-          {/* Induction & Competency Section - CQC Requirement */}
-          <div className="mb-6">
-            <HealthCompetencySection
-              employeeId={employeeId}
-              employeeName={`${employee?.first_name} ${employee?.last_name}`}
-              isAuditor={isAuditor()}
-              onRefresh={() => {
-                fetchTrainingEvaluation();
-                fetchComplianceFile();
-              }}
-            />
-          </div>
-          
           {/* Audit-Ready Training Matrix - Complete training record with tabs */}
+          {/* Contains: Mandatory Training, All Qualifications, Certificates tabs */}
           <AuditReadyTrainingMatrix
             employeeId={employeeId}
             employeeName={`${employee?.first_name} ${employee?.last_name}`}
@@ -4136,6 +4114,19 @@ export default function EmployeeProfilePage() {
               fetchProposedTrainingItems();
             }}
           />
+          
+          {/* Induction & Competency Section - CQC Requirement */}
+          <div className="mt-6">
+            <HealthCompetencySection
+              employeeId={employeeId}
+              employeeName={`${employee?.first_name} ${employee?.last_name}`}
+              isAuditor={isAuditor()}
+              onRefresh={() => {
+                fetchTrainingEvaluation();
+                fetchComplianceFile();
+              }}
+            />
+          </div>
         </TabsContent>
 
         {/* Audit Log Tab - Extracted to AuditTabContent */}

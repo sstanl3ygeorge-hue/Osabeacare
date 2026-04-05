@@ -233,133 +233,154 @@ REQUIRED_BEFORE_CONTRACT = [
 async def can_sign_contract(db, employee_id: str) -> dict:
     """
     Check if an employee can sign their contract.
-    Contract signing is the FINAL step before promotion.
+    Contract signing is the FINAL step - requires 100% completion of all other requirements.
     
-    All pre-employment checks must be complete before contract can be signed.
+    NEW LOGIC (simplified):
+    - Progress must be 100% BEFORE contract can be signed
+    - Contract is excluded from the progress calculation for this check
     
     Returns:
         {
             "can_sign": bool,
             "reason": str or None,
             "blockers": list of remaining items,
-            "completed": list of completed items
+            "completed": list of completed items,
+            "progress_percentage": int
         }
     """
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
-        return {"can_sign": False, "reason": "Employee not found", "blockers": [], "completed": []}
+        return {"can_sign": False, "reason": "Employee not found", "blockers": [], "completed": [], "progress_percentage": 0}
     
+    job_role = (employee.get("job_role") or employee.get("role") or "").lower()
     blockers = []
     completed = []
     
-    # 1. Check DBS verified
-    dbs_docs = await db.employee_documents.find({
+    # Calculate progress (excluding contract itself)
+    # Count requirements by category
+    
+    # ========== DOCUMENTS ==========
+    required_docs = ["right_to_work", "dbs", "identity", "proof_of_address", "proof_of_address_2"]
+    if "nurse" in job_role:
+        required_docs.append("nmc_registration")
+    
+    documents = await db.employee_documents.find({
         "employee_id": employee_id,
-        "requirement_id": "dbs",
-        "status": "verified"
-    }).to_list(1)
-    if dbs_docs:
-        completed.append("DBS Certificate verified")
-    else:
-        blockers.append("DBS Certificate not verified")
+        "status": {"$nin": ["deleted", "superseded"]}
+    }).to_list(200)
     
-    # 2. Check Right to Work verified
-    rtw_docs = await db.employee_documents.find({
-        "employee_id": employee_id,
-        "requirement_id": "right_to_work",
-        "status": "verified"
-    }).to_list(1)
-    if rtw_docs:
-        completed.append("Right to Work verified")
-    else:
-        blockers.append("Right to Work not verified")
-    
-    # 3. Check Identity verified
-    identity_docs = await db.employee_documents.find({
-        "employee_id": employee_id,
-        "requirement_id": "identity",
-        "status": "verified"
-    }).to_list(1)
-    if identity_docs:
-        completed.append("Identity verified")
-    else:
-        blockers.append("Identity not verified")
-    
-    # 4. Check Proof of Address (2 documents required)
-    poa_docs = await db.employee_documents.find({
-        "employee_id": employee_id,
-        "requirement_id": "proof_of_address",
-        "status": "verified"
-    }).to_list(2)
-    if len(poa_docs) >= 2:
-        completed.append("Proof of Address verified (2 documents)")
-    else:
-        blockers.append(f"Proof of Address - {len(poa_docs)} of 2 verified")
-    
-    # 5. Check References verified (both required)
-    ref_1_verified = employee.get("reference_1_status") == "verified"
-    ref_2_verified = employee.get("reference_2_status") == "verified"
-    
-    if ref_1_verified and ref_2_verified:
-        completed.append("Both references verified")
-    else:
-        if not ref_1_verified:
-            blockers.append("Reference 1 not verified")
-        if not ref_2_verified:
-            blockers.append("Reference 2 not verified")
-    
-    # 6. Check Interview completed
-    interview_form = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "requirement_id": {"$in": ["interview_record", "interview"]}
-    })
-    if interview_form:
-        completed.append("Interview completed")
-    else:
-        blockers.append("Interview record not completed")
-    
-    # 7. Check Induction complete (15 items)
-    induction = await db.induction_checklists.find_one({"employee_id": employee_id})
-    if induction:
-        items = induction.get("items", [])
-        completed_items = sum(1 for item in items if item.get("completed"))
-        total_items = len(items)
-        if completed_items >= 15:
-            completed.append("Induction checklist complete (15/15)")
+    doc_completed = 0
+    for doc_type in required_docs:
+        is_verified = False
+        for doc in documents:
+            req_id = (doc.get("requirement_id") or "").lower()
+            if doc_type.replace("_", "") in req_id.replace("_", "") or doc_type in req_id:
+                stamp = doc.get("verification_stamp", "")
+                if stamp and stamp not in ["", "not_verified"]:
+                    is_verified = True
+                    break
+        if is_verified:
+            doc_completed += 1
+            completed.append(f"{doc_type.replace('_', ' ').title()} verified")
         else:
-            blockers.append(f"Induction checklist incomplete ({completed_items}/{total_items})")
-    else:
-        blockers.append("Induction checklist not started")
+            blockers.append(f"{doc_type.replace('_', ' ').title()} not verified")
     
-    # 8. Check Mandatory Training complete
+    # ========== FORMS ==========
+    required_forms = ["staff_health_questionnaire", "staff_personal_info", "hmrc_starter_checklist", "emergency_contacts"]
+    form_submissions = await db.form_submissions.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["submitted", "verified"]}
+    }).to_list(20)
+    submitted_forms = {fs.get("form_type") for fs in form_submissions}
+    
+    form_completed = 0
+    for form_id in required_forms:
+        if form_id in submitted_forms:
+            form_completed += 1
+            completed.append(f"{form_id.replace('_', ' ').title()} submitted")
+        else:
+            blockers.append(f"{form_id.replace('_', ' ').title()} required")
+    
+    # ========== TRAINING ==========
+    mandatory_training = ["safeguarding", "manual_handling", "fire_safety", "health_safety", "bls", "infection_control"]
     training_records = await db.training_records.find({
         "employee_id": employee_id,
-        "is_mandatory": True,
-        "record_status": {"$ne": "deleted"}
+        "record_status": {"$ne": "superseded"}
     }).to_list(100)
     
-    # Check for mandatory training items
-    # Required: safeguarding_adults, moving_handling, fire_safety, health_safety, basic_life_support, infection_control
-    completed_training = set()
-    for record in training_records:
-        if record.get("completed_at") and not record.get("is_expired"):
-            completed_training.add(record.get("training_code") or record.get("training_name", "").lower().replace(" ", "_"))
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    training_completed = 0
     
-    training_complete = len(completed_training) >= 6
-    if training_complete:
-        completed.append("Mandatory training complete")
+    for training_id in mandatory_training:
+        is_done = False
+        for t in training_records:
+            t_name = (t.get("training_name") or "").lower()
+            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
+                expiry_str = t.get("expiry_date")
+                if expiry_str:
+                    try:
+                        if isinstance(expiry_str, str):
+                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                        else:
+                            expiry = expiry_str
+                        if expiry >= now:
+                            is_done = True
+                    except:
+                        is_done = True
+                else:
+                    is_done = True
+                break
+        if is_done:
+            training_completed += 1
+            completed.append(f"{training_id.replace('_', ' ').title()} complete")
+        else:
+            blockers.append(f"{training_id.replace('_', ' ').title()} required")
+    
+    # ========== REFERENCES ==========
+    references = employee.get("references", [])
+    verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
+    ref_completed = min(len(verified_refs), 2)
+    
+    if len(verified_refs) >= 1:
+        completed.append("Reference 1 verified")
     else:
-        blockers.append(f"Mandatory training incomplete ({len(completed_training)}/6)")
+        blockers.append("Reference 1 not verified")
+    if len(verified_refs) >= 2:
+        completed.append("Reference 2 verified")
+    else:
+        blockers.append("Reference 2 not verified")
     
-    can_sign = len(blockers) == 0
+    # ========== INDUCTION (15 items) ==========
+    induction_items = await db.induction_checklist.find({"employee_id": employee_id}).to_list(50)
+    induction_completed = 0
+    induction_total = 15  # Care Certificate Standards
+    
+    if induction_items:
+        induction_completed = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+    
+    if induction_completed >= 15:
+        completed.append("Induction complete (15/15)")
+    else:
+        blockers.append(f"Induction incomplete ({induction_completed}/15)")
+    
+    # ========== CALCULATE TOTAL (excluding contract) ==========
+    total_requirements = len(required_docs) + len(required_forms) + len(mandatory_training) + 2 + 1  # +2 refs, +1 induction
+    total_completed = doc_completed + form_completed + training_completed + ref_completed + (1 if induction_completed >= 15 else 0)
+    
+    progress_percentage = round((total_completed / total_requirements) * 100) if total_requirements > 0 else 0
+    
+    # Contract can only be signed when progress is 100%
+    can_sign = progress_percentage >= 100
     
     return {
         "can_sign": can_sign,
-        "reason": None if can_sign else f"{len(blockers)} requirements remaining",
+        "reason": None if can_sign else f"{len(blockers)} requirements remaining before contract can be signed",
         "blockers": blockers,
         "completed": completed,
-        "total_requirements": 8,
-        "completed_count": len(completed)
+        "total_requirements": total_requirements,
+        "completed_count": total_completed,
+        "progress_percentage": progress_percentage
     }
 
 

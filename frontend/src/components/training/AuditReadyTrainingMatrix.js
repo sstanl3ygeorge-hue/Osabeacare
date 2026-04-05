@@ -58,6 +58,7 @@ import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
 import { formatBackendDate } from '../../lib/dateUtils';
 import TrainingDetailDrawer from './TrainingDetailDrawer';
+import TrainingCertificateExtractor from './TrainingCertificateExtractor';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -118,6 +119,7 @@ export default function AuditReadyTrainingMatrix({
   const [selectedTraining, setSelectedTraining] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [extractorOpen, setExtractorOpen] = useState(false); // AI Certificate Extractor dialog
   const [editingItem, setEditingItem] = useState(null);
   
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin';
@@ -435,7 +437,7 @@ export default function AuditReadyTrainingMatrix({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={onUploadCertificate}
+                      onClick={() => setExtractorOpen(true)}
                       data-testid="upload-training-cert-btn"
                     >
                       <Upload className="h-4 w-4 mr-1" />
@@ -978,6 +980,18 @@ export default function AuditReadyTrainingMatrix({
           onRefresh?.();
         }}
         isAdmin={isAdmin}
+      />
+
+      {/* AI Certificate Extractor with Preview Step */}
+      <TrainingCertificateExtractor
+        employeeId={employeeId}
+        employeeName={employeeName}
+        isOpen={extractorOpen}
+        onClose={() => setExtractorOpen(false)}
+        onSuccess={() => {
+          fetchTrainingData();
+          onRefresh?.();
+        }}
       />
     </div>
   );

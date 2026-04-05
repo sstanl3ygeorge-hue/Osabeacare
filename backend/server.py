@@ -7636,7 +7636,7 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
             categories["induction"]["total"] = len(items)
             categories["induction"]["completed"] = len([i for i in items if i.get("completed")])
         else:
-            categories["induction"]["total"] = 14
+            categories["induction"]["total"] = 15
             categories["induction"]["completed"] = 0
     
     if categories["induction"]["completed"] < categories["induction"]["total"]:
@@ -12163,6 +12163,226 @@ async def bulk_upload_training_certificates(
         "total_extracted": len(all_extracted_trainings),
         "message": f"Extracted {len(all_extracted_trainings)} training(s) from certificate ({len(mandatory)} mandatory, {len(additional)} additional)"
     }
+
+
+@api_router.post("/employees/{employee_id}/training/extract-certificate")
+async def extract_training_certificate_preview(
+    employee_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract training records from a certificate for PREVIEW before saving.
+    
+    This endpoint:
+    1. Uploads the certificate
+    2. Extracts all training records using AI
+    3. Returns extracted data for admin review
+    4. Does NOT save to database until admin confirms via bulk-save
+    
+    Supports:
+    - Simple PDF (one course)
+    - Table format (40+ courses)
+    - Multi-page PDFs
+    - Images (JPG, PNG)
+    
+    Returns extracted trainings with confidence levels for preview.
+    """
+    # Validate file type
+    allowed_extensions = ('.pdf', '.jpg', '.jpeg', '.png', '.webp')
+    if not file.filename.lower().endswith(allowed_extensions):
+        raise HTTPException(status_code=400, detail="Unsupported file type. Use PDF, JPG, or PNG.")
+    
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Read file content
+    contents = await file.read()
+    
+    # Save certificate temporarily
+    upload_dir = Path("/app/uploads/training") / employee_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    safe_filename = f"preview_{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = upload_dir / safe_filename
+    
+    with open(file_path, "wb") as f:
+        f.write(contents)
+    
+    certificate_id = f"cert_{uuid.uuid4().hex[:12]}"
+    file_url = f"/uploads/training/{employee_id}/{safe_filename}"
+    
+    # Extract trainings using AI
+    extracted = await extract_training_from_certificate(contents, file.filename)
+    
+    # Enrich with additional metadata for preview
+    trainings_for_preview = []
+    for idx, training in enumerate(extracted):
+        training_name = training.get("training_name", "Unknown Training")
+        
+        # Determine if mandatory
+        is_mandatory = is_mandatory_training(training_name)
+        
+        # Calculate confidence based on extraction source
+        confidence = "high" if training.get("extracted_by") == "gemini_ai" else "medium"
+        if not training.get("completion_date"):
+            confidence = "low"
+        
+        trainings_for_preview.append({
+            "training_name": training_name,
+            "completion_date": training.get("completion_date"),
+            "expiry_date": training.get("expiry_date"),
+            "provider": training.get("provider", "Unknown"),
+            "is_mandatory": is_mandatory,
+            "confidence": confidence,
+            "certificate_id": certificate_id,
+            "source_file": file.filename
+        })
+    
+    # Log extraction attempt
+    await log_audit_action(user['user_id'], "training_certificate_extracted", "employee", employee_id, {
+        "file": file.filename,
+        "trainings_found": len(trainings_for_preview),
+        "preview_mode": True
+    })
+    
+    return {
+        "success": True,
+        "certificate_id": certificate_id,
+        "certificate_file": file.filename,
+        "certificate_url": file_url,
+        "trainings": trainings_for_preview,
+        "total_extracted": len(trainings_for_preview),
+        "message": f"Extracted {len(trainings_for_preview)} training record(s). Please review and confirm."
+    }
+
+
+@api_router.post("/employees/{employee_id}/training/bulk-save")
+async def bulk_save_training_records(
+    employee_id: str,
+    trainings: List[dict] = Body(..., embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Save selected training records after preview/review.
+    
+    Called after extract-certificate to save admin-approved training records.
+    
+    Request body:
+    {
+        "trainings": [
+            {
+                "training_name": "Safeguarding Adults",
+                "completion_date": "2024-01-15",
+                "expiry_date": "2025-01-15",
+                "provider": "Care Academy",
+                "certificate_id": "cert_abc123"
+            },
+            ...
+        ]
+    }
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    if not trainings or len(trainings) == 0:
+        raise HTTPException(status_code=400, detail="No training records provided")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    saved_records = []
+    
+    for training in trainings:
+        training_name = training.get("training_name", "").strip()
+        if not training_name:
+            continue
+        
+        completion_date = training.get("completion_date")
+        expiry_date = training.get("expiry_date")
+        
+        # Auto-calculate expiry if not provided
+        if completion_date and not expiry_date:
+            try:
+                if isinstance(completion_date, str):
+                    completion_dt = datetime.fromisoformat(completion_date.replace('Z', '+00:00'))
+                else:
+                    completion_dt = completion_date
+                
+                expiry_months = get_expiry_months_for_training(training_name)
+                expiry_dt = completion_dt + timedelta(days=expiry_months * 30)
+                expiry_date = expiry_dt.isoformat()
+            except:
+                pass
+        
+        # Generate training ID
+        training_id = training_name.lower().replace(" ", "_").replace("&", "and")[:30]
+        training_id = re.sub(r'[^a-z0-9_]', '', training_id)
+        
+        is_mandatory = is_mandatory_training(training_name)
+        
+        # Create training record
+        record_id = f"tr_{uuid.uuid4().hex[:12]}"
+        training_record = {
+            "id": record_id,
+            "employee_id": employee_id,
+            "training_id": training_id,
+            "training_name": training_name,
+            "training_code": training_id,
+            "completion_date": completion_date,
+            "expiry_date": expiry_date,
+            "provider": training.get("provider", ""),
+            "certificate_id": training.get("certificate_id"),
+            "is_mandatory": is_mandatory,
+            "blocks_promotion": is_mandatory,
+            "verified": False,
+            "verification_status": "pending",
+            "record_status": "active",
+            "created_at": now,
+            "created_by": user['email'],
+            "source": "bulk_import"
+        }
+        
+        # Check for existing similar record and supersede if found
+        existing = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "training_id": training_id,
+            "record_status": {"$ne": "superseded"}
+        })
+        
+        if existing:
+            await db.training_records.update_one(
+                {"id": existing["id"]},
+                {"$set": {
+                    "record_status": "superseded",
+                    "superseded_at": now,
+                    "superseded_by": record_id
+                }}
+            )
+        
+        await db.training_records.insert_one(training_record)
+        saved_records.append({
+            "id": record_id,
+            "training_name": training_name,
+            "is_mandatory": is_mandatory
+        })
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "training_bulk_save", "employee", employee_id, {
+        "saved_count": len(saved_records),
+        "trainings": [r["training_name"] for r in saved_records]
+    })
+    
+    return {
+        "success": True,
+        "saved_count": len(saved_records),
+        "records": saved_records,
+        "message": f"Saved {len(saved_records)} training record(s) to profile"
+    }
+
+
 
 
 @api_router.post("/employees/{employee_id}/training/deduplicate")
@@ -24008,10 +24228,10 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
             categories["induction"]["total"] = len(items)
             categories["induction"]["completed"] = len([i for i in items if i.get("completed")])
         else:
-            # Default induction items (14 standard items)
-            categories["induction"]["total"] = 14
+            # Default induction items (15 Care Certificate Standards)
+            categories["induction"]["total"] = 15
             categories["induction"]["completed"] = 0
-            blockers.append("Induction Checklist (0/14 items)")
+            blockers.append("Induction Checklist (0/15 items)")
     
     # ========== CALCULATE TOTALS ==========
     total_requirements = sum(cat["total"] for cat in categories.values())

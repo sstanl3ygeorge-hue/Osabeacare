@@ -107,13 +107,24 @@ export default function RecruitmentPage() {
   // Fetch approval status for an applicant
   const fetchApprovalStatus = async (applicantId) => {
     try {
-      const response = await axios.get(
-        `${API}/employees/${applicantId}/recruitment-approval-check`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // Fetch both approval status and unified progress for complete data
+      const [approvalRes, progressRes] = await Promise.all([
+        axios.get(
+          `${API}/employees/${applicantId}/recruitment-approval-check`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ),
+        axios.get(
+          `${API}/employees/${applicantId}/unified-progress`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        ).catch(() => ({ data: { overall_percentage: 0 } })) // Fallback if endpoint fails
+      ]);
+      
       setApprovalData(prev => ({
         ...prev,
-        [applicantId]: response.data
+        [applicantId]: {
+          ...approvalRes.data,
+          progressPct: progressRes.data.overall_percentage || 0
+        }
       }));
     } catch (error) {
       console.error(`Failed to fetch approval status for ${applicantId}:`, error);
@@ -469,18 +480,11 @@ export default function RecruitmentPage() {
                           </Button>
                         )}
                         
-                        {/* Show "Approved" badge ONLY if recruitment_approved=true AND zero blockers */}
-                        {applicant.recruitment_approved && approval?.canApprove && (
-                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200" data-testid={`approved-badge-${applicant.id}`}>
+                        {/* Simplified Status: Show "Ready" only at 100% complete */}
+                        {approval?.progressPct === 100 && (
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200" data-testid={`ready-badge-${applicant.id}`}>
                             <CheckCircle className="w-3 h-3 mr-1" />
-                            Approved
-                          </Badge>
-                        )}
-                        {/* Show conditional approval if approved but has blockers */}
-                        {applicant.recruitment_approved && approval && !approval.canApprove && (
-                          <Badge className="bg-amber-100 text-amber-800 border-amber-200" data-testid={`conditional-badge-${applicant.id}`}>
-                            <AlertTriangle className="w-3 h-3 mr-1" />
-                            Conditionally Approved
+                            Ready
                           </Badge>
                         )}
                       </div>

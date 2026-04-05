@@ -706,5 +706,58 @@ Employee Profile Page
 
 ---
 
+## COMPLETED: Universal Editability UI + P1 Features (April 5, 2026)
+
+### P0: Universal Editability [Edit] Buttons - COMPLETE
+All edit buttons are now wired up and functional:
+
+1. **Edit Personal Details Button** (`data-testid="edit-personal-btn"`)
+   - Location: Work Readiness tab → Employee Summary card
+   - Opens: `EditPersonalDetailsDialog` with fields for name, email, phone, DOB, NI number, address, emergency contact
+   - Includes: Reason for change (audit trail)
+
+2. **Edit Employment History Button** (`data-testid="edit-employment-btn"`)
+   - Location: Employment tab header
+   - Opens: `EditEmploymentHistoryDialog` with multi-position support
+   - Features: Add/remove positions, current position toggle, responsibilities field
+   - Includes: Reason for change (audit trail)
+
+3. **Edit Reference Button** (`data-testid="edit-reference-btn-{n}"`)
+   - Location: References tab → next to declared referee info
+   - Opens: `EditReferenceDialog` with NHS-required fields:
+     - Referee Type (Professional/Character/Personal)
+     - Period of Supervision
+     - Direct Supervisor checkbox
+     - Can Contact Before Offer checkbox
+   - Includes: Reason for change (audit trail)
+
+### P1: Color-Coded Blockers - COMPLETE
+`ConsolidatedStatusPanel.js` now shows color-coded severity:
+- 🔴 **Critical** (Red) = Missing/Unverified documents
+- 🟡 **Pending** (Amber) = Uploaded, awaiting verification
+- Each blocker item shows severity badge and color-coded styling
+- Action buttons styled to match severity
+
+### P1: Gap Explanation UI - ALREADY IMPLEMENTED
+`EmploymentGapPanel.js` already had comprehensive gap explanation:
+- Reason dropdown: career_break, education, health, travel, unemployed, family, volunteering, self_employed, other
+- Explanation text field
+- Supporting document upload
+- Admin verify/reject workflow
+- Color-coded gap status (pending, explained, verified, rejected)
+
+### Key Files Modified
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js` - Wired up edit dialogs and reference handler
+- `/app/frontend/src/components/compliance/ConsolidatedStatusPanel.js` - Added color-coded blocker severity
+- `/app/frontend/src/components/compliance/ReferencesPanel.js` - Added Edit button for references
+- `/app/frontend/src/components/employee/tabs/ReferencesTabContent.js` - Pass onEditReference handler
+
+### Test Results
+- Backend: 100%
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_159.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - ConsolidatedStatusPanel bug fixes completed
+April 5, 2026 - Universal Editability UI + P1 Features completed

@@ -169,7 +169,12 @@ export default function ConsolidatedStatusPanel({
   const canPromote = gates.can_promote;
   const gatesPassed = gates.gates_passed || 0;
   const totalGates = gates.total_gates || 12;
-  const percentage = progress.percentage || 0;
+  
+  // Calculate percentage from gates (pre-employment gates are the real promotion blockers)
+  const gatesPercentage = totalGates > 0 ? Math.round((gatesPassed / totalGates) * 100) : 0;
+  
+  // Use categories breakdown from unified-progress for the detailed grid
+  const breakdown = progress.categories || {};
 
   // Determine overall status
   const isBlocked = blockers.length > 0;
@@ -310,7 +315,7 @@ export default function ConsolidatedStatusPanel({
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-700">
-              PROGRESS: {gatesPassed}/{totalGates} requirements complete ({percentage}%)
+              PROGRESS: {gatesPassed}/{totalGates} requirements complete ({gatesPercentage}%)
             </CardTitle>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />
@@ -318,7 +323,7 @@ export default function ConsolidatedStatusPanel({
           </div>
         </CardHeader>
         <CardContent className="py-4">
-          <Progress value={percentage} className="h-3 mb-4" />
+          <Progress value={gatesPercentage} className="h-3 mb-4" />
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             {[
@@ -329,9 +334,9 @@ export default function ConsolidatedStatusPanel({
               { label: 'Agreements', key: 'agreements', icon: FileCheck },
               { label: 'Induction', key: 'induction', icon: Briefcase }
             ].map((cat) => {
-              const breakdown = progress.breakdown?.[cat.key] || { completed: 0, total: 0 };
+              const catData = breakdown[cat.key] || { completed: 0, total: 0 };
               const Icon = cat.icon;
-              const isComplete = breakdown.completed >= breakdown.total && breakdown.total > 0;
+              const isComplete = catData.completed >= catData.total && catData.total > 0;
               
               return (
                 <div 
@@ -349,7 +354,7 @@ export default function ConsolidatedStatusPanel({
                     "text-sm font-medium",
                     isComplete ? "text-green-700" : "text-gray-700"
                   )}>
-                    {breakdown.completed}/{breakdown.total}
+                    {catData.completed}/{catData.total}
                   </p>
                   <p className="text-xs text-gray-500">{cat.label}</p>
                 </div>

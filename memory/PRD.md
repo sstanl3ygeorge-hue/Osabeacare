@@ -1058,5 +1058,51 @@ System already enforces 2 Proof of Address documents requirement:
 
 ---
 
+## COMPLETED: P0 Contract Signing Lock + Admin Button Fixes (April 5, 2026)
+
+### P0 #1: Contract Signing - Final Step Only
+
+**Backend Implementation:**
+- `can_sign_contract(db, employee_id)` function in `work_readiness_engine.py`
+- `can_promote_to_active(db, employee_id)` function
+- `GET /api/employees/{id}/can-sign-contract` endpoint
+
+**8 Requirements Before Contract:**
+1. DBS Certificate verified with stamp
+2. Right to Work verified with stamp
+3. Identity document verified with stamp
+4. 2 Proof of Address documents verified
+5. Both references verified
+6. Interview record completed
+7. Induction checklist complete (15 items)
+8. Mandatory training complete (6 items)
+
+**Worker Dashboard Changes:**
+- Contract section shows "Contract Locked" when blockers exist
+- Locked button with Lock icon
+- Lists remaining requirements (max 5 shown)
+- Enables "Sign Contract" only when `can_sign=true`
+
+### P0 #2: Admin Button Fixes
+
+| Blocker | Old Button | New Button |
+|---------|-----------|------------|
+| Interview | (none) | [Complete Interview] |
+| Contract | [Send Contract] | [Locked] badge (removed button) |
+| DBS/RTW/Identity/POA | [Record Check] | [Verify with Evidence] |
+| Reference 1/2 | [Review] | [Review] (unchanged) |
+| Induction | [Start] | [Start] (unchanged) |
+| Training | [View Training] | [View Training] (unchanged) |
+
+### P0 #3: Category Grid Labels
+Already correct: Documents, Forms, Training, References, Agreements, Induction
+
+### Test Results:
+- Backend: 89% (16/18 - 2 failures on unrelated endpoint)
+- Frontend: 100% (all P0 features verified)
+- Test report: `/app/test_reports/iteration_166.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - P2 Bulk PDF Import UI completed
+April 5, 2026 - P0 Contract Signing Lock + Admin Button Fixes completed

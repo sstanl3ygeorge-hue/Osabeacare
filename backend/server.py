@@ -12720,6 +12720,173 @@ async def get_import_template(
     }
 
 
+@api_router.post("/admin/employees/extract-from-pdf")
+async def extract_employee_from_pdf(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Extract employee data from a PDF application form using AI.
+    
+    Uses Gemini to parse the PDF and extract:
+    - Personal details (name, email, phone, DOB, address)
+    - Role applied for
+    - Employment history
+    - References
+    - Declarations
+    
+    Returns structured data for review before import.
+    """
+    import tempfile
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    # Validate file type
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    
+    # Save uploaded file temporarily
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+        
+        # Use Gemini to extract data from PDF
+        try:
+            from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+            
+            api_key = os.environ.get('EMERGENT_LLM_KEY')
+            if not api_key:
+                raise HTTPException(status_code=500, detail="AI extraction not configured - EMERGENT_LLM_KEY missing")
+            
+            chat = LlmChat(
+                api_key=api_key,
+                session_id=f"pdf-extract-{file.filename}-{datetime.now(timezone.utc).timestamp()}",
+                system_message="""You are an expert at extracting structured data from employment application forms.
+                
+Extract the following information from the PDF and return it as valid JSON only (no markdown, no explanation):
+
+{
+    "personal_details": {
+        "first_name": "string",
+        "last_name": "string",
+        "email": "string (lowercase)",
+        "phone": "string",
+        "date_of_birth": "YYYY-MM-DD or null",
+        "address": {
+            "line1": "string",
+            "line2": "string or null",
+            "city": "string",
+            "postcode": "string"
+        },
+        "national_insurance": "string or null"
+    },
+    "role": "Healthcare Assistant | Nurse (Registered) | Senior Healthcare Assistant | Support Worker | Care Assistant",
+    "employment_history": [
+        {
+            "employer": "string",
+            "job_title": "string",
+            "start_date": "YYYY-MM-DD",
+            "end_date": "YYYY-MM-DD or null if current",
+            "is_current": true/false,
+            "responsibilities": "string"
+        }
+    ],
+    "references": [
+        {
+            "name": "string",
+            "email": "string or null",
+            "phone": "string or null",
+            "organisation": "string",
+            "position": "string",
+            "relationship": "Line Manager | Supervisor | Colleague | Professional Reference"
+        }
+    ],
+    "declarations": {
+        "has_criminal_convictions": true/false,
+        "criminal_details": "string or null",
+        "has_health_conditions": true/false,
+        "health_details": "string or null",
+        "dbs_consent": true/false,
+        "right_to_work_uk": true/false
+    },
+    "qualifications": {
+        "highest_qualification": "string or null",
+        "care_certificate": true/false,
+        "relevant_training": ["string"]
+    },
+    "extraction_confidence": "high | medium | low",
+    "extraction_notes": "Any issues or unclear fields"
+}
+
+If a field cannot be found, use null. If dates are ambiguous, make your best guess in YYYY-MM-DD format.
+Return ONLY the JSON object, no additional text."""
+            ).with_model("gemini", "gemini-2.5-flash")
+            
+            # Create file content for PDF
+            pdf_file = FileContentWithMimeType(
+                file_path=tmp_path,
+                mime_type="application/pdf"
+            )
+            
+            # Send to AI for extraction
+            user_message = UserMessage(
+                text="Extract all employee application data from this PDF form. Return only valid JSON.",
+                file_contents=[pdf_file]
+            )
+            
+            response = await chat.send_message(user_message)
+            
+            # Parse the JSON response
+            import json
+            import re
+            
+            # Clean up response - remove markdown code blocks if present
+            response_text = response.strip()
+            if response_text.startswith('```'):
+                response_text = re.sub(r'^```json?\s*', '', response_text)
+                response_text = re.sub(r'\s*```$', '', response_text)
+            
+            try:
+                extracted_data = json.loads(response_text)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse AI response: {e}")
+                logger.error(f"Response was: {response_text[:500]}")
+                raise HTTPException(status_code=500, detail=f"AI returned invalid JSON: {str(e)}")
+            
+            # Log audit
+            await log_audit_action(
+                user["user_id"],
+                "pdf_extraction",
+                "system",
+                file.filename,
+                {
+                    "filename": file.filename,
+                    "confidence": extracted_data.get("extraction_confidence", "unknown")
+                }
+            )
+            
+            return {
+                "success": True,
+                "filename": file.filename,
+                "extracted_data": extracted_data
+            }
+            
+        except ImportError as e:
+            logger.error(f"emergentintegrations not installed: {e}")
+            raise HTTPException(status_code=500, detail="AI extraction library not installed")
+        except Exception as e:
+            logger.error(f"AI extraction failed: {e}")
+            raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
+            
+    finally:
+        # Clean up temp file
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 @api_router.get("/employees/{employee_id}/recruitment-status")
 async def get_recruitment_status(
     employee_id: str,

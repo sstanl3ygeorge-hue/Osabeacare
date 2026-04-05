@@ -38,6 +38,7 @@ import AuditViewPage from "./pages/portal/AuditViewPage";
 import DBSRegisterPage from "./pages/portal/DBSRegisterPage";
 import SettingsPage from "./pages/portal/SettingsPage";
 import TemplatesPage from "./pages/portal/TemplatesPage";
+import BulkImportPage from "./pages/portal/BulkImportPage";
 import FormEditorPage from "./pages/portal/FormEditorPage";
 import ComplianceCentrePage from "./pages/portal/ComplianceCentrePage";
 import ServiceUsersPage from "./pages/portal/ServiceUsersPage";
@@ -104,6 +105,7 @@ function AppRouter() {
         <Route path="employees/:employeeId" element={<EmployeeProfilePage />} />
         <Route path="recruitment" element={<RecruitmentPipelinePage />} />
         <Route path="recruitment/:employeeId" element={<EmployeeProfilePage />} />
+        <Route path="bulk-import" element={<BulkImportPage />} />
         {/* Documents route removed - all document management is now per-employee in Employee Profile → Documents tab */}
         {/* <Route path="documents" element={<DocumentsPage />} /> */}
         {/* Policies route removed - policy management consolidated in Compliance Centre */}

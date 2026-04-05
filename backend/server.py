@@ -7450,12 +7450,21 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         if matching:
             doc = matching[0]
             is_verified = doc.get("verification_stamp") not in [None, "", "not_verified"]
+            # Get file URL - prefer stamped version if verified
+            file_url = None
+            if is_verified and doc.get("stamped_file_url"):
+                file_url = doc.get("stamped_file_url")
+            elif doc.get("file_url"):
+                file_url = doc.get("file_url")
+            
             completed_docs.append({
                 "type": doc_type,
                 "name": doc_name,
                 "verified": is_verified,
                 "uploaded_at": doc.get("uploaded_at"),
-                "file_name": doc.get("file_name")
+                "file_name": doc.get("file_name"),
+                "file_url": file_url,
+                "verification_stamp": doc.get("verification_stamp")
             })
         else:
             missing_docs.append({
@@ -7470,15 +7479,19 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         # Remove existing POA from completed if only 1
         if len(poa_docs) == 1:
             completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]
+            poa_doc = poa_docs[0]
+            is_verified = poa_doc.get("verification_stamp") not in [None, "", "not_verified"]
+            file_url = poa_doc.get("stamped_file_url") if is_verified else poa_doc.get("file_url")
             completed_docs.append({
                 "type": "proof_of_address",
                 "name": "Proof of Address (1 of 2)",
-                "verified": poa_docs[0].get("verification_stamp") not in [None, "", "not_verified"],
-                "uploaded_at": poa_docs[0].get("uploaded_at"),
+                "verified": is_verified,
+                "uploaded_at": poa_doc.get("uploaded_at"),
+                "file_url": file_url,
                 "partial": True
             })
         missing_docs.append({
-            "type": "proof_of_address_second",
+            "type": "proof_of_address_2",
             "name": f"Second Proof of Address (need {2 - len(poa_docs)} more)",
             "action": "upload"
         })
@@ -7609,7 +7622,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                         "title": f"{t['name']} Training Expiring",
                         "date": exp_str,
                         "days_left": days_left,
-                        "urgent": days_left < 30
+                        "urgent": days_left < 30,
+                        "training_id": t.get("id")
                     })
             except:
                 pass
@@ -7678,6 +7692,52 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "progress_percentage": progress_percentage
             })
     
+    # Get professional registration if applicable
+    professional_registrations = employee.get("professional_registrations", [])
+    job_role = employee.get("job_role", "").lower()
+    
+    # Determine if role requires professional registration
+    requires_prof_reg = False
+    registration_type = None
+    if "nurse" in job_role or "midwife" in job_role:
+        requires_prof_reg = True
+        registration_type = "NMC"
+    elif "doctor" in job_role or "physician" in job_role or "consultant" in job_role:
+        requires_prof_reg = True
+        registration_type = "GMC"
+    elif "physio" in job_role or "occupational" in job_role or "paramedic" in job_role:
+        requires_prof_reg = True
+        registration_type = "HCPC"
+    elif "social worker" in job_role:
+        requires_prof_reg = True
+        registration_type = "SWE"
+    
+    prof_reg_status = None
+    if requires_prof_reg:
+        # Find matching registration
+        matching_reg = None
+        for reg in professional_registrations:
+            if reg.get("registration_type") == registration_type:
+                matching_reg = reg
+                break
+        
+        if matching_reg:
+            prof_reg_status = {
+                "type": registration_type,
+                "number": matching_reg.get("registration_number"),
+                "verified": matching_reg.get("verified", False),
+                "expiry_date": matching_reg.get("expiry_date"),
+                "status": "verified" if matching_reg.get("verified") else "pending_verification"
+            }
+        else:
+            prof_reg_status = {
+                "type": registration_type,
+                "number": None,
+                "verified": False,
+                "status": "not_submitted",
+                "required": True
+            }
+    
     return {
         "employee": {
             "id": employee_id,
@@ -7686,7 +7746,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "email": employee.get("email"),
             "status": status,
             "employee_status": employee_status,
-            "is_active_employee": is_active_employee
+            "is_active_employee": is_active_employee,
+            "job_role": employee.get("job_role", "")
         },
         "progress": {
             "percentage": progress_percentage,
@@ -7700,7 +7761,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "completed_trainings": completed_trainings,
         "expired_trainings": expired_trainings,
         "alerts": sorted(alerts, key=lambda x: x.get("days_left", 999)),
-        "contract_signed": contract_signed
+        "contract_signed": contract_signed,
+        "professional_registration": prof_reg_status
     }
 
 @api_router.post("/worker/upload-document/{requirement_id}")

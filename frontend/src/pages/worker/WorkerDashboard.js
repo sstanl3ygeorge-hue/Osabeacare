@@ -284,7 +284,7 @@ export default function WorkerDashboard() {
 
   if (!dashboard) return null;
 
-  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, alerts, contract_signed } = dashboard;
+  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, alerts, contract_signed, professional_registration } = dashboard;
   
   const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
 
@@ -310,33 +310,45 @@ export default function WorkerDashboard() {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Status Banner */}
+        {/* Status Banner - Enhanced with "Cleared to Work" messaging */}
         {isActiveEmployee ? (
-          <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg">
+          <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-active">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
                 <Shield className="h-8 w-8" />
               </div>
-              <div>
-                <h3 className="font-bold text-xl">Active Employee</h3>
-                <p className="text-green-100">You are cleared to work. Keep your documents up to date.</p>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-xl">Cleared to Work</h3>
+                  <Badge className="bg-white/20 text-white text-xs">Active Employee</Badge>
+                </div>
+                <p className="text-green-100 mt-1">
+                  All NHS compliance requirements verified. You are authorised to work.
+                </p>
               </div>
             </div>
+            {/* Mini stats for active employees */}
+            {alerts.length === 0 && (
+              <div className="mt-4 pt-4 border-t border-white/20 flex items-center gap-2">
+                <CheckCircle className="h-4 w-4" />
+                <span className="text-sm text-green-100">All documents current • No renewals due</span>
+              </div>
+            )}
           </div>
         ) : employee.status === 'READY' ? (
-          <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg">
+          <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-ready">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
                 <CheckCircle className="h-8 w-8" />
               </div>
               <div>
                 <h3 className="font-bold text-xl">Compliance Complete!</h3>
-                <p className="text-blue-100">All requirements submitted. Awaiting final review.</p>
+                <p className="text-blue-100">All requirements submitted. Awaiting admin verification to be cleared for work.</p>
               </div>
             </div>
           </div>
         ) : (
-          <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white shadow-lg">
+          <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-onboarding">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
                 <AlertCircle className="h-8 w-8" />
@@ -368,31 +380,138 @@ export default function WorkerDashboard() {
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
 
-        {/* Urgent Alerts */}
-        {alerts.length > 0 && (
-          <Card className="border-red-200 bg-red-50/50 shadow-md border-0">
+        {/* Professional Registration Status - if applicable */}
+        {professional_registration && (
+          <Card className={`shadow-md border-0 ${
+            professional_registration.status === 'verified' ? 'bg-green-50/30' :
+            professional_registration.status === 'pending_verification' ? 'bg-amber-50/30' :
+            'bg-red-50/30'
+          }`} data-testid="professional-registration-section">
             <CardHeader className="pb-2">
-              <CardTitle className="text-red-800 flex items-center gap-2 text-lg">
-                <AlertTriangle className="h-5 w-5" />
-                Action Required
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Shield className={`h-5 w-5 ${
+                  professional_registration.status === 'verified' ? 'text-green-600' :
+                  professional_registration.status === 'pending_verification' ? 'text-amber-600' :
+                  'text-red-600'
+                }`} />
+                Professional Registration ({professional_registration.type})
               </CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="p-4 bg-white rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                      professional_registration.status === 'verified' ? 'bg-green-100' :
+                      professional_registration.status === 'pending_verification' ? 'bg-amber-100' :
+                      'bg-red-100'
+                    }`}>
+                      <Shield className={`h-5 w-5 ${
+                        professional_registration.status === 'verified' ? 'text-green-600' :
+                        professional_registration.status === 'pending_verification' ? 'text-amber-600' :
+                        'text-red-600'
+                      }`} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-slate-800">
+                        {professional_registration.type} Registration
+                      </p>
+                      {professional_registration.number ? (
+                        <p className="text-sm text-slate-600">
+                          Reg No: {professional_registration.number}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-red-600">
+                          Not submitted - Required for your role
+                        </p>
+                      )}
+                      {professional_registration.expiry_date && (
+                        <p className="text-xs text-slate-500">
+                          Expires: {formatDate(professional_registration.expiry_date)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {professional_registration.status === 'verified' ? (
+                      <Badge className="bg-green-100 text-green-700">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Verified
+                      </Badge>
+                    ) : professional_registration.status === 'pending_verification' ? (
+                      <Badge className="bg-amber-100 text-amber-700">
+                        <Clock className="h-3 w-3 mr-1" />
+                        Pending Verification
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-red-100 text-red-700">
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        Required
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Urgent Alerts with Renewal Upload Buttons */}
+        {alerts.length > 0 && (
+          <Card className="border-red-200 bg-red-50/50 shadow-md border-0" data-testid="alerts-section">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-red-800 flex items-center gap-2 text-lg">
+                <AlertTriangle className="h-5 w-5" />
+                Upcoming Renewals
+              </CardTitle>
+              <p className="text-xs text-slate-500 mt-1">
+                Documents or training expiring soon. Upload renewals before they expire.
+              </p>
+            </CardHeader>
+            <CardContent>
               <div className="space-y-2">
-                {alerts.map((alert, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ${alert.urgent ? 'bg-red-500' : 'bg-amber-500'}`} />
-                      <div>
-                        <p className="font-medium text-slate-800">{alert.title}</p>
-                        <p className="text-xs text-slate-500">Expires: {formatDate(alert.date)}</p>
+                {alerts.map((alert, idx) => {
+                  // Determine severity color: red < 30 days, amber < 60, yellow < 90
+                  const getSeverityColors = (days) => {
+                    if (days <= 30) return { bg: 'bg-red-50', border: 'border-red-200', badge: 'bg-red-100 text-red-700', dot: 'bg-red-500' };
+                    if (days <= 60) return { bg: 'bg-amber-50', border: 'border-amber-200', badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' };
+                    return { bg: 'bg-yellow-50', border: 'border-yellow-200', badge: 'bg-yellow-100 text-yellow-700', dot: 'bg-yellow-500' };
+                  };
+                  const severity = getSeverityColors(alert.days_left);
+                  
+                  return (
+                    <div key={idx} className={`flex items-center justify-between p-4 ${severity.bg} border ${severity.border} rounded-xl`} data-testid={`alert-${alert.type}`}>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-3 h-3 rounded-full ${severity.dot} animate-pulse`} />
+                        <div>
+                          <p className="font-medium text-slate-800">{alert.title}</p>
+                          <p className="text-xs text-slate-500">Expires: {formatDate(alert.date)}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge className={severity.badge}>
+                          {alert.days_left <= 0 ? 'EXPIRED' : `${alert.days_left} days`}
+                        </Badge>
+                        {/* Upload Renewal Button */}
+                        <Button 
+                          size="sm" 
+                          variant={alert.urgent ? "default" : "outline"}
+                          className={`gap-1 ${alert.urgent ? 'bg-red-600 hover:bg-red-700' : ''}`}
+                          onClick={() => triggerFileInput(alert.type === 'training' ? `training_renewal_${alert.training_id || 'general'}` : `${alert.type}_renewal`)}
+                          disabled={uploading === `${alert.type}_renewal`}
+                          data-testid={`upload-renewal-${alert.type}`}
+                        >
+                          {uploading === `${alert.type}_renewal` ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          Upload Renewal
+                        </Button>
                       </div>
                     </div>
-                    <Badge className={alert.urgent ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}>
-                      {alert.days_left} days left
-                    </Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -566,38 +685,84 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Completed Items */}
+        {/* Completed Items - With Pending Verification & View Document */}
         {(completed_documents?.length > 0 || completed_trainings?.length > 0) && (
           <Card className="shadow-md border-0 bg-green-50/30">
             <CardHeader className="pb-2">
               <CardTitle className="text-green-800 flex items-center gap-2 text-lg">
                 <CheckCircle className="h-5 w-5" />
-                Completed
+                Submitted Documents
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
                 {completed_documents?.map((doc, idx) => (
-                  <div key={idx} className="flex items-center gap-3 p-2">
-                    <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
-                    <span className="text-slate-700">{doc.name}</span>
-                    {doc.verified && (
-                      <Badge className="bg-green-100 text-green-700 text-xs ml-auto">Verified</Badge>
-                    )}
-                    {doc.partial && (
-                      <Badge className="bg-amber-100 text-amber-700 text-xs ml-auto">Partial</Badge>
-                    )}
+                  <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl" data-testid={`completed-doc-${doc.type}`}>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <div>
+                        <span className="text-slate-700 font-medium">{doc.name}</span>
+                        {doc.uploaded_at && (
+                          <p className="text-xs text-slate-500">Uploaded: {formatDate(doc.uploaded_at)}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {doc.verified ? (
+                        <>
+                          <Badge className="bg-green-100 text-green-700 text-xs">
+                            <Shield className="h-3 w-3 mr-1" />
+                            Verified
+                          </Badge>
+                          {doc.file_url && (
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="text-xs h-7"
+                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${doc.file_url}`, '_blank')}
+                              data-testid={`view-doc-${doc.type}`}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              View
+                            </Button>
+                          )}
+                        </>
+                      ) : (
+                        <Badge className="bg-amber-100 text-amber-700 text-xs" data-testid={`pending-verification-${doc.type}`}>
+                          <Clock className="h-3 w-3 mr-1" />
+                          Pending Verification
+                        </Badge>
+                      )}
+                      {doc.partial && (
+                        <Badge className="bg-amber-100 text-amber-700 text-xs">Partial</Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
                 {completed_trainings?.map((training, idx) => (
-                  <div key={idx} className="flex items-center gap-3 p-2">
-                    <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
-                    <span className="text-slate-700">{training.name}</span>
-                    {training.expiry_date && (
-                      <span className="text-xs text-slate-500 ml-auto">
-                        Exp: {formatDate(training.expiry_date)}
-                      </span>
-                    )}
+                  <div key={idx} className="flex items-center justify-between p-3 bg-white rounded-xl" data-testid={`completed-training-${training.id}`}>
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className="h-4 w-4 text-green-600 flex-shrink-0" />
+                      <div>
+                        <span className="text-slate-700 font-medium">{training.name}</span>
+                        {training.expiry_date && (
+                          <p className="text-xs text-slate-500">Expires: {formatDate(training.expiry_date)}</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {training.verified ? (
+                        <Badge className="bg-green-100 text-green-700 text-xs">
+                          <Shield className="h-3 w-3 mr-1" />
+                          Verified
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-amber-100 text-amber-700 text-xs">
+                          <Clock className="h-3 w-3 mr-1" />
+                          Pending Verification
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

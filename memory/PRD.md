@@ -512,5 +512,49 @@ Training certificates often contain 40+ training items in a single document (e.g
 
 ---
 
+## COMPLETED: Training Expiry Auto-Reminders (April 2026)
+
+### Features Implemented
+
+#### Scheduled Daily Job (8:00 AM)
+- Checks all training certificates expiring within 60 days
+- Groups expiring trainings by employee
+- Only sends reminder if no reminder sent in last 7 days
+- Logs all reminder activity in `training_expiry_reminders` collection
+
+#### Email Notifications to Workers
+- Professional HTML email template with training list
+- Color-coded urgency (red for <14 days, amber for <30 days)
+- Direct link to Worker Portal for uploading renewed certificates
+- Table showing training name, expiry date, and days remaining
+
+#### Admin Dashboard Integration
+- **TrainingExpiryAlerts** component on main dashboard
+- Shows summary: Critical (<14 days), Warning (14-30 days), Upcoming (30-60 days)
+- "Send Reminders" button for manual trigger
+- Clicking items navigates to employee's Training tab
+- Green "All Training Current" state when no expiring trainings
+
+#### New API Endpoints
+1. **GET /api/admin/training-expiry-alerts?days=60**
+   - Returns trainings grouped by urgency level
+   - Includes employee name, training name, expiry date, days remaining
+
+2. **POST /api/admin/training-expiry-reminders/send**
+   - Manually triggers reminder emails to all affected workers
+   - Returns count of employees notified
+
+#### Dashboard Stats Extended
+- `training_expiring_critical`: Count of trainings expiring in <14 days
+- `training_expiring_warning`: Count expiring in 14-30 days
+- `training_expiring_upcoming`: Count expiring in 30-60 days
+
+### Key Files
+- `/app/backend/server.py` (lines 42515-42870) - Scheduler job and reminder system
+- `/app/frontend/src/components/admin/TrainingExpiryAlerts.js` - Dashboard component
+- `/app/frontend/src/pages/portal/DashboardPage.js` - Integration
+
+---
+
 ## Last Updated
-April 5, 2026 - AI Multi-Training Extraction completed - bulk certificate upload with AI extraction, mandatory/additional categorization, EnhancedTrainingTab UI
+April 5, 2026 - Training expiry auto-reminder system completed - daily scheduled emails, admin dashboard alerts, manual trigger button

@@ -759,5 +759,66 @@ All edit buttons are now wired up and functional:
 
 ---
 
+## COMPLETED: P0 Compliance Checklist (April 5, 2026)
+
+### P0 #1: Edit Declarations Dialog - COMPLETE
+Created `EditDeclarationsDialog.js` with NHS-required fields:
+- **Criminal Convictions** - Checkbox + details text
+- **Health Conditions** - Checkbox + details for occupational health
+- **DBS Consent** - Consent checkbox + Update Service ID if registered
+- **Right to Work Restrictions** - Restrictions details + visa expiry date
+- **Driving Licence** - Licence type dropdown + convictions
+
+Backend endpoint: `PUT /api/employees/{id}/declarations` with reason logging
+
+### P0 #2: Induction Checklist - 15 Care Certificate Standards - COMPLETE
+Updated `DEFAULT_INDUCTION_ITEMS` in server.py with Care Certificate standards:
+1. Understand your role
+2. Your personal development
+3. Duty of care
+4. Equality and diversity
+5. Work in a person-centred way
+6. Communication
+7. Privacy and dignity
+8. Fluids and nutrition
+9. Awareness of mental health, dementia and learning disabilities
+10. Safeguarding adults
+11. Basic life support
+12. Health and safety
+13. Handling information
+14. Infection prevention and control
+15. Shadow shift completed
+
+Note: Removed "Safeguarding Children" (Adults Only agency)
+
+### P0 #3: Training Tab - Edit/Verify/Unverify Buttons - COMPLETE
+Updated `AuditReadyTrainingMatrix.js`:
+- Added **[Edit]** button (pencil icon) - Opens edit dialog for training records
+- Added **[Verify]** button (green) - Marks training as verified with audit trail
+- Added **[Unverify]** button (amber) - Requires reason, reverts to pending status
+- Added **Verified By** column - Shows who verified and when
+
+Backend endpoints:
+- `POST /api/employees/{id}/training/{record_id}/verify`
+- `POST /api/employees/{id}/training/{record_id}/unverify`
+
+### P0 #4: 2 POA Documents - ALREADY IMPLEMENTED
+System already enforces 2 Proof of Address documents requirement:
+- Backend: `work_readiness_engine.py` checks `poa_stamped_count >= 2`
+- Frontend: Shows "Proof of Address (2 documents required)"
+
+### Key Files Modified
+- `/app/frontend/src/components/admin/EditDeclarationsDialog.js` (NEW)
+- `/app/frontend/src/components/employee/ApplicationDataPanel.js` - Added Edit button
+- `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js` - Edit/Verify/Unverify buttons
+- `/app/backend/server.py` - Declarations endpoint + training verify/unverify + 15 Care Certificate standards
+
+### Test Results
+- Backend: 100%
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_160.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - Universal Editability UI + P1 Features completed
+April 5, 2026 - P0 Compliance Checklist completed

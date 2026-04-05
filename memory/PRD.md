@@ -671,5 +671,40 @@ Employee Profile Page
 
 ---
 
+## COMPLETED: ConsolidatedStatusPanel Bug Fixes (April 5, 2026)
+
+### Bugs Fixed
+
+1. **Progress Percentage Calculation**
+   - **Issue**: Showed "2/12 requirements complete (0%)" when it should be 17%
+   - **Fix**: Changed from `progress.percentage` to calculated `gatesPercentage = Math.round((gatesPassed / totalGates) * 100)`
+   - **Result**: Now shows correct percentage (e.g., 2/12 = 17%)
+
+2. **Dynamic Total Requirements by Role**
+   - **Issue**: Always showed 12 total gates regardless of role
+   - **Fix**: Backend already implements this - 12 for HCA, 13 for Nurse (includes NMC)
+   - **Verified**: Nurse role correctly shows 13 total gates
+
+3. **Send Reminder to Worker Button**
+   - **Status**: Working correctly
+   - **Endpoint**: POST `/api/workers/{employee_id}/send-reminder`
+   - **Response**: Returns magic link for worker portal access
+   - **Note**: `email_sent:false` in preview (Resend API key not configured)
+
+4. **Category Breakdown Grid**
+   - **Fix**: Changed variable reference from `breakdown.completed/total` to `catData.completed/total`
+   - **Result**: Shows correct category values (Documents, Forms, Training, References, Agreements, Induction)
+
+### Quick Actions vs Tabs
+- **Decision**: Kept both Quick Actions and Tabs
+- **Rationale**: Quick Actions provide fast shortcuts (Send Reminder, View Full Compliance) without tab navigation
+
+### Test Results
+- Backend: 100%
+- Frontend: 100%
+- Test report: `/app/test_reports/iteration_158.json`
+
+---
+
 ## Last Updated
-April 5, 2026 - Employee Profile UI Consolidation completed - removed duplicate panels
+April 5, 2026 - ConsolidatedStatusPanel bug fixes completed

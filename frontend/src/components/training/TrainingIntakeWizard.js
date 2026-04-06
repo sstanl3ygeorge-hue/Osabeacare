@@ -310,14 +310,12 @@ export default function TrainingIntakeWizard({
             <div className="space-y-4" data-testid="intake-step-upload">
               <div className="border-2 border-dashed border-gray-200 rounded-xl p-6">
                 <FileUploaderInline
-                  files={uploadFile ? [uploadFile] : []}
-                  setFiles={(files) => setUploadFile(files[0] || null)}
-                  accept={{
-                    'application/pdf': ['.pdf'],
-                    'image/*': ['.png', '.jpg', '.jpeg']
-                  }}
-                  maxSize={10 * 1024 * 1024}
-                  maxFiles={1}
+                  selectedFile={uploadFile}
+                  onFileSelect={(file) => setUploadFile(file)}
+                  onClear={() => setUploadFile(null)}
+                  acceptedTypes={['application/pdf', 'image/jpeg', 'image/jpg', 'image/png']}
+                  maxSizeBytes={10 * 1024 * 1024}
+                  placeholder="Choose file or drag here"
                 />
                 <p className="text-xs text-text-muted text-center mt-3">
                   Upload a training certificate (PDF or image). Multi-course certificates will be split automatically.

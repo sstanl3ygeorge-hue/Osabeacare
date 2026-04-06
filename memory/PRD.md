@@ -2248,7 +2248,9 @@ To send emails to workers (not just test account):
 - [x] Full Onboarding Audit 0%→100% (DONE - April 2026)
 - [x] Rejection Flow with Re-upload (DONE - April 2026)
 - [x] Auto-populate from Application Form (DONE - April 2026)
+- [x] Admin Profile References Tab - External Referee Response Display (DONE - April 2026)
 - [ ] Phase 4: CQC Export (SKIPPED per user request)
+- [ ] Phase 5: Application Form → Profile Auto-Sync (IN PROGRESS)
 
 ### P1 - Important
 - [ ] Magic Link Email Flow verification
@@ -2263,5 +2265,24 @@ To send emails to workers (not just test account):
 - [ ] Supabase Auth integration with RLS policies
 - [ ] PostgreSQL migration (from MongoDB)
 - [ ] MFA (TOTP) for Admin accounts
+
+---
+
+## COMPLETED: Admin Profile References Tab Fix (April 2026)
+
+### Issue
+External referee form submissions saved `reference_X_response_data` to the employee record, but the `/api/employees/{id}/references` endpoint only looked in the `db.references` collection for response data.
+
+### Fix
+Updated `GET /api/employees/{employee_id}/references` endpoint in `/app/backend/server.py`:
+1. Added fallback to check `employee.reference_X_response_data` if `db.references` has no response
+2. Added check for `reference_X_request_status == "submitted"` to detect responses
+3. Added `response_submitted_at` field from `employee.reference_X_response_received_at`
+4. Extended `request_sent` detection to include employee-level status fields
+
+### Verification
+- API returns full referee response data (referee_full_name, performance_rating, etc.)
+- Frontend displays "Verified" badges and response indicators correctly
+- References show as 2/2 complete when both referee responses are submitted
 
 

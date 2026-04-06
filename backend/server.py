@@ -37447,8 +37447,18 @@ async def get_employee_references(
         
         # Determine status
         verification_status = ref_data.get("verification_status", "pending")
-        has_response = bool(ref_data.get("response"))
-        request_sent = bool(ref_data.get("request", {}).get("sent_at")) or bool(req)
+        
+        # Check for response data - first from db.references, then fallback to employee record
+        response_data = ref_data.get("response") or employee.get(f"reference_{ref_num}_response_data")
+        has_response = bool(response_data)
+        
+        # Also check employee request status for "submitted" state
+        emp_request_status = employee.get(f"reference_{ref_num}_request_status")
+        if emp_request_status == "submitted" and not has_response:
+            has_response = True
+            response_data = {}  # Empty dict to indicate response received but data not in standard place
+        
+        request_sent = bool(ref_data.get("request", {}).get("sent_at")) or bool(req) or emp_request_status in ["sent", "submitted"]
         declared = ref_data.get("declared", {})
         
         # Fallback to employee fields if declared is empty
@@ -37488,16 +37498,30 @@ async def get_employee_references(
         else:
             status = "not_declared"
         
+        # Get request sent timestamp from employee record if not in db.references
+        request_sent_at = (
+            ref_data.get("request", {}).get("sent_at") or 
+            (req.get("sent_at") if req else None) or
+            employee.get(f"reference_{ref_num}_request_sent_at")
+        )
+        
+        # Get response submitted timestamp
+        response_submitted_at = (
+            (response_data.get("submitted_at") if isinstance(response_data, dict) else None) or
+            employee.get(f"reference_{ref_num}_response_received_at")
+        )
+        
         result["references"][f"reference_{ref_num}"] = {
             "status": status,
             "declared": declared,
             "request": {
-                "sent_at": ref_data.get("request", {}).get("sent_at") or (req.get("sent_at") if req else None),
+                "sent_at": request_sent_at,
                 "method": ref_data.get("request", {}).get("method"),
                 "request_id": req.get("id") if req else None,
                 "due_at": req.get("due_at") if req else None
             },
-            "response": ref_data.get("response"),
+            "response": response_data,
+            "response_submitted_at": response_submitted_at,
             "verification": {
                 "status": verification_status,
                 "verified_by": ref_data.get("verified_by") or emp_verified_by,

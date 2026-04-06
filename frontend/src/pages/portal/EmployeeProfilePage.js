@@ -7110,34 +7110,40 @@ export default function EmployeeProfilePage() {
                   <SelectValue placeholder="Select requirement type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="right_to_work_evidence">
+                  <SelectItem value="right_to_work_documents">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-green-500" />
-                      Right to Work
+                      Right to Work Documents
                     </div>
                   </SelectItem>
-                  <SelectItem value="dbs_evidence">
+                  <SelectItem value="dbs_certificate">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-blue-500" />
                       DBS Certificate
                     </div>
                   </SelectItem>
-                  <SelectItem value="identity_evidence">
+                  <SelectItem value="identity_documents">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-purple-500" />
                       Identity (Passport/ID)
                     </div>
                   </SelectItem>
-                  <SelectItem value="proof_of_address_evidence">
+                  <SelectItem value="proof_of_address">
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-amber-500" />
                       Proof of Address
                     </div>
                   </SelectItem>
-                  <SelectItem value="training_evidence">
+                  <SelectItem value="right_to_work_check">
                     <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-cyan-500" />
-                      Training Certificate
+                      <span className="w-2 h-2 rounded-full bg-teal-500" />
+                      Right to Work Check (Internal)
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="dbs_check">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                      DBS Update Service Check (Internal)
                     </div>
                   </SelectItem>
                 </SelectContent>

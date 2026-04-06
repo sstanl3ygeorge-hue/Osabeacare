@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
@@ -86,20 +86,27 @@ export default function TrainingPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Track if initial data has been fetched to prevent infinite loops
+  const hasFetched = useRef(false);
+  
   // Initialize filter from URL params
   const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
   const { token, isAuditor, loading: authLoading } = useAuth();
 
-  // Sync filter to URL
+  // Sync filter to URL - using a ref to prevent unnecessary updates
   useEffect(() => {
-    const newParams = new URLSearchParams(searchParams);
-    if (filter && filter !== 'all') {
-      newParams.set('filter', filter);
-    } else {
-      newParams.delete('filter');
+    const currentFilter = searchParams.get('filter') || 'all';
+    // Only update URL if filter actually changed from URL state
+    if (currentFilter !== filter) {
+      const newParams = new URLSearchParams(searchParams);
+      if (filter && filter !== 'all') {
+        newParams.set('filter', filter);
+      } else {
+        newParams.delete('filter');
+      }
+      setSearchParams(newParams, { replace: true });
     }
-    setSearchParams(newParams, { replace: true });
-  }, [filter]);
+  }, [filter, searchParams, setSearchParams]);
 
 
   // Correction modal state
@@ -133,17 +140,14 @@ export default function TrainingPage() {
     expiry_date: ''
   });
 
-  const fetchData = async () => {
-    console.log('[TrainingPage] fetchData called. Token:', token ? 'exists' : 'null');
+  const fetchData = useCallback(async () => {
     if (!token) {
-      console.warn('[TrainingPage] No token available for fetching training data');
       setLoading(false);
       return;
     }
     
     try {
       setLoading(true);
-      console.log('[TrainingPage] Starting data fetch...');
       const headers = { Authorization: `Bearer ${token}` };
       
       const [trainingRes, employeesRes, summaryRes, extractionsRes] = await Promise.all([
@@ -158,12 +162,6 @@ export default function TrainingPage() {
           return null;
         })
       ]);
-      
-      console.log('[TrainingPage] Data fetched:', {
-        trainingCount: trainingRes?.data?.length,
-        employeesCount: employeesRes?.data?.length,
-        summary: summaryRes?.data
-      });
       
       setTraining(trainingRes.data || []);
       setEmployees(employeesRes.data || []);
@@ -186,14 +184,15 @@ export default function TrainingPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
   useEffect(() => {
-    // Only fetch data when auth is complete and token is available
-    if (!authLoading && token) {
+    // Only fetch data once when auth is complete and token is available
+    if (!authLoading && token && !hasFetched.current) {
+      hasFetched.current = true;
       fetchData();
     }
-  }, [token, authLoading]);
+  }, [token, authLoading, fetchData]);
 
   const handleAddTraining = async (e) => {
     e.preventDefault();
@@ -209,6 +208,7 @@ export default function TrainingPage() {
       toast.success('Training record added');
       setAddOpen(false);
       setNewRecord({ employee_id: '', training_name: '', mandatory: true, status: 'not_started', expiry_date: '' });
+      hasFetched.current = false; // Allow refetch after mutation
       await fetchData();
     } catch (error) {
       toast.error('Failed to add training record');
@@ -242,6 +242,7 @@ export default function TrainingPage() {
       setEditOpen(false);
       setEditingRecord(null);
       setCorrection({ field: 'expiry_date', new_value: '', reason: '' });
+      hasFetched.current = false; // Allow refetch after mutation
       await fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to correct training record');
@@ -354,6 +355,7 @@ export default function TrainingPage() {
   const handleExtractionReviewComplete = () => {
     setExtractionReviewOpen(false);
     setReviewingDocumentId(null);
+    hasFetched.current = false; // Allow refetch after mutation
     fetchData(); // Refresh to update counts
   };
 

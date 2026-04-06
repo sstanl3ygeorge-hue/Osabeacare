@@ -2110,3 +2110,38 @@ To send emails to workers (not just test account):
 1. Go to https://resend.com/domains
 2. Add and verify `osabea.care` domain
 3. Set `RESEND_FROM_EMAIL=compliance@osabea.care` in backend/.env
+
+
+---
+
+## COMPLETED: Unverify Buttons for Recruitment Record + CV Upload Fix (April 2026)
+
+### Issue 1: Missing Unverify on Recruitment Record Section
+**Problem**: Recruitment Record items (Interview Record, Application Form, CV/Resume) didn't have Unverify buttons like Agreements.
+
+**Fix Applied**:
+- Added `handleUnverify()` function to `FormRequirementRow.js`
+- Added quick Unverify button in collapsed header view (circular arrow icon)
+- Works via `/api/form-submissions/{id}/unverify` or `/api/employee-documents/{id}/unverify`
+- Matches Agreements section behavior
+
+### Issue 2: CV Upload Bug  
+**Problem**: Uploading CV when already verified didn't show the new file. The upload was using `cv_evidence` as requirement_id instead of `cv`.
+
+**Fix Applied**: In `DualRowComplianceSection.js` line 650:
+- Evidence-type rows (like CV) now use the key directly without `_evidence` suffix
+- Form-type rows still add `_evidence` suffix
+
+### Issue 3: Employment History / Declarations / Qualifications
+**Status**: Working as designed
+
+**Analysis**: 
+- Employment History IS populated (Healthcare Assistant at Current Healthcare Ltd, Support Worker at Care Home B, etc.)
+- Data stored with fields: `company`, `role`, `start_date`, `end_date`
+- Frontend displays correctly using field fallbacks: `job.employer || job.company`, `job.job_title || job.position || job.role`
+- Auto-population from Application Form uses AI extraction to `profile_extractions` collection
+- Admin must review and approve extracted fields before applying to profile
+
+### Files Changed:
+- `/app/frontend/src/components/compliance/FormRequirementRow.js` - Added Unverify button
+- `/app/frontend/src/components/compliance/DualRowComplianceSection.js` - Fixed CV upload key

@@ -643,7 +643,12 @@ export default function DualRowComplianceSection({
                     }}
                     onViewHistory={(reqKey, title) => handleViewHistory(reqKey, title)}
                     onPreviewFile={onPreviewFile}
-                    onUpload={(reqKey) => onUpload && onUpload(`${reqKey}_evidence`)}
+                    onUpload={(reqKey) => {
+                      // For evidence-type rows (like CV), use the key directly
+                      // For form-type rows, add _evidence suffix
+                      const uploadKey = row.row_type === 'evidence' ? reqKey : `${reqKey}_evidence`;
+                      onUpload && onUpload(uploadKey);
+                    }}
                     isAuditor={isAuditor}
                   />
                 );

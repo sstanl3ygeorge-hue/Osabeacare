@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import axios from 'axios';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -15,7 +16,8 @@ import {
   ChevronUp,
   AlertCircle,
   FileCheck,
-  Loader2
+  Loader2,
+  RotateCcw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -23,6 +25,9 @@ import {
   getRequirementCapability, 
   DELIVERY_MODES 
 } from '../../config/requirementCapabilityMap';
+import { useAuth } from '../../context/AuthContext';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 /**
  * FormRequirementRow - Displays a single form-type requirement
@@ -32,7 +37,7 @@ import {
  * - Fill Form (admin fills)
  * - View Submission
  * - Export PDF
- * - Verify / Reject
+ * - Verify / Reject / Unverify
  * - History
  */
 export default function FormRequirementRow({
@@ -47,6 +52,7 @@ export default function FormRequirementRow({
   onExportPdf,        // Callback to export PDF
   onVerify,           // Callback to verify submission
   onReject,           // Callback to reject submission (opens dialog)
+  onUnverify,         // Callback to unverify submission (error correction)
   onViewHistory,
   onPreviewFile,      // Callback to preview a file (for evidence rows like CV)
   onUpload,           // Callback to upload a file (for evidence rows like CV)
@@ -54,6 +60,7 @@ export default function FormRequirementRow({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
+  const { token } = useAuth();
   
   const {
     key,
@@ -204,6 +211,43 @@ export default function FormRequirementRow({
     }
   };
   
+  // Handle unverify (error correction for verified items)
+  const handleUnverify = async () => {
+    const reason = prompt('Enter reason for unverifying (min 3 characters):');
+    if (!reason || reason.trim().length < 3) {
+      if (reason !== null) toast.error('Reason must be at least 3 characters');
+      return;
+    }
+    
+    setActionLoading('unverify');
+    try {
+      // For form submissions, use the submission unverify endpoint
+      if (submission_data?.id) {
+        await axios.post(
+          `${API}/form-submissions/${submission_data.id}/unverify`,
+          { reason: reason.trim() },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      } else if (isEvidenceRow && files && files.length > 0) {
+        // For evidence/document rows (like CV), unverify the document
+        const verifiedFile = files.find(f => f.verified);
+        if (verifiedFile?.id) {
+          await axios.post(
+            `${API}/employee-documents/${verifiedFile.id}/unverify`,
+            { reason: reason.trim() },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        }
+      }
+      toast.success(`${title} unverified successfully`);
+      onRefresh && onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to unverify');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+  
   // Determine which actions to show
   const showSend = isSendable && allowed_actions?.includes('send') && !has_submission;
   const showFillForm = allowed_actions?.includes('fill_form') && !has_submission;
@@ -212,6 +256,7 @@ export default function FormRequirementRow({
   const showExportPdf = allowed_actions?.includes('export_pdf') && has_submission;
   const showVerify = allowed_actions?.includes('verify') && has_submission && !is_verified && !isAuditor;
   const showReject = allowed_actions?.includes('reject') && has_submission && !is_verified && !isAuditor;
+  const showUnverify = is_verified && !isAuditor; // Show unverify for verified items (error correction)
   const showHistory = allowed_actions?.includes('history');
   
   return (
@@ -255,11 +300,31 @@ export default function FormRequirementRow({
           </div>
         </div>
         
-        {/* Right: Status Badge + Expand Icon */}
+        {/* Right: Status Badge + Quick Actions + Expand Icon */}
         <div className="flex items-center gap-2">
           <Badge className={cn("text-xs", getStatusColor())}>
             {getStatusText()}
           </Badge>
+          
+          {/* Quick Unverify button for verified items (shown in collapsed view) */}
+          {is_verified && !isAuditor && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0 text-gray-400 hover:text-amber-600 hover:bg-amber-50"
+              onClick={(e) => { e.stopPropagation(); handleUnverify(); }}
+              disabled={actionLoading === 'unverify'}
+              data-testid={`quick-unverify-${key}`}
+              title="Unverify (error correction)"
+            >
+              {actionLoading === 'unverify' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
+          
           {isExpanded ? (
             <ChevronUp className="h-4 w-4 text-gray-400" />
           ) : (
@@ -510,6 +575,25 @@ export default function FormRequirementRow({
               >
                 <XCircle className="h-4 w-4 mr-1.5" />
                 Reject
+              </Button>
+            )}
+            
+            {/* Unverify - For error correction on verified items */}
+            {showUnverify && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-gray-500 hover:text-amber-600 hover:bg-amber-50"
+                onClick={(e) => { e.stopPropagation(); handleUnverify(); }}
+                disabled={actionLoading === 'unverify'}
+                data-testid={`unverify-form-${key}`}
+                title="Unverify (for error correction)"
+              >
+                {actionLoading === 'unverify' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-4 w-4" />
+                )}
               </Button>
             )}
             

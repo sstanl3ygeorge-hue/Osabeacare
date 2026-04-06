@@ -8607,7 +8607,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "references": references_status,  # P1: References status for worker dashboard
         "induction": induction_status,  # P1: Induction checklist progress for worker dashboard
         "competency_assessments": competency_status,  # P1: Competency assessments for worker
-        "spot_checks": spot_check_status  # P1: Spot checks for worker
+        "spot_checks": spot_check_status,  # P1: Spot checks for worker
+        "agreements": agreements_status  # P0 FIX: Agreements (Contract, Handbook) status
     }
 
 @api_router.post("/worker/upload-document/{requirement_id}")

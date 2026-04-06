@@ -620,10 +620,12 @@ async def get_unified_employee_status(
             ref2_verified = is_verified
     
     # Check from references collection
-    if ref_doc:
-        if ref_doc.get("ref1", {}).get("verification_status") == "verified":
+    if ref_doc is not None:
+        ref1_data = ref_doc.get("ref1") or {}
+        ref2_data = ref_doc.get("ref2") or {}
+        if ref1_data.get("verification_status") == "verified":
             ref1_verified = True
-        if ref_doc.get("ref2", {}).get("verification_status") == "verified":
+        if ref2_data.get("verification_status") == "verified":
             ref2_verified = True
     
     # Also check employee-level flags

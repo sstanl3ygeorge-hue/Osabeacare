@@ -408,7 +408,7 @@ export default function WorkerDashboard() {
 
   if (!dashboard) return null;
 
-  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks } = dashboard;
+  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks, agreements } = dashboard;
   
   const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
 
@@ -1197,6 +1197,92 @@ export default function WorkerDashboard() {
                   Showing 10 of {spot_checks.length} spot checks
                 </p>
               )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== AGREEMENTS (P0: Contract & Handbook Status) ========== */}
+        {agreements && agreements.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="agreements-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <PenTool className="h-5 w-5 text-purple-500" />
+                    Agreements
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Contract and handbook acknowledgements
+                  </p>
+                </div>
+                <Badge className={`${
+                  agreements.every(a => a.verified) ? 'bg-green-100 text-green-700' :
+                  agreements.some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
+                  'bg-slate-100 text-slate-600'
+                }`}>
+                  {agreements.filter(a => a.verified).length} of {agreements.length} Verified
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {agreements.map((agreement) => (
+                  <div
+                    key={agreement.id}
+                    className={`p-4 rounded-xl border ${
+                      agreement.verified ? 'bg-green-50 border-green-200' :
+                      agreement.signed ? 'bg-blue-50 border-blue-200' :
+                      'bg-slate-50 border-slate-200'
+                    }`}
+                    data-testid={`agreement-${agreement.id}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          agreement.verified ? 'bg-green-100' :
+                          agreement.signed ? 'bg-blue-100' :
+                          'bg-slate-100'
+                        }`}>
+                          {agreement.verified ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : agreement.signed ? (
+                            <PenTool className="h-5 w-5 text-blue-600" />
+                          ) : (
+                            <Clock className="h-5 w-5 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-medium text-slate-700">{agreement.name}</span>
+                          {agreement.verified && agreement.verified_at && (
+                            <p className="text-xs text-green-600 mt-0.5">
+                              Verified on {formatDate(agreement.verified_at)}
+                              {agreement.verified_by_name && ` by ${agreement.verified_by_name}`}
+                            </p>
+                          )}
+                          {!agreement.verified && agreement.signed && agreement.signed_at && (
+                            <p className="text-xs text-blue-600 mt-0.5">
+                              Signed on {formatDate(agreement.signed_at)} - Awaiting admin verification
+                            </p>
+                          )}
+                          {!agreement.signed && !agreement.verified && (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Pending your signature
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Badge className={`text-xs ${
+                        agreement.verified ? 'bg-green-100 text-green-700' :
+                        agreement.signed ? 'bg-blue-100 text-blue-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {agreement.verified ? 'Verified' :
+                         agreement.signed ? 'Signed' : 'Pending'}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

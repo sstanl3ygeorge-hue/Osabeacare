@@ -1520,3 +1520,66 @@ Added sections:
 - Remind buttons trigger API calls
 - Refresh button reloads task data
 
+---
+
+## COMPLETED: Induction Checklist CQC Compliance Fix (April 2026)
+
+### Problem Statement
+The Induction Checklist module had 5 critical issues:
+1. Item count mismatch (was 11/13/14 in different places, should be 15)
+2. Progress mismatch between Worker and Admin views
+3. No auto-completion when trainings are verified
+4. Misleading "supervisor will mark" text in Worker view
+5. No checkboxes for Admin to manually mark items complete
+
+### Solution Implemented
+
+#### 1. Unified 15 Care Certificate Standards
+Updated `DEFAULT_INDUCTION_ITEMS` in `/app/backend/server.py` (line 49773) with the official NHS Care Certificate standards:
+1. Understand Your Role
+2. Your Personal Development
+3. Duty of Care
+4. Equality and Diversity
+5. Work in a Person-Centred Way
+6. Communication
+7. Privacy and Dignity
+8. Fluids and Nutrition
+9. Mental Health, Dementia and Learning Disabilities
+10. Safeguarding Adults
+11. Safeguarding Children (Optional - marked as non-mandatory)
+12. Basic Life Support
+13. Health and Safety
+14. Handling Information
+15. Infection Prevention and Control
+
+#### 2. Progress Synchronization
+- Worker dashboard fallback now uses same 15 items (line 8309)
+- Progress calculation updated from 13 to 15 (line 7622)
+
+#### 3. Auto-Completion from Verified Training
+- Added `auto_sync_induction_from_training()` helper function
+- When training is verified via `/api/employees/{id}/training/{id}/verify`, corresponding induction items are auto-marked as complete
+- Uses `INDUCTION_TRAINING_MAP` for name matching
+
+#### 4. Migration Endpoints
+- `POST /api/employees/{id}/induction-checklist/fix` - Migrate single employee to 15 items
+- `POST /api/induction-checklists/migrate-all` - Bulk migrate all existing records
+
+#### 5. Worker Dashboard Text
+- Removed "Your supervisor will mark items complete" text
+- Updated to "Items are auto-completed when related training is verified"
+
+#### 6. Admin Panel Checkboxes
+- `InductionChecklistPanel.js` already had Complete/Pending buttons for Admin (when `isAuditor=false`)
+- Updated CQC note text to mention 15 standards
+
+### Files Modified
+- `/app/backend/server.py` - DEFAULT_INDUCTION_ITEMS, care_certificate_standards fallback, fix endpoint, migration endpoint
+- `/app/backend/work_readiness_engine.py` - Fixed `overall_status` field check (was using wrong `status` field)
+- `/app/frontend/src/pages/worker/WorkerDashboard.js` - Updated text (lines 926, 961)
+- `/app/frontend/src/components/employee/InductionChecklistPanel.js` - Updated CQC note
+
+### Testing Verified
+- Backend: 100% pass rate (9 tests)
+- Frontend: 100% pass rate
+- All 5 issues confirmed fixed

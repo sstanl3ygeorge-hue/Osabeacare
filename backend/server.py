@@ -7358,6 +7358,43 @@ async def get_current_worker(authorization: str = Header(None)):
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+async def get_current_user_or_worker(authorization: str = Header(None)) -> dict:
+    """
+    Unified auth dependency that accepts both admin/user and worker tokens.
+    Used for endpoints that need to serve both portal types (e.g., document viewing).
+    
+    Returns dict with at minimum: {role, employee_id (for workers) or user_id (for admins)}
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    token = authorization.replace("Bearer ", "")
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        
+        # Worker token
+        if payload.get("role") == "worker" or payload.get("type") == "worker_session":
+            return {
+                "role": "worker",
+                "employee_id": payload.get("employee_id"),
+                "email": payload.get("email"),
+                "is_worker": True
+            }
+        
+        # Admin/User token - look up user in database
+        user_id = payload.get("user_id")
+        if user_id:
+            user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+            if user:
+                user["is_worker"] = False
+                return user
+        
+        raise HTTPException(status_code=401, detail="Invalid token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+
 @api_router.post("/worker/request-login")
 async def worker_request_login(request: WorkerLoginRequest, http_request: Request):
     """
@@ -8551,16 +8588,14 @@ async def worker_upload_document(
     safe_filename = sanitize_filename(file.filename)
     safe_filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"
     
-    # Save file
-    upload_dir = Path("/app/uploads/documents") / employee_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    # Upload to cloud storage (NOT local disk - local disk breaks file retrieval)
+    storage_path = f"documents/{employee_id}/{safe_filename}"
     
-    file_path = upload_dir / safe_filename
+    # Use the detected content type for proper MIME handling
+    content_type = detected_type or file.content_type or "application/octet-stream"
+    put_object(storage_path, contents, content_type)
     
-    with open(file_path, "wb") as f:
-        f.write(contents)
-    
-    file_url = f"/uploads/documents/{employee_id}/{safe_filename}"
+    file_url = storage_path
     now = datetime.now(timezone.utc).isoformat()
     
     # Create document record
@@ -21814,20 +21849,50 @@ async def delete_employee_document(doc_id: str, user: dict = Depends(require_man
     return {"message": "Document deleted successfully"}
 
 @api_router.get("/employee-documents/{doc_id}/file")
-async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_current_user)):
-    """Serve an employee document file"""
+async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_current_user_or_worker)):
+    """
+    Serve an employee document file.
+    Works for both admin users and workers viewing their own documents.
+    Handles both local (/uploads/) and cloud storage paths.
+    """
     doc = await db.employee_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Security: Workers can only view their own documents
+    if user.get("is_worker"):
+        if doc.get("employee_id") != user.get("employee_id"):
+            raise HTTPException(status_code=403, detail="You can only view your own documents")
     
     file_path = doc.get("file_url")
     if not file_path:
         raise HTTPException(status_code=404, detail="No file uploaded for this document")
     
+    filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
+    safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
+    
     try:
-        content, content_type = get_object(file_path)
-        filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
-        safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
+        # Handle local file paths (legacy /uploads/ storage)
+        if file_path.startswith("/uploads/") or file_path.startswith("uploads/"):
+            local_path = Path("/app") / file_path.lstrip("/")
+            if local_path.exists():
+                content = local_path.read_bytes()
+                # Determine content type from extension
+                ext = local_path.suffix.lower()
+                CONTENT_TYPES = {
+                    ".pdf": "application/pdf",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".webp": "image/webp",
+                    ".gif": "image/gif",
+                }
+                content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
+            else:
+                raise HTTPException(status_code=404, detail="File not found on disk")
+        else:
+            # Cloud storage path
+            content, content_type = get_object(file_path)
         
         return Response(
             content=content,
@@ -21837,14 +21902,18 @@ async def serve_employee_document_file(doc_id: str, user: dict = Depends(get_cur
                 "Cache-Control": "private, max-age=3600"
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to retrieve employee document file: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve file")
 
 @api_router.get("/employee-documents/{doc_id}/download")
-async def download_employee_document_file(doc_id: str, user: dict = Depends(get_current_user)):
+async def download_employee_document_file(doc_id: str, user: dict = Depends(get_current_user_or_worker)):
     """
     Download an employee document file.
+    Works for both admin users and workers downloading their own documents.
+    Handles both local (/uploads/) and cloud storage paths.
     
     If the document has a stamped version (stamped_file_url), it will be served instead.
     This ensures all downloaded verified documents show the visual stamp.
@@ -21853,24 +21922,52 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
+    # Security: Workers can only download their own documents
+    if user.get("is_worker"):
+        if doc.get("employee_id") != user.get("employee_id"):
+            raise HTTPException(status_code=403, detail="You can only download your own documents")
+    
     # Prefer stamped file if available (Medway CQC requirement)
     file_path = doc.get("stamped_file_url") or doc.get("file_url")
     if not file_path:
         raise HTTPException(status_code=404, detail="No file uploaded for this document")
     
+    filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
+    
+    # Add "_verified" suffix if serving stamped version
+    if doc.get("stamped_file_url") and file_path == doc.get("stamped_file_url"):
+        name_parts = filename.rsplit(".", 1)
+        if len(name_parts) == 2:
+            filename = f"{name_parts[0]}_verified.{name_parts[1]}"
+        else:
+            filename = f"{filename}_verified"
+    
+    safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
+    
     try:
-        content, storage_content_type = get_object(file_path)
-        filename = doc.get("original_filename", doc.get("file_name", "document.pdf"))
+        storage_content_type = None
         
-        # Add "_verified" suffix if serving stamped version
-        if doc.get("stamped_file_url") and file_path == doc.get("stamped_file_url"):
-            name_parts = filename.rsplit(".", 1)
-            if len(name_parts) == 2:
-                filename = f"{name_parts[0]}_verified.{name_parts[1]}"
+        # Handle local file paths (legacy /uploads/ storage)
+        if file_path.startswith("/uploads/") or file_path.startswith("uploads/"):
+            local_path = Path("/app") / file_path.lstrip("/")
+            if local_path.exists():
+                content = local_path.read_bytes()
+                # Determine content type from extension
+                ext = local_path.suffix.lower()
+                CONTENT_TYPE_MAP = {
+                    ".pdf": "application/pdf",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".webp": "image/webp",
+                    ".gif": "image/gif",
+                }
+                storage_content_type = CONTENT_TYPE_MAP.get(ext, "application/octet-stream")
             else:
-                filename = f"{filename}_verified"
-        
-        safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
+                raise HTTPException(status_code=404, detail="File not found on disk")
+        else:
+            # Cloud storage path
+            content, storage_content_type = get_object(file_path)
         
         # CRITICAL: Determine correct content-type from multiple sources
         # Priority: 1. File extension, 2. Stored file_type, 3. Storage response, 4. Fallback
@@ -36337,27 +36434,62 @@ class ReferenceIntegrityService:
         rejection_reason: str,
         admin_id: str
     ) -> dict:
-        """Reject a reference - requires new reference to be provided."""
+        """Reject a reference - clears data so worker can provide fresh reference details."""
         now = datetime.now(timezone.utc).isoformat()
         prefix = f"reference_{ref_num}_"
         
+        # Clear all reference data fields to allow fresh input
+        # while preserving rejection audit trail
         update = {
+            # Rejection audit fields
             f"{prefix}rejected": True,
             f"{prefix}rejected_at": now,
             f"{prefix}rejected_by": admin_id,
             f"{prefix}rejection_reason": rejection_reason,
             f"{prefix}request_status": "rejected",
-            f"{prefix}verified": False
+            f"{prefix}verified": False,
+            # Clear the actual data fields so worker can re-enter
+            f"{prefix}name": None,
+            f"{prefix}email": None,
+            f"{prefix}phone": None,
+            f"{prefix}company": None,
+            f"{prefix}position": None,
+            f"{prefix}relationship": None,
+            f"{prefix}years_known": None,
+            f"{prefix}declared": False,
+            f"{prefix}response_data": None,
+            f"{prefix}response_received_at": None,
+            f"{prefix}reviewed": False,
+            f"{prefix}reviewed_by": None,
+            f"{prefix}reviewed_at": None,
         }
         
         await db.employees.update_one({"id": employee_id}, {"$set": update})
         
+        # Also clear any associated document records
+        await db.employee_documents.update_many(
+            {"employee_id": employee_id, "requirement_id": f"reference_{ref_num}"},
+            {"$set": {"status": "rejected", "is_active": False}}
+        )
+        
+        # Also clear from db.references collection if exists
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": {
+                f"ref{ref_num}": None,
+                f"ref{ref_num}_status": "rejected",
+                f"ref{ref_num}_rejected_at": now,
+                f"ref{ref_num}_rejection_reason": rejection_reason
+            }}
+        )
+        
         await log_audit_action(admin_id, "reject_reference", "employee", employee_id, {
             "reference_num": ref_num,
-            "rejection_reason": rejection_reason
+            "rejection_reason": rejection_reason,
+            "data_cleared": True
         })
         
-        return {"status": "success", "message": f"Reference {ref_num} rejected"}
+        return {"status": "success", "message": f"Reference {ref_num} rejected and data cleared. Worker can now provide new reference details."}
 
 
 # ==================== CROSS-DOCUMENT INTELLIGENCE (Phase 4) ====================
@@ -36955,7 +37087,7 @@ async def get_employee_references(
     
     for ref_num in [1, 2]:
         ref_key = f"ref{ref_num}"
-        ref_data = refs.get(ref_key, {}) if refs else {}
+        ref_data = (refs.get(ref_key) if refs else None) or {}
         
         # Get request status from email_requests
         req = next((r for r in ref_requests if r.get("requirement_id") == f"reference_{ref_num}"), None)
@@ -46711,13 +46843,27 @@ async def verify_or_reject_reference(
             "verified_at": now
         }
     else:
-        # Reject the reference
+        # Reject the reference and clear data for fresh input
         update_data = {
             f"{prefix}request_status": "rejected",
             f"{prefix}verified": False,
             f"{prefix}rejected_by": user['user_id'],
             f"{prefix}rejected_at": now,
             f"{prefix}rejection_reason": request.notes,
+            # Clear all reference data fields so worker can re-enter
+            f"{prefix}name": None,
+            f"{prefix}email": None,
+            f"{prefix}phone": None,
+            f"{prefix}company": None,
+            f"{prefix}position": None,
+            f"{prefix}relationship": None,
+            f"{prefix}years_known": None,
+            f"{prefix}declared": False,
+            f"{prefix}response_data": None,
+            f"{prefix}response_received_at": None,
+            f"{prefix}reviewed": False,
+            f"{prefix}reviewed_by": None,
+            f"{prefix}reviewed_at": None,
         }
         
         await db.employees.update_one({"id": employee_id}, {"$set": update_data})
@@ -46730,7 +46876,19 @@ async def verify_or_reject_reference(
                 "status": "rejected",
                 "rejected_by": user['user_id'],
                 "rejected_at": now,
-                "rejection_reason": request.notes
+                "rejection_reason": request.notes,
+                "is_active": False
+            }}
+        )
+        
+        # Also clear from db.references collection if exists
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": {
+                f"ref{reference_num}": None,
+                f"ref{reference_num}_status": "rejected",
+                f"ref{reference_num}_rejected_at": now,
+                f"ref{reference_num}_rejection_reason": request.notes
             }}
         )
         
@@ -46738,12 +46896,13 @@ async def verify_or_reject_reference(
             "reference_num": reference_num,
             "action": "rejected",
             "reason": request.notes,
-            "employee_id": employee_id
+            "employee_id": employee_id,
+            "data_cleared": True
         })
         
         return {
             "status": "success",
-            "message": f"Reference {reference_num} rejected",
+            "message": f"Reference {reference_num} rejected and data cleared",
             "rejected_at": now
         }
 

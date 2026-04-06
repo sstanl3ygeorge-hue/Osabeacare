@@ -194,6 +194,8 @@ export default function WorkerDashboard() {
   // Document viewer modal state
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerDocument, setViewerDocument] = useState(null);
+  const [documentBlobUrl, setDocumentBlobUrl] = useState(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -238,6 +240,58 @@ export default function WorkerDashboard() {
   useEffect(() => {
     fetchDashboard();
   }, [fetchDashboard]);
+  
+  // Clean up blob URL when viewer closes or document changes
+  useEffect(() => {
+    return () => {
+      if (documentBlobUrl) {
+        URL.revokeObjectURL(documentBlobUrl);
+      }
+    };
+  }, [documentBlobUrl]);
+
+  // Fetch document as blob with authentication
+  const openDocumentViewer = async (doc) => {
+    setViewerDocument(doc);
+    setViewerOpen(true);
+    setDocumentLoading(true);
+    setDocumentBlobUrl(null);
+    
+    if (!doc?.id) {
+      setDocumentLoading(false);
+      return;
+    }
+    
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(
+        `${API}/employee-documents/${doc.id}/file`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+      
+      // Create blob URL for the document
+      const blobUrl = URL.createObjectURL(response.data);
+      setDocumentBlobUrl(blobUrl);
+    } catch (error) {
+      console.error('Failed to load document:', error);
+      toast.error('Failed to load document');
+    } finally {
+      setDocumentLoading(false);
+    }
+  };
+  
+  // Close document viewer and clean up
+  const closeDocumentViewer = () => {
+    if (documentBlobUrl) {
+      URL.revokeObjectURL(documentBlobUrl);
+    }
+    setDocumentBlobUrl(null);
+    setViewerDocument(null);
+    setViewerOpen(false);
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('workerToken');
@@ -1241,10 +1295,7 @@ export default function WorkerDashboard() {
                               size="sm" 
                               variant="outline" 
                               className="text-xs h-7"
-                              onClick={() => {
-                                setViewerDocument(doc);
-                                setViewerOpen(true);
-                              }}
+                              onClick={() => openDocumentViewer(doc)}
                               data-testid={`view-doc-${doc.type}`}
                             >
                               <Eye className="h-3 w-3 mr-1" />
@@ -1263,10 +1314,7 @@ export default function WorkerDashboard() {
                               size="sm" 
                               variant="ghost" 
                               className="text-xs h-7"
-                              onClick={() => {
-                                setViewerDocument(doc);
-                                setViewerOpen(true);
-                              }}
+                              onClick={() => openDocumentViewer(doc)}
                               data-testid={`view-pending-doc-${doc.type}`}
                             >
                               <Eye className="h-3 w-3 mr-1" />
@@ -1336,7 +1384,7 @@ export default function WorkerDashboard() {
       </Dialog>
       
       {/* Document Viewer Modal */}
-      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+      <Dialog open={viewerOpen} onOpenChange={closeDocumentViewer}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1382,46 +1430,35 @@ export default function WorkerDashboard() {
           
           {/* Document Preview */}
           <div className="flex-1 min-h-[400px] overflow-auto bg-gray-100 rounded-lg">
-            {viewerDocument?.id ? (
-              // P0 FIX: Use proper API endpoint for document viewing
-              viewerDocument.file_url?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+            {documentLoading ? (
+              <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                <Loader2 className="h-12 w-12 mb-3 animate-spin" />
+                <p>Loading document...</p>
+              </div>
+            ) : documentBlobUrl ? (
+              // Use blob URL for secure document viewing
+              viewerDocument?.file_url?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                 <div className="flex items-center justify-center p-4 h-full">
                   <img 
-                    src={`${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/file`}
-                    alt={viewerDocument.name}
+                    src={documentBlobUrl}
+                    alt={viewerDocument?.name || 'Document'}
                     className="max-w-full max-h-full object-contain rounded shadow-lg"
                     onError={(e) => {
+                      console.error('Image load error');
                       e.target.style.display = 'none';
                       e.target.nextSibling.style.display = 'flex';
                     }}
                   />
                   <div className="hidden flex-col items-center justify-center h-full text-gray-500">
                     <FileText className="h-16 w-16 mb-3" />
-                    <p>Failed to load image</p>
+                    <p>Failed to display image</p>
                   </div>
                 </div>
               ) : (
                 <iframe
-                  src={`${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/file#toolbar=0`}
+                  src={documentBlobUrl}
                   className="w-full h-full min-h-[500px] rounded"
-                  title={viewerDocument.name}
-                />
-              )
-            ) : viewerDocument?.file_url ? (
-              // Fallback for documents without proper ID
-              viewerDocument.file_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
-                <div className="flex items-center justify-center p-4 h-full">
-                  <img 
-                    src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url.startsWith('/api') ? '' : '/api'}${viewerDocument.file_url}`}
-                    alt={viewerDocument.name}
-                    className="max-w-full max-h-full object-contain rounded shadow-lg"
-                  />
-                </div>
-              ) : (
-                <iframe
-                  src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url.startsWith('/api') ? '' : '/api'}${viewerDocument.file_url}#toolbar=0`}
-                  className="w-full h-full min-h-[500px] rounded"
-                  title={viewerDocument.name}
+                  title={viewerDocument?.name || 'Document'}
                 />
               )
             ) : (
@@ -1433,15 +1470,13 @@ export default function WorkerDashboard() {
           </div>
           
           <DialogFooter className="gap-2 pt-4 border-t">
-            {(viewerDocument?.id || viewerDocument?.file_url) && (
+            {documentBlobUrl && (
               <>
                 <Button 
                   variant="outline" 
                   onClick={() => {
-                    const url = viewerDocument.id 
-                      ? `${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/file`
-                      : `${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`;
-                    window.open(url, '_blank');
+                    // Open blob URL in new tab
+                    window.open(documentBlobUrl, '_blank');
                   }}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
@@ -1449,14 +1484,28 @@ export default function WorkerDashboard() {
                 </Button>
                 <Button 
                   variant="outline" 
-                  onClick={() => {
-                    const url = viewerDocument.id 
-                      ? `${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/download`
-                      : `${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`;
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = viewerDocument.file_name || viewerDocument.name || 'document';
-                    link.click();
+                  onClick={async () => {
+                    // Download with auth
+                    try {
+                      const token = localStorage.getItem('workerToken');
+                      const response = await axios.get(
+                        `${API}/employee-documents/${viewerDocument.id}/download`,
+                        {
+                          headers: { Authorization: `Bearer ${token}` },
+                          responseType: 'blob'
+                        }
+                      );
+                      const downloadUrl = URL.createObjectURL(response.data);
+                      const link = document.createElement('a');
+                      link.href = downloadUrl;
+                      link.download = viewerDocument?.file_name || viewerDocument?.name || 'document';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      URL.revokeObjectURL(downloadUrl);
+                    } catch (error) {
+                      toast.error('Failed to download document');
+                    }
                   }}
                 >
                   <Download className="h-4 w-4 mr-2" />
@@ -1464,7 +1513,7 @@ export default function WorkerDashboard() {
                 </Button>
               </>
             )}
-            <Button variant="outline" onClick={() => setViewerOpen(false)}>
+            <Button variant="outline" onClick={closeDocumentViewer}>
               Close
             </Button>
           </DialogFooter>

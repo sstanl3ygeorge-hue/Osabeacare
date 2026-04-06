@@ -432,6 +432,36 @@ export default function UploadRequirementCard({
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
                         )}
+                        
+                        {/* Download original file */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 text-gray-500 hover:text-green-600"
+                          onClick={() => {
+                            const url = file.file_url || `/api/employee-documents/${file.file_id || file.id}/file`;
+                            window.open(url, '_blank');
+                          }}
+                          title="Download original"
+                          data-testid={`${key}-evidence-download-${file.file_id || file.id}`}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </Button>
+                        
+                        {/* Download stamped version if exists */}
+                        {file.stamped_file_url && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-1.5 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
+                            onClick={() => window.open(file.stamped_file_url, '_blank')}
+                            title="Download stamped version"
+                            data-testid={`${key}-evidence-download-stamped-${file.file_id || file.id}`}
+                          >
+                            <Stamp className="h-3 w-3 mr-0.5" />
+                            <Download className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}

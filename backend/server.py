@@ -23394,13 +23394,28 @@ async def generate_staff_health_pdf(submission_data: dict, employee_data: dict, 
     # Header with green background
     green_color = colors.HexColor(branding.get("header_color", "#2E7D32"))
     
-    # Company header table
-    header_data = [[
-        Paragraph(f"<b>{branding.get('logo_text', 'O')}</b>", 
-                  ParagraphStyle('Logo', fontSize=24, textColor=colors.white, alignment=TA_CENTER)),
-        Paragraph(f"<b>{branding.get('name', 'Osabea Healthcare Solutions Ltd')}</b><br/><font size='10'>Staff Health Questionnaire</font>", 
-                  ParagraphStyle('HeaderText', fontSize=14, textColor=colors.white, alignment=TA_LEFT))
-    ]]
+    # Try to get the company logo image
+    logo_element = None
+    try:
+        from services.pdf_service import get_logo_image
+        logo_element = get_logo_image(width=35*mm, height=14*mm)
+    except Exception:
+        pass
+    
+    # Company header table - use logo image if available, otherwise text
+    if logo_element:
+        header_data = [[
+            logo_element,
+            Paragraph(f"<b>{branding.get('name', 'Osabea Healthcare Solutions Ltd')}</b><br/><font size='10'>Staff Health Questionnaire</font>", 
+                      ParagraphStyle('HeaderText', fontSize=14, textColor=colors.white, alignment=TA_LEFT))
+        ]]
+    else:
+        header_data = [[
+            Paragraph(f"<b>{branding.get('logo_text', 'O')}</b>", 
+                      ParagraphStyle('Logo', fontSize=24, textColor=colors.white, alignment=TA_CENTER)),
+            Paragraph(f"<b>{branding.get('name', 'Osabea Healthcare Solutions Ltd')}</b><br/><font size='10'>Staff Health Questionnaire</font>", 
+                      ParagraphStyle('HeaderText', fontSize=14, textColor=colors.white, alignment=TA_LEFT))
+        ]]
     
     header_table = Table(header_data, colWidths=[25*mm, 145*mm])
     header_table.setStyle(TableStyle([
@@ -23541,12 +23556,24 @@ async def generate_staff_health_pdf(submission_data: dict, employee_data: dict, 
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#E0E0E0')))
     story.append(Spacer(1, 3*mm))
     
+    # Add verification stamp if verified
+    if submission_data.get('_verified'):
+        verified_style = ParagraphStyle(
+            'VerifiedStamp',
+            fontSize=10,
+            textColor=colors.HexColor('#059669'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        story.append(Paragraph("✓ VERIFIED", verified_style))
+        story.append(Spacer(1, 2*mm))
+    
     submitted_at = submission_data.get('_submitted_at', '')
     if submitted_at:
         try:
             dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
             submitted_at = dt.strftime('%d/%m/%Y at %H:%M')
-        except:
+        except Exception:
             pass
     
     footer_text = f"Generated from Osabea Compliance Portal | Form submitted: {submitted_at} | Employee: {employee_data.get('first_name', '')} {employee_data.get('last_name', '')} ({employee_data.get('employee_code', '')})"
@@ -23643,9 +23670,21 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
         story_list.append(Paragraph(f"<b>{label}:</b> {value}", value_style))
         story_list.append(Spacer(1, 2*mm))
     
-    # Header
-    story.append(Paragraph("Osabea Healthcare Solutions", ParagraphStyle('CompanyName', fontSize=14, textColor=colors.HexColor('#0F766E'), alignment=TA_CENTER)))
-    story.append(Spacer(1, 3*mm))
+    # Try to add company logo
+    try:
+        from services.pdf_service import get_logo_image
+        logo = get_logo_image(width=50*mm, height=20*mm)
+        if logo:
+            from reportlab.platypus import Table, TableStyle
+            logo_table = Table([[logo]], colWidths=[170*mm])
+            logo_table.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+            story.append(logo_table)
+            story.append(Spacer(1, 3*mm))
+    except Exception:
+        # Fallback to text header
+        story.append(Paragraph("Osabea Healthcare Solutions", ParagraphStyle('CompanyName', fontSize=14, textColor=colors.HexColor('#0F766E'), alignment=TA_CENTER)))
+        story.append(Spacer(1, 3*mm))
+    
     story.append(Paragraph("Application Form", title_style))
     
     # Status banner
@@ -23829,12 +23868,24 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#E0E0E0')))
     story.append(Spacer(1, 3*mm))
     
+    # Add verification stamp if verified
+    if submission_data.get('_verified'):
+        verified_style = ParagraphStyle(
+            'VerifiedStamp',
+            fontSize=10,
+            textColor=colors.HexColor('#059669'),
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        story.append(Paragraph("✓ VERIFIED", verified_style))
+        story.append(Spacer(1, 2*mm))
+    
     submitted_at = submission_data.get('_submitted_at', '')
     if submitted_at:
         try:
             dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
             submitted_at = dt.strftime('%d/%m/%Y at %H:%M')
-        except:
+        except Exception:
             pass
     
     footer_text = f"Generated from Osabea Compliance Portal | Application submitted: {submitted_at}"

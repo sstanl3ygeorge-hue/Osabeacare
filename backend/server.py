@@ -7065,6 +7065,62 @@ async def get_me(user: dict = Depends(get_current_user)):
     return {k: v for k, v in user.items() if k != 'password'}
 
 
+@api_router.get("/auth/session-info")
+async def get_session_info(request: Request, user: dict = Depends(get_current_user)):
+    """
+    Get session information including expiry time for timeout warnings.
+    
+    P0 FIX: Returns token expiry so frontend can show session timeout warnings.
+    
+    Returns:
+    - expires_at: ISO timestamp when session expires
+    - expires_in_seconds: Seconds until expiration
+    - warning_threshold_seconds: When to show warning (5 minutes before expiry)
+    """
+    import jwt
+    
+    # Get the token from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else None
+    
+    if not token:
+        raise HTTPException(status_code=401, detail="No token provided")
+    
+    try:
+        # Decode without verification to get expiry
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        exp_timestamp = payload.get("exp")
+        
+        if exp_timestamp:
+            expires_at = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+            now = datetime.now(timezone.utc)
+            expires_in_seconds = int((expires_at - now).total_seconds())
+            
+            # Warning threshold: 5 minutes before expiry
+            warning_threshold_seconds = 300  # 5 minutes
+            
+            return {
+                "user_id": user.get("user_id"),
+                "email": user.get("email"),
+                "role": user.get("role"),
+                "expires_at": expires_at.isoformat(),
+                "expires_in_seconds": max(0, expires_in_seconds),
+                "warning_threshold_seconds": warning_threshold_seconds,
+                "show_warning": expires_in_seconds <= warning_threshold_seconds and expires_in_seconds > 0,
+                "session_expired": expires_in_seconds <= 0
+            }
+    except jwt.ExpiredSignatureError:
+        return {
+            "session_expired": True,
+            "expires_in_seconds": 0,
+            "show_warning": False,
+            "message": "Session has expired. Please log in again."
+        }
+    except Exception as e:
+        logger.warning(f"Session info error: {e}")
+        raise HTTPException(status_code=401, detail="Invalid session")
+
+
 # ========== ADMIN USER MANAGEMENT ==========
 
 @api_router.get("/admin/users")
@@ -20619,21 +20675,68 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
     
     return EmployeeDocumentResponse(**updated_doc)
 
+class UnverifyDocumentRequest(BaseModel):
+    reason: str = Field(..., min_length=5, description="Reason for removing verification (audit requirement)")
+
+
 @api_router.post("/employee-documents/{doc_id}/unverify")
-async def unverify_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):
-    """Remove verification from a document"""
+async def unverify_employee_document(
+    doc_id: str, 
+    payload: UnverifyDocumentRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Remove verification from a document (requires reason for CQC audit trail).
+    
+    P0 FIX: Now requires reason for audit compliance.
+    All unverification actions are logged with the reason.
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get admin name for audit trail
+    admin = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1})
+    admin_name = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() if admin else user['email']
+    
     result = await db.employee_documents.update_one(
         {"id": doc_id},
-        {"$set": {"verified": False, "verified_by": None, "verified_at": None, "verified_by_name": None}}
+        {"$set": {
+            "verified": False, 
+            "verified_by": None, 
+            "verified_at": None, 
+            "verified_by_name": None,
+            "verification_stamp": "not_verified",
+            "unverified_by": user['user_id'],
+            "unverified_by_name": admin_name,
+            "unverified_at": now,
+            "unverification_reason": payload.reason,
+            "updated_at": now
+        }}
     )
     
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    await log_audit_action(user['user_id'], "unverify_document", "employee_document", doc_id, {"verified": False})
+    # Log to audit trail with reason
+    await log_audit_action(user['user_id'], "unverify_document", "employee_document", doc_id, {
+        "verified": False,
+        "reason": payload.reason,
+        "unverified_by_name": admin_name,
+        "document_type": doc.get("requirement_id"),
+        "employee_id": doc.get("employee_id")
+    })
     
-    doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
-    return EmployeeDocumentResponse(**doc)
+    updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
+    return {
+        "status": "success",
+        "message": f"Document verification removed",
+        "unverified_by": admin_name,
+        "reason": payload.reason,
+        "document": updated_doc
+    }
 
 class RejectDocumentRequest(BaseModel):
     reason: str = Field(..., min_length=10, description="Reason for rejection")

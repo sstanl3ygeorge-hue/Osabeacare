@@ -1928,6 +1928,79 @@ Both panels now show **IDENTICAL 10 items**:
 7. Health & Safety: Not verified
 8. Basic Life Support (BLS): Not verified
 9. Infection Prevention & Control: Not verified
+
+---
+
+## COMPLETED: P0 Audit Fixes Implementation (April 2026)
+
+### Fixes Implemented Based on Compliance Audit
+
+#### 1. Information Governance / GDPR Training - MANDATORY (P0)
+- Added to `MANDATORY_TRAINING_HCA` list in `unified_compliance_engine.py`
+- Training total increased from 6 to 8
+- Now appears in blocker list if not completed
+
+#### 2. Prevent Training - MANDATORY for HCA and Nurse roles (P0)
+- Added "Prevent (Counter-Terrorism Awareness)" to mandatory training
+- NHS requirement for all healthcare staff
+- Appears in blocker list if not completed
+
+#### 3. Unverify with Reason - ALL Document Types (P0)
+- Updated `/employee-documents/{doc_id}/unverify` endpoint
+- Now requires `reason` field (min 5 characters)
+- Logs unverification action with:
+  - Who unverified (`unverified_by_name`)
+  - When (`unverified_at`)
+  - Why (`unverification_reason`)
+- Full CQC audit trail maintained
+
+#### 4. Reject with Reason - ALL Document Types (Already Existed)
+- `/employee-documents/{doc_id}/reject` - ✅ Already implemented
+- `/employees/{employee_id}/training/{record_id}/reject` - ✅ Already implemented
+- Both require reason (min 10 characters)
+
+#### 5. Session Timeout Warnings (P0)
+- New endpoint: `GET /api/auth/session-info`
+  - Returns `expires_in_seconds`
+  - Returns `show_warning` when < 5 minutes remaining
+  - Returns `session_expired` when expired
+- New component: `SessionTimeoutWarning.js`
+  - Shows warning 5 minutes before expiry
+  - Countdown timer
+  - "Extend Session" and "Logout" buttons
+  - Auto-redirects on expiry
+
+### Updated Totals
+- **Mandatory Training**: 8 items (was 6)
+  1. Safeguarding Adults
+  2. Manual Handling / Moving & Handling
+  3. Fire Safety
+  4. Health & Safety
+  5. Basic Life Support (BLS)
+  6. Infection Prevention & Control
+  7. **Information Governance / GDPR** (NEW)
+  8. **Prevent** (NEW)
+
+- **Total Requirements for HCA**: 33 (was 31)
+
+### Files Modified
+- `/app/backend/unified_compliance_engine.py` - Added IG and Prevent to mandatory training
+- `/app/backend/server.py`:
+  - Updated unverify endpoint to require reason
+  - Added `/auth/session-info` endpoint
+- `/app/frontend/src/components/SessionTimeoutWarning.js` (NEW)
+- `/app/frontend/src/App.js` - Added SessionTimeoutWarning component
+
+### Verification
+```
+Progress: 21%
+Completed: 7 / 33
+Training: 1/8
+Blockers include:
+  ✓ Information Governance / GDPR / Data Protection: Not verified
+  ✓ Prevent (Counter-Terrorism Awareness): Not verified
+```
+
 10. Induction: 1 of 15 Care Certificate standards complete
 
 ### Files Modified

@@ -51,6 +51,9 @@ import AdminUsersPage from "./pages/portal/AdminUsersPage";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 
+// Session Timeout Warning (P0: 5 E's Error Tolerant)
+import SessionTimeoutWarning from "./components/SessionTimeoutWarning";
+
 function AppRouter() {
   const location = useLocation();
   
@@ -133,6 +136,8 @@ function App() {
       <AuthProvider>
         <AppRouter />
         <Toaster position="top-right" richColors />
+        {/* P0 FIX: Session timeout warning for 5 E's Error Tolerance */}
+        <SessionTimeoutWarning />
       </AuthProvider>
     </BrowserRouter>
   );

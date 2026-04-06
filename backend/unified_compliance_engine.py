@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 # CONSTANTS - NHS Employment Check Standards
 # =============================================================================
 
-# Mandatory Training for Healthcare Assistants (6 items)
+# Mandatory Training for Healthcare Assistants (8 items - P0 CRITICAL)
+# NHS Employment Check Standards + CQC Requirements
 MANDATORY_TRAINING_HCA = [
     {"id": "safeguarding_adults", "name": "Safeguarding Adults", "induction_sync": "safeguarding_adults"},
     {"id": "manual_handling", "name": "Manual Handling / Moving & Handling", "induction_sync": "moving_handling"},
@@ -47,6 +48,9 @@ MANDATORY_TRAINING_HCA = [
     {"id": "health_safety", "name": "Health & Safety", "induction_sync": "health_safety"},
     {"id": "basic_life_support", "name": "Basic Life Support (BLS)", "induction_sync": "basic_life_support"},
     {"id": "infection_control", "name": "Infection Prevention & Control", "induction_sync": "infection_control"},
+    # P0 ADDITIONS - Mandatory per NHS/CQC requirements
+    {"id": "information_governance", "name": "Information Governance / GDPR / Data Protection", "induction_sync": None},
+    {"id": "prevent", "name": "Prevent (Counter-Terrorism Awareness)", "induction_sync": None},
 ]
 
 # 15 Care Certificate Standards for Induction (Adults only - no Safeguarding Children)
@@ -104,12 +108,14 @@ CLEAR_LABELS = {
     "interview_record": "Interview Record",
     "contract": "Employment Contract",
     "induction": "Induction Checklist (15 Care Certificate Standards)",
-    "mandatory_training": "Mandatory Training (6 courses)",
+    "mandatory_training": "Mandatory Training (8 courses)",  # Updated: +IG +Prevent
     "staff_health_questionnaire": "Staff Health Questionnaire",
     "employment_gaps": "Employment Gaps Explained",
     "nmc_registration": "NMC Registration",
     "gmc_registration": "GMC Registration",
     "professional_indemnity": "Professional Indemnity Insurance",
+    "information_governance": "Information Governance / GDPR",
+    "prevent": "Prevent Training",
 }
 
 
@@ -308,7 +314,7 @@ async def get_unified_employee_status(
     categories = {
         "documents": {"completed": 0, "total": 0, "items": []},
         "forms": {"completed": 0, "total": 0, "items": []},
-        "training": {"completed": 0, "total": 6, "items": []},
+        "training": {"completed": 0, "total": 8, "items": []},  # 8 mandatory: 6 core + IG + Prevent
         "references": {"completed": 0, "total": 2, "items": []},
         "agreements": {"completed": 0, "total": 2, "items": []},
         "induction": {"completed": 0, "total": 15, "items": []},
@@ -517,7 +523,7 @@ async def get_unified_employee_status(
                 "severity": "critical" if not matched_training else "pending"
             })
     
-    checks["mandatory_training"] = categories["training"]["completed"] == 6
+    checks["mandatory_training"] = categories["training"]["completed"] == 8  # All 8 mandatory trainings
     
     # ==========================================================================
     # CHECK 4: INDUCTION CHECKLIST (15 Care Certificate Standards)

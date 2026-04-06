@@ -303,7 +303,7 @@ export default function WorkerDashboard() {
 
   if (!dashboard) return null;
 
-  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration } = dashboard;
+  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction } = dashboard;
   
   const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
 
@@ -765,6 +765,149 @@ export default function WorkerDashboard() {
               </div>
               <p className="text-xs text-slate-400 mt-4 text-center">
                 {ACCEPTED_FORMATS}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== REFERENCES STATUS (P1: Worker Dashboard Sync) ========== */}
+        {!isActiveEmployee && references && references.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="references-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <User className="h-5 w-5 text-purple-500" />
+                    References (2 required)
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your references will be contacted by our team
+                  </p>
+                </div>
+                <Badge className={`${
+                  references.filter(r => r.status === 'verified').length === 2 
+                    ? 'bg-green-100 text-green-700' 
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {references.filter(r => r.status === 'verified').length}/2 Verified
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {references.map((ref, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`p-4 rounded-xl border ${
+                      ref.status === 'verified' ? 'bg-green-50 border-green-200' :
+                      ref.status === 'rejected' ? 'bg-red-50 border-red-200' :
+                      ref.status === 'response_received' ? 'bg-blue-50 border-blue-200' :
+                      ref.status === 'sent' ? 'bg-amber-50 border-amber-200' :
+                      'bg-slate-50 border-slate-200'
+                    }`}
+                    data-testid={`reference-${ref.reference_number}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          ref.status === 'verified' ? 'bg-green-100' :
+                          ref.status === 'rejected' ? 'bg-red-100' :
+                          ref.status === 'response_received' ? 'bg-blue-100' :
+                          ref.status === 'sent' ? 'bg-amber-100' :
+                          'bg-slate-100'
+                        }`}>
+                          {ref.status === 'verified' ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : ref.status === 'rejected' ? (
+                            <X className="h-5 w-5 text-red-600" />
+                          ) : ref.status === 'response_received' ? (
+                            <Clock className="h-5 w-5 text-blue-600" />
+                          ) : ref.status === 'sent' ? (
+                            <Clock className="h-5 w-5 text-amber-600" />
+                          ) : (
+                            <AlertCircle className="h-5 w-5 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-medium text-slate-800">Reference {ref.reference_number}</span>
+                          {ref.referee_name && (
+                            <p className="text-xs text-slate-500">{ref.referee_name}</p>
+                          )}
+                          {ref.verified_at && ref.verified_by_name && (
+                            <p className="text-xs text-green-600">
+                              Verified by {ref.verified_by_name} on {formatDate(ref.verified_at)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Badge className={`text-xs ${
+                        ref.status === 'verified' ? 'bg-green-100 text-green-700' :
+                        ref.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        ref.status === 'response_received' ? 'bg-blue-100 text-blue-700' :
+                        ref.status === 'sent' ? 'bg-amber-100 text-amber-700' :
+                        ref.status === 'declared' ? 'bg-slate-100 text-slate-600' :
+                        'bg-slate-100 text-slate-500'
+                      }`}>
+                        {ref.status === 'verified' && <CheckCircle className="h-3 w-3 mr-1" />}
+                        {ref.status === 'rejected' && <X className="h-3 w-3 mr-1" />}
+                        {(ref.status === 'response_received' || ref.status === 'sent') && <Clock className="h-3 w-3 mr-1" />}
+                        {ref.status_label}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== INDUCTION CHECKLIST (P1: Worker Dashboard Sync) ========== */}
+        {!isActiveEmployee && induction && (
+          <Card className="shadow-md border-0" data-testid="induction-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Shield className="h-5 w-5 text-cyan-500" />
+                    Induction Checklist ({induction.total} items)
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Care Certificate standards - completed by your supervisor
+                  </p>
+                </div>
+                <Badge className={`${
+                  induction.completed === induction.total 
+                    ? 'bg-green-100 text-green-700' 
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {induction.completed}/{induction.total} Complete
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4">
+                <Progress value={(induction.completed / induction.total) * 100} className="h-2" />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {induction.items?.map((item, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
+                      item.completed ? 'bg-green-50 text-green-800' : 'bg-slate-50 text-slate-600'
+                    }`}
+                    data-testid={`induction-item-${item.id}`}
+                  >
+                    {item.completed ? (
+                      <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0" />
+                    )}
+                    <span className="truncate">{item.name}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 mt-4 text-center">
+                Your supervisor will mark items complete during your induction period
               </p>
             </CardContent>
           </Card>

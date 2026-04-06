@@ -8176,6 +8176,113 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "required": True
             }
     
+    # ========== REFERENCES STATUS (P1: Worker Dashboard Sync) ==========
+    # Get references for this employee - worker can see status but NOT referee answers
+    references_status = []
+    for ref_num in [1, 2]:
+        prefix = f"referee{ref_num}_"
+        
+        # Check referee declaration
+        referee_name = employee.get(f"{prefix}name", "")
+        referee_email = employee.get(f"{prefix}email", "")
+        is_declared = bool(referee_name and referee_email)
+        
+        # Check if request sent
+        request_sent = employee.get(f"{prefix}request_sent", False)
+        request_sent_at = employee.get(f"{prefix}request_sent_at")
+        
+        # Check if response received
+        response_received = employee.get(f"{prefix}response_received", False)
+        response_received_at = employee.get(f"{prefix}response_received_at")
+        
+        # Check verification status
+        verification_status = employee.get(f"{prefix}verification_status", "pending")
+        verified_at = employee.get(f"{prefix}verified_at")
+        verified_by_name = employee.get(f"{prefix}verified_by_name")
+        
+        # Determine display status
+        if verification_status == "verified":
+            status = "verified"
+            status_label = "Verified"
+        elif verification_status == "rejected":
+            status = "rejected"
+            status_label = "Rejected - Please contact admin"
+        elif response_received:
+            status = "response_received"
+            status_label = "Response received - pending admin review"
+        elif request_sent:
+            status = "sent"
+            status_label = "Request sent - awaiting response"
+        elif is_declared:
+            status = "declared"
+            status_label = "Referee declared - request not yet sent"
+        else:
+            status = "not_declared"
+            status_label = "Not declared"
+        
+        references_status.append({
+            "reference_number": ref_num,
+            "referee_name": referee_name if is_declared else None,  # Only show name if declared
+            "status": status,
+            "status_label": status_label,
+            "verified_at": verified_at,
+            "verified_by_name": verified_by_name
+        })
+    
+    # ========== INDUCTION CHECKLIST STATUS (P1: Worker Dashboard Sync) ==========
+    # Get induction checklist - worker can see progress but cannot modify (admin only)
+    induction_record = await db.induction_checklists.find_one({
+        "employee_id": employee_id
+    }, {"_id": 0})
+    
+    # All 15 Care Certificate standards
+    care_certificate_standards = [
+        {"id": "standard_1", "name": "Understand your role"},
+        {"id": "standard_2", "name": "Your personal development"},
+        {"id": "standard_3", "name": "Duty of care"},
+        {"id": "standard_4", "name": "Equality and diversity"},
+        {"id": "standard_5", "name": "Work in a person-centred way"},
+        {"id": "standard_6", "name": "Communication"},
+        {"id": "standard_7", "name": "Privacy and dignity"},
+        {"id": "standard_8", "name": "Fluids and nutrition"},
+        {"id": "standard_9", "name": "Awareness of mental health, dementia and learning disabilities"},
+        {"id": "standard_10", "name": "Safeguarding adults"},
+        {"id": "standard_11", "name": "Basic life support"},
+        {"id": "standard_12", "name": "Health and safety"},
+        {"id": "standard_13", "name": "Handling information"},
+        {"id": "standard_14", "name": "Infection prevention and control"},
+        {"id": "standard_15", "name": "Shadow shift completed"}
+    ]
+    
+    induction_items = []
+    completed_count = 0
+    for standard in care_certificate_standards:
+        is_complete = False
+        completed_at = None
+        if induction_record:
+            item_data = induction_record.get(standard["id"], {})
+            if isinstance(item_data, dict):
+                is_complete = item_data.get("completed", False)
+                completed_at = item_data.get("completed_at")
+            elif isinstance(item_data, bool):
+                is_complete = item_data
+        
+        if is_complete:
+            completed_count += 1
+        
+        induction_items.append({
+            "id": standard["id"],
+            "name": standard["name"],
+            "completed": is_complete,
+            "completed_at": completed_at
+        })
+    
+    induction_status = {
+        "total": len(care_certificate_standards),
+        "completed": completed_count,
+        "items": induction_items
+    }
+    
     return {
         "employee": {
             "id": employee_id,
@@ -8202,7 +8309,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "all_mandatory_trainings": all_mandatory_trainings,  # NEW: All 6 trainings with status
         "alerts": sorted(alerts, key=lambda x: x.get("days_left", 999)),
         "contract_signed": contract_signed,
-        "professional_registration": prof_reg_status
+        "professional_registration": prof_reg_status,
+        "references": references_status,  # P1: References status for worker dashboard
+        "induction": induction_status  # P1: Induction checklist progress for worker dashboard
     }
 
 @api_router.post("/worker/upload-document/{requirement_id}")

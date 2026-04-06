@@ -12219,12 +12219,33 @@ async def verify_training(
     """
     Verify a training record.
     Only verified training counts toward readiness where evidence is required.
+    
+    P0 FIX: Now accepts either:
+    - record_id: The actual training record UUID (e.g., "tr_abc123")
+    - training_code: The training type code (e.g., "safeguarding", "manual_handling")
     """
+    # First try to find by exact record ID
     record = await db.training_records.find_one({
         "id": record_id,
         "employee_id": employee_id,
         "record_status": {"$ne": "deleted"}
     })
+    
+    # P0 FIX: If not found by ID, try by training code/name
+    if not record:
+        # Try matching by requirement_id or training_name patterns
+        code_lower = record_id.lower().replace("_", " ")
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "record_status": {"$ne": "deleted"},
+            "$or": [
+                {"requirement_id": record_id},
+                {"requirement_id": {"$regex": f"^{record_id}$", "$options": "i"}},
+                {"code": record_id},
+                {"code": {"$regex": f"^{record_id}$", "$options": "i"}},
+                {"training_name": {"$regex": code_lower, "$options": "i"}}
+            ]
+        })
     
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found")
@@ -12235,7 +12256,7 @@ async def verify_training(
     now = datetime.now(timezone.utc).isoformat()
     
     await db.training_records.update_one(
-        {"id": record_id},
+        {"id": record.get("id")},  # Use actual record ID
         {"$set": {
             "verified": True,
             "verification_status": "verified",
@@ -12246,7 +12267,7 @@ async def verify_training(
     )
     
     await log_audit_action(user['user_id'], "verify_training", "employee", employee_id, {
-        "record_id": record_id,
+        "record_id": record.get("id"),
         "training_name": record.get('training_name')
     })
     
@@ -12268,12 +12289,30 @@ async def reject_training(
     """
     Reject a training record.
     Rejected training does not count toward readiness.
+    
+    P0 FIX: Now accepts either record_id or training_code.
     """
+    # First try to find by exact record ID
     record = await db.training_records.find_one({
         "id": record_id,
         "employee_id": employee_id,
         "record_status": {"$ne": "deleted"}
     })
+    
+    # P0 FIX: If not found by ID, try by training code/name
+    if not record:
+        code_lower = record_id.lower().replace("_", " ")
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "record_status": {"$ne": "deleted"},
+            "$or": [
+                {"requirement_id": record_id},
+                {"requirement_id": {"$regex": f"^{record_id}$", "$options": "i"}},
+                {"code": record_id},
+                {"code": {"$regex": f"^{record_id}$", "$options": "i"}},
+                {"training_name": {"$regex": code_lower, "$options": "i"}}
+            ]
+        })
     
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found")
@@ -12281,7 +12320,7 @@ async def reject_training(
     now = datetime.now(timezone.utc).isoformat()
     
     await db.training_records.update_one(
-        {"id": record_id},
+        {"id": record.get("id")},  # Use actual record ID
         {"$set": {
             "verified": False,
             "verification_status": "rejected",
@@ -12293,7 +12332,7 @@ async def reject_training(
     )
     
     await log_audit_action(user['user_id'], "reject_training", "employee", employee_id, {
-        "record_id": record_id,
+        "record_id": record.get("id"),
         "training_name": record.get('training_name'),
         "reason": reason
     })
@@ -12316,12 +12355,30 @@ async def unverify_training(
     """
     Unverify a training record (requires reason for audit trail).
     This reverts a previously verified training back to pending status.
+    
+    P0 FIX: Now accepts either record_id or training_code.
     """
+    # First try to find by exact record ID
     record = await db.training_records.find_one({
         "id": record_id,
         "employee_id": employee_id,
         "record_status": {"$ne": "deleted"}
     })
+    
+    # P0 FIX: If not found by ID, try by training code/name
+    if not record:
+        code_lower = record_id.lower().replace("_", " ")
+        record = await db.training_records.find_one({
+            "employee_id": employee_id,
+            "record_status": {"$ne": "deleted"},
+            "$or": [
+                {"requirement_id": record_id},
+                {"requirement_id": {"$regex": f"^{record_id}$", "$options": "i"}},
+                {"code": record_id},
+                {"code": {"$regex": f"^{record_id}$", "$options": "i"}},
+                {"training_name": {"$regex": code_lower, "$options": "i"}}
+            ]
+        })
     
     if not record:
         raise HTTPException(status_code=404, detail="Training record not found")
@@ -12332,7 +12389,7 @@ async def unverify_training(
     now = datetime.now(timezone.utc).isoformat()
     
     await db.training_records.update_one(
-        {"id": record_id},
+        {"id": record.get("id")},  # Use actual record ID
         {"$set": {
             "verified": False,
             "verification_status": "pending",
@@ -12344,7 +12401,7 @@ async def unverify_training(
     )
     
     await log_audit_action(user['user_id'], "unverify_training", "employee", employee_id, {
-        "record_id": record_id,
+        "record_id": record.get("id"),
         "training_name": record.get('training_name'),
         "reason": reason
     })

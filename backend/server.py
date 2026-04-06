@@ -7536,6 +7536,8 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     Internal unified progress computation - SINGLE SOURCE OF TRUTH.
     This is the same calculation as GET /employees/{id}/unified-progress but as a callable function.
     Used by both Admin views and Worker Dashboard to ensure progress percentage consistency.
+    
+    P0 FIX: Now uses calculate_employee_compliance for consistent counts across all views.
     """
     if not employee:
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -7545,7 +7547,37 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     
     job_role = (employee.get("job_role") or employee.get("role") or "").lower()
     
-    # Initialize category counters
+    # P0 FIX: Use the SAME compliance calculation as admin view for consistency
+    compliance_data = await calculate_employee_compliance(employee_id, job_role)
+    
+    # Extract counts from unified compliance calculation
+    total_requirements = compliance_data.get("total_items", 0)
+    completed_requirements = compliance_data.get("complete_count", 0)
+    overall_percentage = compliance_data.get("completion_percentage", 0)
+    
+    # Build blockers list from missing items
+    blockers = []
+    for item in compliance_data.get("items", []):
+        if item.get("status") == "missing" and not item.get("optional", False):
+            blockers.append(item.get("name", item.get("requirement_id", "Unknown")))
+    
+    # Add specific blockers for references if not verified
+    ref_1_verified = employee.get("reference_1_verified", False)
+    ref_2_verified = employee.get("reference_2_verified", False)
+    if not ref_1_verified:
+        if "Reference 1" not in blockers:
+            blockers.append("Reference 1")
+    if not ref_2_verified:
+        if "Reference 2" not in blockers:
+            blockers.append("Reference 2")
+    
+    # Check contract
+    contract_signed = employee.get("contract_signed", False)
+    if not contract_signed:
+        if "Employment Contract" not in blockers:
+            blockers.append("Employment Contract")
+    
+    # Build categories for detailed breakdown (same structure as before)
     categories = {
         "documents": {"completed": 0, "total": 0},
         "forms": {"completed": 0, "total": 0},
@@ -7554,169 +7586,41 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
         "agreements": {"completed": 0, "total": 2},
         "induction": {"completed": 0, "total": 0}
     }
-    blockers = []
     
-    # ========== DOCUMENTS ==========
-    required_docs = {
-        "right_to_work": "Right to Work",
-        "dbs": "DBS Certificate",
-        "identity": "Identity Document",
-        "proof_of_address": "Proof of Address (1)",
-        "proof_of_address_2": "Proof of Address (2)"
-    }
-    
-    # Add professional registration for clinical roles
-    if "nurse" in job_role or "midwife" in job_role:
-        required_docs["nmc_registration"] = "NMC Registration"
-    elif "doctor" in job_role or "physician" in job_role or "consultant" in job_role:
-        required_docs["gmc_registration"] = "GMC Registration"
-    elif "physio" in job_role or "occupational" in job_role or "paramedic" in job_role:
-        required_docs["hcpc_registration"] = "HCPC Registration"
-    elif "social worker" in job_role:
-        required_docs["swe_registration"] = "Social Work England Registration"
-    
-    categories["documents"]["total"] = len(required_docs)
-    
-    documents = await db.employee_documents.find({
-        "employee_id": employee_id,
-        "status": {"$nin": ["deleted", "superseded"]}
-    }).to_list(200)
-    
-    for doc_type, doc_name in required_docs.items():
-        is_completed = False
-        for doc in documents:
-            req_id = (doc.get("requirement_id") or "").lower()
-            if doc_type.replace("_", "") in req_id.replace("_", "") or doc_type in req_id:
-                stamp = doc.get("verification_stamp", "")
-                if stamp and stamp not in ["", "not_verified"]:
-                    is_completed = True
-                    break
-                elif doc.get("status") == "verified" or doc.get("verified"):
-                    is_completed = True
-                    break
+    # Populate categories from compliance items
+    for item in compliance_data.get("items", []):
+        req_type = item.get("type", "document")
+        is_complete = item.get("status") in ["complete", "expiring", "expired"]
         
-        if is_completed:
-            categories["documents"]["completed"] += 1
-        else:
-            blockers.append(doc_name)
+        if req_type == "document":
+            categories["documents"]["total"] += 1
+            if is_complete:
+                categories["documents"]["completed"] += 1
+        elif req_type == "form":
+            categories["forms"]["total"] += 1
+            if is_complete:
+                categories["forms"]["completed"] += 1
+        elif req_type == "training":
+            categories["training"]["total"] += 1
+            if is_complete:
+                categories["training"]["completed"] += 1
     
-    # ========== FORMS ==========
-    required_forms = {
-        "staff_health_questionnaire": "Health Questionnaire",
-        "staff_personal_info": "Personal Information",
-        "hmrc_starter_checklist": "HMRC Starter Checklist",
-        "emergency_contacts": "Emergency Contacts"
-    }
-    categories["forms"]["total"] = len(required_forms)
+    # References from employee data
+    categories["references"]["completed"] = (1 if ref_1_verified else 0) + (1 if ref_2_verified else 0)
     
-    form_submissions = await db.form_submissions.find({
-        "employee_id": employee_id,
-        "status": {"$in": ["submitted", "verified"]}
-    }).to_list(20)
-    submitted_forms = {fs.get("form_type") for fs in form_submissions}
-    
-    for form_id, form_name in required_forms.items():
-        if form_id in submitted_forms:
-            categories["forms"]["completed"] += 1
-        else:
-            blockers.append(form_name)
-    
-    # ========== TRAINING ==========
-    mandatory_training = {
-        "safeguarding": "Safeguarding",
-        "manual_handling": "Manual Handling",
-        "fire_safety": "Fire Safety",
-        "health_safety": "Health & Safety",
-        "bls": "Basic Life Support",
-        "infection_control": "Infection Control"
-    }
-    categories["training"]["total"] = len(mandatory_training)
-    
-    training_records = await db.training_records.find({
-        "employee_id": employee_id,
-        "record_status": {"$ne": "superseded"}
-    }).to_list(100)
-    
-    now = datetime.now(timezone.utc)
-    
-    for training_id, training_name in mandatory_training.items():
-        is_completed = False
-        for t in training_records:
-            t_name = (t.get("training_name") or "").lower()
-            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
-                expiry_str = t.get("expiry_date")
-                if expiry_str:
-                    try:
-                        if isinstance(expiry_str, str):
-                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                        else:
-                            expiry = expiry_str
-                        if expiry >= now:
-                            is_completed = True
-                    except:
-                        is_completed = True
-                else:
-                    is_completed = True
-                break
-        
-        if is_completed:
-            categories["training"]["completed"] += 1
-        else:
-            blockers.append(training_name)
-    
-    # ========== REFERENCES ==========
-    references = employee.get("references", [])
-    verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
-    categories["references"]["completed"] = min(len(verified_refs), 2)
-    
-    if len(verified_refs) < 1:
-        blockers.append("Reference 1")
-    if len(verified_refs) < 2:
-        blockers.append("Reference 2")
-    
-    # ========== AGREEMENTS ==========
-    contract_ack = await db.agreement_acknowledgements.find_one({
-        "employee_id": employee_id,
-        "agreement_type": {"$in": ["contract_acceptance", "employment_contract"]},
-        "verification_status": "verified"
-    })
-    
-    if contract_ack or employee.get("contract_signed", False):
-        categories["agreements"]["completed"] += 1
-    else:
-        blockers.append("Employment Contract")
-    
-    # Check handbook (optional, don't add to blockers)
-    handbook_ack = await db.agreement_acknowledgements.find_one({
-        "employee_id": employee_id,
-        "agreement_type": {"$in": ["employee_handbook", "handbook"]},
-        "verification_status": {"$in": ["verified", "acknowledged"]}
-    })
-    if handbook_ack:
+    # Agreements
+    if contract_signed:
         categories["agreements"]["completed"] += 1
     
-    # ========== INDUCTION ==========
-    induction_items = await db.induction_checklist.find({"employee_id": employee_id}).to_list(50)
-    if induction_items:
-        categories["induction"]["total"] = len(induction_items)
-        categories["induction"]["completed"] = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+    # Induction - read from induction_checklists collection
+    induction_record = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
+    if induction_record and induction_record.get("items"):
+        items = induction_record.get("items", [])
+        categories["induction"]["total"] = len(items)
+        categories["induction"]["completed"] = sum(1 for i in items if i.get("status") == "completed")
     else:
-        induction_data = employee.get("induction_checklist", {})
-        if induction_data:
-            items = induction_data.get("items", [])
-            categories["induction"]["total"] = len(items)
-            categories["induction"]["completed"] = len([i for i in items if i.get("completed")])
-        else:
-            categories["induction"]["total"] = 15
-            categories["induction"]["completed"] = 0
-    
-    if categories["induction"]["completed"] < categories["induction"]["total"]:
-        blockers.append(f"Induction ({categories['induction']['completed']}/{categories['induction']['total']} items)")
-    
-    # ========== CALCULATE TOTALS ==========
-    total_requirements = sum(cat["total"] for cat in categories.values())
-    completed_requirements = sum(cat["completed"] for cat in categories.values())
-    overall_percentage = round((completed_requirements / total_requirements) * 100) if total_requirements > 0 else 0
+        categories["induction"]["total"] = 13  # P0 FIX: Match DEFAULT_INDUCTION_ITEMS count
+        categories["induction"]["completed"] = 0
     
     return {
         "overall_percentage": overall_percentage,
@@ -7809,23 +7713,41 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         
         if matching:
             # Prefer verified documents, then most recent
-            verified_docs = [d for d in matching if d.get("verification_stamp") not in [None, "", "not_verified"]]
+            # P0 FIX: Check BOTH verification_stamp AND verified/status fields for sync
+            verified_docs = [d for d in matching if (
+                d.get("verification_stamp") not in [None, "", "not_verified"] or
+                d.get("verified") == True or
+                d.get("status") == "verified"
+            )]
             if verified_docs:
                 # Sort by verified_at descending, pick most recent verified
-                verified_docs.sort(key=lambda x: x.get("verified_at") or x.get("uploaded_at") or "", reverse=True)
+                verified_docs.sort(key=lambda x: x.get("verified_at") or x.get("verification_stamp_at") or x.get("uploaded_at") or "", reverse=True)
                 doc = verified_docs[0]
             else:
                 # No verified docs, pick most recently uploaded
                 matching.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
                 doc = matching[0]
             
-            is_verified = doc.get("verification_stamp") not in [None, "", "not_verified"]
+            # P0 FIX: Document is verified if ANY verification indicator is true
+            is_verified = (
+                doc.get("verification_stamp") not in [None, "", "not_verified"] or
+                doc.get("verified") == True or
+                doc.get("status") == "verified"
+            )
             # Get file URL - prefer stamped version if verified
             file_url = None
             if is_verified and doc.get("stamped_file_url"):
                 file_url = doc.get("stamped_file_url")
             elif doc.get("file_url"):
                 file_url = doc.get("file_url")
+            
+            # P0 FIX: Show worker-friendly status
+            if is_verified:
+                display_status = "verified"
+            elif doc.get("status") == "pending" or doc.get("status") == "uploaded":
+                display_status = "pending_verification"
+            else:
+                display_status = doc.get("status", "uploaded")
             
             completed_docs.append({
                 "type": doc_type,
@@ -7841,7 +7763,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified_by": doc.get("verification_stamp_by") or doc.get("verified_by"),
                 "verified_by_name": doc.get("verification_stamp_by_name") or doc.get("verified_by_name"),
                 "verified_at": doc.get("verification_stamp_at") or doc.get("verified_at"),
-                "status": doc.get("status")
+                "status": display_status,  # P0 FIX: Use clear status for worker
+                "raw_status": doc.get("status")  # Keep raw for debugging
             })
         else:
             missing_docs.append({
@@ -7861,7 +7784,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         if len(poa_docs) == 1:
             completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]
             poa_doc = poa_docs[0]
-            is_verified = poa_doc.get("verification_stamp") not in [None, "", "not_verified"]
+            # P0 FIX: Check all verification indicators
+            is_verified = (
+                poa_doc.get("verification_stamp") not in [None, "", "not_verified"] or
+                poa_doc.get("verified") == True or
+                poa_doc.get("status") == "verified"
+            )
             file_url = poa_doc.get("stamped_file_url") if is_verified else poa_doc.get("file_url")
             completed_docs.append({
                 "type": "proof_of_address",
@@ -7869,7 +7797,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified": is_verified,
                 "uploaded_at": poa_doc.get("uploaded_at"),
                 "file_url": file_url,
-                "partial": True
+                "file_name": poa_doc.get("file_name") or poa_doc.get("original_filename"),
+                "document_id": poa_doc.get("id"),
+                "partial": True,
+                "status": "verified" if is_verified else "pending_verification"
             })
         missing_docs.append({
             "type": "proof_of_address_2",
@@ -8199,6 +8130,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # ========== REFERENCES STATUS (P1: Worker Dashboard Sync) ==========
     # Get references for this employee - worker can see status but NOT referee answers
     # NOTE: Admin uses `reference_X_*` format (e.g., reference_1_name, reference_1_response_data)
+    # P0 FIX: Check ALL possible status indicators for proper sync
     references_status = []
     for ref_num in [1, 2]:
         prefix = f"reference_{ref_num}_"
@@ -8208,24 +8140,32 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         referee_email = employee.get(f"{prefix}email", "")
         is_declared = bool(referee_name and referee_email)
         
-        # Check if request sent
-        request_sent = bool(employee.get(f"{prefix}request_sent_at"))
+        # P0 FIX: Check MULTIPLE indicators for "request sent" status
         request_sent_at = employee.get(f"{prefix}request_sent_at")
+        request_status = employee.get(f"{prefix}request_status")  # Could be "awaiting_response", "requested"
+        request_token = employee.get(f"{prefix}request_token")  # Token exists = request was created
+        request_sent = bool(request_sent_at) or request_status in ["awaiting_response", "requested", "sent"] or bool(request_token)
         
-        # Check if response received - check for response_data or response_received_at
+        # P0 FIX: Check MULTIPLE indicators for "response received" status
         response_data = employee.get(f"{prefix}response_data")
         response_received_at = employee.get(f"{prefix}response_received_at")
-        response_received = bool(response_data) or bool(response_received_at)
+        response_status = employee.get(f"{prefix}response_status")  # Could be "received", "submitted"
+        # Also check if request_status indicates response
+        response_received = bool(response_data) or bool(response_received_at) or response_status in ["received", "submitted"] or request_status == "response_received"
         
-        # Check verification status - admin uses reference_X_verified boolean
-        is_verified = employee.get(f"{prefix}verified", False)
+        # P0 FIX: Check MULTIPLE indicators for verification
+        is_verified = (
+            employee.get(f"{prefix}verified", False) == True or
+            employee.get(f"{prefix}status") == "verified" or
+            request_status == "verified"
+        )
         verified_at = employee.get(f"{prefix}verified_at")
         verified_by = employee.get(f"{prefix}verified_by")
         
         # Check if rejected
-        is_rejected = employee.get(f"{prefix}rejected", False)
+        is_rejected = employee.get(f"{prefix}rejected", False) or request_status == "rejected"
         
-        # Determine display status
+        # Determine display status - P0 FIX: Clearer status logic
         if is_verified:
             status = "verified"
             status_label = "Verified"
@@ -8237,10 +8177,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             status_label = "Response received - pending admin review"
         elif request_sent:
             status = "sent"
-            status_label = "Request sent - awaiting response"
+            status_label = "Request sent - awaiting referee response"
         elif is_declared:
             status = "declared"
-            status_label = "Referee declared - request not yet sent"
+            status_label = "Referee declared - admin will send request"
         else:
             status = "not_declared"
             status_label = "Not declared"
@@ -8364,22 +8304,22 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "synced_from_training": is_training_complete and not is_complete_in_checklist
             })
     else:
-        # No induction record - show default 15 Care Certificate standards (NO Safeguarding Children for adult care)
+        # No induction record - show default 13 Care Certificate standards (NO Safeguarding Children for adult care)
+        # P0 FIX: Match DEFAULT_INDUCTION_ITEMS exactly
         care_certificate_standards = [
-            "Safeguarding adults",
-            "Fire safety",
+            "Safeguarding Adults",
+            "Fire Safety",
             "Health & Safety",
-            "Infection prevention and control",
-            "Moving & handling",
-            "Basic life support",
-            "Equality and diversity",
-            "Communication",
-            "Privacy and dignity",
-            "Fluids and nutrition",
-            "Awareness of mental health, dementia and learning disabilities",
-            "Medication awareness",
-            "Company policies review",
-            "Shadow shift completed"
+            "Infection Prevention & Control",
+            "Data Protection (GDPR)",
+            "Equality & Diversity",
+            "Moving & Handling",
+            "Basic Life Support",
+            "Medication Awareness",
+            "Food Hygiene",
+            "Communication Skills",
+            "Company Policies Review",
+            "Shadow Shift Completed"
         ]
         for std_name in care_certificate_standards:
             is_training_complete = is_training_verified(std_name)

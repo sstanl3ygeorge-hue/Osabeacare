@@ -2145,3 +2145,66 @@ To send emails to workers (not just test account):
 ### Files Changed:
 - `/app/frontend/src/components/compliance/FormRequirementRow.js` - Added Unverify button
 - `/app/frontend/src/components/compliance/DualRowComplianceSection.js` - Fixed CV upload key
+
+---
+
+## COMPLETED: Worker Dashboard Agreements & Progress Sync Fix (April 2026)
+
+### Issue 1: Worker Dashboard Missing Agreements Section (P0)
+**Problem**: The Worker Dashboard API (`/api/worker/dashboard`) did not include the `agreements` array (Contract Acceptance, Employee Handbook) in its response. Workers couldn't see their contract/handbook verification status.
+
+**Fix Applied**:
+- Added `agreements_status` array to the worker dashboard endpoint return statement (`server.py` line 8611)
+- Added `agreements` to frontend destructuring in `WorkerDashboard.js`
+- Created new Agreements UI section with:
+  - Purple icon header with "Agreements" title
+  - Badge showing "X of 2 Verified" status
+  - Contract Acceptance and Employee Handbook rows
+  - Green/Blue/Gray styling based on verified/signed/pending status
+  - Verification dates and verified-by names displayed
+
+### Issue 2: Admin vs Worker Progress Bar Mismatch (P1)
+**Problem**: Admin `/api/employees/{id}/unified-progress` endpoint was returning 500 Internal Server Error due to a NoneType error in `unified_compliance_engine.py`. This caused inconsistent progress calculations between views.
+
+**Root Cause**: The code at line 624 was accessing `ref_doc.get("ref1")` which could fail if `ref_doc` was `None`, despite an `if ref_doc:` check on the previous line. The error persisted due to Python bytecode caching.
+
+**Fix Applied**:
+- Refactored reference checking in `unified_compliance_engine.py` (line 622-628):
+  - Changed to `if ref_doc is not None:` for explicit None check
+  - Used intermediate variables for safe attribute access: `ref1_data = ref_doc.get("ref1") or {}`
+  - Cleared Python cache files to ensure new code was loaded
+- Both Worker and Admin now show consistent 36% progress (12 of 33 requirements)
+
+### Test Results:
+- Backend: 100% (9/9 passed)
+- Frontend: 100%
+- Test file: `/app/test_reports/iteration_175.json`
+
+### Files Changed:
+- `/app/backend/server.py` - Added `agreements` to worker dashboard response
+- `/app/backend/unified_compliance_engine.py` - Fixed NoneType error in reference checking
+- `/app/frontend/src/pages/worker/WorkerDashboard.js` - Added agreements destructuring and UI section
+
+---
+
+## P0/P1 Feature Backlog (Prioritized)
+
+### P0 - Critical (Must Have)
+- [x] Worker Dashboard Agreements section (DONE - April 2026)
+- [x] Admin/Worker Progress Sync (DONE - April 2026)
+- [ ] Phase 4: CQC Export (PDF downloads, Compliance Summary, Audit Trail)
+
+### P1 - Important
+- [ ] Phase 5: Application Form → Profile Auto-Sync
+- [ ] Full AI extraction integration for CV/App Form to pre-fill profile gaps
+
+### P2 - Should Have
+- [ ] Refactor `server.py` into modular routers (55k+ lines currently)
+- [ ] Resolve F811 duplicate function definitions
+- [ ] Rate limiting on auth endpoints
+
+### P3 - Nice to Have
+- [ ] Supabase Auth integration with RLS policies
+- [ ] PostgreSQL migration (from MongoDB)
+- [ ] MFA (TOTP) for Admin accounts
+

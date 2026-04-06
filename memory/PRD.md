@@ -2024,3 +2024,53 @@ When training is verified, corresponding induction checklist items auto-complete
 - Infection Control Training → Induction Standard 13
 - Moving & Handling Training → Induction Standard 14
 - Fire Safety Training → Induction Standard 15
+
+
+
+---
+
+## COMPLETED: P0 Bug Fixes - Document Upload & Reference Rejection (April 2026)
+
+### Issue 1: Worker Document Upload Corrupting Image Files (JPG/PNG)
+**Root Cause**: Worker upload endpoint at `/api/worker/upload-document/{requirement_id}` was saving files to local disk (`/app/uploads/documents/`) instead of cloud storage. The `get_object()` function used for file retrieval only fetches from cloud storage.
+
+**Fix Applied**:
+- Changed worker upload to use `put_object()` for cloud storage (line 8561 in server.py)
+- Storage path format: `documents/{employee_id}/{uuid}_{filename}`
+- Content type properly detected via magic bytes and preserved
+
+### Issue 2: Rejected References Do Not Clear Data
+**Root Cause**: When an admin rejected a reference, only status flags were set but underlying data fields (name, email, phone, company) remained, preventing workers from entering fresh reference details.
+
+**Fix Applied** (ReferenceIntegrityService.reject_reference at line 36431):
+- Clears: name, email, phone, company, position, relationship, years_known
+- Clears: declared, response_data, response_received_at
+- Clears: reviewed, reviewed_by, reviewed_at
+- Preserves: rejection audit trail (rejected_at, rejected_by, rejection_reason)
+- Also clears from `db.references` collection
+
+### Additional Fixes:
+1. **Unified Auth for Document Viewing**: Added `get_current_user_or_worker()` dependency (line 7361) that accepts both admin and worker JWT tokens. Used by document serving endpoints.
+
+2. **Hybrid Storage Path Handling**: Document serving endpoints now handle both:
+   - Legacy local paths (`/uploads/...`) - reads from `/app/uploads/`
+   - Cloud storage paths - uses `get_object()`
+
+3. **Worker Document Viewer Security**: Workers can only view their own documents (check at line 21863).
+
+4. **Frontend Blob Fetch**: WorkerDashboard.js `openDocumentViewer()` function (line 254) fetches documents as blob with authentication header.
+
+### Bug Fixed During Testing:
+- `/api/employees/{id}/references` endpoint had NoneType error when `refs.get(ref_key)` returned None
+- Fixed by changing to `(refs.get(ref_key) if refs else None) or {}`
+
+### Test Results:
+- Backend: 100% (11/11 passed)
+- Frontend: 100%
+- Test file: `/app/test_reports/iteration_173.json`
+
+### API Endpoints Verified:
+- `POST /api/worker/upload-document/{requirement_id}` - PNG, JPG, PDF uploads work
+- `GET /api/employee-documents/{doc_id}/file` - Returns document with correct MIME type
+- `POST /api/references/{employee_id}/{ref_num}/reject` - Clears reference data
+- `GET /api/employees/{id}/references-integrity` - Shows cleared data

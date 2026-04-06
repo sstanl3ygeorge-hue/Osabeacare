@@ -7078,6 +7078,142 @@ export default function EmployeeProfilePage() {
         </DialogContent>
       </Dialog>
       
+      {/* ========== EVIDENCE UPLOAD DIALOG (SUPER ADMIN) ========== */}
+      {/* This dialog allows admins to upload evidence for any compliance requirement */}
+      <Dialog open={uploadDialogOpen} onOpenChange={(open) => {
+        setUploadDialogOpen(open);
+        if (!open) {
+          setSelectedRequirement('');
+          setUploadFile(null);
+          setDocumentLabel('');
+        }
+      }}>
+        <DialogContent className="max-w-lg bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center gap-2">
+              <Upload className="h-5 w-5 text-blue-600" />
+              Upload Document Evidence
+            </DialogTitle>
+            <DialogDescription>
+              Upload evidence for the selected compliance requirement. This will be available for verification.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <form onSubmit={handleUploadDocument} className="space-y-4 mt-4">
+            {/* Requirement Selection */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                Requirement <span className="text-red-500">*</span>
+              </Label>
+              <Select value={selectedRequirement} onValueChange={setSelectedRequirement}>
+                <SelectTrigger className="rounded-xl" data-testid="upload-requirement-select">
+                  <SelectValue placeholder="Select requirement type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="right_to_work_evidence">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-green-500" />
+                      Right to Work
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="dbs_evidence">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-blue-500" />
+                      DBS Certificate
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="identity_evidence">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-500" />
+                      Identity (Passport/ID)
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="proof_of_address_evidence">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      Proof of Address
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="training_evidence">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                      Training Certificate
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {/* Optional File Label */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">File Label (optional)</Label>
+              <Input
+                value={documentLabel}
+                onChange={(e) => setDocumentLabel(e.target.value)}
+                placeholder="e.g., BRP Card Front, DBS Certificate 2024"
+                className="rounded-xl"
+                data-testid="upload-file-label"
+              />
+            </div>
+            
+            {/* File Picker */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">
+                File <span className="text-red-500">*</span>
+              </Label>
+              <FileUploaderInline
+                onUpload={(file) => setUploadFile(file)}
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                maxSize={10 * 1024 * 1024}
+                className="border-2 border-dashed rounded-xl p-4"
+              />
+              {uploadFile && (
+                <div className="flex items-center gap-2 p-2 bg-green-50 rounded-lg border border-green-200">
+                  <FileText className="h-4 w-4 text-green-600" />
+                  <span className="text-sm text-green-700 truncate flex-1">{uploadFile.name}</span>
+                  <Button 
+                    type="button" 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => setUploadFile(null)}
+                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                  >
+                    <XCircle className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              <p className="text-xs text-gray-500">
+                Accepted: PDF, JPG, PNG, WebP (max 10MB)
+              </p>
+            </div>
+            
+            <DialogFooter className="pt-4">
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setUploadDialogOpen(false)}
+                className="border-gray-200"
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="submit" 
+                disabled={!selectedRequirement || !uploadFile || isUploading}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                data-testid="upload-submit-btn"
+              >
+                {isUploading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4 mr-2" />
+                )}
+                Upload Evidence
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      
       {/* ========== DUAL-ROW COMPLIANCE MODEL DIALOGS (STEP 11) ========== */}
       
       {/* Record Check Dialog */}

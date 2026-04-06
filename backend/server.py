@@ -7754,21 +7754,57 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "status": {"$nin": ["deleted", "superseded"]}
     }).to_list(length=200)
     
-    # Required document types
+    # Required document types with their acceptable requirement_id patterns
+    # IMPORTANT: Use exact patterns to avoid false matches (e.g., 'dbs_check' is NOT a DBS certificate)
     required_docs = {
-        "right_to_work": "Right to Work",
-        "dbs": "DBS Certificate", 
-        "identity": "Identity (Passport/ID)",
-        "proof_of_address": "Proof of Address"
+        "right_to_work": {
+            "name": "Right to Work",
+            "patterns": ["right_to_work", "right_to_work_documents", "right_to_work_evidence", "rtw"],
+            "exclude_patterns": ["right_to_work_check"]  # RTW check is a verification, not a document
+        },
+        "dbs": {
+            "name": "DBS Certificate",
+            "patterns": ["dbs", "dbs_certificate", "dbs_evidence"],
+            "exclude_patterns": ["dbs_check", "dbs_status_check", "dbs_update"]  # DBS checks are verifications, not the certificate
+        },
+        "identity": {
+            "name": "Identity (Passport/ID)",
+            "patterns": ["identity", "identity_documents", "identity_evidence", "passport", "id_document"],
+            "exclude_patterns": ["identity_check", "identity_verification"]
+        },
+        "proof_of_address": {
+            "name": "Proof of Address",
+            "patterns": ["proof_of_address", "poa", "address_evidence"],
+            "exclude_patterns": ["address_check", "address_verification"]
+        }
     }
+    
+    def matches_requirement(requirement_id: str, doc_config: dict) -> bool:
+        """Check if a requirement_id matches a document type's patterns, excluding verification-only records."""
+        if not requirement_id:
+            return False
+        req_lower = requirement_id.lower()
+        
+        # First check if it matches any exclude pattern (verifications)
+        for exclude in doc_config.get("exclude_patterns", []):
+            if exclude in req_lower:
+                return False
+        
+        # Then check if it matches any include pattern
+        for pattern in doc_config.get("patterns", []):
+            if pattern in req_lower:
+                return True
+        return False
     
     missing_docs = []
     completed_docs = []
     
-    for doc_type, doc_name in required_docs.items():
+    for doc_type, doc_config in required_docs.items():
+        doc_name = doc_config["name"]
         # Find active document of this type - exclude superseded, rejected, uploaded_in_error
+        # Use precise pattern matching to avoid false positives
         matching = [d for d in documents 
-                   if doc_type in (d.get("requirement_id", "") or "").lower()
+                   if matches_requirement(d.get("requirement_id", ""), doc_config)
                    and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
         
         if matching:
@@ -7815,8 +7851,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             })
     
     # Check POA needs 2 documents - exclude superseded, rejected, uploaded_in_error
+    # Use the same precise matching as above
+    poa_config = required_docs["proof_of_address"]
     poa_docs = [d for d in documents 
-               if "proof_of_address" in (d.get("requirement_id", "") or "").lower()
+               if matches_requirement(d.get("requirement_id", ""), poa_config)
                and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
     if len(poa_docs) < 2:
         # Remove existing POA from completed if only 1

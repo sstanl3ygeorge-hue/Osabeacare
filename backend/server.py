@@ -8117,13 +8117,54 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 logger.warning(f"Error parsing training expiry for alert: {e}")
                 pass
     
-    # Check contract status
+    # ========== AGREEMENTS STATUS (P0: Worker Dashboard Sync) ==========
+    # Worker needs to see their agreements (Contract, Handbook) status
+    agreements_status = []
+    
+    # Check Contract Acceptance
     contract_ack = await db.agreement_acknowledgements.find_one({
         "employee_id": employee_id,
-        "agreement_type": "contract_acceptance",
-        "verification_status": "verified"
-    })
-    contract_signed = bool(contract_ack)
+        "agreement_type": "contract_acceptance"
+    }, {"_id": 0})
+    
+    contract_status = {
+        "id": "contract_acceptance",
+        "name": "Contract Acceptance",
+        "type": "contract_acceptance",
+        "signed": bool(contract_ack and contract_ack.get("acknowledged")),
+        "signed_at": contract_ack.get("acknowledged_at") if contract_ack else None,
+        "verified": bool(contract_ack and contract_ack.get("verification_status") == "verified"),
+        "verified_at": contract_ack.get("verified_at") if contract_ack else None,
+        "verified_by_name": contract_ack.get("verified_by_name") if contract_ack else None,
+        "can_sign": not bool(contract_ack and contract_ack.get("acknowledged")),
+        "status": "verified" if (contract_ack and contract_ack.get("verification_status") == "verified") else (
+            "signed" if (contract_ack and contract_ack.get("acknowledged")) else "pending"
+        )
+    }
+    agreements_status.append(contract_status)
+    contract_signed = contract_status["signed"]
+    
+    # Check Employee Handbook Acknowledgement
+    handbook_ack = await db.agreement_acknowledgements.find_one({
+        "employee_id": employee_id,
+        "agreement_type": "handbook_acknowledgement"
+    }, {"_id": 0})
+    
+    handbook_status = {
+        "id": "handbook_acknowledgement",
+        "name": "Employee Handbook Acknowledgement",
+        "type": "handbook_acknowledgement",
+        "signed": bool(handbook_ack and handbook_ack.get("acknowledged")),
+        "signed_at": handbook_ack.get("acknowledged_at") if handbook_ack else None,
+        "verified": bool(handbook_ack and handbook_ack.get("verification_status") == "verified"),
+        "verified_at": handbook_ack.get("verified_at") if handbook_ack else None,
+        "verified_by_name": handbook_ack.get("verified_by_name") if handbook_ack else None,
+        "can_sign": not bool(handbook_ack and handbook_ack.get("acknowledged")),
+        "status": "verified" if (handbook_ack and handbook_ack.get("verification_status") == "verified") else (
+            "signed" if (handbook_ack and handbook_ack.get("acknowledged")) else "pending"
+        )
+    }
+    agreements_status.append(handbook_status)
     
     # ========== UNIFIED PROGRESS (P0 FIX: Single Source of Truth) ==========
     # Use get_unified_employee_status() - SAME function as Admin views

@@ -168,6 +168,10 @@ export default function EmployeeProfilePage() {
   const [trainingCertDialogOpen, setTrainingCertDialogOpen] = useState(false);
   const [trainingCertFile, setTrainingCertFile] = useState(null);
   const [isUploadingCert, setIsUploadingCert] = useState(false);
+  
+  // Form submissions state
+  const [formSubmissions, setFormSubmissions] = useState([]);
+  const [viewFormSubmission, setViewFormSubmission] = useState(null);
   const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
   
   // Training correction/history dialog states
@@ -844,7 +848,22 @@ export default function EmployeeProfilePage() {
     fetchNameMismatch();
     fetchTrainingEvaluation();
     fetchProposedTrainingItems();
+    fetchFormSubmissions();
   }, [employeeId, token]);
+  
+  // Fetch form submissions for the Forms tab
+  const fetchFormSubmissions = async () => {
+    try {
+      const response = await axios.get(
+        `${API}/api/employees/${employeeId}/forms`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setFormSubmissions(response.data.forms || response.data || []);
+    } catch (error) {
+      console.error('Failed to fetch form submissions:', error);
+      setFormSubmissions([]);
+    }
+  };
 
   // Handle URL parameters from email action links
   useEffect(() => {
@@ -3895,46 +3914,214 @@ export default function EmployeeProfilePage() {
             <CardHeader>
               <CardTitle className="font-heading text-lg">Employee Forms</CardTitle>
               <p className="text-xs text-text-muted">
-                Health questionnaire, personal information, HMRC details, and emergency contacts.
+                Required forms that worker must complete. View submissions, mark as reviewed, or send reminders.
               </p>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {/* Form status cards */}
-                {['Staff Health Questionnaire', 'Personal Information', 'HMRC Starter Checklist', 'Emergency Contacts'].map((formName, idx) => {
-                  const formSubmission = generatedForms?.find(f => 
-                    f.name?.toLowerCase().includes(formName.toLowerCase().split(' ')[0])
+              <div className="space-y-3">
+                {/* Form status cards with proper data from form_submissions */}
+                {[
+                  { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations' },
+                  { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details' },
+                  { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
+                  { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details' }
+                ].map((form) => {
+                  // Find submission from form_submissions endpoint data
+                  const submission = formSubmissions?.find(fs => 
+                    fs.form_type === form.key || 
+                    fs.requirement_id === form.key ||
+                    (fs.form_type || '').toLowerCase().includes(form.key.split('_')[0])
                   );
-                  const isSubmitted = formSubmission?.status === 'submitted' || formSubmission?.status === 'verified';
+                  
+                  // Determine status
+                  const status = submission?.status || 'not_started';
+                  const isSubmitted = status === 'submitted' || status === 'verified';
+                  const isInProgress = status === 'draft' || status === 'in_progress';
+                  const isVerified = status === 'verified';
+                  const submittedDate = submission?.submitted_at || submission?.updated_at;
                   
                   return (
-                    <div key={idx} className={`p-4 rounded-lg border ${
-                      isSubmitted ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'
-                    }`}>
+                    <div 
+                      key={form.key} 
+                      className={`p-4 rounded-lg border ${
+                        isVerified ? 'bg-green-50 border-green-200' :
+                        isSubmitted ? 'bg-blue-50 border-blue-200' :
+                        isInProgress ? 'bg-amber-50 border-amber-200' :
+                        'bg-gray-50 border-gray-200'
+                      }`}
+                      data-testid={`form-card-${form.key}`}
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          {isSubmitted ? (
+                          {isVerified ? (
                             <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : isSubmitted ? (
+                            <FileText className="h-5 w-5 text-blue-600" />
+                          ) : isInProgress ? (
+                            <Clock className="h-5 w-5 text-amber-500" />
                           ) : (
-                            <Clock className="h-5 w-5 text-gray-400" />
+                            <AlertCircle className="h-5 w-5 text-gray-400" />
                           )}
                           <div>
-                            <p className="font-medium text-gray-800">{formName}</p>
-                            <p className="text-xs text-gray-500">
-                              {isSubmitted ? 'Submitted' : 'Pending submission'}
-                            </p>
+                            <p className="font-medium text-gray-800">{form.name}</p>
+                            <p className="text-xs text-gray-500">{form.description}</p>
+                            {submittedDate && isSubmitted && (
+                              <p className="text-xs text-blue-600 mt-1">
+                                Submitted: {new Date(submittedDate).toLocaleDateString('en-GB', { 
+                                  day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                                })}
+                              </p>
+                            )}
                           </div>
                         </div>
-                        <Badge className={isSubmitted ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}>
-                          {isSubmitted ? 'Complete' : 'Pending'}
-                        </Badge>
+                        
+                        <div className="flex items-center gap-2">
+                          {/* Status Badge */}
+                          <Badge className={
+                            isVerified ? 'bg-green-100 text-green-700' :
+                            isSubmitted ? 'bg-blue-100 text-blue-700' :
+                            isInProgress ? 'bg-amber-100 text-amber-700' :
+                            'bg-gray-100 text-gray-600'
+                          }>
+                            {isVerified ? 'Reviewed' : 
+                             isSubmitted ? 'Submitted' : 
+                             isInProgress ? 'In Progress' : 
+                             'Not Started'}
+                          </Badge>
+                          
+                          {/* Action Buttons */}
+                          <div className="flex gap-1">
+                            {/* View Submission - only if submitted */}
+                            {isSubmitted && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setViewFormSubmission({
+                                    isOpen: true,
+                                    formType: form.key,
+                                    formName: form.name,
+                                    submissionId: submission?.id,
+                                    data: submission?.data || submission?.form_data
+                                  });
+                                }}
+                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                data-testid={`view-submission-${form.key}`}
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                View
+                              </Button>
+                            )}
+                            
+                            {/* Mark as Reviewed - only if submitted but not verified */}
+                            {isSubmitted && !isVerified && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    await axios.post(
+                                      `${API}/api/form-submissions/${submission.id}/verify`,
+                                      {},
+                                      { headers: { Authorization: `Bearer ${token}` } }
+                                    );
+                                    toast.success('Form marked as reviewed');
+                                    fetchFormSubmissions();
+                                  } catch (err) {
+                                    toast.error('Failed to mark as reviewed');
+                                  }
+                                }}
+                                className="text-green-600 border-green-200 hover:bg-green-50"
+                                data-testid={`mark-reviewed-${form.key}`}
+                              >
+                                <CheckCircle className="h-4 w-4 mr-1" />
+                                Mark Reviewed
+                              </Button>
+                            )}
+                            
+                            {/* Send Reminder - only if not submitted */}
+                            {!isSubmitted && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    await axios.post(
+                                      `${API}/api/employees/${employeeId}/forms/${form.key}/remind`,
+                                      {},
+                                      { headers: { Authorization: `Bearer ${token}` } }
+                                    );
+                                    toast.success(`Reminder sent for ${form.name}`);
+                                  } catch (err) {
+                                    toast.error('Failed to send reminder');
+                                  }
+                                }}
+                                className="text-amber-600 border-amber-200 hover:bg-amber-50"
+                                data-testid={`send-reminder-${form.key}`}
+                              >
+                                <Send className="h-4 w-4 mr-1" />
+                                Send Reminder
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
+              
+              {/* Interview Record - Admin completes this */}
+              <div className="mt-6 pt-6 border-t">
+                <h4 className="font-medium text-gray-800 mb-3">Admin Forms</h4>
+                <InterviewFormPanel 
+                  employeeId={employeeId}
+                  employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                  onComplete={() => {
+                    fetchCompliance();
+                    fetchFormSubmissions();
+                  }}
+                />
+              </div>
             </CardContent>
           </Card>
+          
+          {/* Form Submission View Dialog */}
+          <Dialog open={viewFormSubmission?.isOpen} onOpenChange={(open) => !open && setViewFormSubmission(null)}>
+            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{viewFormSubmission?.formName} - Submission</DialogTitle>
+                <DialogDescription>
+                  Review the worker's submitted answers
+                </DialogDescription>
+              </DialogHeader>
+              <div className="py-4">
+                {viewFormSubmission?.data ? (
+                  <div className="space-y-4">
+                    {Object.entries(viewFormSubmission.data).map(([key, value]) => (
+                      <div key={key} className="border-b pb-2">
+                        <p className="text-sm font-medium text-gray-600">
+                          {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                        </p>
+                        <p className="text-gray-800">
+                          {typeof value === 'boolean' ? (value ? 'Yes' : 'No') :
+                           typeof value === 'object' ? JSON.stringify(value, null, 2) :
+                           value || 'Not provided'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500 text-center py-8">No submission data available</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setViewFormSubmission(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         {/* ========== TAB 6: EMPLOYMENT ========== */}

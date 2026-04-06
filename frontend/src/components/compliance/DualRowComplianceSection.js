@@ -756,8 +756,7 @@ export default function DualRowComplianceSection({
           {/* Recruitment Record - Form-type requirements */}
           {sections.recruitment_record && sections.recruitment_record.rows && renderSection('recruitment_record', sections.recruitment_record)}
           
-          {/* Admin Forms - Form-type requirements */}
-          {sections.admin_forms && sections.admin_forms.rows && renderSection('admin_forms', sections.admin_forms)}
+          {/* NOTE: Admin Forms moved to dedicated Forms Tab to avoid duplication */}
         </>
       )}
       

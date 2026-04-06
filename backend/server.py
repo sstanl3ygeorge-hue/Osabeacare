@@ -21072,6 +21072,97 @@ async def get_employee_forms(
     return {"forms": submissions, "count": len(submissions)}
 
 
+
+@api_router.post("/employees/{employee_id}/forms/{form_type}/remind")
+async def send_form_reminder(
+    employee_id: str,
+    form_type: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Send a reminder email to an employee to complete a specific form.
+    
+    Form types:
+    - staff_health_questionnaire
+    - staff_personal_info
+    - hmrc_starter_checklist
+    - emergency_contacts
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    emp_email = employee.get("email")
+    if not emp_email:
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+    
+    # Form type labels
+    form_labels = {
+        "staff_health_questionnaire": "Staff Health Questionnaire",
+        "staff_personal_info": "Personal Information Form",
+        "hmrc_starter_checklist": "HMRC Starter Checklist",
+        "emergency_contacts": "Emergency Contacts Form"
+    }
+    
+    form_name = form_labels.get(form_type, form_type.replace("_", " ").title())
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
+    
+    if not resend.api_key:
+        raise HTTPException(status_code=500, detail="Email service not configured")
+    
+    try:
+        reminder_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #059669, #10b981); padding: 24px; text-align: center;">
+                <h1 style="color: white; margin: 0; font-size: 24px;">Form Reminder</h1>
+            </div>
+            <div style="padding: 32px; background: #f8fafc;">
+                <p style="color: #1e293b; font-size: 16px;">
+                    Hi {employee.get('first_name', 'there')},
+                </p>
+                <p style="color: #475569; line-height: 1.6;">
+                    This is a friendly reminder to complete your <strong>{form_name}</strong> form 
+                    as part of your onboarding process.
+                </p>
+                <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 16px; margin: 24px 0;">
+                    <p style="color: #92400e; margin: 0;">
+                        <strong>Action Required:</strong> Please log in and complete this form at your earliest convenience.
+                    </p>
+                </div>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{frontend_url}/worker/login" style="background: #059669; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                        Complete Form Now
+                    </a>
+                </div>
+                <p style="color: #64748b; font-size: 14px;">
+                    If you have any questions, please contact your manager.
+                </p>
+            </div>
+        </div>
+        """
+        
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [emp_email],
+            "subject": f"Reminder: Please Complete Your {form_name}",
+            "html": reminder_html
+        })
+        
+        # Log audit
+        await log_audit_action(user['user_id'], "form_reminder_sent", "employee", employee_id, {
+            "form_type": form_type,
+            "form_name": form_name,
+            "sent_to": emp_email
+        })
+        
+        return {"success": True, "message": f"Reminder sent to {emp_email}"}
+        
+    except Exception as e:
+        logger.error(f"Failed to send form reminder: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send reminder: {str(e)}")
+
+
+
 @api_router.get("/form-submissions/{submission_id}")
 async def get_form_submission(submission_id: str, user: dict = Depends(get_current_user)):
     """

@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User
+  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
@@ -303,7 +303,7 @@ export default function WorkerDashboard() {
 
   if (!dashboard) return null;
 
-  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction } = dashboard;
+  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks } = dashboard;
   
   const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
 
@@ -909,6 +909,169 @@ export default function WorkerDashboard() {
               <p className="text-xs text-slate-400 mt-4 text-center">
                 Your supervisor will mark items complete during your induction period
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard) ========== */}
+        {!isActiveEmployee && competency_assessments && competency_assessments.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="competency-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Award className="h-5 w-5 text-orange-500" />
+                    Competency Assessments
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your skills assessments and outcomes
+                  </p>
+                </div>
+                <Badge className={`${
+                  competency_assessments.filter(c => c.outcome === 'pass' || c.status === 'completed').length === competency_assessments.length
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {competency_assessments.filter(c => c.outcome === 'pass' || c.status === 'completed').length}/{competency_assessments.length} Passed
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {competency_assessments.map((comp, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-xl border ${
+                      comp.outcome === 'pass' ? 'bg-green-50 border-green-200' :
+                      comp.outcome === 'fail' ? 'bg-red-50 border-red-200' :
+                      comp.status === 'scheduled' ? 'bg-blue-50 border-blue-200' :
+                      'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                          comp.outcome === 'pass' ? 'bg-green-100' :
+                          comp.outcome === 'fail' ? 'bg-red-100' :
+                          'bg-slate-100'
+                        }`}>
+                          {comp.outcome === 'pass' ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : comp.outcome === 'fail' ? (
+                            <X className="h-5 w-5 text-red-600" />
+                          ) : (
+                            <Clock className="h-5 w-5 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-medium text-slate-800">{comp.competency_name}</span>
+                          {comp.area && <p className="text-xs text-slate-500">{comp.area}</p>}
+                          {comp.scheduled_date && (
+                            <p className="text-xs text-slate-500">
+                              {comp.status === 'completed' ? 'Completed' : 'Scheduled'}: {formatDate(comp.completed_date || comp.scheduled_date)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Badge className={`text-xs ${
+                        comp.outcome === 'pass' ? 'bg-green-100 text-green-700' :
+                        comp.outcome === 'fail' ? 'bg-red-100 text-red-700' :
+                        comp.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {comp.outcome === 'pass' ? 'Passed' :
+                         comp.outcome === 'fail' ? 'Needs Improvement' :
+                         comp.status === 'scheduled' ? 'Scheduled' : 'Pending'}
+                      </Badge>
+                    </div>
+                    {comp.follow_up_required && comp.follow_up_date && (
+                      <p className="text-xs text-amber-600 mt-2">
+                        Follow-up scheduled: {formatDate(comp.follow_up_date)}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== SPOT CHECKS (P1: Worker Dashboard) ========== */}
+        {spot_checks && spot_checks.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="spot-checks-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Eye className="h-5 w-5 text-indigo-500" />
+                    Spot Checks
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your observation and supervision history
+                  </p>
+                </div>
+                <Badge className="bg-indigo-100 text-indigo-700">
+                  {spot_checks.length} Recorded
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {spot_checks.slice(0, 10).map((spot, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-xl border ${
+                      spot.outcome === 'pass' ? 'bg-green-50 border-green-200' :
+                      spot.outcome === 'needs_improvement' ? 'bg-amber-50 border-amber-200' :
+                      spot.outcome === 'fail' ? 'bg-red-50 border-red-200' :
+                      'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          spot.outcome === 'pass' ? 'bg-green-100' :
+                          spot.outcome === 'needs_improvement' ? 'bg-amber-100' :
+                          spot.outcome === 'fail' ? 'bg-red-100' :
+                          'bg-slate-100'
+                        }`}>
+                          {spot.outcome === 'pass' ? (
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                          ) : spot.outcome === 'needs_improvement' ? (
+                            <AlertCircle className="h-4 w-4 text-amber-600" />
+                          ) : spot.outcome === 'fail' ? (
+                            <X className="h-4 w-4 text-red-600" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-medium text-slate-700 text-sm">{spot.area || spot.type || 'Observation'}</span>
+                          {spot.date && <p className="text-xs text-slate-500">{formatDate(spot.date)}</p>}
+                        </div>
+                      </div>
+                      <Badge className={`text-xs ${
+                        spot.outcome === 'pass' ? 'bg-green-100 text-green-700' :
+                        spot.outcome === 'needs_improvement' ? 'bg-amber-100 text-amber-700' :
+                        spot.outcome === 'fail' ? 'bg-red-100 text-red-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {spot.outcome === 'pass' ? 'Pass' :
+                         spot.outcome === 'needs_improvement' ? 'Needs Work' :
+                         spot.outcome === 'fail' ? 'Fail' : 'Pending'}
+                      </Badge>
+                    </div>
+                    {spot.notes && (
+                      <p className="text-xs text-slate-600 mt-2 bg-white/50 p-2 rounded">{spot.notes}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {spot_checks.length > 10 && (
+                <p className="text-xs text-slate-400 mt-2 text-center">
+                  Showing 10 of {spot_checks.length} spot checks
+                </p>
+              )}
             </CardContent>
           </Card>
         )}

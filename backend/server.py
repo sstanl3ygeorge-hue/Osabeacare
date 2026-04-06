@@ -7949,11 +7949,20 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             if expiry_str:
                 try:
                     if isinstance(expiry_str, str):
-                        expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                        # Handle ISO format with timezone
+                        if 'T' in expiry_str or '+' in expiry_str or 'Z' in expiry_str:
+                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                        else:
+                            # Simple date format - add timezone
+                            expiry = datetime.strptime(expiry_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
                     else:
                         expiry = expiry_str
+                        # Ensure timezone aware
+                        if expiry.tzinfo is None:
+                            expiry = expiry.replace(tzinfo=timezone.utc)
                     is_expired = expiry < now
-                except:
+                except Exception as e:
+                    logger.warning(f"Error parsing training expiry date '{expiry_str}': {e}")
                     pass
             
             training_entry.update({
@@ -8033,26 +8042,37 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         except:
             pass
     
-    # Training expiry alerts
-    for t in completed_trainings:
+    # Training expiry alerts - check BOTH completed and expired trainings
+    for t in completed_trainings + expired_trainings:
         if t.get("expiry_date"):
             try:
                 exp_str = t["expiry_date"]
                 if isinstance(exp_str, str):
-                    exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                    # Handle simple date format without timezone
+                    if 'T' in exp_str or '+' in exp_str or 'Z' in exp_str:
+                        exp_date = datetime.fromisoformat(exp_str.replace('Z', '+00:00'))
+                    else:
+                        exp_date = datetime.strptime(exp_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
                 else:
                     exp_date = exp_str
+                    if exp_date.tzinfo is None:
+                        exp_date = exp_date.replace(tzinfo=timezone.utc)
                 days_left = (exp_date - now).days
-                if 0 < days_left < 60:
+                
+                # Alert if expiring within 60 days OR already expired
+                if days_left < 60:
                     alerts.append({
                         "type": "training",
-                        "title": f"{t['name']} Training Expiring",
+                        "name": t['name'],
+                        "title": f"{t['name']} Training {'EXPIRED' if days_left < 0 else 'Expiring'}",
                         "date": exp_str,
                         "days_left": days_left,
                         "urgent": days_left < 30,
+                        "is_expired": days_left < 0,
                         "training_id": t.get("id")
                     })
-            except:
+            except Exception as e:
+                logger.warning(f"Error parsing training expiry for alert: {e}")
                 pass
     
     # Check contract status
@@ -8310,6 +8330,48 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "overall_status": induction_record.get("overall_status") if induction_record else "not_started"
     }
     
+    # ========== COMPETENCY ASSESSMENTS (P1: Worker Dashboard Sync) ==========
+    # Get competency assessments - worker sees their assessment schedule and results
+    competency_records = await db.competency_assessments.find({
+        "employee_id": employee_id
+    }, {"_id": 0}).sort("scheduled_date", -1).to_list(20)
+    
+    competency_status = []
+    for comp in competency_records:
+        competency_status.append({
+            "id": comp.get("id"),
+            "competency_name": comp.get("competency_name") or comp.get("assessment_type", "Assessment"),
+            "area": comp.get("area") or comp.get("competency_area"),
+            "status": comp.get("status", "pending"),
+            "scheduled_date": comp.get("scheduled_date") or comp.get("due_date"),
+            "completed_date": comp.get("completed_date") or comp.get("assessment_date"),
+            "outcome": comp.get("outcome"),
+            "assessed_by_name": comp.get("assessed_by_name") or comp.get("assessor_name"),
+            "notes": comp.get("notes"),  # Worker can see general feedback
+            "follow_up_required": comp.get("follow_up_required", False),
+            "follow_up_date": comp.get("follow_up_date")
+        })
+    
+    # ========== SPOT CHECKS (P1: Worker Dashboard Sync) ==========
+    # Get spot checks - worker sees their spot check history and upcoming checks
+    spot_check_records = await db.spot_checks.find({
+        "employee_id": employee_id
+    }, {"_id": 0}).sort("date", -1).to_list(20)
+    
+    spot_check_status = []
+    for spot in spot_check_records:
+        spot_check_status.append({
+            "id": spot.get("id"),
+            "type": spot.get("type", "observation"),
+            "area": spot.get("area"),
+            "date": spot.get("date") or spot.get("scheduled_date"),
+            "outcome": spot.get("outcome"),
+            "notes": spot.get("notes"),  # Worker sees feedback
+            "assessed_by_name": spot.get("assessed_by_name"),
+            "follow_up_required": spot.get("follow_up_required", False),
+            "follow_up_date": spot.get("follow_up_date")
+        })
+    
     return {
         "employee": {
             "id": employee_id,
@@ -8338,7 +8400,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "contract_signed": contract_signed,
         "professional_registration": prof_reg_status,
         "references": references_status,  # P1: References status for worker dashboard
-        "induction": induction_status  # P1: Induction checklist progress for worker dashboard
+        "induction": induction_status,  # P1: Induction checklist progress for worker dashboard
+        "competency_assessments": competency_status,  # P1: Competency assessments for worker
+        "spot_checks": spot_check_status  # P1: Spot checks for worker
     }
 
 @api_router.post("/worker/upload-document/{requirement_id}")

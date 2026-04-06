@@ -8245,56 +8245,69 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # ========== INDUCTION CHECKLIST STATUS (P1: Worker Dashboard Sync) ==========
     # Get induction checklist - worker can see progress but cannot modify (admin only)
+    # NOTE: Admin stores induction data in "items" array with status/completed_at fields
     induction_record = await db.induction_checklists.find_one({
         "employee_id": employee_id
     }, {"_id": 0})
     
-    # All 15 Care Certificate standards
-    care_certificate_standards = [
-        {"id": "standard_1", "name": "Understand your role"},
-        {"id": "standard_2", "name": "Your personal development"},
-        {"id": "standard_3", "name": "Duty of care"},
-        {"id": "standard_4", "name": "Equality and diversity"},
-        {"id": "standard_5", "name": "Work in a person-centred way"},
-        {"id": "standard_6", "name": "Communication"},
-        {"id": "standard_7", "name": "Privacy and dignity"},
-        {"id": "standard_8", "name": "Fluids and nutrition"},
-        {"id": "standard_9", "name": "Awareness of mental health, dementia and learning disabilities"},
-        {"id": "standard_10", "name": "Safeguarding adults"},
-        {"id": "standard_11", "name": "Basic life support"},
-        {"id": "standard_12", "name": "Health and safety"},
-        {"id": "standard_13", "name": "Handling information"},
-        {"id": "standard_14", "name": "Infection prevention and control"},
-        {"id": "standard_15", "name": "Shadow shift completed"}
-    ]
-    
     induction_items = []
     completed_count = 0
-    for standard in care_certificate_standards:
-        is_complete = False
-        completed_at = None
-        if induction_record:
-            item_data = induction_record.get(standard["id"], {})
-            if isinstance(item_data, dict):
-                is_complete = item_data.get("completed", False)
-                completed_at = item_data.get("completed_at")
-            elif isinstance(item_data, bool):
-                is_complete = item_data
-        
-        if is_complete:
-            completed_count += 1
-        
-        induction_items.append({
-            "id": standard["id"],
-            "name": standard["name"],
-            "completed": is_complete,
-            "completed_at": completed_at
-        })
+    total_items = 0
+    
+    if induction_record and induction_record.get("items"):
+        # Read from actual admin data model
+        admin_items = induction_record.get("items", [])
+        for item in admin_items:
+            is_complete = item.get("status") == "completed"
+            completed_at = item.get("completed_at")
+            
+            if is_complete:
+                completed_count += 1
+            total_items += 1
+            
+            induction_items.append({
+                "id": item.get("name", "").lower().replace(" ", "_").replace("&", "and"),
+                "name": item.get("name", "Unknown"),
+                "mandatory": item.get("mandatory", True),
+                "completed": is_complete,
+                "completed_at": completed_at,
+                "completed_by_name": item.get("completed_by_name")
+            })
+    else:
+        # No induction record - show default 15 Care Certificate standards
+        care_certificate_standards = [
+            "Understand your role",
+            "Your personal development",
+            "Duty of care",
+            "Equality and diversity",
+            "Work in a person-centred way",
+            "Communication",
+            "Privacy and dignity",
+            "Fluids and nutrition",
+            "Awareness of mental health, dementia and learning disabilities",
+            "Safeguarding adults",
+            "Basic life support",
+            "Health and safety",
+            "Handling information",
+            "Infection prevention and control",
+            "Shadow shift completed"
+        ]
+        for std_name in care_certificate_standards:
+            total_items += 1
+            induction_items.append({
+                "id": std_name.lower().replace(" ", "_").replace(",", ""),
+                "name": std_name,
+                "mandatory": True,
+                "completed": False,
+                "completed_at": None,
+                "completed_by_name": None
+            })
     
     induction_status = {
-        "total": len(care_certificate_standards),
+        "total": total_items,
         "completed": completed_count,
-        "items": induction_items
+        "items": induction_items,
+        "overall_status": induction_record.get("overall_status") if induction_record else "not_started"
     }
     
     return {
@@ -19580,6 +19593,18 @@ async def upload_document_for_requirement(
     if allow_multiple:
         # Multi-file requirement: always create new document
         doc_id = str(uuid.uuid4())
+        
+        # Detect file type properly
+        detected_content_type = file.content_type or "application/octet-stream"
+        if ext.lower() in ['pdf']:
+            detected_content_type = "application/pdf"
+        elif ext.lower() in ['jpg', 'jpeg']:
+            detected_content_type = "image/jpeg"
+        elif ext.lower() in ['png']:
+            detected_content_type = "image/png"
+        elif ext.lower() in ['webp']:
+            detected_content_type = "image/webp"
+        
         doc_data = {
             "id": doc_id,
             "employee_id": employee_id,
@@ -19591,6 +19616,8 @@ async def upload_document_for_requirement(
             "document_label": document_label or file.filename,  # Use provided label or filename
             "file_url": path,
             "original_filename": file.filename,
+            "file_type": detected_content_type,  # Store the content type for proper serving
+            "content_type": detected_content_type,  # Backup field
             "status": DocumentStatus.UPLOADED,
             "uploaded_by": user['user_id'],
             "uploaded_at": now,
@@ -19626,10 +19653,23 @@ async def upload_document_for_requirement(
         }, {"_id": 0})
         
         if existing_doc:
+            # Detect file type properly
+            detected_content_type = file.content_type or "application/octet-stream"
+            if ext.lower() in ['pdf']:
+                detected_content_type = "application/pdf"
+            elif ext.lower() in ['jpg', 'jpeg']:
+                detected_content_type = "image/jpeg"
+            elif ext.lower() in ['png']:
+                detected_content_type = "image/png"
+            elif ext.lower() in ['webp']:
+                detected_content_type = "image/webp"
+            
             # Update existing document
             update_data = {
                 "file_url": path,
                 "original_filename": file.filename,
+                "file_type": detected_content_type,  # Store content type
+                "content_type": detected_content_type,  # Backup field
                 "document_label": document_label,
                 "status": DocumentStatus.UPLOADED,
                 "uploaded_by": user['user_id'],
@@ -19653,6 +19693,18 @@ async def upload_document_for_requirement(
         else:
             # Create new document
             doc_id = str(uuid.uuid4())
+            
+            # Detect file type properly
+            detected_content_type = file.content_type or "application/octet-stream"
+            if ext.lower() in ['pdf']:
+                detected_content_type = "application/pdf"
+            elif ext.lower() in ['jpg', 'jpeg']:
+                detected_content_type = "image/jpeg"
+            elif ext.lower() in ['png']:
+                detected_content_type = "image/png"
+            elif ext.lower() in ['webp']:
+                detected_content_type = "image/webp"
+            
             doc_data = {
                 "id": doc_id,
                 "employee_id": employee_id,
@@ -19664,6 +19716,8 @@ async def upload_document_for_requirement(
                 "document_label": document_label,
                 "file_url": path,
                 "original_filename": file.filename,
+                "file_type": detected_content_type,  # Store content type
+                "content_type": detected_content_type,  # Backup field
                 "status": DocumentStatus.UPLOADED,
                 "uploaded_by": user['user_id'],
                 "uploaded_at": now,
@@ -19702,18 +19756,31 @@ async def upload_employee_document(
     ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
     path = f"{APP_NAME}/documents/{doc['employee_id']}/{uuid.uuid4()}.{ext}"
     
+    # Detect file type properly
+    detected_content_type = file.content_type or "application/octet-stream"
+    if ext.lower() in ['pdf']:
+        detected_content_type = "application/pdf"
+    elif ext.lower() in ['jpg', 'jpeg']:
+        detected_content_type = "image/jpeg"
+    elif ext.lower() in ['png']:
+        detected_content_type = "image/png"
+    elif ext.lower() in ['webp']:
+        detected_content_type = "image/webp"
+    
     # Upload to storage
     data = await file.read()
-    result = put_object(path, data, file.content_type or "application/octet-stream")
+    result = put_object(path, data, detected_content_type)
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Update document record
+    # Update document record - INCLUDE file_type!
     await db.employee_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "file_url": result["path"],
             "original_filename": file.filename,
+            "file_type": detected_content_type,  # Store content type
+            "content_type": detected_content_type,  # Backup field
             "status": DocumentStatus.UPLOADED,
             "uploaded_by": user['user_id'],
             "uploaded_at": now,
@@ -20781,8 +20848,8 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
         
         safe_filename = filename.replace('"', '\\"') if filename else "document.pdf"
         
-        # CRITICAL: Determine correct content-type from file extension
-        # Storage might return wrong content-type, so we override based on extension
+        # CRITICAL: Determine correct content-type from multiple sources
+        # Priority: 1. File extension, 2. Stored file_type, 3. Storage response, 4. Fallback
         extension = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else ""
         
         CONTENT_TYPES = {
@@ -20796,8 +20863,16 @@ async def download_employee_document_file(doc_id: str, user: dict = Depends(get_
             "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         }
         
-        # Use extension-based content type, fall back to storage content type, then octet-stream
-        content_type = CONTENT_TYPES.get(extension, storage_content_type or "application/octet-stream")
+        # Get stored content type from document record
+        stored_content_type = doc.get("file_type") or doc.get("content_type")
+        
+        # Use extension-based content type first, then stored type, then storage response, then fallback
+        content_type = (
+            CONTENT_TYPES.get(extension) or 
+            stored_content_type or 
+            storage_content_type or 
+            "application/octet-stream"
+        )
         
         logger.info(f"Downloading document {doc_id}: filename={safe_filename}, content_type={content_type}, size={len(content)} bytes")
         

@@ -298,8 +298,8 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
         {/* CQC Note */}
         <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
           <p className="text-xs text-blue-700">
-            <strong>CQC Requirement:</strong> All mandatory induction items must be completed before an employee can work unsupervised. 
-            Shadow shifts should be recorded as part of the induction process.
+            <strong>CQC Requirement:</strong> All 15 Care Certificate standards must be completed during induction before an employee can work unsupervised.
+            Items linked to verified trainings are auto-completed. Manual items (e.g., Shadow Shifts) require Admin sign-off.
           </p>
         </div>
       </CardContent>

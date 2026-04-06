@@ -923,7 +923,7 @@ export default function WorkerDashboard() {
                     Induction Checklist ({induction.total} items)
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    Care Certificate standards - completed by your supervisor
+                    Care Certificate standards - 15 NHS requirements
                   </p>
                 </div>
                 <Badge className={`${
@@ -958,7 +958,7 @@ export default function WorkerDashboard() {
                 ))}
               </div>
               <p className="text-xs text-slate-400 mt-4 text-center">
-                Your supervisor will mark items complete during your induction period
+                Items are auto-completed when related training is verified. Some items require manual sign-off by Admin.
               </p>
             </CardContent>
           </Card>

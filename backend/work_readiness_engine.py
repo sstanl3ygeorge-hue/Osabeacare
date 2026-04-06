@@ -661,10 +661,10 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
     })
     checks["contract"] = bool(contract_ack)
     
-    # 8. Induction complete
+    # 8. Induction complete (15 Care Certificate standards)
     induction = await db.induction_checklists.find_one({
         "employee_id": emp_id_str,
-        "status": "completed"
+        "overall_status": "completed"  # P0 FIX: Use overall_status field, not status
     })
     # Also check form submissions
     if not induction:

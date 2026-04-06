@@ -50442,6 +50442,186 @@ async def get_competency_types(user: dict = Depends(get_current_user)):
     return {"competency_types": COMPETENCY_TYPES}
 
 
+# ========== TEST DATA CLEANUP ENDPOINTS ==========
+
+class TestDataCleanupRequest(BaseModel):
+    """Request model for test data cleanup"""
+    remove_employment_history: Optional[List[str]] = None  # List of employer names to remove
+    reset_contract: bool = False
+    remove_test_forms: bool = False
+    clear_all_test_data: bool = False  # Nuclear option - removes all test-like data
+
+
+@api_router.post("/employees/{employee_id}/cleanup-test-data")
+async def cleanup_employee_test_data(
+    employee_id: str,
+    payload: TestDataCleanupRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Clean up test data from an employee's record.
+    Use this to remove dummy/test data created during development.
+    
+    Options:
+    - remove_employment_history: List of employer names to remove (e.g., ["Care Home A", "Care Home B"])
+    - reset_contract: Remove contract_signed status (re-enables contract gating)
+    - remove_test_forms: Remove test form submissions
+    - clear_all_test_data: Auto-detect and remove common test patterns
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    changes_made = []
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # 1. Remove specified employment history entries
+    if payload.remove_employment_history:
+        current_history = employee.get("employment_history", [])
+        names_to_remove = [n.lower() for n in payload.remove_employment_history]
+        
+        new_history = [
+            h for h in current_history 
+            if h.get("employer_name", "").lower() not in names_to_remove
+        ]
+        
+        removed_count = len(current_history) - len(new_history)
+        if removed_count > 0:
+            await db.employees.update_one(
+                {"id": employee_id},
+                {"$set": {"employment_history": new_history}}
+            )
+            changes_made.append(f"Removed {removed_count} employment history entries")
+    
+    # 2. Clear all test-pattern employment history
+    if payload.clear_all_test_data:
+        current_history = employee.get("employment_history", [])
+        test_patterns = ["test", "care home a", "care home b", "carehome", "demo", "sample", "example"]
+        
+        new_history = [
+            h for h in current_history 
+            if not any(pattern in h.get("employer_name", "").lower() for pattern in test_patterns)
+        ]
+        
+        removed_count = len(current_history) - len(new_history)
+        if removed_count > 0:
+            await db.employees.update_one(
+                {"id": employee_id},
+                {"$set": {"employment_history": new_history}}
+            )
+            changes_made.append(f"Auto-removed {removed_count} test employment entries")
+    
+    # 3. Reset contract signed status
+    if payload.reset_contract:
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$unset": {
+                "contract_signed": "",
+                "contract_signed_at": "",
+                "contract_signed_ip": "",
+                "contract_signature": ""
+            }}
+        )
+        changes_made.append("Reset contract signed status")
+    
+    # 4. Remove test form submissions
+    if payload.remove_test_forms or payload.clear_all_test_data:
+        # Find form submissions with test-like content
+        test_submissions = await db.form_submissions.find({
+            "employee_id": employee_id,
+            "$or": [
+                {"submitted_data.employer_name": {"$regex": "test|care home a|care home b", "$options": "i"}},
+                {"submitted_data.referee1_name": {"$regex": "test", "$options": "i"}},
+                {"submitted_data": {"$regex": "test", "$options": "i"}}
+            ]
+        }).to_list(100)
+        
+        if test_submissions:
+            form_ids = [f.get("id") for f in test_submissions if f.get("id")]
+            if form_ids:
+                result = await db.form_submissions.delete_many({"id": {"$in": form_ids}})
+                changes_made.append(f"Removed {result.deleted_count} test form submissions")
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "cleanup_test_data", "employee", employee_id, {
+        "changes_made": changes_made,
+        "request": {
+            "remove_employment_history": payload.remove_employment_history,
+            "reset_contract": payload.reset_contract,
+            "remove_test_forms": payload.remove_test_forms,
+            "clear_all_test_data": payload.clear_all_test_data
+        }
+    })
+    
+    return {
+        "success": True,
+        "employee_id": employee_id,
+        "changes_made": changes_made,
+        "message": f"Cleaned up: {', '.join(changes_made)}" if changes_made else "No test data found to clean"
+    }
+
+
+@api_router.post("/admin/bulk-cleanup-test-data")
+async def bulk_cleanup_test_data(
+    user: dict = Depends(require_admin)
+):
+    """
+    Bulk cleanup test data across ALL employees.
+    Removes common test patterns from employment history for all employees.
+    Use with caution!
+    """
+    test_patterns = ["test", "care home a", "care home b", "carehome a", "carehome b", "demo company", "sample employer"]
+    
+    # Find all employees with test-like employment history
+    employees = await db.employees.find({
+        "employment_history.employer_name": {"$regex": "|".join(test_patterns), "$options": "i"}
+    }).to_list(500)
+    
+    updated_count = 0
+    for emp in employees:
+        current_history = emp.get("employment_history", [])
+        new_history = [
+            h for h in current_history 
+            if not any(pattern in h.get("employer_name", "").lower() for pattern in test_patterns)
+        ]
+        
+        if len(new_history) < len(current_history):
+            await db.employees.update_one(
+                {"id": emp["id"]},
+                {"$set": {"employment_history": new_history}}
+            )
+            updated_count += 1
+    
+    # Also reset contract_signed for employees with test signatures
+    test_contracts = await db.employees.update_many(
+        {
+            "$or": [
+                {"contract_signed_by": {"$regex": "test", "$options": "i"}},
+                {"contract_signature": {"$regex": "test", "$options": "i"}}
+            ]
+        },
+        {"$unset": {
+            "contract_signed": "",
+            "contract_signed_at": "",
+            "contract_signed_ip": "",
+            "contract_signature": "",
+            "contract_signed_by": ""
+        }}
+    )
+    
+    await log_audit_action(user['user_id'], "bulk_cleanup_test_data", "system", "all", {
+        "employees_updated": updated_count,
+        "contracts_reset": test_contracts.modified_count
+    })
+    
+    return {
+        "success": True,
+        "employees_cleaned": updated_count,
+        "contracts_reset": test_contracts.modified_count,
+        "message": f"Cleaned {updated_count} employee records, reset {test_contracts.modified_count} test contracts"
+    }
+
+
 # ========== SPOT CHECK ENDPOINTS ==========
 
 # Spot check types and areas

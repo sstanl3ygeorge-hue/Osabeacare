@@ -32,8 +32,8 @@ const getDocumentGuidance = (docType) => {
   const guidance = {
     right_to_work: "Upload your UK passport, biometric residence permit, or share code screenshot from GOV.UK. Share code must be valid for at least 30 days.",
     dbs: "Upload your Enhanced DBS certificate (issued within last 3 years). If subscribed to DBS Update Service, please confirm.",
-    identity: "Upload a clear photo of your passport photo page or UK driving licence (both sides).",
-    proof_of_address: "Upload a utility bill, bank statement, or council tax bill dated within last 3 months. Must show your full name and current address.",
+    identity: "Upload your passport photo page or UK driving licence. For driving licence, select BOTH front AND back images at once.",
+    proof_of_address: "Upload a utility bill, bank statement, or council tax bill dated within last 3 months. Must show your full name and current address. You can select multiple files if needed.",
     proof_of_address_2: "Upload a different document from the first. Examples: bank statement, HMRC letter, tenancy agreement, or voter registration.",
     training: "Upload PDF or photo of your training certificate. AI will automatically extract the training name, completion date, and expiry date.",
     nmc_registration: "Upload your NMC PIN card or registration letter. Your registration will be verified online.",
@@ -277,14 +277,65 @@ export default function WorkerDashboard() {
     }
   };
 
+  // Handle multiple file uploads for documents that need both sides (e.g., ID, driving licence)
+  const handleMultiFileUpload = async (requirementId, files) => {
+    if (!files || files.length === 0) return;
+    
+    setUploading(requirementId);
+    const token = localStorage.getItem('workerToken');
+    
+    try {
+      // Upload each file with a suffix indicator
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const formData = new FormData();
+        formData.append('file', file);
+        // Add suffix to indicate which part (front/back)
+        const suffix = files.length > 1 ? (i === 0 ? '_front' : '_back') : '';
+        
+        await axios.post(
+          `${API}/worker/upload-document/${requirementId}${suffix}`,
+          formData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'multipart/form-data'
+            }
+          }
+        );
+      }
+      
+      toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded successfully! Awaiting admin verification.`);
+      fetchDashboard();
+    } catch (error) {
+      const message = error.response?.data?.detail || 'Failed to upload documents';
+      toast.error(message);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  // Document types that require/allow multiple files (front + back)
+  const MULTI_FILE_DOC_TYPES = ['identity', 'proof_of_address'];
+
   const triggerFileInput = (requirementId) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.pdf,.jpg,.jpeg,.png,.webp';
+    
+    // Allow multiple files for ID documents
+    if (MULTI_FILE_DOC_TYPES.includes(requirementId)) {
+      input.multiple = true;
+    }
+    
     input.onchange = (e) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        handleFileUpload(requirementId, file);
+      const files = e.target.files;
+      if (files && files.length > 0) {
+        if (files.length > 1) {
+          handleMultiFileUpload(requirementId, Array.from(files));
+        } else {
+          handleFileUpload(requirementId, files[0]);
+        }
       }
     };
     input.click();

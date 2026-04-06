@@ -1288,3 +1288,26 @@ April 5, 2026
 - Backend endpoint: POST /employees/{id}/references/{num}/verify
 - Audit logging for all reference actions
 
+### Task 4: Competency Assessments ✅
+- [Schedule] button to schedule future assessments with due date
+- [Record Result] button for scheduled/overdue assessments
+- Result options: Competent, Not Competent, Training Required
+- Auto-sets next review date to +1 year after recording
+- Backend endpoints:
+  - POST /employees/{id}/competencies/schedule
+  - PUT /employees/{id}/competencies/{id}/record-result
+- Reminder tracking fields (60/30/7 days before due)
+- Assessment history logging
+
+### Task 5: Spot Checks ✅
+- [Schedule] button to schedule future spot checks
+- [Record Outcome] dialog with:
+  - Outcome: Pass / Needs Improvement / Fail
+  - Notes field
+  - Follow-up required checkbox with date
+- Backend endpoints:
+  - POST /employees/{id}/spot-checks/schedule
+  - PUT /employees/{id}/spot-checks/{id}/record-outcome
+- Reminder tracking fields (7 days before, day of check)
+- Audit logging for all actions
+

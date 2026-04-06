@@ -1731,3 +1731,43 @@ Added `POST /api/employees/{id}/training/re-extract` endpoint:
 - API test: Lawrence Egbeni now shows 5/15 induction items auto-completed
 - Auto-sync working: Safeguarding, BLS, Health & Safety, Infection Control all synced
 - 15-item Care Certificate standard confirmed
+
+---
+
+## COMPLETED: Data Inconsistency Fix + Delete Training (April 2026)
+
+### Problem Statement
+1. Progress showed differently in different places (58% vs 25%)
+2. Induction count was inconsistent (6/11, 6/14, 0/15)
+3. Total requirements varied (24, 12, 34)
+4. Safeguarding Children still appeared (should be adults only)
+5. "Verified By" showed emails not names
+6. No way to delete test training records
+
+### Solution Implemented
+
+#### 1. Data Consistency Fixes
+- Fixed `induction_checklist` collection name to `induction_checklists` (plural)
+- Standardized induction count to **14 mandatory items** (excludes optional Safeguarding Children)
+- Fixed unified-progress endpoint to correctly count completed induction items
+- Both worker dashboard and admin dashboard now use the same calculation
+
+#### 2. Verified By Name Display
+- Updated verify_training endpoint to fetch user's full name from database
+- Shows name (e.g., "Stanley George") instead of email address
+
+#### 3. Delete Training Feature
+- Added Delete button to training matrix rows (Admin only)
+- Confirmation dialog with required reason field (for audit trail)
+- Soft delete - marks record as deleted, doesn't remove from database
+- Deleted trainings don't count toward work readiness
+- Logged to audit trail with who, when, why
+
+### Files Modified
+- `/app/backend/server.py` - Fixed collection names, induction counts, verified_by
+- `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js` - Added delete button and dialog
+
+### Testing Verified
+- API test confirmed: Lawrence shows 10/33 (30%) with induction at 2/14
+- Data now consistent across unified-progress endpoint
+- Delete functionality tested with confirmation dialog

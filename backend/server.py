@@ -40822,7 +40822,7 @@ async def get_poa_freshness(
     # Get PoA documents
     poa_docs = await db.employee_documents.find({
         "employee_id": employee_id,
-        "requirement_id": {"$in": ["proof_of_address", "proof_of_address_evidence", "address_proof"]},
+        "requirement_id": {"$in": ["proof_of_address", "proof_of_address_evidence", "address_proof", "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"]},
         "status": {"$nin": ["superseded", "deleted", "removed"]}
     }, {"_id": 0}).to_list(50)
     
@@ -41455,7 +41455,7 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     }
     
     # ---- Proof of Address ----
-    poa_docs = [d for d in docs if d.get("requirement_id") in ["proof_of_address", "poa", "address_proof", "address_verification"] and d.get("status") not in ["superseded", "deleted", "rejected", "uploaded_in_error"]]
+    poa_docs = [d for d in docs if d.get("requirement_id") in ["proof_of_address", "poa", "address_proof", "address_verification", "proof_of_address_evidence", "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"] and d.get("status") not in ["superseded", "deleted", "rejected", "uploaded_in_error"]]
     poa_verified = any(
         d.get("verified") or 
         d.get("status") in ["verified", "approved"] or 
@@ -41840,10 +41840,10 @@ async def get_compliance_file(
             all_docs.extend(docs_for_key)
             # DIAGNOSTIC: Log what we're collecting
             if docs_for_key:
-                logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, req_key={req_key}, found {len(docs_for_key)} docs")
+                logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, req_key={req_key}, found {len(docs_for_key)} docs with statuses: {[d.get('status') for d in docs_for_key]}")
         
         # DIAGNOSTIC: Log total collected before filtering
-        logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, total collected={len(all_docs)}, doc_requirement_keys={doc_requirement_keys}")
+        logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, total collected={len(all_docs)}, doc_requirement_keys={doc_requirement_keys}")
         
         # EVIDENCE STATE MODEL:
         # Active files (visible on main card):
@@ -41861,13 +41861,13 @@ async def get_compliance_file(
         # Filter out excluded documents for active display
         active_docs = [d for d in all_docs if d.get("status") not in EXCLUDED_STATUSES]
         
-        # Historical files are the excluded ones
-        historical_docs = [d for d in all_docs if d.get("status") in EXCLUDED_STATUSES]
-        
         # DIAGNOSTIC: Log after status filter
         if len(active_docs) != len(all_docs):
             filtered_out = len(all_docs) - len(active_docs)
-            logger.debug(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, filtered out {filtered_out} docs by status")
+            logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, after filtering: {len(active_docs)} active, {filtered_out} filtered out. Active statuses: {[d.get('status') for d in active_docs]}")
+        
+        # Historical files are the excluded ones
+        historical_docs = [d for d in all_docs if d.get("status") in EXCLUDED_STATUSES]
         
         verified_count = len([d for d in active_docs if d.get("verified") or d.get("status") == "approved"])
         awaiting_verification = len([d for d in active_docs if not d.get("verified") and d.get("status") not in ["approved"]])
@@ -42084,6 +42084,9 @@ async def get_compliance_file(
                 for d in active_docs[:3]
             ],
             "has_more_documents": active_count > 3,
+            
+            # DIAGNOSTIC: Log documents being added to preview
+            **({} if not (key == "proof_of_address_evidence") else {"_debug_active_docs_count": active_count, "_debug_active_doc_ids": [d.get("id") for d in active_docs[:3]]}),
             
             # Historical documents (rejected, superseded, uploaded_in_error)
             "historical_documents": [
@@ -42309,7 +42312,10 @@ async def get_compliance_file(
             verified_docs = []
         
         # Get PoA documents for freshness evaluation
-        poa_docs = [d for d in documents if d.get("requirement_id") in ["proof_of_address", "proof_of_address_evidence", "address_proof"]]
+        poa_docs = [d for d in documents if d.get("requirement_id") in [
+            "proof_of_address", "proof_of_address_evidence", "address_proof",
+            "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"
+        ]]
         
         # Evaluate freshness for all PoA documents
         poa_freshness = evaluate_poa_compliance(poa_docs)
@@ -43159,13 +43165,15 @@ async def get_compliance_file(
         },
         
         # Proof of Address - Evidence + Verification (special count-based)
+        # Note: proof_of_address_2, proof_of_address_3, etc. are numbered variants for multiple uploads
         "proof_of_address": {
             "title": "Proof of Address",
             "rows": [
                 build_evidence_row(
                     key="proof_of_address_evidence",
                     title="Proof of Address Evidence",
-                    doc_requirement_keys=["proof_of_address", "proof_of_address_evidence", "address_evidence"],
+                    doc_requirement_keys=["proof_of_address", "proof_of_address_evidence", "address_evidence", 
+                                          "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"],
                     paired_check_key="address_verification"
                 ),
                 build_address_verification_row()

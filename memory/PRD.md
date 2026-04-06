@@ -1242,3 +1242,49 @@ April 5, 2026
 - **server.py Size:** 51,000+ lines needs splitting into modular routers
 - **Bare Except Clauses:** Multiple bare `except:` statements should be replaced with specific exception handling
 
+---
+
+## Phase 2 Fixes Implemented (April 2026)
+
+### Task 1: Training Tab Redesign ✅
+- Worker dashboard now shows ALL 6 mandatory trainings with status
+- Enhanced training matching for CSTF certificate patterns (safeguarding, manual handling, fire safety, health & safety, BLS, infection control)
+- Each training shows: Status (Complete/Pending/Expired), Completion date, Expiry date, Verification status
+- Bulk upload button for multiple certificates
+- Individual upload button for each training
+
+### Task 2: Induction Checklist ✅
+- InductionChecklistPanel added to Competencies tab
+- Shows all 15 Care Certificate standards:
+  1. Understand your role
+  2. Your personal development
+  3. Duty of care
+  4. Equality and diversity
+  5. Work in a person-centred way
+  6. Communication
+  7. Privacy and dignity
+  8. Fluids and nutrition
+  9. Awareness of mental health, dementia and learning disabilities
+  10. Safeguarding adults
+  11. Basic life support
+  12. Health and safety
+  13. Handling information
+  14. Infection prevention and control
+  15. Shadow shift completed
+- Checkboxes for admin to mark each item complete
+- Progress tracking (0/15 Induction)
+
+### Task 3: References Workflow ✅
+- Status tracking: Not Declared → Declared → Sent → Response Received → Verified/Rejected
+- [Add Referee Details] button for manual entry
+- [Send Request] button (sends email to referee)
+- [Review Response] modal showing all referee answers
+- [Verify] and [Reject] buttons with confirmation modal
+- Mismatch handling dropdown:
+  - Referee is from earlier employment
+  - Referee is personal/professional reference
+  - Applicant changed employers since declaration
+  - Other (specify in notes)
+- Backend endpoint: POST /employees/{id}/references/{num}/verify
+- Audit logging for all reference actions
+

@@ -966,6 +966,115 @@ export default function AuditReadyTrainingMatrix({
         </TabsContent>
       </Tabs>
 
+      {/* ========== EDIT TRAINING DIALOG ========== */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit2 className="h-5 w-5 text-blue-600" />
+              Edit Training Record
+            </DialogTitle>
+            <DialogDescription>
+              Correct the details for {editingItem?.title || editingItem?.training_title || 'this training'}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {editingItem && (
+            <div className="space-y-4 py-4">
+              {/* Completion Date */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Completion Date</label>
+                <Input
+                  type="date"
+                  defaultValue={editingItem.completed_at?.split('T')[0] || ''}
+                  onChange={(e) => setEditingItem({...editingItem, completed_at: e.target.value})}
+                  data-testid="edit-training-completion-date"
+                />
+              </div>
+              
+              {/* Expiry Date */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Expiry Date</label>
+                <Input
+                  type="date"
+                  defaultValue={editingItem.expires_at?.split('T')[0] || editingItem.expiry_date?.split('T')[0] || ''}
+                  onChange={(e) => setEditingItem({...editingItem, expires_at: e.target.value, expiry_date: e.target.value})}
+                  data-testid="edit-training-expiry-date"
+                />
+                <p className="text-xs text-slate-500">Leave blank for training that doesn't expire</p>
+              </div>
+              
+              {/* Provider */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Provider</label>
+                <Input
+                  type="text"
+                  defaultValue={editingItem.provider || editingItem.training_provider || ''}
+                  onChange={(e) => setEditingItem({...editingItem, provider: e.target.value})}
+                  placeholder="e.g., Skills for Care, Company Training"
+                  data-testid="edit-training-provider"
+                />
+              </div>
+              
+              {/* Certificate Number */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Certificate Number (optional)</label>
+                <Input
+                  type="text"
+                  defaultValue={editingItem.certificate_number || ''}
+                  onChange={(e) => setEditingItem({...editingItem, certificate_number: e.target.value})}
+                  placeholder="e.g., CERT-12345"
+                  data-testid="edit-training-cert-number"
+                />
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setEditDialogOpen(false);
+                setEditingItem(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!editingItem) return;
+                try {
+                  const recordId = editingItem.record_id || editingItem.id;
+                  await axios.post(
+                    `${API}/api/training-records/${recordId}/correct`,
+                    {
+                      completed_at: editingItem.completed_at,
+                      expires_at: editingItem.expires_at || editingItem.expiry_date,
+                      provider: editingItem.provider,
+                      certificate_number: editingItem.certificate_number,
+                      correction_reason: 'Admin date correction'
+                    },
+                    { headers: { Authorization: `Bearer ${token}` } }
+                  );
+                  toast.success('Training record updated successfully');
+                  setEditDialogOpen(false);
+                  setEditingItem(null);
+                  fetchTrainingData();
+                  onRefresh?.();
+                } catch (err) {
+                  console.error('Error updating training:', err);
+                  toast.error(err.response?.data?.detail || 'Failed to update training record');
+                }
+              }}
+              className="bg-blue-600 hover:bg-blue-700"
+              data-testid="edit-training-save-btn"
+            >
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Training Detail Drawer */}
       <TrainingDetailDrawer
         isOpen={drawerOpen}
@@ -973,7 +1082,7 @@ export default function AuditReadyTrainingMatrix({
           setDrawerOpen(false);
           setSelectedTraining(null);
         }}
-        training={selectedTraining}
+        trainingItem={selectedTraining}
         employeeId={employeeId}
         onUpdate={() => {
           fetchTrainingData();

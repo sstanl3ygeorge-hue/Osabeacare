@@ -2346,9 +2346,10 @@ Implements dual-evidence model for CQC audit-ready compliance:
   - Date validity (within 6 months for POA)
 
 ### Pending Work
-- [ ] PDF generation with dual stamping (evidence + verification)
-- [ ] Email notifications for amendment requests
+- [x] PDF generation with verification record (DONE - April 2026)
+- [x] Evidence stamping with PyMuPDF (DONE - April 2026)
+- [ ] Email notifications for amendment requests (Resend integration)
 - [ ] Worker dashboard amendment re-upload flow
-- [ ] Visual stamp embedding on PDF documents
+- [ ] Frontend display of stamped PDF download links
 
 

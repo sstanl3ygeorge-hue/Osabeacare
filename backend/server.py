@@ -13126,6 +13126,148 @@ async def extract_training_certificate_preview(
     }
 
 
+
+@api_router.post("/employees/{employee_id}/training/re-extract")
+async def re_extract_training_from_existing_certificate(
+    employee_id: str,
+    certificate_url: str = Body(..., embed=True),
+    document_id: Optional[str] = Body(None, embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Re-extract training data from an existing certificate file.
+    
+    This endpoint:
+    1. Reads the existing certificate file from URL or document ID
+    2. Re-runs AI extraction with enhanced prompts
+    3. Returns extracted data for admin review
+    4. Does NOT auto-save - admin must confirm via bulk-save
+    
+    Used when initial extraction missed courses or had incorrect dates.
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    file_path = None
+    original_filename = "certificate"
+    
+    # Try to get certificate from document_id first
+    if document_id:
+        doc = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
+        if doc:
+            certificate_url = doc.get("file_url") or doc.get("url")
+            original_filename = doc.get("original_filename") or doc.get("file_name") or "certificate"
+    
+    if not certificate_url:
+        raise HTTPException(status_code=400, detail="No certificate URL provided")
+    
+    # Download or read the certificate file
+    contents = None
+    
+    try:
+        # Check if it's a local file path
+        if certificate_url.startswith("/uploads/") or certificate_url.startswith("uploads/"):
+            local_path = Path("/app") / certificate_url.lstrip("/")
+            if local_path.exists():
+                with open(local_path, "rb") as f:
+                    contents = f.read()
+                original_filename = local_path.name
+        elif certificate_url.startswith("http"):
+            # Download from URL
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(certificate_url, timeout=30) as response:
+                    if response.status == 200:
+                        contents = await response.read()
+                        # Try to get filename from URL
+                        original_filename = certificate_url.split("/")[-1].split("?")[0]
+        
+        if not contents:
+            raise HTTPException(status_code=400, detail="Could not read certificate file")
+        
+    except Exception as e:
+        logger.error(f"Error reading certificate for re-extraction: {e}")
+        raise HTTPException(status_code=400, detail=f"Could not read certificate: {str(e)}")
+    
+    # Extract trainings using AI with enhanced prompts
+    extracted = await extract_training_from_certificate(contents, original_filename)
+    
+    if not extracted:
+        return {
+            "success": False,
+            "certificate_url": certificate_url,
+            "trainings": [],
+            "total_extracted": 0,
+            "message": "No training records detected during re-extraction. The certificate may need manual entry.",
+            "suggestion": "Try uploading a clearer image or manually add the training records."
+        }
+    
+    # Get existing training records for this employee to avoid duplicates
+    existing_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0, "training_name": 1, "id": 1}).to_list(200)
+    
+    existing_names = {r.get("training_name", "").lower(): r.get("id") for r in existing_records}
+    
+    # Enrich with additional metadata for preview
+    trainings_for_preview = []
+    for training in extracted:
+        training_name = training.get("training_name", "Unknown Training")
+        training_lower = training_name.lower()
+        
+        # Check if this training already exists
+        existing_id = existing_names.get(training_lower)
+        is_update = existing_id is not None
+        
+        # Determine if mandatory
+        is_mandatory = is_mandatory_training(training_name)
+        
+        # Calculate confidence based on extraction source
+        extraction_source = training.get("extracted_by", "unknown")
+        confidence = training.get("confidence", "high" if extraction_source in ("emergent_gemini_vision", "gemini_vision") else "medium")
+        
+        if not training.get("completion_date"):
+            confidence = "low"
+        
+        trainings_for_preview.append({
+            "training_name": training_name,
+            "completion_date": training.get("completion_date"),
+            "expiry_date": training.get("expiry_date"),
+            "validity_period": training.get("validity_period"),
+            "provider": training.get("provider", "Unknown"),
+            "level": training.get("level"),
+            "is_mandatory": is_mandatory,
+            "is_optional": training.get("is_optional", False),
+            "confidence": confidence,
+            "source_file": original_filename,
+            "extracted_by": extraction_source,
+            "is_update": is_update,
+            "existing_record_id": existing_id
+        })
+    
+    # Log re-extraction attempt
+    await log_audit_action(user['user_id'], "training_certificate_re_extracted", "employee", employee_id, {
+        "certificate_url": certificate_url,
+        "trainings_found": len(trainings_for_preview),
+        "updates": sum(1 for t in trainings_for_preview if t.get("is_update"))
+    })
+    
+    return {
+        "success": True,
+        "certificate_url": certificate_url,
+        "original_filename": original_filename,
+        "trainings": trainings_for_preview,
+        "total_extracted": len(trainings_for_preview),
+        "updates_count": sum(1 for t in trainings_for_preview if t.get("is_update")),
+        "new_count": sum(1 for t in trainings_for_preview if not t.get("is_update")),
+        "message": f"Re-extracted {len(trainings_for_preview)} training record(s). {sum(1 for t in trainings_for_preview if t.get('is_update'))} will update existing records."
+    }
+
+
+
 @api_router.post("/employees/{employee_id}/training/bulk-save")
 async def bulk_save_training_records(
     employee_id: str,
@@ -50038,25 +50180,149 @@ async def get_induction_checklist(
     """
     Get induction checklist for an employee.
     If no checklist exists, returns default template.
+    AUTO-SYNCS with verified training records.
     """
     # Check employee exists
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    # Get verified trainings for this employee
+    verified_trainings = await db.training_records.find({
+        "employee_id": employee_id,
+        "verified": True,
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0, "training_name": 1, "requirement_id": 1, "code": 1, "verified_by": 1, "verified_at": 1}).to_list(100)
+    
+    # Build set of verified training names/codes for matching
+    verified_set = set()
+    verified_info = {}
+    for tr in verified_trainings:
+        name = (tr.get('training_name') or '').lower()
+        code = (tr.get('code') or tr.get('requirement_id') or '').lower()
+        if name:
+            verified_set.add(name)
+            verified_info[name] = tr
+        if code:
+            verified_set.add(code)
+            verified_info[code] = tr
+    
+    # Mapping from induction item name to training patterns
+    INDUCTION_TO_TRAINING_MAP = {
+        "Safeguarding Adults": ["safeguarding", "safeguard", "safeguarding adults", "safeguard_adults"],
+        "Safeguarding Children": ["safeguarding children", "child protection", "safeguard_children"],
+        "Basic Life Support": ["basic life support", "bls", "basic_life_support", "resuscitation", "cpr"],
+        "Health and Safety": ["health and safety", "health & safety", "health_safety", "health safety"],
+        "Infection Prevention and Control": ["infection", "infection control", "infection_control", "infection prevention"],
+        "Equality and Diversity": ["equality", "diversity", "equality and diversity", "equality_diversity", "edi"],
+        "Communication": ["communication", "communication skills"],
+        "Privacy and Dignity": ["privacy", "dignity", "privacy and dignity"],
+        "Fluids and Nutrition": ["nutrition", "fluids", "food hygiene", "food_hygiene", "food safety"],
+        "Mental Health, Dementia and Learning Disabilities": ["mental health", "dementia", "learning disabilities", "mental_health"],
+        "Handling Information": ["data protection", "gdpr", "information governance", "handling information"],
+        "Understand Your Role": ["understand your role", "induction", "company policies"],
+        "Your Personal Development": ["personal development", "cpd"],
+        "Duty of Care": ["duty of care"],
+        "Work in a Person-Centred Way": ["person centred", "person-centred", "pcc"],
+        # Additional common mappings
+        "Fire Safety": ["fire safety", "fire_safety", "fire awareness"],
+        "Moving & Handling": ["manual handling", "moving and handling", "moving_handling", "manual_handling"],
+    }
+    
+    def is_training_verified(item_name):
+        """Check if the corresponding training for this induction item is verified"""
+        item_lower = item_name.lower()
+        
+        # Direct match
+        if item_lower in verified_set:
+            return True, verified_info.get(item_lower)
+        
+        # Check via mapping
+        patterns = INDUCTION_TO_TRAINING_MAP.get(item_name, [])
+        for pattern in patterns:
+            if pattern.lower() in verified_set:
+                return True, verified_info.get(pattern.lower())
+            # Also check if any verified training contains this pattern
+            for v_name in verified_set:
+                if pattern.lower() in v_name or v_name in pattern.lower():
+                    return True, verified_info.get(v_name)
+        
+        return False, None
+    
     checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
+    now = datetime.now(timezone.utc).isoformat()
     
     if not checklist:
-        # Return default structure
+        # Create default structure with auto-sync
+        items = []
+        for item_def in DEFAULT_INDUCTION_ITEMS:
+            is_verified, training_info = is_training_verified(item_def["name"])
+            items.append({
+                "name": item_def["name"],
+                "mandatory": item_def["mandatory"],
+                "status": "completed" if is_verified else "pending",
+                "completed_at": training_info.get("verified_at") if is_verified and training_info else None,
+                "completed_by_name": f"Auto (Training: {training_info.get('training_name', 'Verified')})" if is_verified and training_info else None,
+                "synced_from_training": is_verified
+            })
+        
+        completed_count = sum(1 for i in items if i["status"] == "completed")
+        overall_status = "completed" if completed_count == len(items) else "in_progress" if completed_count > 0 else "pending"
+        
         return {
             "employee_id": employee_id,
-            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-            "items": [{"name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by_name": None} for item in DEFAULT_INDUCTION_ITEMS],
-            "overall_status": "pending",
-            "started_at": None,
-            "completed_at": None
+            "employee_name": employee_name,
+            "items": items,
+            "overall_status": overall_status,
+            "started_at": now if completed_count > 0 else None,
+            "completed_at": now if overall_status == "completed" else None,
+            "auto_synced": True
         }
     
+    # Existing checklist - sync with verified trainings
+    items_updated = False
+    for item in checklist.get("items", []):
+        # Only update pending items that have verified training
+        if item.get("status") != "completed":
+            is_verified, training_info = is_training_verified(item["name"])
+            if is_verified:
+                item["status"] = "completed"
+                item["completed_at"] = training_info.get("verified_at") if training_info else now
+                item["completed_by_name"] = f"Auto (Training: {training_info.get('training_name', 'Verified')})" if training_info else "Auto-synced"
+                item["synced_from_training"] = True
+                items_updated = True
+    
+    # Recalculate overall status
+    completed_count = sum(1 for i in checklist.get("items", []) if i.get("status") == "completed")
+    total_count = len(checklist.get("items", []))
+    mandatory_complete = all(i.get("status") == "completed" for i in checklist.get("items", []) if i.get("mandatory"))
+    
+    if completed_count == total_count:
+        checklist["overall_status"] = "completed"
+        checklist["completed_at"] = checklist.get("completed_at") or now
+    elif completed_count > 0:
+        checklist["overall_status"] = "in_progress"
+        checklist["started_at"] = checklist.get("started_at") or now
+    else:
+        checklist["overall_status"] = "pending"
+    
+    # Save updates if items were synced
+    if items_updated:
+        await db.induction_checklists.update_one(
+            {"employee_id": employee_id},
+            {"$set": {
+                "items": checklist["items"],
+                "overall_status": checklist["overall_status"],
+                "started_at": checklist.get("started_at"),
+                "completed_at": checklist.get("completed_at"),
+                "updated_at": now,
+                "last_auto_sync": now
+            }}
+        )
+    
+    checklist["auto_synced"] = items_updated
     return checklist
 
 

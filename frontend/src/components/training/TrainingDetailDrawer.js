@@ -79,6 +79,12 @@ export default function TrainingDetailDrawer({
   const [previewType, setPreviewType] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   
+  // P0 FIX: Re-extraction state
+  const [reExtractLoading, setReExtractLoading] = useState(false);
+  const [reExtractedTrainings, setReExtractedTrainings] = useState(null);
+  const [showReExtractPreview, setShowReExtractPreview] = useState(false);
+  const [selectedReExtracted, setSelectedReExtracted] = useState([]);
+  
   // Fetch history when tab changes
   const fetchHistory = async () => {
     if (!trainingItem?.record_id) return;
@@ -178,6 +184,78 @@ export default function TrainingDetailDrawer({
     }
   };
   
+  // P0 FIX: Re-extract training data from existing certificate
+  const handleReExtract = async () => {
+    // Get certificate URL from training item
+    const certUrl = trainingItem?.certificate_url || trainingItem?.source_document_url;
+    const docId = trainingItem?.source_document_id || trainingItem?.certificate_document_id;
+    
+    if (!certUrl && !docId) {
+      toast.error('No certificate file found for this training record');
+      return;
+    }
+    
+    setReExtractLoading(true);
+    try {
+      const response = await axios.post(
+        `${API}/api/employees/${employeeId}/training/re-extract`,
+        { 
+          certificate_url: certUrl,
+          document_id: docId
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      if (response.data.success && response.data.trainings?.length > 0) {
+        setReExtractedTrainings(response.data);
+        setSelectedReExtracted(response.data.trainings.map((_, idx) => idx));
+        setShowReExtractPreview(true);
+        toast.success(`Re-extracted ${response.data.total_extracted} training(s)`);
+      } else {
+        toast.error(response.data.message || 'No trainings detected');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Re-extraction failed');
+    } finally {
+      setReExtractLoading(false);
+    }
+  };
+  
+  // P0 FIX: Save re-extracted trainings
+  const handleSaveReExtracted = async () => {
+    if (!reExtractedTrainings || selectedReExtracted.length === 0) return;
+    
+    const trainingsToSave = selectedReExtracted.map(idx => reExtractedTrainings.trainings[idx]);
+    
+    setLoading(true);
+    try {
+      await axios.post(
+        `${API}/api/employees/${employeeId}/training/bulk-save`,
+        { trainings: trainingsToSave },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(`Saved ${trainingsToSave.length} training record(s)`);
+      setShowReExtractPreview(false);
+      setReExtractedTrainings(null);
+      setSelectedReExtracted([]);
+      onUpdate?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to save trainings');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Toggle selection of re-extracted training
+  const toggleReExtractSelection = (idx) => {
+    setSelectedReExtracted(prev => 
+      prev.includes(idx) 
+        ? prev.filter(i => i !== idx)
+        : [...prev, idx]
+    );
+  };
+  
   // Verify training
   const handleVerify = async () => {
     if (!trainingItem?.record_id) return;
@@ -231,7 +309,28 @@ export default function TrainingDetailDrawer({
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent className="w-full sm:max-w-lg overflow-y-auto" data-testid="training-detail-drawer">
         <SheetHeader className="pb-4 border-b">
-          <SheetTitle className="text-xl">{trainingItem.title}</SheetTitle>
+          <div className="flex items-center justify-between">
+            <SheetTitle className="text-xl">{trainingItem.title}</SheetTitle>
+            {/* P0 FIX: Re-extract button */}
+            {isAdmin && (trainingItem.certificate_url || trainingItem.source_document_id) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReExtract}
+                disabled={reExtractLoading}
+                data-testid="re-extract-btn"
+              >
+                {reExtractLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <History className="h-4 w-4 mr-1" />
+                    Re-extract
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-1">
             <Badge variant="outline" className="font-mono text-xs">
               {trainingItem.code}
@@ -249,6 +348,13 @@ export default function TrainingDetailDrawer({
               </Badge>
             )}
           </div>
+          {/* Show verified by if available */}
+          {trainingItem.verified_by && (
+            <p className="text-xs text-gray-500 mt-1">
+              Verified by: {trainingItem.verified_by}
+              {trainingItem.verified_at && ` on ${formatBackendDate(trainingItem.verified_at, { format: 'short' })}`}
+            </p>
+          )}
         </SheetHeader>
         
         <Tabs value={activeTab} onValueChange={handleTabChange} className="mt-4">
@@ -560,6 +666,106 @@ export default function TrainingDetailDrawer({
             Close
           </Button>
         </SheetFooter>
+        
+        {/* P0 FIX: Re-extract Preview Modal */}
+        {showReExtractPreview && reExtractedTrainings && (
+          <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+              <div className="p-4 border-b">
+                <h3 className="text-lg font-semibold">Re-extracted Training Data</h3>
+                <p className="text-sm text-gray-500">
+                  Certificate: {reExtractedTrainings.original_filename} • 
+                  Found {reExtractedTrainings.total_extracted} training(s)
+                </p>
+                {reExtractedTrainings.updates_count > 0 && (
+                  <p className="text-sm text-amber-600 mt-1">
+                    ⚠️ {reExtractedTrainings.updates_count} record(s) will update existing data
+                  </p>
+                )}
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-4">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="p-2 text-left w-8">
+                        <input
+                          type="checkbox"
+                          checked={selectedReExtracted.length === reExtractedTrainings.trainings.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedReExtracted(reExtractedTrainings.trainings.map((_, i) => i));
+                            } else {
+                              setSelectedReExtracted([]);
+                            }
+                          }}
+                        />
+                      </th>
+                      <th className="p-2 text-left">Training Name</th>
+                      <th className="p-2 text-left">Completed</th>
+                      <th className="p-2 text-left">Expires</th>
+                      <th className="p-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reExtractedTrainings.trainings.map((training, idx) => (
+                      <tr key={idx} className={cn(
+                        "border-b hover:bg-gray-50",
+                        training.is_optional && "opacity-60"
+                      )}>
+                        <td className="p-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedReExtracted.includes(idx)}
+                            onChange={() => toggleReExtractSelection(idx)}
+                          />
+                        </td>
+                        <td className="p-2">
+                          <span className="font-medium">{training.training_name}</span>
+                          {training.is_optional && (
+                            <Badge className="ml-2 bg-gray-100 text-gray-600 text-[10px]">Optional</Badge>
+                          )}
+                        </td>
+                        <td className="p-2">{training.completion_date || '-'}</td>
+                        <td className="p-2">{training.expiry_date || '-'}</td>
+                        <td className="p-2">
+                          {training.is_update ? (
+                            <Badge className="bg-amber-100 text-amber-700">Update</Badge>
+                          ) : (
+                            <Badge className="bg-green-100 text-green-700">New</Badge>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              
+              <div className="p-4 border-t bg-gray-50 flex justify-between">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowReExtractPreview(false);
+                    setReExtractedTrainings(null);
+                    setSelectedReExtracted([]);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSaveReExtracted}
+                  disabled={loading || selectedReExtracted.length === 0}
+                  data-testid="save-reextracted-btn"
+                >
+                  {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : null}
+                  Save {selectedReExtracted.length} Training(s)
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );

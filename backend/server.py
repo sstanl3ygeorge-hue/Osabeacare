@@ -21033,6 +21033,7 @@ async def reject_employee_document(
     
     This is the EVIDENCE REVIEW action - distinct from formal compliance verification.
     Rejecting means the file cannot be used for compliance purposes.
+    Sends email notification to worker if email is available.
     """
     doc = await db.employee_documents.find_one({"id": doc_id})
     if not doc:
@@ -21061,6 +21062,104 @@ async def reject_employee_document(
         "reason": payload.reason,
         "requirement_id": doc.get('requirement_id')
     })
+    
+    # Send email notification to worker about rejected document
+    try:
+        employee_id = doc.get('employee_id')
+        if employee_id and resend.api_key:
+            employee = await db.employees.find_one(
+                {"id": employee_id}, 
+                {"_id": 0, "email": 1, "first_name": 1, "last_name": 1, "employee_code": 1}
+            )
+            
+            if employee and employee.get('email'):
+                emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or "Worker"
+                emp_email = employee.get('email')
+                emp_code = employee.get('employee_code', 'N/A')
+                
+                # Get document type name
+                requirement_id = doc.get('requirement_id', '')
+                doc_type_name = doc.get('file_name') or requirement_id.replace('_', ' ').title()
+                
+                # Lookup friendly name from MANDATORY_ITEMS if available
+                # MANDATORY_ITEMS is a dict with keys like "base", "nurse", "hca"
+                for category_items in MANDATORY_ITEMS.values():
+                    for item in category_items:
+                        if item.get("id") == requirement_id:
+                            doc_type_name = item.get("name", doc_type_name)
+                            break
+                
+                portal_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+                
+                email_html = f"""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); padding: 24px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: white; margin: 0; font-size: 22px;">Document Requires Attention</h2>
+                    </div>
+                    <div style="padding: 32px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none;">
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Hi {emp_name},
+                        </p>
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Your uploaded document has been reviewed and requires your attention.
+                        </p>
+                        
+                        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px; width: 40%;">Document Type:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-weight: 600; font-size: 14px;">{doc_type_name}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Status:</td>
+                                    <td style="padding: 8px 0; color: #dc2626; font-weight: 600; font-size: 14px;">Rejected</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reason:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-size: 14px;">{payload.reason}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reviewed by:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-size: 14px;">{reviewer_name or 'Admin'}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                            Please log in to your Worker Portal to upload a corrected document.
+                        </p>
+                        
+                        <div style="text-align: center; margin: 32px 0;">
+                            <a href="{portal_url}/worker/login" 
+                               style="display: inline-block; background: linear-gradient(135deg, #0F172A 0%, #1e293b 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                                Upload New Document
+                            </a>
+                        </div>
+                        
+                        <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 24px 0 0 0;">
+                            If you have any questions, please contact your compliance administrator.
+                        </p>
+                    </div>
+                    <div style="background: #f9fafb; padding: 16px; text-align: center; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                            Osabea Healthcare Solutions - Compliance Portal<br>
+                            Employee Code: {emp_code}
+                        </p>
+                    </div>
+                </div>
+                """
+                
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": f"Osabea Compliance <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                    "to": [emp_email],
+                    "subject": f"Action Required: Your {doc_type_name} document needs attention",
+                    "html": email_html
+                })
+                
+                logger.info(f"Sent document rejection notification to {emp_email} for doc {doc_id}")
+    except Exception as e:
+        # Don't fail the rejection if email fails
+        logger.warning(f"Failed to send document rejection notification: {e}")
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**updated_doc)
@@ -36434,9 +36533,20 @@ class ReferenceIntegrityService:
         rejection_reason: str,
         admin_id: str
     ) -> dict:
-        """Reject a reference - clears data so worker can provide fresh reference details."""
+        """Reject a reference - clears data so worker can provide fresh reference details. Sends email notification."""
         now = datetime.now(timezone.utc).isoformat()
         prefix = f"reference_{ref_num}_"
+        
+        # Get employee info for email before clearing data
+        employee = await db.employees.find_one(
+            {"id": employee_id}, 
+            {"_id": 0, "email": 1, "first_name": 1, "last_name": 1, "employee_code": 1,
+             f"{prefix}name": 1, f"{prefix}company": 1}
+        )
+        
+        # Store referee info before clearing
+        referee_name = employee.get(f"{prefix}name", "Reference") if employee else "Reference"
+        referee_company = employee.get(f"{prefix}company", "") if employee else ""
         
         # Clear all reference data fields to allow fresh input
         # while preserving rejection audit trail
@@ -36488,6 +36598,98 @@ class ReferenceIntegrityService:
             "rejection_reason": rejection_reason,
             "data_cleared": True
         })
+        
+        # Send email notification to worker
+        try:
+            if employee and employee.get('email') and resend.api_key:
+                emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() or "Worker"
+                emp_email = employee.get('email')
+                emp_code = employee.get('employee_code', 'N/A')
+                
+                # Get admin name
+                admin_user = await db.users.find_one({"user_id": admin_id}, {"_id": 0, "name": 1})
+                admin_name = admin_user.get('name') if admin_user else 'Admin'
+                
+                portal_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+                
+                referee_display = referee_name
+                if referee_company:
+                    referee_display = f"{referee_name} ({referee_company})"
+                
+                email_html = f"""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); padding: 24px; text-align: center; border-radius: 8px 8px 0 0;">
+                        <h2 style="color: white; margin: 0; font-size: 22px;">Reference {ref_num} Requires Attention</h2>
+                    </div>
+                    <div style="padding: 32px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none;">
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Hi {emp_name},
+                        </p>
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                            Your Reference {ref_num} has been reviewed and requires your attention.
+                        </p>
+                        
+                        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 20px; margin: 24px 0;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px; width: 40%;">Reference:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-weight: 600; font-size: 14px;">Reference {ref_num}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Previous Referee:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-size: 14px;">{referee_display}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Status:</td>
+                                    <td style="padding: 8px 0; color: #dc2626; font-weight: 600; font-size: 14px;">Rejected - New Reference Required</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reason:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-size: 14px;">{rejection_reason}</td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reviewed by:</td>
+                                    <td style="padding: 8px 0; color: #1f2937; font-size: 14px;">{admin_name}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                            <strong>What you need to do:</strong><br>
+                            Please provide details for a new referee. Your previous reference information has been cleared so you can start fresh.
+                        </p>
+                        
+                        <div style="text-align: center; margin: 32px 0;">
+                            <a href="{portal_url}/worker/login" 
+                               style="display: inline-block; background: linear-gradient(135deg, #0F172A 0%, #1e293b 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                                Provide New Reference
+                            </a>
+                        </div>
+                        
+                        <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin: 24px 0 0 0;">
+                            If you have any questions about why your reference was rejected, please contact your compliance administrator.
+                        </p>
+                    </div>
+                    <div style="background: #f9fafb; padding: 16px; text-align: center; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+                        <p style="color: #6b7280; font-size: 12px; margin: 0;">
+                            Osabea Healthcare Solutions - Compliance Portal<br>
+                            Employee Code: {emp_code}
+                        </p>
+                    </div>
+                </div>
+                """
+                
+                await asyncio.to_thread(resend.Emails.send, {
+                    "from": f"Osabea Compliance <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                    "to": [emp_email],
+                    "subject": f"Action Required: Reference {ref_num} needs to be replaced",
+                    "html": email_html
+                })
+                
+                logger.info(f"Sent reference rejection notification to {emp_email} for reference {ref_num}")
+        except Exception as e:
+            # Don't fail the rejection if email fails
+            logger.warning(f"Failed to send reference rejection notification: {e}")
         
         return {"status": "success", "message": f"Reference {ref_num} rejected and data cleared. Worker can now provide new reference details."}
 

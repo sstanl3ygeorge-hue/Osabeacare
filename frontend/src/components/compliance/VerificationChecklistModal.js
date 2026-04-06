@@ -163,7 +163,7 @@ export default function VerificationChecklistModal({
       
       if (response.data.success) {
         toast.success('Verification checklist submitted!', {
-          description: 'Click "Approve Verification" to complete the process.'
+          description: 'Generating verification documents...'
         });
         
         // Now auto-approve if all checks passed
@@ -173,10 +173,17 @@ export default function VerificationChecklistModal({
         });
         
         if (approveResponse.data.success) {
+          const pdfUrl = approveResponse.data.verification_pdf_url;
+          const stampedUrl = approveResponse.data.stamped_evidence_url;
+          
           toast.success('Verification approved!', {
-            description: 'This document now counts toward compliance.'
+            description: pdfUrl 
+              ? 'Verification PDF generated and evidence stamped.' 
+              : 'This document now counts toward compliance.',
+            duration: 5000
           });
-          onVerificationComplete?.();
+          
+          onVerificationComplete?.(approveResponse.data);
           onClose();
         }
       }

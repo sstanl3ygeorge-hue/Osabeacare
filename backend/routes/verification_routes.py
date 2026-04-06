@@ -454,6 +454,7 @@ async def approve_verification(
 ):
     """
     Final approval of verification document. This is what makes compliance % increase.
+    Generates verification PDF and stamps evidence document.
     """
     if db is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
@@ -468,6 +469,107 @@ async def approve_verification(
     admin_id = current_user.get("user_id", "system") if current_user else "system"
     
     if approval.approved:
+        # Get employee data for PDF generation
+        employee = await db.employees.find_one({"id": ver_doc["employee_id"]}, {"_id": 0})
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        
+        requirement_id = ver_doc.get("requirement_id")
+        verification_id = ver_doc.get("verification_id", generate_verification_id())
+        
+        # Requirement labels
+        REQUIREMENT_LABELS = {
+            'right_to_work': 'Right to Work',
+            'dbs': 'DBS Certificate',
+            'identity': 'Identity Document',
+            'proof_of_address': 'Proof of Address'
+        }
+        requirement_label = REQUIREMENT_LABELS.get(requirement_id, requirement_id.replace('_', ' ').title())
+        
+        # Generate verification PDF
+        verification_pdf_url = None
+        stamped_evidence_url = None
+        
+        try:
+            from services.pdf_service import generate_verification_pdf, stamp_evidence_document
+            from emergentintegrations.cloud_storage import CloudStorage, StorageConfig
+            
+            CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
+            
+            # Generate verification record PDF
+            pdf_bytes = generate_verification_pdf(
+                employee_data=employee,
+                requirement_id=requirement_id,
+                requirement_label=requirement_label,
+                checklist_data=ver_doc.get("checklist_data", {}),
+                ai_extraction=ver_doc.get("ai_extraction"),
+                verification_method=ver_doc.get("verification_method"),
+                admin_name=admin_name,
+                admin_notes=ver_doc.get("checklist_data", {}).get("admin_notes"),
+                verification_id=verification_id,
+                verified_at=now
+            )
+            
+            # Upload verification PDF to cloud storage
+            if CLOUD_STORAGE_URL:
+                storage = CloudStorage(StorageConfig(storage_url=CLOUD_STORAGE_URL))
+                
+                emp_code = employee.get('employee_code', 'unknown')
+                pdf_filename = f"verification_{requirement_id}_{verification_id}.pdf"
+                
+                verification_pdf_url = await storage.upload_file_async(
+                    file_data=pdf_bytes,
+                    file_name=pdf_filename,
+                    folder=f"employees/{emp_code}/verifications",
+                    content_type="application/pdf"
+                )
+                logger.info(f"Verification PDF uploaded: {verification_pdf_url}")
+            
+            # Stamp the original evidence document if it exists
+            evidence_doc_id = ver_doc.get("evidence_document_id")
+            if evidence_doc_id and CLOUD_STORAGE_URL:
+                evidence_doc = await db.employee_documents.find_one({"id": evidence_doc_id})
+                if evidence_doc and evidence_doc.get("file_url"):
+                    try:
+                        # Download the original evidence
+                        import httpx
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.get(evidence_doc["file_url"])
+                            if resp.status_code == 200:
+                                original_bytes = resp.content
+                                
+                                # Determine if image or PDF
+                                file_type = evidence_doc.get("file_type", "").lower()
+                                is_image = any(ext in file_type for ext in ['image', 'jpg', 'jpeg', 'png', 'gif'])
+                                
+                                # Stamp the document
+                                stamped_bytes = stamp_evidence_document(
+                                    document_bytes=original_bytes,
+                                    admin_name=admin_name,
+                                    verified_at=now,
+                                    verification_id=verification_id,
+                                    is_image=is_image
+                                )
+                                
+                                # Upload stamped version
+                                stamped_filename = f"stamped_{evidence_doc.get('file_name', 'evidence')}"
+                                if not stamped_filename.endswith('.pdf'):
+                                    stamped_filename = stamped_filename.rsplit('.', 1)[0] + '_stamped.pdf'
+                                
+                                stamped_evidence_url = await storage.upload_file_async(
+                                    file_data=stamped_bytes,
+                                    file_name=stamped_filename,
+                                    folder=f"employees/{emp_code}/documents",
+                                    content_type="application/pdf"
+                                )
+                                logger.info(f"Stamped evidence uploaded: {stamped_evidence_url}")
+                    except Exception as stamp_err:
+                        logger.error(f"Error stamping evidence document: {stamp_err}")
+        
+        except Exception as pdf_err:
+            logger.error(f"Error generating verification PDF: {pdf_err}")
+            # Continue with approval even if PDF generation fails
+        
         # Approve verification
         update_data = {
             "status": "approved",
@@ -475,7 +577,8 @@ async def approve_verification(
             "approved_by": admin_id,
             "approved_by_name": admin_name,
             "approved_at": now,
-            "updated_at": now
+            "updated_at": now,
+            "verification_pdf_url": verification_pdf_url,
         }
         
         await db.verification_documents.update_one(
@@ -484,39 +587,47 @@ async def approve_verification(
         )
         
         # Update employee record
-        requirement_id = ver_doc.get("requirement_id")
         await db.employees.update_one(
             {"id": ver_doc["employee_id"]},
             {"$set": {
                 f"{requirement_id}_verified": True,
                 f"{requirement_id}_verified_at": now,
                 f"{requirement_id}_verified_by": admin_name,
+                f"{requirement_id}_verification_pdf_url": verification_pdf_url,
                 "updated_at": now
             }}
         )
         
-        # Stamp the evidence document if exists
+        # Update the evidence document with stamp info and stamped URL
         evidence_doc_id = ver_doc.get("evidence_document_id")
         if evidence_doc_id:
+            evidence_update = {
+                "verification_stamp": "verified",
+                "verification_stamp_at": now,
+                "verification_stamp_by": admin_id,
+                "verification_stamp_by_name": admin_name,
+                "verification_stamp_label": "Verified",
+                "verification_stamp_audit_text": f"VERIFIED by {admin_name}",
+                "verification_stamp_badge_color": "green",
+                "linked_verification_id": approval.verification_document_id,
+                "verification_id": verification_id,
+                "updated_at": now
+            }
+            if stamped_evidence_url:
+                evidence_update["stamped_file_url"] = stamped_evidence_url
+            
             await db.employee_documents.update_one(
                 {"id": evidence_doc_id},
-                {"$set": {
-                    "verification_stamp": "verified",
-                    "verification_stamp_at": now,
-                    "verification_stamp_by": admin_id,
-                    "verification_stamp_by_name": admin_name,
-                    "verification_stamp_label": "Verified",
-                    "verification_stamp_audit_text": f"VERIFIED by {admin_name}",
-                    "verification_stamp_badge_color": "green",
-                    "linked_verification_id": approval.verification_document_id,
-                    "updated_at": now
-                }}
+                {"$set": evidence_update}
             )
         
         return {
             "success": True,
             "status": "approved",
-            "message": "Verification approved. Document now counts toward compliance."
+            "message": "Verification approved. Document now counts toward compliance.",
+            "verification_pdf_url": verification_pdf_url,
+            "stamped_evidence_url": stamped_evidence_url,
+            "verification_id": verification_id
         }
     else:
         # Reject verification

@@ -543,3 +543,472 @@ def generate_generic_pdf_content(form_data: Dict[str, Any], styles) -> list:
         elements.append(Paragraph(value_str, styles['FieldValue']))
     
     return elements
+
+
+
+# =============================================================================
+# SMART VERIFICATION SYSTEM - PDF Generation & Stamping
+# =============================================================================
+
+import fitz  # PyMuPDF - for stamping existing PDFs
+
+class VerificationPDFGenerator:
+    """Generates verification record PDFs for the Smart Verification System"""
+    
+    def __init__(self, company_name="Osabea Healthcare"):
+        self.company_name = company_name
+        self.styles = getSampleStyleSheet()
+        self._setup_verification_styles()
+    
+    def _setup_verification_styles(self):
+        """Setup custom styles for verification PDFs"""
+        self.styles.add(ParagraphStyle(
+            name='VerifMainTitle',
+            parent=self.styles['Heading1'],
+            fontSize=18,
+            textColor=PRIMARY_COLOR,
+            alignment=TA_CENTER,
+            spaceAfter=6
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='VerifSubTitle',
+            parent=self.styles['Heading2'],
+            fontSize=12,
+            textColor=TEXT_SECONDARY,
+            alignment=TA_CENTER,
+            spaceAfter=20
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='VerifSectionHeader',
+            parent=self.styles['Heading2'],
+            fontSize=11,
+            textColor=PRIMARY_COLOR,
+            spaceBefore=15,
+            spaceAfter=8
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='VerifChecklistItem',
+            parent=self.styles['Normal'],
+            fontSize=10,
+            leftIndent=20
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='VerifApprovedBadge',
+            parent=self.styles['Normal'],
+            fontSize=14,
+            textColor=HexColor('#16a34a'),  # Green
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        ))
+        
+        self.styles.add(ParagraphStyle(
+            name='VerifFooter',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            textColor=TEXT_SECONDARY,
+            alignment=TA_CENTER
+        ))
+    
+    def generate_verification_pdf(
+        self,
+        employee_data: dict,
+        requirement_id: str,
+        requirement_label: str,
+        checklist_data: dict,
+        ai_extraction: dict = None,
+        verification_method: str = None,
+        admin_name: str = None,
+        admin_notes: str = None,
+        verification_id: str = None,
+        verified_at: str = None
+    ) -> bytes:
+        """Generate a complete verification record PDF"""
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=20*mm,
+            leftMargin=20*mm,
+            topMargin=20*mm,
+            bottomMargin=20*mm
+        )
+        
+        elements = []
+        
+        # Logo
+        logo = get_logo_image(width=40*mm, height=16*mm)
+        if logo:
+            elements.append(logo)
+            elements.append(Spacer(1, 10))
+        
+        # Header
+        elements.append(Paragraph(
+            f"<b>{self.company_name.upper()}</b>",
+            self.styles['VerifMainTitle']
+        ))
+        elements.append(Paragraph(
+            "VERIFICATION RECORD",
+            self.styles['VerifMainTitle']
+        ))
+        elements.append(Paragraph(
+            f"Document Type: {requirement_label}",
+            self.styles['VerifSubTitle']
+        ))
+        
+        elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=15))
+        
+        # Employee Details
+        elements.append(Paragraph("EMPLOYEE DETAILS", self.styles['VerifSectionHeader']))
+        
+        emp_name = f"{employee_data.get('first_name', '')} {employee_data.get('last_name', '')}".strip()
+        emp_table = Table([
+            ["Name:", emp_name],
+            ["Employee Code:", employee_data.get('employee_code', 'N/A')],
+            ["Email:", employee_data.get('email', 'N/A')],
+            ["Requirement:", requirement_label],
+        ], colWidths=[100, 350])
+        emp_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(emp_table)
+        
+        # AI Extraction Results (if available)
+        if ai_extraction and any(ai_extraction.values()):
+            elements.append(Spacer(1, 10))
+            elements.append(Paragraph("AI DOCUMENT ANALYSIS", self.styles['VerifSectionHeader']))
+            
+            ai_rows = []
+            if ai_extraction.get('extracted_name'):
+                ai_rows.append(["Extracted Name:", ai_extraction['extracted_name']])
+            if ai_extraction.get('extracted_address'):
+                ai_rows.append(["Extracted Address:", ai_extraction['extracted_address']])
+            if ai_extraction.get('extracted_date'):
+                ai_rows.append(["Document Date:", ai_extraction['extracted_date']])
+            if ai_extraction.get('document_type'):
+                ai_rows.append(["Document Type:", ai_extraction['document_type']])
+            
+            if ai_rows:
+                ai_table = Table(ai_rows, colWidths=[120, 330])
+                ai_table.setStyle(TableStyle([
+                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('TOPPADDING', (0, 0), (-1, -1), 3),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ]))
+                elements.append(ai_table)
+            
+            # Validation indicators
+            validation = ai_extraction.get('validation_results', {})
+            confidence = ai_extraction.get('confidence_scores', {})
+            
+            if validation:
+                elements.append(Spacer(1, 6))
+                for key, passed in validation.items():
+                    if passed is None:
+                        continue
+                    check = "✓" if passed else "✗"
+                    color = '#16a34a' if passed else '#dc2626'
+                    label = key.replace('_', ' ').title()
+                    
+                    if key == 'name_match' and 'name_match' in confidence:
+                        label = f"Name Match: {confidence['name_match']}% confidence"
+                    elif key == 'address_match':
+                        label = f"Address Match: {'Match' if passed else 'Mismatch'}"
+                    elif key == 'date_valid':
+                        label = f"Date Valid: {'Within 6 months' if passed else 'Older than 6 months'}"
+                    
+                    elements.append(Paragraph(
+                        f"<font color='{color}'>{check} {label}</font>",
+                        self.styles['VerifChecklistItem']
+                    ))
+        
+        # Verification Checklist
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph("ADMIN VERIFICATION CHECKLIST", self.styles['VerifSectionHeader']))
+        
+        method_labels = {
+            'in_person': 'In Person - Original Document Seen',
+            'video_call': 'Video Call Verification',
+            'online_check': 'Online Check (gov.uk / DBS Update Service)'
+        }
+        elements.append(Paragraph(
+            f"<b>Verification Method:</b> {method_labels.get(verification_method, verification_method or 'Not specified')}",
+            self.styles['Normal']
+        ))
+        elements.append(Spacer(1, 8))
+        
+        # Checklist items
+        checklist_fields = self._get_checklist_fields(requirement_id)
+        for field_id, field_label in checklist_fields.items():
+            value = checklist_data.get(field_id, False)
+            check = "✓" if value else "☐"
+            color = '#16a34a' if value else '#6b7280'
+            elements.append(Paragraph(
+                f"<font color='{color}'>[{check}] {field_label}</font>",
+                self.styles['VerifChecklistItem']
+            ))
+        
+        # Admin notes
+        if admin_notes:
+            elements.append(Spacer(1, 10))
+            elements.append(Paragraph("<b>Admin Notes:</b>", self.styles['Normal']))
+            elements.append(Paragraph(f"<i>{admin_notes}</i>", self.styles['Normal']))
+        
+        # Approval section
+        elements.append(Spacer(1, 15))
+        elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=10))
+        elements.append(Paragraph("VERIFICATION APPROVAL", self.styles['VerifSectionHeader']))
+        
+        # Format date
+        if verified_at:
+            try:
+                if isinstance(verified_at, str):
+                    dt = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
+                else:
+                    dt = verified_at
+                formatted_date = dt.strftime("%d %B %Y, %H:%M GMT")
+            except Exception:
+                formatted_date = str(verified_at)
+        else:
+            formatted_date = datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M GMT")
+        
+        approval_table = Table([
+            ["Verified By:", admin_name or 'System'],
+            ["Verified At:", formatted_date],
+            ["Verification ID:", verification_id or 'N/A'],
+        ], colWidths=[100, 350])
+        approval_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(approval_table)
+        
+        # Approved badge
+        elements.append(Spacer(1, 15))
+        elements.append(Paragraph("[ ✓ APPROVED ]", self.styles['VerifApprovedBadge']))
+        
+        # Footer
+        elements.append(Spacer(1, 30))
+        elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=8))
+        elements.append(Paragraph(
+            "This document is system-generated and forms part of the employee's "
+            "compliance file for CQC audit purposes.",
+            self.styles['VerifFooter']
+        ))
+        elements.append(Paragraph(
+            f"Generated: {datetime.now(timezone.utc).strftime('%d %B %Y, %H:%M GMT')}",
+            self.styles['VerifFooter']
+        ))
+        
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    def _get_checklist_fields(self, requirement_id: str) -> dict:
+        """Get checklist field labels for a requirement type"""
+        fields = {
+            'identity': {
+                'photo_matches_applicant': 'Photo matches the applicant',
+                'security_features_verified': 'Security features verified (hologram, watermark, chip)',
+                'document_appears_genuine': 'Document appears genuine (not altered)',
+                'expiry_date_valid': 'Expiry date is valid',
+                'details_match_profile': 'Details match employee profile',
+            },
+            'proof_of_address': {
+                'address_matches_declared': 'Address matches declared address',
+                'document_within_6_months': 'Document dated within 6 months',
+                'document_type_acceptable': 'Document type is acceptable',
+                'name_matches_employee': 'Name on document matches employee',
+                'document_appears_genuine': 'Document appears genuine',
+            },
+            'right_to_work': {
+                'share_code_verified': 'Share code verified on gov.uk',
+                'right_to_work_confirmed': 'Right to work confirmed',
+                'details_match_profile': 'Details match employee profile',
+            },
+            'dbs': {
+                'dbs_update_service_checked': 'Certificate verified on DBS Update Service',
+                'certificate_number_matches': 'Certificate number matches uploaded document',
+                'details_match_profile': 'Details match employee profile',
+            }
+        }
+        return fields.get(requirement_id, {})
+
+
+class EvidenceStamper:
+    """Stamps existing PDF documents with verification watermark"""
+    
+    STAMP_WIDTH = 150
+    STAMP_HEIGHT = 60
+    
+    def stamp_pdf(
+        self,
+        pdf_bytes: bytes,
+        admin_name: str,
+        verified_at: str,
+        verification_id: str,
+        position: str = "top-right"
+    ) -> bytes:
+        """Add verification stamp to an existing PDF"""
+        try:
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            
+            # Parse date
+            if verified_at:
+                try:
+                    if isinstance(verified_at, str):
+                        dt = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
+                    else:
+                        dt = verified_at
+                    date_str = dt.strftime("%d %b %Y")
+                except Exception:
+                    date_str = str(verified_at)[:10]
+            else:
+                date_str = datetime.now(timezone.utc).strftime("%d %b %Y")
+            
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                page_rect = page.rect
+                
+                margin = 10
+                if position == "top-right":
+                    x = page_rect.width - self.STAMP_WIDTH - margin
+                    y = margin
+                elif position == "top-left":
+                    x = margin
+                    y = margin
+                elif position == "bottom-right":
+                    x = page_rect.width - self.STAMP_WIDTH - margin
+                    y = page_rect.height - self.STAMP_HEIGHT - margin
+                else:
+                    x = margin
+                    y = page_rect.height - self.STAMP_HEIGHT - margin
+                
+                stamp_rect = fitz.Rect(x, y, x + self.STAMP_WIDTH, y + self.STAMP_HEIGHT)
+                
+                # Draw stamp background
+                shape = page.new_shape()
+                shape.draw_rect(stamp_rect)
+                shape.finish(color=(0.1, 0.3, 0.5), fill=(1, 1, 1), width=1.5)
+                shape.commit()
+                
+                # Add stamp text
+                page.insert_text(
+                    fitz.Point(x + 8, y + 15),
+                    "✓ VERIFIED",
+                    fontsize=12,
+                    fontname="helv",
+                    color=(0.086, 0.639, 0.290)
+                )
+                
+                page.insert_text(
+                    fitz.Point(x + 8, y + 28),
+                    f"By: {admin_name[:25]}",
+                    fontsize=8,
+                    fontname="helv",
+                    color=(0.3, 0.3, 0.3)
+                )
+                
+                page.insert_text(
+                    fitz.Point(x + 8, y + 40),
+                    f"Date: {date_str}",
+                    fontsize=8,
+                    fontname="helv",
+                    color=(0.3, 0.3, 0.3)
+                )
+                
+                page.insert_text(
+                    fitz.Point(x + 8, y + 52),
+                    f"ID: {verification_id[:20]}",
+                    fontsize=7,
+                    fontname="helv",
+                    color=(0.5, 0.5, 0.5)
+                )
+            
+            output = io.BytesIO()
+            doc.save(output)
+            doc.close()
+            output.seek(0)
+            return output.getvalue()
+            
+        except Exception as e:
+            import logging
+            logging.error(f"Error stamping PDF: {e}")
+            return pdf_bytes
+    
+    def stamp_image(
+        self,
+        image_bytes: bytes,
+        admin_name: str,
+        verified_at: str,
+        verification_id: str
+    ) -> bytes:
+        """Convert image to PDF and stamp it"""
+        try:
+            from PIL import Image as PILImage
+            
+            img = PILImage.open(io.BytesIO(image_bytes))
+            if img.mode in ('RGBA', 'P'):
+                img = img.convert('RGB')
+            
+            pdf_buffer = io.BytesIO()
+            img.save(pdf_buffer, format='PDF')
+            pdf_buffer.seek(0)
+            
+            return self.stamp_pdf(
+                pdf_buffer.getvalue(),
+                admin_name,
+                verified_at,
+                verification_id
+            )
+        except Exception as e:
+            import logging
+            logging.error(f"Error stamping image: {e}")
+            return image_bytes
+
+
+# Convenience functions
+def generate_verification_pdf(
+    employee_data: dict,
+    requirement_id: str,
+    requirement_label: str,
+    checklist_data: dict,
+    **kwargs
+) -> bytes:
+    """Generate a verification record PDF"""
+    generator = VerificationPDFGenerator()
+    return generator.generate_verification_pdf(
+        employee_data=employee_data,
+        requirement_id=requirement_id,
+        requirement_label=requirement_label,
+        checklist_data=checklist_data,
+        **kwargs
+    )
+
+
+def stamp_evidence_document(
+    document_bytes: bytes,
+    admin_name: str,
+    verified_at: str,
+    verification_id: str,
+    is_image: bool = False
+) -> bytes:
+    """Stamp an evidence document with verification watermark"""
+    stamper = EvidenceStamper()
+    if is_image:
+        return stamper.stamp_image(document_bytes, admin_name, verified_at, verification_id)
+    return stamper.stamp_pdf(document_bytes, admin_name, verified_at, verification_id)

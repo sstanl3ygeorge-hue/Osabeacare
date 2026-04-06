@@ -50,7 +50,7 @@ import {
 } from '../../components/employee';
 import {
   ArrowLeft, Upload, FileText, Mail, Phone, Calendar,
-  CheckCircle, Clock, AlertTriangle, XCircle, Loader2, FileCheck,
+  CheckCircle, Clock, AlertTriangle, AlertCircle, XCircle, Loader2, FileCheck,
   GraduationCap, ClipboardList, History, User, FolderUp, Eye, Shield,
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FileSearch,

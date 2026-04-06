@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 
 // Public Pages
@@ -85,6 +85,7 @@ function AppRouter() {
       
       {/* Auth Routes */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/portal/login" element={<Navigate to="/login" replace />} />
       <Route path="/auth/callback" element={<AuthCallback />} />
       
       {/* Worker Portal Routes (No Admin Auth Required) */}

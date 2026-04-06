@@ -42,7 +42,6 @@ import {
   CompetencyRecordsPanel, 
   PreEmploymentGatesPanel, 
   ReferenceEmploymentComparison,
-  HealthCompetencySection,
   ProfessionalRegistrationPanel,
   ApplicationDataPanel,
   PoliciesTabContent,
@@ -3800,6 +3799,14 @@ export default function EmployeeProfilePage() {
             <History className="h-4 w-4 mr-2" />
             Audit
           </TabsTrigger>
+          <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <ClipboardCheck className="h-4 w-4 mr-2" />
+            Competencies
+          </TabsTrigger>
+          <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <Eye className="h-4 w-4 mr-2" />
+            Spot Checks
+          </TabsTrigger>
         </TabsList>
 
         {/* ========== TAB 1: WORK READINESS ========== */}
@@ -4439,13 +4446,13 @@ export default function EmployeeProfilePage() {
             }}
           />
           
-          {/* Induction & Competency Section - CQC Requirement */}
+          {/* Induction Checklist - 15 Care Certificate Standards */}
           <div className="mt-6">
-            <HealthCompetencySection
+            <InductionChecklistPanel
               employeeId={employeeId}
               employeeName={`${employee?.first_name} ${employee?.last_name}`}
               isAuditor={isAuditor()}
-              onRefresh={() => {
+              onStatusChange={() => {
                 fetchTrainingEvaluation();
                 fetchComplianceFile();
               }}
@@ -4458,6 +4465,29 @@ export default function EmployeeProfilePage() {
           <AuditTabContent employeeId={employeeId} />
         </TabsContent>
 
+        {/* ========== TAB: COMPETENCIES ========== */}
+        <TabsContent value="competencies">
+          <CompetencyAssessmentsPanel
+            employeeId={employeeId}
+            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            onRefresh={() => {
+              fetchComplianceFile();
+              fetchRecruitmentStatus();
+            }}
+          />
+        </TabsContent>
+
+        {/* ========== TAB: SPOT CHECKS ========== */}
+        <TabsContent value="spot_checks">
+          <SpotChecksPanel
+            employeeId={employeeId}
+            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+            onRefresh={() => {
+              fetchComplianceFile();
+              fetchRecruitmentStatus();
+            }}
+          />
+        </TabsContent>
 
         {/* References Tab - Extracted to ReferencesTabContent */}
         <TabsContent value="references">

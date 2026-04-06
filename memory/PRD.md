@@ -1487,3 +1487,36 @@ Added sections:
 - View button opens drawer correctly
 - Warning badge shows for verified items without evidence
 
+---
+
+## P2 ADMIN DASHBOARD ACTIONABLE TASK QUEUE UI (April 2026)
+
+### Features Implemented
+1. **Filter Tabs** - Quick filtering by category:
+   - All | Verify | Refs | Onboarding | Expiring
+
+2. **Task Sections**:
+   - PENDING VERIFICATIONS - Document type, employee badge, upload date, [Verify] button
+   - REFERENCES TO SEND - Referee info with [Send] button
+   - REFERENCE RESPONSES TO REVIEW - With [Review] button
+   - INDUCTION CHECKLISTS INCOMPLETE - Care Certificate compliance message
+   - INTERVIEWS/APPROVALS PENDING - Count with navigation link
+   - RECURRING COMPLIANCE DUE - Spot Checks and Supervision counts
+   - WORKERS STUCK IN ONBOARDING - Progress badges with [View] and [Remind] buttons
+
+3. **Visual Improvements**:
+   - Color-coded cards by category (blue, purple, teal, orange, amber, slate)
+   - Gradient card headers
+   - Progress percentage badges
+   - Refresh button for real-time updates
+
+### Files Modified
+- `/app/frontend/src/components/admin/ActionableTaskQueue.js`
+
+### Testing Verified
+- All task categories display correctly
+- Filter tabs switch between views
+- Verify buttons navigate to employee profiles
+- Remind buttons trigger API calls
+- Refresh button reloads task data
+

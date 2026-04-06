@@ -7766,11 +7766,23 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     completed_docs = []
     
     for doc_type, doc_name in required_docs.items():
-        # Find active document of this type
-        matching = [d for d in documents if doc_type in (d.get("requirement_id", "") or "").lower()]
+        # Find active document of this type - exclude superseded, rejected, uploaded_in_error
+        matching = [d for d in documents 
+                   if doc_type in (d.get("requirement_id", "") or "").lower()
+                   and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
         
         if matching:
-            doc = matching[0]
+            # Prefer verified documents, then most recent
+            verified_docs = [d for d in matching if d.get("verification_stamp") not in [None, "", "not_verified"]]
+            if verified_docs:
+                # Sort by verified_at descending, pick most recent verified
+                verified_docs.sort(key=lambda x: x.get("verified_at") or x.get("uploaded_at") or "", reverse=True)
+                doc = verified_docs[0]
+            else:
+                # No verified docs, pick most recently uploaded
+                matching.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
+                doc = matching[0]
+            
             is_verified = doc.get("verification_stamp") not in [None, "", "not_verified"]
             # Get file URL - prefer stamped version if verified
             file_url = None
@@ -7802,8 +7814,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "action": "upload"
             })
     
-    # Check POA needs 2 documents
-    poa_docs = [d for d in documents if "proof_of_address" in (d.get("requirement_id", "") or "").lower()]
+    # Check POA needs 2 documents - exclude superseded, rejected, uploaded_in_error
+    poa_docs = [d for d in documents 
+               if "proof_of_address" in (d.get("requirement_id", "") or "").lower()
+               and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
     if len(poa_docs) < 2:
         # Remove existing POA from completed if only 1
         if len(poa_docs) == 1:

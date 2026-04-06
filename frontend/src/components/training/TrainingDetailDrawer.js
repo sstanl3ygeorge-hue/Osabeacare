@@ -74,6 +74,10 @@ export default function TrainingDetailDrawer({
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [verifyNotes, setVerifyNotes] = useState('');
+  // P0 FIX: Add state for inline document preview
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [previewType, setPreviewType] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   
   // Fetch history when tab changes
   const fetchHistory = async () => {
@@ -101,12 +105,18 @@ export default function TrainingDetailDrawer({
     if (tab === 'history' && history.length === 0) {
       fetchHistory();
     }
+    // Clear preview when switching tabs
+    if (tab !== 'evidence') {
+      setPreviewUrl(null);
+      setPreviewType(null);
+    }
   };
   
-  // View certificate
+  // P0 FIX: View certificate inline instead of new tab
   const handleViewCertificate = async () => {
     if (!trainingItem?.record_id) return;
     
+    setPreviewLoading(true);
     try {
       const response = await axios.get(
         `${API}/api/training-records/${trainingItem.record_id}/certificate/file`,
@@ -116,11 +126,26 @@ export default function TrainingDetailDrawer({
         }
       );
       
-      const blob = new Blob([response.data], { type: response.headers['content-type'] });
+      const contentType = response.headers['content-type'] || 'application/pdf';
+      const blob = new Blob([response.data], { type: contentType });
       const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      
+      // Determine preview type
+      if (contentType.includes('pdf')) {
+        setPreviewType('pdf');
+      } else if (contentType.includes('image')) {
+        setPreviewType('image');
+      } else {
+        // Fallback to opening in new tab for unsupported types
+        window.open(url, '_blank');
+        return;
+      }
+      
+      setPreviewUrl(url);
     } catch (err) {
       toast.error('Failed to view certificate');
+    } finally {
+      setPreviewLoading(false);
     }
   };
   
@@ -367,6 +392,53 @@ export default function TrainingDetailDrawer({
           
           {/* Evidence Tab */}
           <TabsContent value="evidence" className="mt-4">
+            {/* P0 FIX: Inline Preview Panel */}
+            {previewUrl && (
+              <div className="mb-4 border rounded-lg overflow-hidden">
+                <div className="flex items-center justify-between p-2 bg-gray-100 border-b">
+                  <span className="text-sm font-medium text-gray-700">Certificate Preview</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => window.open(previewUrl, '_blank')}
+                      className="h-7 px-2"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                      Open in Tab
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setPreviewUrl(null);
+                        setPreviewType(null);
+                      }}
+                      className="h-7 px-2"
+                    >
+                      Close
+                    </Button>
+                  </div>
+                </div>
+                <div className="bg-gray-900 flex items-center justify-center" style={{ minHeight: '350px', maxHeight: '450px' }}>
+                  {previewType === 'image' ? (
+                    <img 
+                      src={previewUrl} 
+                      alt="Training Certificate" 
+                      className="max-w-full max-h-[450px] object-contain"
+                    />
+                  ) : previewType === 'pdf' ? (
+                    <iframe 
+                      src={previewUrl}
+                      title="Training Certificate PDF"
+                      className="w-full h-[450px]"
+                      style={{ border: 'none' }}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            )}
+            
             {trainingItem.has_evidence || trainingItem.evidence?.length > 0 || trainingItem.source_document_id || trainingItem.record_id ? (
               <div className="space-y-4">
                 <div className="p-4 bg-gray-50 rounded-lg border">
@@ -386,12 +458,17 @@ export default function TrainingDetailDrawer({
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant={previewUrl ? "default" : "outline"}
                         onClick={handleViewCertificate}
+                        disabled={previewLoading}
                         data-testid="view-certificate-btn"
                       >
-                        <Eye className="h-4 w-4 mr-1.5" />
-                        View
+                        {previewLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                        ) : (
+                          <Eye className="h-4 w-4 mr-1.5" />
+                        )}
+                        {previewUrl ? 'Reload' : 'View'}
                       </Button>
                       <Button
                         size="sm"

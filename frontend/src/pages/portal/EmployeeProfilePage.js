@@ -4493,14 +4493,28 @@ export default function EmployeeProfilePage() {
 
         {/* ========== TAB: COMPETENCIES ========== */}
         <TabsContent value="competencies">
-          <CompetencyAssessmentsPanel
-            employeeId={employeeId}
-            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
-            onRefresh={() => {
-              fetchComplianceFile();
-              fetchRecruitmentStatus();
-            }}
-          />
+          <div className="space-y-6">
+            {/* Induction Checklist - 15 Care Certificate Standards */}
+            <InductionChecklistPanel
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+              isAuditor={isAuditor}
+              onStatusChange={() => {
+                fetchComplianceFile();
+                fetchRecruitmentStatus();
+              }}
+            />
+            
+            {/* Competency Assessments */}
+            <CompetencyAssessmentsPanel
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+              onRefresh={() => {
+                fetchComplianceFile();
+                fetchRecruitmentStatus();
+              }}
+            />
+          </div>
         </TabsContent>
 
         {/* ========== TAB: SPOT CHECKS ========== */}

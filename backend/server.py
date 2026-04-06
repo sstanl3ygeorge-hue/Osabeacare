@@ -7831,6 +7831,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "record_status": {"$ne": "superseded"}
     }).to_list(length=100)
     
+    # All 6 mandatory trainings - NHS Core Skills Framework
     mandatory_trainings = {
         "safeguarding": "Safeguarding",
         "manual_handling": "Manual Handling", 
@@ -7843,16 +7844,51 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     missing_trainings = []
     completed_trainings = []
     expired_trainings = []
+    all_mandatory_trainings = []  # NEW: Always show all 6 with status
     now = datetime.now(timezone.utc)
     
     for training_id, training_name in mandatory_trainings.items():
-        # Find matching training
+        # Find matching training - check multiple name patterns
         record = None
+        search_patterns = [
+            training_id.replace("_", " "),
+            training_id.replace("_", ""),
+            training_name.lower(),
+            # CSTF patterns for multi-course certificates
+            f"cstf {training_name.lower()}",
+            f"cstf {training_id.replace('_', ' ')}",
+        ]
+        
+        # Special mappings for common certificate names
+        if training_id == "safeguarding":
+            search_patterns.extend(["safeguarding adults", "safeguarding children", "safeguard"])
+        elif training_id == "manual_handling":
+            search_patterns.extend(["moving & handling", "moving and handling", "patient handling"])
+        elif training_id == "bls":
+            search_patterns.extend(["basic life support", "resuscitation", "cpr"])
+        elif training_id == "health_safety":
+            search_patterns.extend(["health, safety and welfare", "health and safety", "h&s"])
+        elif training_id == "infection_control":
+            search_patterns.extend(["infection prevention", "ipc"])
+        
         for t in trainings:
             t_name = (t.get("training_name") or "").lower()
-            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
-                record = t
+            for pattern in search_patterns:
+                if pattern in t_name:
+                    record = t
+                    break
+            if record:
                 break
+        
+        training_entry = {
+            "id": training_id,
+            "name": training_name,
+            "status": "missing",
+            "completion_date": None,
+            "expiry_date": None,
+            "verified": False,
+            "record_id": None
+        }
         
         if record:
             expiry_str = record.get("expiry_date")
@@ -7867,6 +7903,14 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                     is_expired = expiry < now
                 except:
                     pass
+            
+            training_entry.update({
+                "status": "expired" if is_expired else "complete",
+                "completion_date": record.get("completion_date"),
+                "expiry_date": expiry_str,
+                "verified": record.get("verified", False),
+                "record_id": record.get("id")
+            })
             
             if is_expired:
                 expired_trainings.append({
@@ -7889,6 +7933,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "name": training_name,
                 "action": "upload_certificate"
             })
+        
+        all_mandatory_trainings.append(training_entry)
     
     # Get expiry alerts (within 90 days)
     alerts = []
@@ -8101,6 +8147,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "missing_trainings": missing_trainings,
         "completed_trainings": completed_trainings,
         "expired_trainings": expired_trainings,
+        "all_mandatory_trainings": all_mandatory_trainings,  # NEW: All 6 trainings with status
         "alerts": sorted(alerts, key=lambda x: x.get("days_left", 999)),
         "contract_signed": contract_signed,
         "professional_registration": prof_reg_status

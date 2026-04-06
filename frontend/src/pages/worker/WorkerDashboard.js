@@ -905,7 +905,7 @@ export default function WorkerDashboard() {
                     key={idx} 
                     className={`p-4 rounded-xl border ${
                       ref.status === 'verified' ? 'bg-green-50 border-green-200' :
-                      ref.status === 'rejected' ? 'bg-red-50 border-red-200' :
+                      ref.status === 'rejected' || ref.status === 'needs_new_input' ? 'bg-red-50 border-red-200' :
                       ref.status === 'response_received' ? 'bg-blue-50 border-blue-200' :
                       ref.status === 'sent' ? 'bg-amber-50 border-amber-200' :
                       'bg-slate-50 border-slate-200'
@@ -916,15 +916,15 @@ export default function WorkerDashboard() {
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                           ref.status === 'verified' ? 'bg-green-100' :
-                          ref.status === 'rejected' ? 'bg-red-100' :
+                          ref.status === 'rejected' || ref.status === 'needs_new_input' ? 'bg-red-100' :
                           ref.status === 'response_received' ? 'bg-blue-100' :
                           ref.status === 'sent' ? 'bg-amber-100' :
                           'bg-slate-100'
                         }`}>
                           {ref.status === 'verified' ? (
                             <CheckCircle className="h-5 w-5 text-green-600" />
-                          ) : ref.status === 'rejected' ? (
-                            <X className="h-5 w-5 text-red-600" />
+                          ) : ref.status === 'rejected' || ref.status === 'needs_new_input' ? (
+                            <AlertCircle className="h-5 w-5 text-red-600" />
                           ) : ref.status === 'response_received' ? (
                             <Clock className="h-5 w-5 text-blue-600" />
                           ) : ref.status === 'sent' ? (
@@ -943,21 +943,41 @@ export default function WorkerDashboard() {
                               Verified by {ref.verified_by_name} on {formatDate(ref.verified_at)}
                             </p>
                           )}
+                          {/* Show rejection reason if reference was rejected */}
+                          {ref.rejection_reason && (
+                            <p className="text-xs text-red-600 mt-1">
+                              Reason: {ref.rejection_reason}
+                            </p>
+                          )}
                         </div>
                       </div>
-                      <Badge className={`text-xs ${
-                        ref.status === 'verified' ? 'bg-green-100 text-green-700' :
-                        ref.status === 'rejected' ? 'bg-red-100 text-red-700' :
-                        ref.status === 'response_received' ? 'bg-blue-100 text-blue-700' :
-                        ref.status === 'sent' ? 'bg-amber-100 text-amber-700' :
-                        ref.status === 'declared' ? 'bg-slate-100 text-slate-600' :
-                        'bg-slate-100 text-slate-500'
-                      }`}>
-                        {ref.status === 'verified' && <CheckCircle className="h-3 w-3 mr-1" />}
-                        {ref.status === 'rejected' && <X className="h-3 w-3 mr-1" />}
-                        {(ref.status === 'response_received' || ref.status === 'sent') && <Clock className="h-3 w-3 mr-1" />}
-                        {ref.status_label}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        {/* Show "Provide New" button for rejected references */}
+                        {ref.can_provide_new && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-xs border-primary text-primary hover:bg-primary hover:text-white"
+                            onClick={() => navigate('/worker/forms')}
+                            data-testid={`provide-new-ref-${ref.reference_number}`}
+                          >
+                            Provide New Referee
+                          </Button>
+                        )}
+                        <Badge className={`text-xs ${
+                          ref.status === 'verified' ? 'bg-green-100 text-green-700' :
+                          ref.status === 'rejected' || ref.status === 'needs_new_input' ? 'bg-red-100 text-red-700' :
+                          ref.status === 'response_received' ? 'bg-blue-100 text-blue-700' :
+                          ref.status === 'sent' ? 'bg-amber-100 text-amber-700' :
+                          ref.status === 'declared' ? 'bg-slate-100 text-slate-600' :
+                          'bg-slate-100 text-slate-500'
+                        }`}>
+                          {ref.status === 'verified' && <CheckCircle className="h-3 w-3 mr-1" />}
+                          {(ref.status === 'rejected' || ref.status === 'needs_new_input') && <AlertCircle className="h-3 w-3 mr-1" />}
+                          {(ref.status === 'response_received' || ref.status === 'sent') && <Clock className="h-3 w-3 mr-1" />}
+                          {ref.status_label}
+                        </Badge>
+                      </div>
                     </div>
                   </div>
                 ))}

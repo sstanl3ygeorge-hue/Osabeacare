@@ -8297,14 +8297,23 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         
         # Check if rejected
         is_rejected = employee.get(f"{prefix}rejected", False) or request_status == "rejected"
+        rejection_reason = employee.get(f"{prefix}rejection_reason", "")
         
-        # Determine display status - P0 FIX: Clearer status logic
+        # Check if data was cleared after rejection (worker can provide new reference)
+        data_cleared = is_rejected and not referee_name
+        
+        # Determine display status - P0 FIX: Better UX for rejected references
         if is_verified:
             status = "verified"
             status_label = "Verified"
+        elif data_cleared:
+            # Reference was rejected AND data cleared - worker needs to provide new details
+            status = "needs_new_input"
+            status_label = "Please provide new referee details"
         elif is_rejected:
+            # Reference rejected but data not cleared yet (legacy state)
             status = "rejected"
-            status_label = "Rejected - Please contact admin"
+            status_label = "Rejected - Please provide new referee"
         elif response_received:
             status = "response_received"
             status_label = "Response received - pending admin review"
@@ -8331,6 +8340,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "referee_company": employee.get(f"{prefix}company", "") if is_declared else None,
             "status": status,
             "status_label": status_label,
+            "rejection_reason": rejection_reason if (is_rejected or data_cleared) else None,
+            "can_provide_new": data_cleared or status == "not_declared",  # Worker can input new details
             "verified_at": verified_at,
             "verified_by_name": verified_by_name,
             "response_received_at": response_received_at

@@ -8270,15 +8270,83 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "employee_id": employee_id
     }, {"_id": 0})
     
+    # Also get verified trainings to auto-sync with induction items
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "verified": True
+    }, {"_id": 0}).to_list(50)
+    
+    # Get training documents that are verified
+    training_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "requirement_id": {"$regex": "training|safeguard|fire|manual|infection|health|bls|basic_life"},
+        "verification_stamp": {"$nin": [None, "", "not_verified"]}
+    }, {"_id": 0}).to_list(50)
+    
+    # Build a set of verified training types for quick lookup
+    verified_training_names = set()
+    for tr in training_records:
+        name = (tr.get("training_name") or "").lower()
+        verified_training_names.add(name)
+    for doc in training_docs:
+        req_id = (doc.get("requirement_id") or "").lower()
+        verified_training_names.add(req_id)
+        # Also add common variations
+        if "safeguard" in req_id:
+            verified_training_names.add("safeguarding adults")
+            verified_training_names.add("safeguarding")
+        if "fire" in req_id:
+            verified_training_names.add("fire safety")
+        if "manual" in req_id or "moving" in req_id:
+            verified_training_names.add("moving & handling")
+            verified_training_names.add("manual handling")
+        if "infection" in req_id:
+            verified_training_names.add("infection prevention & control")
+            verified_training_names.add("infection control")
+        if "health" in req_id and "safety" in req_id:
+            verified_training_names.add("health & safety")
+        if "bls" in req_id or "basic_life" in req_id:
+            verified_training_names.add("basic life support")
+    
     induction_items = []
     completed_count = 0
     total_items = 0
+    
+    # Mapping from induction item name to training verification
+    INDUCTION_TRAINING_MAP = {
+        "safeguarding adults": ["safeguarding", "safeguard"],
+        "fire safety": ["fire safety", "fire"],
+        "health & safety": ["health & safety", "health_safety", "health safety"],
+        "infection prevention & control": ["infection", "infection control"],
+        "moving & handling": ["manual handling", "moving", "handling"],
+        "basic life support": ["bls", "basic life", "basic_life"],
+    }
+    
+    def is_training_verified(item_name):
+        """Check if a training item is verified based on training records/documents."""
+        item_lower = item_name.lower()
+        # Direct match
+        if item_lower in verified_training_names:
+            return True
+        # Check mapped names
+        for induction_name, training_patterns in INDUCTION_TRAINING_MAP.items():
+            if induction_name in item_lower or item_lower in induction_name:
+                for pattern in training_patterns:
+                    if any(pattern in vtn for vtn in verified_training_names):
+                        return True
+        return False
     
     if induction_record and induction_record.get("items"):
         # Read from actual admin data model
         admin_items = induction_record.get("items", [])
         for item in admin_items:
-            is_complete = item.get("status") == "completed"
+            item_name = item.get("name", "Unknown")
+            
+            # Check if this item is completed in the checklist OR if the related training is verified
+            is_complete_in_checklist = item.get("status") == "completed"
+            is_training_complete = is_training_verified(item_name)
+            
+            is_complete = is_complete_in_checklist or is_training_complete
             completed_at = item.get("completed_at")
             
             if is_complete:
@@ -8286,41 +8354,46 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             total_items += 1
             
             induction_items.append({
-                "id": item.get("name", "").lower().replace(" ", "_").replace("&", "and"),
-                "name": item.get("name", "Unknown"),
+                "id": item_name.lower().replace(" ", "_").replace("&", "and"),
+                "name": item_name,
                 "mandatory": item.get("mandatory", True),
                 "completed": is_complete,
                 "completed_at": completed_at,
-                "completed_by_name": item.get("completed_by_name")
+                "completed_by_name": item.get("completed_by_name"),
+                # Add flag to indicate if auto-synced from training
+                "synced_from_training": is_training_complete and not is_complete_in_checklist
             })
     else:
-        # No induction record - show default 15 Care Certificate standards
+        # No induction record - show default 15 Care Certificate standards (NO Safeguarding Children for adult care)
         care_certificate_standards = [
-            "Understand your role",
-            "Your personal development",
-            "Duty of care",
+            "Safeguarding adults",
+            "Fire safety",
+            "Health & Safety",
+            "Infection prevention and control",
+            "Moving & handling",
+            "Basic life support",
             "Equality and diversity",
-            "Work in a person-centred way",
             "Communication",
             "Privacy and dignity",
             "Fluids and nutrition",
             "Awareness of mental health, dementia and learning disabilities",
-            "Safeguarding adults",
-            "Basic life support",
-            "Health and safety",
-            "Handling information",
-            "Infection prevention and control",
+            "Medication awareness",
+            "Company policies review",
             "Shadow shift completed"
         ]
         for std_name in care_certificate_standards:
+            is_training_complete = is_training_verified(std_name)
+            if is_training_complete:
+                completed_count += 1
             total_items += 1
             induction_items.append({
-                "id": std_name.lower().replace(" ", "_").replace(",", ""),
+                "id": std_name.lower().replace(" ", "_").replace(",", "").replace("&", "and"),
                 "name": std_name,
                 "mandatory": True,
-                "completed": False,
+                "completed": is_training_complete,
                 "completed_at": None,
-                "completed_by_name": None
+                "completed_by_name": None,
+                "synced_from_training": is_training_complete
             })
     
     induction_status = {
@@ -49547,22 +49620,20 @@ async def set_manual_system_role(
 
 # Default induction checklist items for all care roles
 DEFAULT_INDUCTION_ITEMS = [
-    # Care Certificate 15 Standards (NHS/CQC Required)
-    {"name": "1. Understand your role", "mandatory": True, "order": 1},
-    {"name": "2. Your personal development", "mandatory": True, "order": 2},
-    {"name": "3. Duty of care", "mandatory": True, "order": 3},
-    {"name": "4. Equality and diversity", "mandatory": True, "order": 4},
-    {"name": "5. Work in a person-centred way", "mandatory": True, "order": 5},
-    {"name": "6. Communication", "mandatory": True, "order": 6},
-    {"name": "7. Privacy and dignity", "mandatory": True, "order": 7},
-    {"name": "8. Fluids and nutrition", "mandatory": True, "order": 8},
-    {"name": "9. Awareness of mental health, dementia and learning disabilities", "mandatory": True, "order": 9},
-    {"name": "10. Safeguarding adults", "mandatory": True, "order": 10},
-    {"name": "11. Basic life support", "mandatory": True, "order": 11},
-    {"name": "12. Health and safety", "mandatory": True, "order": 12},
-    {"name": "13. Handling information", "mandatory": True, "order": 13},
-    {"name": "14. Infection prevention and control", "mandatory": True, "order": 14},
-    {"name": "15. Shadow shift completed", "mandatory": True, "order": 15},
+    # Care Certificate Standards - Adult Care (NO Safeguarding Children)
+    {"name": "Safeguarding Adults", "mandatory": True, "order": 1},
+    {"name": "Fire Safety", "mandatory": True, "order": 2},
+    {"name": "Health & Safety", "mandatory": True, "order": 3},
+    {"name": "Infection Prevention & Control", "mandatory": True, "order": 4},
+    {"name": "Data Protection (GDPR)", "mandatory": True, "order": 5},
+    {"name": "Equality & Diversity", "mandatory": True, "order": 6},
+    {"name": "Moving & Handling", "mandatory": True, "order": 7},
+    {"name": "Basic Life Support", "mandatory": True, "order": 8},
+    {"name": "Medication Awareness", "mandatory": True, "order": 9},
+    {"name": "Food Hygiene", "mandatory": False, "order": 10},
+    {"name": "Communication Skills", "mandatory": False, "order": 11},
+    {"name": "Company Policies Review", "mandatory": True, "order": 12},
+    {"name": "Shadow Shift Completed", "mandatory": True, "order": 13},
 ]
 
 # Default competency types required for different roles
@@ -49795,6 +49866,169 @@ async def reset_induction_checklist(
     await log_audit_action(user['user_id'], "induction_checklist_reset", "induction_checklist", employee_id, {})
     
     return {"success": True, "message": "Induction checklist reset"}
+
+
+@api_router.post("/employees/{employee_id}/induction-checklist/fix")
+async def fix_induction_checklist(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Fix induction checklist for an employee:
+    1. Remove 'Safeguarding Children' (not applicable for adult care)
+    2. Sync training completions with induction items
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get verified trainings
+    training_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "verified": True
+    }, {"_id": 0}).to_list(50)
+    
+    training_docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "verification_stamp": {"$nin": [None, "", "not_verified"]}
+    }, {"_id": 0}).to_list(100)
+    
+    # Build verified training names
+    verified_trainings = set()
+    for tr in training_records:
+        name = (tr.get("training_name") or "").lower()
+        if name:
+            verified_trainings.add(name)
+    for doc in training_docs:
+        req_id = (doc.get("requirement_id") or "").lower()
+        if req_id:
+            verified_trainings.add(req_id)
+    
+    # Mapping from induction item to training patterns
+    TRAINING_MAP = {
+        "Safeguarding Adults": ["safeguarding", "safeguard"],
+        "Fire Safety": ["fire safety", "fire_safety", "fire"],
+        "Health & Safety": ["health_safety", "health & safety", "health and safety"],
+        "Infection Prevention & Control": ["infection", "infection_control"],
+        "Moving & Handling": ["manual_handling", "moving", "handling"],
+        "Basic Life Support": ["bls", "basic_life", "basic life support"],
+    }
+    
+    def is_verified(item_name):
+        item_lower = item_name.lower()
+        for induction_name, patterns in TRAINING_MAP.items():
+            if induction_name.lower() in item_lower or item_lower in induction_name.lower():
+                for pattern in patterns:
+                    if any(pattern in vt for vt in verified_trainings):
+                        return True
+        return False
+    
+    # Default correct items (NO Safeguarding Children)
+    CORRECT_ITEMS = [
+        {"name": "Safeguarding Adults", "mandatory": True},
+        {"name": "Fire Safety", "mandatory": True},
+        {"name": "Health & Safety", "mandatory": True},
+        {"name": "Infection Prevention & Control", "mandatory": True},
+        {"name": "Data Protection (GDPR)", "mandatory": True},
+        {"name": "Equality & Diversity", "mandatory": True},
+        {"name": "Moving & Handling", "mandatory": True},
+        {"name": "Basic Life Support", "mandatory": True},
+        {"name": "Medication Awareness", "mandatory": True},
+        {"name": "Food Hygiene", "mandatory": False},
+        {"name": "Communication Skills", "mandatory": False},
+        {"name": "Company Policies Review", "mandatory": True},
+        {"name": "Shadow Shift Completed", "mandatory": True},
+    ]
+    
+    # Get existing checklist
+    existing = await db.induction_checklists.find_one({"employee_id": employee_id})
+    existing_items = {i.get("name"): i for i in (existing.get("items", []) if existing else [])}
+    
+    # Build new items list, preserving completed status from existing
+    new_items = []
+    completed_count = 0
+    
+    for item_def in CORRECT_ITEMS:
+        item_name = item_def["name"]
+        existing_item = existing_items.get(item_name)
+        
+        # Check if completed in existing record or from verified training
+        is_complete = False
+        completed_at = None
+        completed_by = None
+        completed_by_name = None
+        
+        if existing_item and existing_item.get("status") == "completed":
+            is_complete = True
+            completed_at = existing_item.get("completed_at")
+            completed_by = existing_item.get("completed_by")
+            completed_by_name = existing_item.get("completed_by_name")
+        elif is_verified(item_name):
+            is_complete = True
+            completed_at = now
+            completed_by_name = "Auto-synced from training"
+        
+        if is_complete:
+            completed_count += 1
+        
+        new_items.append({
+            "name": item_name,
+            "mandatory": item_def["mandatory"],
+            "status": "completed" if is_complete else "pending",
+            "completed_at": completed_at,
+            "completed_by": completed_by,
+            "completed_by_name": completed_by_name,
+            "notes": None
+        })
+    
+    # Determine overall status
+    mandatory_completed = sum(1 for i in new_items if i.get("mandatory") and i["status"] == "completed")
+    mandatory_total = sum(1 for i in new_items if i.get("mandatory"))
+    
+    if completed_count == 0:
+        overall_status = "pending"
+    elif mandatory_completed >= mandatory_total:
+        overall_status = "completed"
+    else:
+        overall_status = "in_progress"
+    
+    # Upsert checklist
+    checklist_data = {
+        "id": existing.get("id") if existing else str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "items": new_items,
+        "overall_status": overall_status,
+        "started_at": existing.get("started_at") if existing else (now if completed_count > 0 else None),
+        "completed_at": now if overall_status == "completed" else None,
+        "created_at": existing.get("created_at") if existing else now,
+        "updated_at": now,
+        "fixed_at": now,
+        "fixed_reason": "Removed Safeguarding Children, synced with trainings"
+    }
+    
+    await db.induction_checklists.update_one(
+        {"employee_id": employee_id},
+        {"$set": checklist_data},
+        upsert=True
+    )
+    
+    await log_audit_action(user['user_id'], "induction_checklist_fixed", "induction_checklist", employee_id, {
+        "items_count": len(new_items),
+        "completed_count": completed_count,
+        "synced_from_trainings": len(verified_trainings)
+    })
+    
+    return {
+        "success": True,
+        "message": f"Induction checklist fixed: {completed_count}/{len(new_items)} complete",
+        "items_count": len(new_items),
+        "completed_count": completed_count,
+        "synced_trainings": list(verified_trainings)[:10]
+    }
 
 
 # ========== COMPETENCY RECORDS ENDPOINTS ==========

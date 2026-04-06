@@ -372,13 +372,25 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                           </div>
                         )}
 
-                        {/* Response Received */}
+                        {/* Response Received - with View Full Response button */}
                         {response && Object.keys(response).length > 0 && (
                           <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
-                            <p className="text-sm font-medium text-purple-700 flex items-center gap-2">
-                              <MessageSquare className="h-4 w-4" />
-                              Response Received
-                            </p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium text-purple-700 flex items-center gap-2">
+                                <MessageSquare className="h-4 w-4" />
+                                Response Received
+                              </p>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-purple-700 hover:text-purple-900 hover:bg-purple-100"
+                                onClick={() => openReviewDialog(refNum)}
+                                data-testid={`view-response-btn-${refNum}`}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                View Full Response
+                              </Button>
+                            </div>
                             {response.submitted_at && (
                               <p className="text-xs text-purple-600 mt-1">
                                 Received: {formatBackendDate(response.submitted_at)}
@@ -630,54 +642,143 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
         </DialogContent>
       </Dialog>
       
-      {/* Review Response Dialog */}
+      {/* Review Response Dialog - Enhanced with categorized fields */}
       <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
-        <DialogContent className="sm:max-w-2xl bg-white max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-3xl bg-white max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <MessageSquare className="h-5 w-5 text-primary" />
-              Reference Response - Referee {reviewRefNum}
+              Full Reference Response - Referee {reviewRefNum}
             </DialogTitle>
+            <DialogDescription>
+              Complete response submitted by the referee for verification review.
+            </DialogDescription>
           </DialogHeader>
-          {reviewRefNum && references?.references?.[`reference_${reviewRefNum}`]?.response && (
-            <div className="space-y-4 py-4">
-              {/* Referee Info */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="font-medium mb-2">Referee Information</h4>
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <p><span className="text-gray-500">Name:</span> {references.references[`reference_${reviewRefNum}`].declared?.name}</p>
-                  <p><span className="text-gray-500">Organisation:</span> {references.references[`reference_${reviewRefNum}`].declared?.organisation}</p>
-                  <p><span className="text-gray-500">Email:</span> {references.references[`reference_${reviewRefNum}`].declared?.email}</p>
-                  <p><span className="text-gray-500">Position:</span> {references.references[`reference_${reviewRefNum}`].declared?.job_title}</p>
+          {reviewRefNum && references?.references?.[`reference_${reviewRefNum}`]?.response && (() => {
+            const response = references.references[`reference_${reviewRefNum}`].response;
+            const declared = references.references[`reference_${reviewRefNum}`].declared;
+            
+            // Categorize fields for better organization
+            const refereeFields = ['referee_full_name', 'referee_organisation', 'referee_job_title', 'referee_work_email', 'referee_phone'];
+            const relationshipFields = ['relationship_type', 'known_from_date', 'known_to_date', 'employment_dates_confirm', 'job_title_held', 'reason_for_leaving'];
+            const performanceFields = ['performance_rating', 'reliability', 'professionalism', 'teamwork'];
+            const suitabilityFields = ['safeguarding_concerns', 'disciplinary_record', 'would_re_employ', 're_employ_notes', 'care_vulnerable_suitable', 'care_suitability_notes'];
+            const declarationFields = ['declaration_accurate', 'declaration_authority'];
+            const skipFields = ['submitted_at', 'ip_address', 'user_agent'];
+            
+            const getRatingColor = (value) => {
+              const v = String(value).toLowerCase();
+              if (v.includes('excellent') || v === 'yes' || v.includes('suitable')) return 'text-green-700 bg-green-50';
+              if (v.includes('good') || v.includes('reliable') || v.includes('professional')) return 'text-blue-700 bg-blue-50';
+              if (v.includes('no concern') || v.includes('no issue')) return 'text-green-700 bg-green-50';
+              if (v.includes('concern') || v === 'no') return 'text-red-700 bg-red-50';
+              return 'text-gray-700 bg-gray-50';
+            };
+            
+            const formatFieldName = (key) => key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            
+            const renderField = (key, value) => {
+              if (skipFields.includes(key) || value === null || value === undefined) return null;
+              const isRating = performanceFields.includes(key) || suitabilityFields.includes(key);
+              const displayValue = typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A');
+              
+              return (
+                <div key={key} className={`rounded-lg p-3 ${isRating ? getRatingColor(displayValue) : 'bg-gray-50'}`}>
+                  <p className="text-xs font-medium text-gray-500 mb-0.5">{formatFieldName(key)}</p>
+                  <p className="text-sm font-medium">{displayValue}</p>
                 </div>
-              </div>
-              
-              {/* Response Answers */}
-              <div className="space-y-3">
-                <h4 className="font-medium">Reference Answers</h4>
-                {Object.entries(references.references[`reference_${reviewRefNum}`].response).map(([key, value]) => {
-                  // Skip internal fields
-                  if (['submitted_at', 'ip_address', 'user_agent'].includes(key)) return null;
-                  
-                  return (
-                    <div key={key} className="border rounded-lg p-3">
-                      <p className="text-sm font-medium text-gray-600 mb-1">
-                        {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                      </p>
-                      <p className="text-gray-900">{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A')}</p>
+              );
+            };
+            
+            return (
+              <div className="space-y-6 py-4">
+                {/* Declared vs Returned Comparison */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <h4 className="font-medium text-blue-800 mb-2 text-sm">Declared by Applicant</h4>
+                    <p className="text-sm"><span className="text-blue-600">Name:</span> {declared?.name || 'N/A'}</p>
+                    <p className="text-sm"><span className="text-blue-600">Organisation:</span> {declared?.organisation || 'N/A'}</p>
+                    <p className="text-sm"><span className="text-blue-600">Email:</span> {declared?.email || 'N/A'}</p>
+                  </div>
+                  <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                    <h4 className="font-medium text-purple-800 mb-2 text-sm">Returned by Referee</h4>
+                    <p className="text-sm"><span className="text-purple-600">Name:</span> {response.referee_full_name || 'N/A'}</p>
+                    <p className="text-sm"><span className="text-purple-600">Organisation:</span> {response.referee_organisation || 'N/A'}</p>
+                    <p className="text-sm"><span className="text-purple-600">Email:</span> {response.referee_work_email || 'N/A'}</p>
+                  </div>
+                </div>
+                
+                {/* Employment Period */}
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                    <Briefcase className="h-4 w-4 text-gray-500" />
+                    Employment Details
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {relationshipFields.map(key => response[key] !== undefined && renderField(key, response[key]))}
+                  </div>
+                </div>
+                
+                {/* Performance Ratings */}
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-gray-500" />
+                    Performance Assessment
+                  </h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {performanceFields.map(key => response[key] !== undefined && renderField(key, response[key]))}
+                  </div>
+                </div>
+                
+                {/* Suitability & Safeguarding */}
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-gray-500" />
+                    Suitability & Safeguarding
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {suitabilityFields.map(key => response[key] !== undefined && renderField(key, response[key]))}
+                  </div>
+                </div>
+                
+                {/* Additional Comments - Full Width */}
+                {response.additional_comments && (
+                  <div>
+                    <h4 className="font-medium text-gray-900 mb-2">Additional Comments</h4>
+                    <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 italic">
+                      "{response.additional_comments}"
                     </div>
-                  );
-                })}
+                  </div>
+                )}
+                
+                {/* Declaration Confirmations */}
+                <div className="border-t pt-4">
+                  <h4 className="font-medium text-gray-900 mb-3">Referee Declarations</h4>
+                  <div className="flex gap-4">
+                    {response.declaration_accurate && (
+                      <Badge className="bg-green-100 text-green-700">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Information Accurate
+                      </Badge>
+                    )}
+                    {response.declaration_authority && (
+                      <Badge className="bg-green-100 text-green-700">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Has Authority to Provide
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Submission Timestamp */}
+                {response.submitted_at && (
+                  <p className="text-xs text-gray-500 text-center border-t pt-3">
+                    Response submitted: {formatBackendDate(response.submitted_at)}
+                  </p>
+                )}
               </div>
-              
-              {/* Submission Info */}
-              {references.references[`reference_${reviewRefNum}`].response.submitted_at && (
-                <p className="text-xs text-gray-500 text-center">
-                  Submitted: {formatBackendDate(references.references[`reference_${reviewRefNum}`].response.submitted_at)}
-                </p>
-              )}
-            </div>
-          )}
+            );
+          })()}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setReviewDialogOpen(false)}>
               Close

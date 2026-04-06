@@ -2280,9 +2280,20 @@ Updated `GET /api/employees/{employee_id}/references` endpoint in `/app/backend/
 3. Added `response_submitted_at` field from `employee.reference_X_response_received_at`
 4. Extended `request_sent` detection to include employee-level status fields
 
+### Enhancement: View Full Response Modal (April 2026)
+Added "View Full Response" button to Reference cards in `/app/frontend/src/components/compliance/ReferencesPanel.js`:
+- Button appears in the "Response Received" indicator box regardless of verification status
+- Enhanced modal with categorized sections:
+  - **Declared vs Returned comparison** - side-by-side view highlighting any mismatches
+  - **Employment Details** - relationship, dates, job title, reason for leaving
+  - **Performance Assessment** - color-coded ratings (excellent=green, good=blue)
+  - **Suitability & Safeguarding** - concerns, disciplinary record, re-employ recommendation
+  - **Referee Declarations** - badges for "Information Accurate" and "Has Authority"
+
 ### Verification
 - API returns full referee response data (referee_full_name, performance_rating, etc.)
 - Frontend displays "Verified" badges and response indicators correctly
 - References show as 2/2 complete when both referee responses are submitted
+- "View Full Response" modal displays all referee answers in organized format
 
 

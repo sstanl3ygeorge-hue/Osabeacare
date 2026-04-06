@@ -2074,3 +2074,39 @@ When training is verified, corresponding induction checklist items auto-complete
 - `GET /api/employee-documents/{doc_id}/file` - Returns document with correct MIME type
 - `POST /api/references/{employee_id}/{ref_num}/reject` - Clears reference data
 - `GET /api/employees/{id}/references-integrity` - Shows cleared data
+
+
+
+---
+
+## COMPLETED: Automatic Email Notifications for Rejections (April 2026)
+
+### Feature: Document Rejection Email Notifications
+When an admin rejects a document via `/api/employee-documents/{doc_id}/reject`:
+- Worker receives professional HTML email with:
+  - Document type name (from MANDATORY_ITEMS lookup)
+  - Rejection reason
+  - Reviewer name
+  - Link to Worker Portal to upload corrected document
+- Uses `RESEND_FROM_EMAIL` env var (fallback: `onboarding@resend.dev` for testing)
+
+### Feature: Reference Rejection Email Notifications  
+When an admin rejects a reference via `ReferenceIntegrityService.reject_reference`:
+- Worker receives professional HTML email with:
+  - Reference number
+  - Previous referee name and company (before data is cleared)
+  - Rejection reason
+  - Reviewer name
+  - Link to Worker Portal to provide new reference
+
+### Implementation Notes:
+- Email sending runs asynchronously (doesn't block rejection)
+- Graceful failure handling - rejection succeeds even if email fails
+- Osabea branded HTML email templates with responsive design
+- Location: `server.py` lines 21066-21160 (documents), 36606-36705 (references)
+
+### Production Setup Required:
+To send emails to workers (not just test account):
+1. Go to https://resend.com/domains
+2. Add and verify `osabea.care` domain
+3. Set `RESEND_FROM_EMAIL=compliance@osabea.care` in backend/.env

@@ -12459,9 +12459,16 @@ async def extract_training_from_certificate(file_bytes: bytes, filename: str) ->
     """
     Extract training information from certificate PDF/Image using AI + regex fallback.
     Returns list of trainings found in the certificate.
+    
+    Enhanced to:
+    1. Detect "Valid for X year/month" badges and calculate expiry
+    2. Extract MULTIPLE trainings from single certificate (e.g., CSTF bundle certs)
+    3. Handle both PDF text and image vision analysis
+    4. Uses Emergent LLM integration for reliable API access
     """
     extracted_trainings = []
     text = ""
+    is_image = filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif'))
     
     # Extract text from PDF
     if filename.lower().endswith('.pdf'):
@@ -12474,115 +12481,204 @@ async def extract_training_from_certificate(file_bytes: bytes, filename: str) ->
         except Exception as e:
             logger.warning(f"Failed to extract text from PDF: {e}")
     
-    # Try AI extraction with Gemini if configured
-    gemini_key = os.environ.get('GEMINI_API_KEY')
-    if gemini_key and len(file_bytes) < 5 * 1024 * 1024:  # Under 5MB
+    # Try AI extraction with Emergent LLM integration
+    llm_key = os.environ.get('EMERGENT_LLM_KEY') or os.environ.get('GEMINI_API_KEY')
+    if llm_key and len(file_bytes) < 10 * 1024 * 1024:  # Under 10MB
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+            import base64
             
-            # For PDFs, use text; for images, use the file directly
-            if text:
-                prompt = f"""Analyze this training certificate text and extract ALL training courses mentioned.
-                
+            # Enhanced prompt for multi-training extraction with validity period detection
+            extraction_prompt = """You are analyzing a training certificate image. Extract ALL training courses/modules mentioned.
+
+IMPORTANT INSTRUCTIONS:
+1. This certificate may contain MULTIPLE trainings/courses listed. Extract EACH ONE separately.
+2. Look for "Valid for X year" or "Valid for X months" badges/text - use this to calculate expiry from completion date
+3. Look for CSTF (Core Skills Training Framework) courses which are often bundled together
+4. Common multi-training certificates include Health & Safety Group certificates with 10+ courses
+
 For EACH training found, provide:
-- training_name: The name of the training/course
-- completion_date: Date completed (ISO format YYYY-MM-DD if found)
-- expiry_date: Expiry date if mentioned (ISO format)
+- training_name: The specific name of the training/course (e.g., "CSTF Fire Safety", "CSTF Moving & Handling Level 2")
+- completion_date: Date completed in ISO format YYYY-MM-DD
+- expiry_date: Calculated expiry date in ISO format YYYY-MM-DD
+  - If "Valid for 1 year" is shown, add 1 year to completion date
+  - If "Valid for 3 years" is shown, add 3 years to completion date
+  - If no validity mentioned, leave as null
+- validity_period: The validity text found (e.g., "Valid for 1 year", "Valid for 3 years", or null)
+- provider: Training provider name if visible
+- level: Training level if specified (e.g., "Level 1", "Level 2", "Levels 1 & 2")
 
-Return as JSON array. Example:
-[{{"training_name": "Safeguarding Adults Level 2", "completion_date": "2024-01-15", "expiry_date": "2025-01-15"}}]
+Return ONLY a valid JSON array. Example for a multi-course certificate:
+[
+  {"training_name": "CSTF Fire Safety", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Practical"},
+  {"training_name": "CSTF Moving & Handling", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Levels 1 & 2"},
+  {"training_name": "CSTF Safeguarding Adults", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Levels 1 & 2"}
+]
 
-Certificate text:
-{text[:4000]}"""
+If only ONE training is found, still return as array with one item.
+If no trainings detected, return empty array: []"""
+
+            # Initialize chat with Gemini for vision
+            chat = LlmChat(
+                api_key=llm_key,
+                session_id=f"training_extract_{uuid.uuid4().hex[:8]}",
+                system_message="You are an expert at extracting training information from certificates. Always respond with valid JSON."
+            ).with_model("gemini", "gemini-2.5-flash")
+            
+            # For images, use vision capabilities
+            if is_image:
+                image_base64 = base64.b64encode(file_bytes).decode('utf-8')
                 
-                response = model.generate_content(prompt)
-                
-                # Parse JSON from response
-                response_text = response.text.strip()
-                # Extract JSON array
-                json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
-                if json_match:
-                    extracted = json.loads(json_match.group())
-                    if isinstance(extracted, list):
-                        for item in extracted:
-                            if isinstance(item, dict) and item.get('training_name'):
-                                extracted_trainings.append({
-                                    "training_name": item.get('training_name'),
-                                    "completion_date": item.get('completion_date'),
-                                    "expiry_date": item.get('expiry_date'),
-                                    "certificate_file": filename,
-                                    "extracted_by": "gemini_ai"
-                                })
-                        if extracted_trainings:
-                            return extracted_trainings
+                user_message = UserMessage(
+                    text=extraction_prompt,
+                    file_contents=[ImageContent(image_base64=image_base64)]
+                )
+            else:
+                # For PDFs with extracted text
+                if text:
+                    full_prompt = f"{extraction_prompt}\n\nCertificate text:\n{text[:8000]}"
+                    user_message = UserMessage(text=full_prompt)
+                else:
+                    logger.info("PDF has no extractable text, returning empty")
+                    return []
+            
+            # Send message and get response
+            response = await chat.send_message(user_message)
+            response_text = response.strip() if isinstance(response, str) else str(response)
+            
+            logger.info(f"AI extraction response: {response_text[:500]}")
+            
+            # Extract JSON array from response
+            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            if json_match:
+                extracted = json.loads(json_match.group())
+                if isinstance(extracted, list):
+                    for item in extracted:
+                        if isinstance(item, dict) and item.get('training_name'):
+                            training_name = item.get('training_name', '')
+                            completion_date = item.get('completion_date')
+                            expiry_date = item.get('expiry_date')
+                            validity_period = item.get('validity_period')
+                            
+                            # If AI didn't calculate expiry but we have validity period, calculate it
+                            if completion_date and validity_period and not expiry_date:
+                                try:
+                                    comp_date = datetime.fromisoformat(completion_date)
+                                    years_match = re.search(r'(\d+)\s*year', validity_period, re.IGNORECASE)
+                                    months_match = re.search(r'(\d+)\s*month', validity_period, re.IGNORECASE)
+                                    
+                                    if years_match:
+                                        years = int(years_match.group(1))
+                                        expiry_date = (comp_date.replace(year=comp_date.year + years)).isoformat()[:10]
+                                    elif months_match:
+                                        months = int(months_match.group(1))
+                                        new_month = comp_date.month + months
+                                        new_year = comp_date.year + (new_month - 1) // 12
+                                        new_month = ((new_month - 1) % 12) + 1
+                                        expiry_date = comp_date.replace(year=new_year, month=new_month).isoformat()[:10]
+                                except Exception as calc_err:
+                                    logger.warning(f"Failed to calculate expiry: {calc_err}")
+                            
+                            extracted_trainings.append({
+                                "training_name": training_name,
+                                "completion_date": completion_date,
+                                "expiry_date": expiry_date,
+                                "validity_period": validity_period,
+                                "provider": item.get('provider'),
+                                "level": item.get('level'),
+                                "certificate_file": filename,
+                                "extracted_by": "emergent_gemini_vision" if is_image else "emergent_gemini_text"
+                            })
+                    
+                    if extracted_trainings:
+                        logger.info(f"AI extracted {len(extracted_trainings)} trainings from certificate")
+                        return extracted_trainings
         except Exception as e:
-            logger.warning(f"AI extraction failed, using regex fallback: {e}")
+            logger.warning(f"AI extraction failed: {e}", exc_info=True)
     
-    # Fallback: Regex-based extraction
-    training_patterns = {
-        "Safeguarding Adults": r"Safeguarding.*Adults|Adult\s+Safeguarding",
-        "Safeguarding Children": r"Safeguarding.*Children|Child\s+Safeguarding",
-        "Manual Handling": r"Manual\s*Handling|Moving\s*and\s*Handling",
-        "Fire Safety": r"Fire\s*Safety|Fire\s*Awareness|Fire\s*Marshal",
-        "Health & Safety": r"Health\s*(?:&|and)?\s*Safety",
-        "Infection Control": r"Infection\s*(?:Control|Prevention)",
-        "Basic Life Support": r"Basic\s*Life\s*Support|BLS|CPR|Resuscitation",
-        "Medication Administration": r"Medication|Medicine\s*Administration",
-        "Food Hygiene": r"Food\s*(?:Hygiene|Safety)",
-        "Equality & Diversity": r"Equality|Diversity|EDI",
-        "Data Protection": r"Data\s*Protection|GDPR|Information\s*Governance",
-        "First Aid": r"First\s*Aid",
-        "Dementia Awareness": r"Dementia\s*Awareness",
-        "Mental Health Awareness": r"Mental\s*Health\s*Awareness"
-    }
-    
-    # Find dates in text
-    date_patterns = [
-        r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})",
-        r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})",
-    ]
-    
-    completion_date = None
-    for pattern in date_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        if matches:
+    # Fallback: Regex-based extraction (only for text-based PDFs)
+    if text:
+        training_patterns = {
+            "Safeguarding Adults": r"Safeguarding.*Adults|Adult\s+Safeguarding|CSTF\s+Safeguarding\s+Adults",
+            "Safeguarding Children": r"Safeguarding.*Children|Child\s+Safeguarding|CSTF\s+Safeguarding\s+Children",
+            "Manual Handling": r"Manual\s*Handling|Moving\s*(?:and|&)\s*Handling|CSTF\s+Moving\s*(?:and|&)\s*Handling",
+            "Fire Safety": r"Fire\s*Safety|Fire\s*Awareness|Fire\s*Marshal|CSTF\s+Fire\s+Safety",
+            "Health & Safety": r"Health\s*(?:&|and)?\s*Safety|CSTF\s+Health",
+            "Infection Control": r"Infection\s*(?:Control|Prevention)|CSTF\s+Infection",
+            "Basic Life Support": r"Basic\s*Life\s*Support|BLS|CPR|Resuscitation|CSTF\s+Resuscitation",
+            "Medication Administration": r"Medication|Medicine\s*Administration",
+            "Food Hygiene": r"Food\s*(?:Hygiene|Safety)|HACCP",
+            "Equality & Diversity": r"Equality|Diversity|EDI|CSTF\s+Equality",
+            "Data Protection": r"Data\s*Protection|GDPR|Information\s*Governance|CSTF\s+Information\s+Governance",
+            "First Aid": r"First\s*Aid",
+            "Dementia Awareness": r"Dementia\s*Awareness",
+            "Mental Health Awareness": r"Mental\s*Health\s*Awareness",
+            "Conflict Resolution": r"Conflict\s*Resolution|CSTF\s+NHS\s+Conflict",
+            "Preventing Radicalisation": r"Prevent|Radicalisation|CSTF\s+Preventing\s+Radicalisation"
+        }
+        
+        # Look for validity period in text
+        validity_period = None
+        validity_match = re.search(r'Valid\s+for\s+(\d+)\s*(year|month)s?', text, re.IGNORECASE)
+        if validity_match:
+            validity_period = f"Valid for {validity_match.group(1)} {validity_match.group(2)}s"
+        
+        # Find dates in text
+        date_patterns = [
+            r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})",
+            r"(\d{1,2})(?:st|nd|rd|th)?\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})",
+        ]
+        
+        completion_date = None
+        for pattern in date_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            if matches:
+                try:
+                    match = matches[0]
+                    if len(match) == 3:
+                        if isinstance(match[1], str) and match[1].isalpha():
+                            date_str = f"{match[0]} {match[1]} {match[2]}"
+                            completion_date = datetime.strptime(date_str, "%d %b %Y")
+                        else:
+                            completion_date = datetime(int(match[2]), int(match[1]), int(match[0]))
+                        break
+                except:
+                    pass
+        
+        # Calculate expiry if we have validity period
+        expiry_date = None
+        if completion_date and validity_period:
             try:
-                match = matches[0]
-                if len(match) == 3:
-                    if isinstance(match[1], str) and match[1].isalpha():
-                        # Month name format
-                        date_str = f"{match[0]} {match[1]} {match[2]}"
-                        completion_date = datetime.strptime(date_str, "%d %b %Y")
-                    else:
-                        # DD/MM/YYYY format
-                        completion_date = datetime(int(match[2]), int(match[1]), int(match[0]))
-                    break
+                years_match = re.search(r'(\d+)\s*year', validity_period, re.IGNORECASE)
+                if years_match:
+                    years = int(years_match.group(1))
+                    expiry_date = completion_date.replace(year=completion_date.year + years)
             except:
                 pass
-    
-    # Find which trainings are present
-    for training_name, pattern in training_patterns.items():
-        if re.search(pattern, text, re.IGNORECASE):
+        
+        # Find which trainings are present
+        for training_name, pattern in training_patterns.items():
+            if re.search(pattern, text, re.IGNORECASE):
+                extracted_trainings.append({
+                    "training_name": training_name,
+                    "completion_date": completion_date.isoformat()[:10] if completion_date else None,
+                    "expiry_date": expiry_date.isoformat()[:10] if expiry_date else None,
+                    "validity_period": validity_period,
+                    "certificate_file": filename,
+                    "extracted_by": "regex"
+                })
+        
+        # If nothing found but we have text, add as "Unknown Training"
+        if not extracted_trainings and text.strip():
             extracted_trainings.append({
-                "training_name": training_name,
-                "completion_date": completion_date.isoformat() if completion_date else None,
-                "expiry_date": None,
+                "training_name": "Training Certificate",
+                "completion_date": completion_date.isoformat()[:10] if completion_date else None,
+                "expiry_date": expiry_date.isoformat()[:10] if expiry_date else None,
+                "validity_period": validity_period,
                 "certificate_file": filename,
-                "extracted_by": "regex"
+                "extracted_by": "unknown",
+                "needs_review": True
             })
-    
-    # If nothing found but we have text, add as "Unknown Training"
-    if not extracted_trainings and text.strip():
-        extracted_trainings.append({
-            "training_name": "Training Certificate",
-            "completion_date": completion_date.isoformat() if completion_date else None,
-            "expiry_date": None,
-            "certificate_file": filename,
-            "extracted_by": "unknown",
-            "needs_review": True
-        })
     
     return extracted_trainings
 
@@ -12811,6 +12907,19 @@ async def extract_training_certificate_preview(
     # Extract trainings using AI
     extracted = await extract_training_from_certificate(contents, file.filename)
     
+    if not extracted:
+        # Return helpful error with guidance
+        return {
+            "success": False,
+            "certificate_id": certificate_id,
+            "certificate_file": file.filename,
+            "certificate_url": file_url,
+            "trainings": [],
+            "total_extracted": 0,
+            "message": "No training records detected. Please check the image quality or try a clearer photo of the certificate.",
+            "suggestion": "Ensure the certificate text is readable and the 'Valid for' badge is visible if present."
+        }
+    
     # Enrich with additional metadata for preview
     trainings_for_preview = []
     for idx, training in enumerate(extracted):
@@ -12820,7 +12929,14 @@ async def extract_training_certificate_preview(
         is_mandatory = is_mandatory_training(training_name)
         
         # Calculate confidence based on extraction source
-        confidence = "high" if training.get("extracted_by") == "gemini_ai" else "medium"
+        extraction_source = training.get("extracted_by", "unknown")
+        if extraction_source in ("gemini_vision", "gemini_text"):
+            confidence = "high"
+        elif extraction_source == "regex":
+            confidence = "medium"
+        else:
+            confidence = "low"
+        
         if not training.get("completion_date"):
             confidence = "low"
         
@@ -12828,11 +12944,14 @@ async def extract_training_certificate_preview(
             "training_name": training_name,
             "completion_date": training.get("completion_date"),
             "expiry_date": training.get("expiry_date"),
+            "validity_period": training.get("validity_period"),
             "provider": training.get("provider", "Unknown"),
+            "level": training.get("level"),
             "is_mandatory": is_mandatory,
             "confidence": confidence,
             "certificate_id": certificate_id,
-            "source_file": file.filename
+            "source_file": file.filename,
+            "extracted_by": extraction_source
         })
     
     # Log extraction attempt

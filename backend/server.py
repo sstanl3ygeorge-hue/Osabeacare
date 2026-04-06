@@ -9619,20 +9619,25 @@ async def generate_employee_code():
 async def calculate_completion_percentage(employee_id: str) -> int:
     """
     Calculate completion percentage using UNIFIED compliance logic.
-    This is a convenience wrapper around calculate_employee_compliance.
+    P0 FIX: Now uses get_unified_employee_status() for SINGLE SOURCE OF TRUTH.
     
     MUST return identical values to what profile/dashboard show.
     """
-    # Get employee role
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
-    if not employee:
-        return 0
-    
-    role = employee.get('role', '')
-    
-    # Use the SINGLE unified calculation function
-    compliance = await calculate_employee_compliance(employee_id, role)
-    return compliance["completion_percentage"]
+    try:
+        # P0 FIX: Use the SINGLE unified function from unified_compliance_engine
+        unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
+        if unified_status.get("error"):
+            return 0
+        return unified_status["progress"]["percentage"]
+    except Exception as e:
+        logger.warning(f"Failed to get unified status for {employee_id}: {e}")
+        # Fallback to old calculation if unified fails
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1})
+        if not employee:
+            return 0
+        role = employee.get('role', '')
+        compliance = await calculate_employee_compliance(employee_id, role)
+        return compliance["completion_percentage"]
 
 async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
     """

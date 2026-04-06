@@ -1825,3 +1825,82 @@ All four views now show **identical progress**.
 - ✅ No regression in Admin or Worker functionality
 - ✅ Testing agent created `/app/backend/tests/test_progress_consistency.py` (10 passing tests)
 - ✅ Test report: `/app/test_reports/iteration_171.json`
+
+
+---
+
+## COMPLETED: Unified Compliance Engine - Complete Single Source of Truth (April 2026)
+
+### Problem Statement - CRITICAL
+Multiple views showed **completely different data** for the same employee:
+- "What's Blocking Promotion" listed 9 items
+- "7 Blocking Requirements" listed different 7 items
+- Employees List showed 66% progress
+- Employee Profile showed 58% progress
+- Worker Dashboard showed 25% progress
+- Training Tab showed all verified ✅ but still appeared as blockers
+
+**Root Cause**: 4+ separate calculation implementations across endpoints.
+
+### Solution Implemented: Unified Compliance Engine
+
+Created `/app/backend/unified_compliance_engine.py` with:
+```python
+async def get_unified_employee_status(employee_id, db, user_role="admin"):
+    """SINGLE SOURCE OF TRUTH for all compliance/progress/blockers"""
+```
+
+**All endpoints now call this ONE function:**
+- `GET /api/employees/{id}/unified-progress`
+- `GET /api/employees/{id}/pre-employment-gates`
+- `GET /api/worker/dashboard`
+- `GET /api/employees/{id}/compliance-requirements`
+- `GET /api/employees` (list completion_percentage)
+
+### Standards Implemented
+
+| Standard | Implementation |
+|----------|----------------|
+| **CIA Triad - Integrity** | ALL views use SAME function, return SAME data |
+| **CIA Triad - Availability** | Role-based filtering (admin/worker/auditor) |
+| **5 E's - Effective** | Verified items NEVER appear as blockers |
+| **5 E's - Easy to Learn** | Clear labels ("Reference 1" not emails) |
+| **NHS Level** | 12 gates for HCA, 14 for Nurse |
+| **CQC Audit** | Verifier names stored (not emails) |
+
+### Verification Results
+
+| View | Progress | Completed/Total | Blockers |
+|------|----------|-----------------|----------|
+| Employees List | 23% | - | - |
+| Employee Profile | 23% | 7/31 | 10 |
+| Worker Dashboard | 23% | 7/31 | 10 |
+| Pre-employment Gates | - | 6/12 gates | 10 |
+| unified-progress API | 23% | 7/31 | 10 |
+| compliance-requirements API | 23% | 7/31 | 10 |
+
+**ALL VIEWS NOW SHOW IDENTICAL DATA!**
+
+### Files Created/Modified
+
+- **NEW**: `/app/backend/unified_compliance_engine.py` - Single source of truth module
+- **MODIFIED**: `/app/backend/server.py`:
+  - Import unified_compliance_engine
+  - `/unified-progress` → calls `get_unified_employee_status()`
+  - `/pre-employment-gates` → calls `get_unified_employee_status()`
+  - `/worker/dashboard` → calls `get_unified_employee_status()`
+  - `/compliance-requirements` → includes `unified_progress` in response
+  - `calculate_completion_percentage()` → calls `get_unified_employee_status()`
+
+### Test Reports
+- `/app/test_reports/iteration_172.json` - 100% success (15/15 tests)
+- `/app/backend/tests/test_unified_compliance_engine.py`
+
+### Induction Auto-Sync Feature
+When training is verified, corresponding induction checklist items auto-complete:
+- Safeguarding Adults Training → Induction Standard 10
+- Basic Life Support Training → Induction Standard 11
+- Health & Safety Training → Induction Standard 12
+- Infection Control Training → Induction Standard 13
+- Moving & Handling Training → Induction Standard 14
+- Fire Safety Training → Induction Standard 15

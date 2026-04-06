@@ -49771,21 +49771,35 @@ async def set_manual_system_role(
 
 # Default induction checklist items for all care roles
 DEFAULT_INDUCTION_ITEMS = [
-    # Care Certificate Standards - Adult Care (NO Safeguarding Children)
-    {"name": "Safeguarding Adults", "mandatory": True, "order": 1},
-    {"name": "Fire Safety", "mandatory": True, "order": 2},
-    {"name": "Health & Safety", "mandatory": True, "order": 3},
-    {"name": "Infection Prevention & Control", "mandatory": True, "order": 4},
-    {"name": "Data Protection (GDPR)", "mandatory": True, "order": 5},
-    {"name": "Equality & Diversity", "mandatory": True, "order": 6},
-    {"name": "Moving & Handling", "mandatory": True, "order": 7},
-    {"name": "Basic Life Support", "mandatory": True, "order": 8},
-    {"name": "Medication Awareness", "mandatory": True, "order": 9},
-    {"name": "Food Hygiene", "mandatory": False, "order": 10},
-    {"name": "Communication Skills", "mandatory": False, "order": 11},
-    {"name": "Company Policies Review", "mandatory": True, "order": 12},
-    {"name": "Shadow Shift Completed", "mandatory": True, "order": 13},
+    # CQC Care Certificate 15 Standards for Adult Care
+    # These are the OFFICIAL 15 standards that must be completed during induction
+    {"name": "Understand Your Role", "mandatory": True, "order": 1, "training_link": None},
+    {"name": "Your Personal Development", "mandatory": True, "order": 2, "training_link": None},
+    {"name": "Duty of Care", "mandatory": True, "order": 3, "training_link": None},
+    {"name": "Equality and Diversity", "mandatory": True, "order": 4, "training_link": "equality_diversity"},
+    {"name": "Work in a Person-Centred Way", "mandatory": True, "order": 5, "training_link": None},
+    {"name": "Communication", "mandatory": True, "order": 6, "training_link": None},
+    {"name": "Privacy and Dignity", "mandatory": True, "order": 7, "training_link": None},
+    {"name": "Fluids and Nutrition", "mandatory": True, "order": 8, "training_link": "food_hygiene"},
+    {"name": "Mental Health, Dementia and Learning Disabilities", "mandatory": True, "order": 9, "training_link": None},
+    {"name": "Safeguarding Adults", "mandatory": True, "order": 10, "training_link": "safeguarding"},
+    {"name": "Safeguarding Children", "mandatory": False, "order": 11, "training_link": None},  # Only if working with children
+    {"name": "Basic Life Support", "mandatory": True, "order": 12, "training_link": "bls"},
+    {"name": "Health and Safety", "mandatory": True, "order": 13, "training_link": "health_safety"},
+    {"name": "Handling Information", "mandatory": True, "order": 14, "training_link": "data_protection"},
+    {"name": "Infection Prevention and Control", "mandatory": True, "order": 15, "training_link": "infection_control"},
 ]
+
+# Mapping of induction items to training requirement codes for auto-completion
+INDUCTION_TRAINING_MAP = {
+    "Safeguarding Adults": ["safeguarding", "safeguard_adults", "safeguarding_adults"],
+    "Basic Life Support": ["bls", "basic_life_support", "resuscitation"],
+    "Health and Safety": ["health_safety", "health_and_safety", "cstf_health"],
+    "Infection Prevention and Control": ["infection_control", "infection_prevention", "cstf_infection"],
+    "Equality and Diversity": ["equality_diversity", "equality", "edi", "cstf_equality"],
+    "Fluids and Nutrition": ["food_hygiene", "food_safety", "nutrition"],
+    "Handling Information": ["data_protection", "gdpr", "information_governance"],
+}
 
 # Default competency types required for different roles
 DEFAULT_COMPETENCY_REQUIREMENTS = {

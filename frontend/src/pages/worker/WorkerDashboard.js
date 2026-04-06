@@ -5,11 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
-import { Dialog, DialogContent } from '../../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool, Lock
+  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
@@ -191,6 +191,9 @@ export default function WorkerDashboard() {
   const [uploading, setUploading] = useState(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
   const [contractEligibility, setContractEligibility] = useState(null);
+  // Document viewer modal state
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerDocument, setViewerDocument] = useState(null);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -785,6 +788,13 @@ export default function WorkerDashboard() {
                         {doc.uploaded_at && (
                           <p className="text-xs text-slate-500">Uploaded: {formatDate(doc.uploaded_at)}</p>
                         )}
+                        {/* Show verification details if verified */}
+                        {doc.verified && doc.verified_by_name && (
+                          <p className="text-xs text-green-600 mt-1">
+                            Verified by {doc.verified_by_name} on {formatDate(doc.verified_at)}
+                            {doc.verification_stamp_label && ` • ${doc.verification_stamp_label}`}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -799,19 +809,39 @@ export default function WorkerDashboard() {
                               size="sm" 
                               variant="outline" 
                               className="text-xs h-7"
-                              onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${doc.file_url}`, '_blank')}
+                              onClick={() => {
+                                setViewerDocument(doc);
+                                setViewerOpen(true);
+                              }}
                               data-testid={`view-doc-${doc.type}`}
                             >
-                              <FileText className="h-3 w-3 mr-1" />
+                              <Eye className="h-3 w-3 mr-1" />
                               View
                             </Button>
                           )}
                         </>
                       ) : (
-                        <Badge className="bg-amber-100 text-amber-700 text-xs" data-testid={`pending-verification-${doc.type}`}>
-                          <Clock className="h-3 w-3 mr-1" />
-                          Pending Verification
-                        </Badge>
+                        <>
+                          <Badge className="bg-amber-100 text-amber-700 text-xs" data-testid={`pending-verification-${doc.type}`}>
+                            <Clock className="h-3 w-3 mr-1" />
+                            Pending Verification
+                          </Badge>
+                          {doc.file_url && (
+                            <Button 
+                              size="sm" 
+                              variant="ghost" 
+                              className="text-xs h-7"
+                              onClick={() => {
+                                setViewerDocument(doc);
+                                setViewerOpen(true);
+                              }}
+                              data-testid={`view-pending-doc-${doc.type}`}
+                            >
+                              <Eye className="h-3 w-3 mr-1" />
+                              View
+                            </Button>
+                          )}
+                        </>
                       )}
                       {doc.partial && (
                         <Badge className="bg-amber-100 text-amber-700 text-xs">Partial</Badge>
@@ -870,6 +900,108 @@ export default function WorkerDashboard() {
             }}
             onCancel={() => setShowSignaturePad(false)}
           />
+        </DialogContent>
+      </Dialog>
+      
+      {/* Document Viewer Modal */}
+      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              {viewerDocument?.name || 'Document'}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {/* Document Metadata */}
+          <div className="flex flex-wrap items-center gap-3 py-2 border-b border-gray-200">
+            {viewerDocument?.verified ? (
+              <Badge className="bg-green-100 text-green-700 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" />
+                Verified
+              </Badge>
+            ) : (
+              <Badge className="bg-amber-100 text-amber-700 flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Pending Verification
+              </Badge>
+            )}
+            
+            {viewerDocument?.verification_stamp_label && (
+              <Badge variant="outline" className="flex items-center gap-1">
+                <Shield className="h-3 w-3" />
+                {viewerDocument.verification_stamp_label}
+              </Badge>
+            )}
+            
+            {viewerDocument?.uploaded_at && (
+              <span className="text-sm text-gray-500">
+                Uploaded: {formatDate(viewerDocument.uploaded_at)}
+              </span>
+            )}
+            
+            {viewerDocument?.verified_by_name && (
+              <span className="text-sm text-gray-500 flex items-center gap-1">
+                <User className="h-3 w-3" />
+                Verified by: {viewerDocument.verified_by_name}
+              </span>
+            )}
+          </div>
+          
+          {/* Document Preview */}
+          <div className="flex-1 min-h-[400px] overflow-auto bg-gray-100 rounded-lg">
+            {viewerDocument?.file_url ? (
+              viewerDocument.file_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                <div className="flex items-center justify-center p-4 h-full">
+                  <img 
+                    src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`}
+                    alt={viewerDocument.name}
+                    className="max-w-full max-h-full object-contain rounded shadow-lg"
+                  />
+                </div>
+              ) : (
+                <iframe
+                  src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}#toolbar=0`}
+                  className="w-full h-full min-h-[500px] rounded"
+                  title={viewerDocument.name}
+                />
+              )
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-500">
+                <FileText className="h-16 w-16 mb-3" />
+                <p>No document available</p>
+              </div>
+            )}
+          </div>
+          
+          <DialogFooter className="gap-2 pt-4 border-t">
+            {viewerDocument?.file_url && (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`, '_blank')}
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Open in New Tab
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = `${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`;
+                    link.download = viewerDocument.file_name || viewerDocument.name || 'document';
+                    link.click();
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
+                </Button>
+              </>
+            )}
+            <Button variant="outline" onClick={() => setViewerOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -297,8 +297,21 @@ class AuditTrailService:
         skip: int = 0,
         action_filter: Optional[List[AuditAction]] = None
     ) -> List[Dict]:
-        """Get audit trail for a specific employee."""
-        query = {"employee_id": employee_id}
+        """Get audit trail for a specific employee.
+        
+        Searches both:
+        - employee_id field (new format)
+        - metadata.employee_id (legacy format for backwards compatibility)
+        - entity_id when entity_type is employee
+        """
+        # Build query to search multiple locations for employee_id
+        query = {
+            "$or": [
+                {"employee_id": employee_id},
+                {"metadata.employee_id": employee_id},
+                {"entity_id": employee_id, "entity_type": {"$in": ["employee", "EMPLOYEE"]}}
+            ]
+        }
         
         if action_filter:
             query["action"] = {"$in": [a.value for a in action_filter]}

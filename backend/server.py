@@ -7784,9 +7784,16 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "name": doc_name,
                 "verified": is_verified,
                 "uploaded_at": doc.get("uploaded_at"),
-                "file_name": doc.get("file_name"),
+                "file_name": doc.get("file_name") or doc.get("original_filename"),
                 "file_url": file_url,
-                "verification_stamp": doc.get("verification_stamp")
+                "document_id": doc.get("id"),
+                # Verification metadata for "Verified by X on Y" display
+                "verification_stamp": doc.get("verification_stamp"),
+                "verification_stamp_label": doc.get("verification_stamp_label"),
+                "verified_by": doc.get("verification_stamp_by") or doc.get("verified_by"),
+                "verified_by_name": doc.get("verification_stamp_by_name") or doc.get("verified_by_name"),
+                "verified_at": doc.get("verification_stamp_at") or doc.get("verified_at"),
+                "status": doc.get("status")
             })
         else:
             missing_docs.append({

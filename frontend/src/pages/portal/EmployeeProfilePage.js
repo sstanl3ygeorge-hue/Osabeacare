@@ -863,7 +863,7 @@ export default function EmployeeProfilePage() {
   const fetchFormSubmissions = async () => {
     try {
       const response = await axios.get(
-        `${API}/api/employees/${employeeId}/forms`,
+        `${API}/employees/${employeeId}/forms`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setFormSubmissions(response.data.forms || response.data || []);
@@ -4071,7 +4071,7 @@ export default function EmployeeProfilePage() {
                                 onClick={async () => {
                                   try {
                                     await axios.post(
-                                      `${API}/api/form-submissions/${submission.id}/verify`,
+                                      `${API}/form-submissions/${submission.id}/verify`,
                                       {},
                                       { headers: { Authorization: `Bearer ${token}` } }
                                     );
@@ -4097,7 +4097,7 @@ export default function EmployeeProfilePage() {
                                 onClick={async () => {
                                   try {
                                     await axios.post(
-                                      `${API}/api/employees/${employeeId}/forms/${form.key}/remind`,
+                                      `${API}/employees/${employeeId}/forms/${form.key}/remind`,
                                       {},
                                       { headers: { Authorization: `Bearer ${token}` } }
                                     );

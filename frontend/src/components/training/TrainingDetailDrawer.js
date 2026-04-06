@@ -367,7 +367,7 @@ export default function TrainingDetailDrawer({
           
           {/* Evidence Tab */}
           <TabsContent value="evidence" className="mt-4">
-            {trainingItem.has_evidence ? (
+            {trainingItem.has_evidence || trainingItem.evidence?.length > 0 || trainingItem.source_document_id || trainingItem.record_id ? (
               <div className="space-y-4">
                 <div className="p-4 bg-gray-50 rounded-lg border">
                   <div className="flex items-center justify-between">
@@ -420,6 +420,21 @@ export default function TrainingDetailDrawer({
                 <FileText className="h-12 w-12 mx-auto mb-3 opacity-50" />
                 <p>No certificate uploaded</p>
                 <p className="text-sm mt-1">Upload a certificate to verify this training</p>
+                {/* Show warning if verified without evidence */}
+                {trainingItem.verified && (
+                  <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200 text-left">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-amber-800 font-medium text-sm">Verification Issue</p>
+                        <p className="text-amber-700 text-xs mt-1">
+                          This training is marked as verified but has no certificate uploaded. 
+                          Please upload evidence to maintain CQC compliance.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </TabsContent>

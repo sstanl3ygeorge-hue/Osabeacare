@@ -138,7 +138,7 @@ export default function AuditReadyTrainingMatrix({
         axios.get(`${API}/api/employees/${employeeId}/training/proposed-items`, {
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => ({ data: [] })),
-        axios.get(`${API}/api/employees/${employeeId}/documents`, {
+        axios.get(`${API}/api/employee-documents?employee_id=${employeeId}`, {
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => ({ data: [] }))
       ]);
@@ -516,10 +516,17 @@ export default function AuditReadyTrainingMatrix({
                       </TableCell>
                       <TableCell>
                         {item.verified ? (
-                          <Badge className="bg-green-100 text-green-700 border-green-200">
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Verified
-                          </Badge>
+                          item.evidence?.length > 0 || item.has_evidence ? (
+                            <Badge className="bg-green-100 text-green-700 border-green-200">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Verified
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-700 border-amber-200" title="Verified but no evidence file">
+                              <AlertTriangle className="h-3 w-3 mr-1" />
+                              No Evidence
+                            </Badge>
+                          )
                         ) : item.status !== 'missing' ? (
                           <Badge className="bg-amber-100 text-amber-700 border-amber-200">
                             Unverified
@@ -528,7 +535,8 @@ export default function AuditReadyTrainingMatrix({
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {item.evidence?.length > 0 && (
+                          {/* View button - always available for completed training */}
+                          {item.completed_at && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -537,6 +545,21 @@ export default function AuditReadyTrainingMatrix({
                               title="View details"
                             >
                               <Eye className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {/* Edit button for Admin */}
+                          {isAdmin && item.completed_at && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-gray-500 hover:text-primary"
+                              onClick={() => {
+                                setEditingItem(item);
+                                setEditDialogOpen(true);
+                              }}
+                              title="Edit dates"
+                            >
+                              <Edit2 className="h-4 w-4" />
                             </Button>
                           )}
                           {isAdmin && item.status === 'missing' && (
@@ -1044,15 +1067,15 @@ export default function AuditReadyTrainingMatrix({
               onClick={async () => {
                 if (!editingItem) return;
                 try {
-                  const recordId = editingItem.record_id || editingItem.id;
-                  await axios.post(
-                    `${API}/api/training-records/${recordId}/correct`,
+                  // Use the PATCH endpoint which accepts bulk updates with proper format
+                  const trainingCode = editingItem.code || editingItem.requirement_id || editingItem.id;
+                  
+                  await axios.patch(
+                    `${API}/api/employees/${employeeId}/training/${trainingCode}`,
                     {
-                      completed_at: editingItem.completed_at,
-                      expires_at: editingItem.expires_at || editingItem.expiry_date,
-                      provider: editingItem.provider,
-                      certificate_number: editingItem.certificate_number,
-                      correction_reason: 'Admin date correction'
+                      completion_date: editingItem.completed_at,
+                      expiry_date: editingItem.expires_at || editingItem.expiry_date || null,
+                      reason: 'Admin date correction via Edit dialog'
                     },
                     { headers: { Authorization: `Bearer ${token}` } }
                   );

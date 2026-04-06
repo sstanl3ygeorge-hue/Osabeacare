@@ -641,31 +641,46 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Missing Documents - Only for onboarding */}
-        {!isActiveEmployee && missing_documents.length > 0 && (
-          <Card className="shadow-md border-0">
+        {/* Missing Documents - Show for onboarding OR if there are rejected docs */}
+        {((!isActiveEmployee && missing_documents.length > 0) || missing_documents.some(d => d.rejection)) && (
+          <Card className="shadow-md border-0" data-testid="missing-documents-section">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Upload className="h-5 w-5 text-red-500" />
-                Documents Needed
+                {missing_documents.some(d => d.rejection) ? 'Action Required - Re-upload Documents' : 'Documents Needed'}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
                 {missing_documents.map((doc, idx) => (
-                  <div key={idx} className="p-4 bg-slate-50 rounded-xl">
+                  <div 
+                    key={idx} 
+                    className={`p-4 rounded-xl ${doc.rejection ? 'bg-red-50 border border-red-200' : 'bg-slate-50'}`}
+                    data-testid={`missing-doc-${doc.type}`}
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-                          <X className="h-5 w-5 text-red-500" />
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${doc.rejection ? 'bg-red-100' : 'bg-slate-100'}`}>
+                          {doc.rejection ? (
+                            <AlertTriangle className="h-5 w-5 text-red-500" />
+                          ) : (
+                            <X className="h-5 w-5 text-slate-400" />
+                          )}
                         </div>
-                        <span className="font-medium text-slate-800">{doc.name}</span>
+                        <div>
+                          <span className="font-medium text-slate-800">{doc.name}</span>
+                          {doc.rejection && (
+                            <p className="text-xs text-red-600 font-medium">
+                              Rejected - Re-upload required
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <Button 
                         size="sm" 
                         onClick={() => triggerFileInput(doc.type)}
                         disabled={uploading === doc.type}
-                        className="gap-1 bg-blue-600 hover:bg-blue-700"
+                        className={`gap-1 ${doc.rejection ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                         data-testid={`upload-${doc.type}`}
                       >
                         {uploading === doc.type ? (
@@ -673,15 +688,35 @@ export default function WorkerDashboard() {
                         ) : (
                           <Upload className="h-4 w-4" />
                         )}
-                        Upload
+                        {doc.rejection ? 'Re-upload' : 'Upload'}
                       </Button>
                     </div>
-                    <p className="text-xs text-slate-500 ml-13 pl-1">
-                      {getDocumentGuidance(doc.type)}
-                    </p>
-                    <p className="text-xs text-slate-400 ml-13 pl-1 mt-1">
-                      {ACCEPTED_FORMATS}
-                    </p>
+                    {/* Show rejection reason */}
+                    {doc.rejection && (
+                      <div className="ml-13 pl-1 mt-2 p-3 bg-red-100 rounded-lg border border-red-200">
+                        <p className="text-sm text-red-700 font-medium mb-1">
+                          <AlertTriangle className="h-4 w-4 inline mr-1" />
+                          Reason for rejection:
+                        </p>
+                        <p className="text-sm text-red-600">
+                          {doc.rejection.rejection_reason}
+                        </p>
+                        <p className="text-xs text-red-500 mt-1">
+                          Previous file: {doc.rejection.previous_file_name} • 
+                          Rejected by: {doc.rejection.rejected_by_name}
+                        </p>
+                      </div>
+                    )}
+                    {!doc.rejection && (
+                      <>
+                        <p className="text-xs text-slate-500 ml-13 pl-1">
+                          {getDocumentGuidance(doc.type)}
+                        </p>
+                        <p className="text-xs text-slate-400 ml-13 pl-1 mt-1">
+                          {ACCEPTED_FORMATS}
+                        </p>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

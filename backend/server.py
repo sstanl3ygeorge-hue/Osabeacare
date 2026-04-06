@@ -5209,6 +5209,65 @@ FORM_BASED_REQUIREMENTS = {
     },
     
     # ========================================================================
+    # 5.5 EMERGENCY CONTACTS FORM - Auto-fill from Application
+    # ========================================================================
+    "emergency_contacts": {
+        "name": "Emergency Contacts",
+        "form_type": "emergency_contacts",
+        "auto_fill_fields": ["primary_contact_name", "primary_contact_phone", "primary_contact_relationship"],
+        "sections": [
+            {
+                "id": "primary_contact",
+                "title": "Primary Emergency Contact",
+                "description": "Who should we contact in case of an emergency? (Auto-filled from your application if available)",
+                "fields": [
+                    {"id": "primary_contact_name", "label": "Full Name", "type": "text", "required": True, "auto_fill": "emergency_contact_name"},
+                    {"id": "primary_contact_phone", "label": "Phone Number", "type": "text", "required": True, "auto_fill": "emergency_contact_phone"},
+                    {"id": "primary_contact_relationship", "label": "Relationship to You", "type": "select", "required": True, "auto_fill": "emergency_contact_relationship", "options": [
+                        "Spouse/Partner", "Parent", "Child", "Sibling", "Other Family Member", "Friend", "Other"
+                    ]},
+                    {"id": "primary_contact_address", "label": "Address (optional)", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "secondary_contact",
+                "title": "Secondary Emergency Contact (Optional)",
+                "description": "Provide a backup contact if the primary cannot be reached",
+                "fields": [
+                    {"id": "secondary_contact_name", "label": "Full Name", "type": "text"},
+                    {"id": "secondary_contact_phone", "label": "Phone Number", "type": "text"},
+                    {"id": "secondary_contact_relationship", "label": "Relationship to You", "type": "select", "options": [
+                        "Spouse/Partner", "Parent", "Child", "Sibling", "Other Family Member", "Friend", "Other"
+                    ]},
+                ]
+            },
+            {
+                "id": "medical_info",
+                "title": "Medical Information (Optional)",
+                "description": "Any information emergency responders should know",
+                "fields": [
+                    {"id": "has_medical_conditions", "label": "Do you have any medical conditions we should be aware of?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "medical_conditions_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "has_medical_conditions", "conditional_value": "Yes"},
+                    {"id": "has_allergies", "label": "Do you have any allergies?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "allergies_details", "label": "If yes, please list allergies", "type": "textarea", "conditional_on": "has_allergies", "conditional_value": "Yes"},
+                    {"id": "takes_medication", "label": "Do you take any regular medication?", "type": "select", "options": ["No", "Yes"]},
+                    {"id": "medication_details", "label": "If yes, please list medications", "type": "textarea", "conditional_on": "takes_medication", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "fields": [
+                    {"id": "declaration_accurate", "label": "I confirm the emergency contact details provided are accurate and I will notify the company of any changes", "type": "checkbox", "required": True},
+                    {"id": "signature", "label": "Signature (type full name)", "type": "text", "required": True, "auto_fill": "full_name"},
+                    {"id": "sign_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
+    },
+    
+    # ========================================================================
     # 6. INDUCTION & COMPETENCY ASSESSMENT
     # ========================================================================
     "induction": {
@@ -7828,13 +7887,17 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     for doc_type, doc_config in required_docs.items():
         doc_name = doc_config["name"]
-        # Find active document of this type - exclude superseded, rejected, uploaded_in_error
-        # Use precise pattern matching to avoid false positives
+        # Find active document of this type - exclude superseded, uploaded_in_error
+        # P0 FIX: Keep rejected docs separately to show rejection reason
         matching = [d for d in documents 
                    if matches_requirement(d.get("requirement_id", ""), doc_config)
-                   and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
+                   and d.get("status") not in ['superseded', 'uploaded_in_error']]
         
-        if matching:
+        # Separate rejected docs
+        rejected_docs = [d for d in matching if d.get("status") == 'rejected']
+        active_docs = [d for d in matching if d.get("status") != 'rejected']
+        
+        if active_docs:
             # Prefer verified documents, then most recent
             # P0 FIX: Check BOTH verification_stamp AND verified/status fields for sync
             verified_docs = [d for d in matching if (
@@ -7891,10 +7954,25 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "raw_status": doc.get("status")  # Keep raw for debugging
             })
         else:
+            # P0 FIX: If document was rejected, include rejection details
+            rejected_info = None
+            if rejected_docs:
+                # Get most recent rejection
+                rejected_docs.sort(key=lambda x: x.get("rejected_at") or "", reverse=True)
+                rejected_doc = rejected_docs[0]
+                rejected_info = {
+                    "rejected": True,
+                    "rejection_reason": rejected_doc.get("rejection_reason"),
+                    "rejected_at": rejected_doc.get("rejected_at"),
+                    "rejected_by_name": rejected_doc.get("rejected_by_name"),
+                    "previous_file_name": rejected_doc.get("original_filename") or rejected_doc.get("file_name")
+                }
+            
             missing_docs.append({
                 "type": doc_type,
                 "name": doc_name,
-                "action": "upload"
+                "action": "re_upload" if rejected_info else "upload",
+                "rejection": rejected_info  # P0 FIX: Include rejection details
             })
     
     # Check POA needs 2 documents - exclude superseded, rejected, uploaded_in_error
@@ -9324,6 +9402,10 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
             "emergency_phone": employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone"),
             "next_of_kin_address": build_nok_address(),
             "emergency_address": build_nok_address(),
+            # Emergency contact specific fields (from application form)
+            "emergency_contact_name": employee.get("emergency_contact_name") or employee.get("next_of_kin_name"),
+            "emergency_contact_phone": employee.get("emergency_contact_phone") or employee.get("next_of_kin_phone"),
+            "emergency_contact_relationship": employee.get("emergency_contact_relationship") or employee.get("next_of_kin_relationship"),
             "has_driving_licence": "Yes" if employee.get("has_driving_licence") else ("No" if employee.get("has_driving_licence") == False else None),
             "driving_licence_number": employee.get("driving_licence_number"),
             "has_own_vehicle": "Yes" if employee.get("has_own_vehicle") else ("No" if employee.get("has_own_vehicle") == False else None),

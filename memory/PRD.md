@@ -2187,16 +2187,72 @@ To send emails to workers (not just test account):
 
 ---
 
+## COMPLETED: Full Onboarding Audit & Auto-populate (April 2026)
+
+### End-to-End Onboarding Audit: 0% → 100%
+**Test Employee**: Ifedolapo George (isg1994@outlook.com)
+
+**Journey Tested:**
+- ✅ Forms submission & admin verification
+- ✅ Document uploads & admin verification
+- ✅ Training certificate uploads & verification
+- ✅ References declaration & verification
+- ✅ Contract signing & handbook acknowledgement
+- ✅ Induction checklist completion
+- ✅ Auto-promotion to active_employee at 100%
+
+**Bugs Fixed During Audit:**
+1. **REQUIRED_FORMS**: Added missing worker forms (Personal Info, HMRC, Emergency Contacts) to compliance calculation
+2. **Form Verification Logic**: Fixed to prefer verified forms over submitted; only count verified toward progress
+3. **Document Upload Status**: Changed from 'pending' to 'uploaded' for proper admin verification flow
+4. **Training MANDATORY_ITEMS**: Added `information_governance` and `prevent` training types
+5. **Induction Auto-complete**: Fixed list vs dict handling in `auto_complete_induction_from_training`
+6. **Induction Item IDs**: Added proper `id`, `standard_id`, `standard_number` to checklist items
+
+### Rejection Flow Implementation
+**Full cycle tested: Reject → Worker sees reason → Re-upload → Admin verifies**
+
+**Changes Made:**
+- `/app/backend/server.py`: Modified worker dashboard to include rejection details in `missing_documents`
+- `/app/frontend/src/pages/worker/WorkerDashboard.js`: Added "Action Required" section showing:
+  - Rejection reason
+  - Previous file name
+  - Red "Re-upload" button
+  - Shows even for active employees with rejected docs
+
+### Auto-Populate from Application Form
+**Data extracted from PDF application form and synced to employee profile**
+
+**Fields Auto-filled:**
+- Primary Contact Name (from emergency_contact_name)
+- Primary Contact Phone (from emergency_contact_phone)
+- Primary Contact Relationship (from emergency_contact_relationship)
+- Full Address (address_line_1, city, county, postcode)
+- NI Number
+- Professional Registration (NMC PIN)
+- Reference 1 & 2 details
+
+**Files Changed:**
+- `/app/backend/server.py`: 
+  - Added `emergency_contacts` to FORM_BASED_REQUIREMENTS with auto_fill fields
+  - Extended field_value_map with emergency_contact_* mappings
+- `/app/backend/unified_compliance_engine.py`: Various fixes for compliance calculation
+
+---
+
 ## P0/P1 Feature Backlog (Prioritized)
 
 ### P0 - Critical (Must Have)
 - [x] Worker Dashboard Agreements section (DONE - April 2026)
 - [x] Admin/Worker Progress Sync (DONE - April 2026)
-- [ ] Phase 4: CQC Export (PDF downloads, Compliance Summary, Audit Trail)
+- [x] Full Onboarding Audit 0%→100% (DONE - April 2026)
+- [x] Rejection Flow with Re-upload (DONE - April 2026)
+- [x] Auto-populate from Application Form (DONE - April 2026)
+- [ ] Phase 4: CQC Export (SKIPPED per user request)
 
 ### P1 - Important
-- [ ] Phase 5: Application Form → Profile Auto-Sync
-- [ ] Full AI extraction integration for CV/App Form to pre-fill profile gaps
+- [ ] Magic Link Email Flow verification
+- [ ] Worker portal reference declaration endpoint
 
 ### P2 - Should Have
 - [ ] Refactor `server.py` into modular routers (55k+ lines currently)
@@ -2207,4 +2263,5 @@ To send emails to workers (not just test account):
 - [ ] Supabase Auth integration with RLS policies
 - [ ] PostgreSQL migration (from MongoDB)
 - [ ] MFA (TOTP) for Admin accounts
+
 

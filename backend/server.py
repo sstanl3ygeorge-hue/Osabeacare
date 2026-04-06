@@ -1081,6 +1081,22 @@ MANDATORY_ITEMS = {
          "status_group": "other",
          "description": "Health & Safety certificate",
          "work_ready_hint": "Complete after employee starts"},
+        
+        {"id": "information_governance", "name": "Information Governance / GDPR Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Information Governance",
+         "allow_multiple_files": True,
+         "priority": "secondary", "priority_order": 46,
+         "status_group": "other",
+         "description": "IG / GDPR / Data Protection certificate",
+         "work_ready_hint": "Complete after employee starts"},
+        
+        {"id": "prevent", "name": "Prevent Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Prevent",
+         "allow_multiple_files": True,
+         "priority": "secondary", "priority_order": 47,
+         "status_group": "other",
+         "description": "Counter-terrorism awareness certificate",
+         "work_ready_hint": "Complete after employee starts"},
     ],
     
     "nurse_specific": [  # Additional items for Nurses only

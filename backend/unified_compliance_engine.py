@@ -309,22 +309,50 @@ async def auto_complete_induction_from_training(
         result["message"] = f"Created induction checklist and auto-completed '{induction_item['name']}' from {training_name} training"
     else:
         # Update existing checklist
-        items = checklist.get("items", {})
+        items = checklist.get("items", [])
         
-        # Check if already completed
-        if items.get(induction_item_id, {}).get("completed"):
-            result["message"] = f"Induction item '{induction_item['name']}' already completed"
-            return result
-        
-        # Mark as completed
-        items[induction_item_id] = {
-            "completed": True,
-            "completed_at": now,
-            "completed_by": verified_by,
-            "completed_by_name": verified_by_name or verified_by,
-            "auto_completed_from": f"training:{training_id}",
-            "training_name": training_name
-        }
+        # Handle both list and dict formats
+        # P0 FIX: items can be a list of objects or a dict keyed by ID
+        if isinstance(items, list):
+            # Find the item in the list by matching standard number or name
+            item_found = False
+            for i, item in enumerate(items):
+                item_num = item.get("standard_number") or item.get("num")
+                item_name = item.get("name", "").lower()
+                if (item_num == induction_item.get("num") or 
+                    induction_item_id.lower() in item_name or
+                    induction_item.get("name", "").lower() in item_name):
+                    if item.get("completed") or item.get("status") == "completed":
+                        result["message"] = f"Induction item '{induction_item['name']}' already completed"
+                        return result
+                    # Mark as completed
+                    items[i]["completed"] = True
+                    items[i]["status"] = "completed"
+                    items[i]["completed_at"] = now
+                    items[i]["completed_by"] = verified_by
+                    items[i]["completed_by_name"] = verified_by_name or verified_by
+                    items[i]["auto_completed_from"] = f"training:{training_id}"
+                    items[i]["training_name"] = training_name
+                    item_found = True
+                    break
+            
+            if not item_found:
+                result["message"] = f"Induction item for '{induction_item['name']}' not found in checklist"
+                return result
+        else:
+            # Dict format (legacy)
+            if items.get(induction_item_id, {}).get("completed"):
+                result["message"] = f"Induction item '{induction_item['name']}' already completed"
+                return result
+            # Mark as completed
+            items[induction_item_id] = {
+                "completed": True,
+                "completed_at": now,
+                "completed_by": verified_by,
+                "completed_by_name": verified_by_name or verified_by,
+                "auto_completed_from": f"training:{training_id}",
+                "training_name": training_name
+            }
         
         await db.induction_checklists.update_one(
             {"employee_id": employee_id},

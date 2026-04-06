@@ -1771,3 +1771,55 @@ Added `POST /api/employees/{id}/training/re-extract` endpoint:
 - API test confirmed: Lawrence shows 10/33 (30%) with induction at 2/14
 - Data now consistent across unified-progress endpoint
 - Delete functionality tested with confirmation dialog
+
+
+---
+
+## COMPLETED: Progress Calculation Single Source of Truth Fix (April 2026)
+
+### Problem Statement
+Admin and Worker views showed **different progress percentages** for the same employee:
+- Admin `/unified-progress` showed 58%
+- Worker Dashboard showed 25%
+- Form submissions weren't properly synced across views
+
+### Root Cause Analysis
+There were **TWO separate progress calculation implementations**:
+
+1. **`compute_unified_progress_internal`** (used by Worker Dashboard)
+   - Called `calculate_employee_compliance` which used `MANDATORY_ITEMS` dictionary
+   - Checked form submissions by `requirement_id`
+
+2. **`GET /api/employees/{id}/unified-progress` endpoint** (used by Admin views)
+   - Had its **own hardcoded logic** (~300 lines of duplicate code)
+   - Checked form submissions by `form_type` instead of `requirement_id`
+   - Used different dictionaries for required_forms, required_docs, training
+
+### Solution Implemented
+Replaced the entire `/unified-progress` endpoint to call `compute_unified_progress_internal` instead of having duplicate logic:
+
+```python
+@api_router.get("/employees/{employee_id}/unified-progress")
+async def get_unified_progress(employee_id: str, user: dict = Depends(get_current_user)):
+    # P0 FIX: Use the SAME internal function as Worker Dashboard
+    progress_data = await compute_unified_progress_internal(employee_id, employee)
+    return { ... }  # Format response
+```
+
+**Result**: Both Admin and Worker views now use the **SAME single source of truth** for progress calculations.
+
+### Verification
+- **Admin unified-progress API**: 66% - 16/24 requirements
+- **Worker dashboard API**: 66% - 16/24 requirements  
+- **Admin Employee Profile UI**: 66% Complete, 16 of 24 requirements
+- **Worker Dashboard UI**: 66%, 16 of 24 requirements completed
+
+All four views now show **identical progress**.
+
+### Files Modified
+- `/app/backend/server.py` - Replaced ~250 lines of duplicate code in `/unified-progress` endpoint with call to `compute_unified_progress_internal`
+
+### Testing Status
+- ✅ curl tests confirmed identical API responses
+- ✅ Screenshots confirmed identical UI displays
+- ✅ No regression in Admin or Worker functionality

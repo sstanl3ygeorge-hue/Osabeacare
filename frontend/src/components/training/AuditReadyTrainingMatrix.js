@@ -52,7 +52,8 @@ import {
   Edit2,
   Download,
   CheckCircle,
-  Wand2
+  Wand2,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '../../lib/utils';
@@ -121,6 +122,12 @@ export default function AuditReadyTrainingMatrix({
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [extractorOpen, setExtractorOpen] = useState(false); // AI Certificate Extractor dialog
   const [editingItem, setEditingItem] = useState(null);
+  
+  // Delete training state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingItem, setDeletingItem] = useState(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleting, setDeleting] = useState(false);
   
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin';
 
@@ -254,6 +261,45 @@ export default function AuditReadyTrainingMatrix({
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to reject item');
     }
+  };
+
+  // Delete training record - Admin only with audit trail
+  const handleDeleteTraining = async () => {
+    if (!deletingItem) return;
+    
+    const recordId = deletingItem.record_id || deletingItem.id;
+    if (!recordId) {
+      toast.error('No record ID found for this training');
+      return;
+    }
+    
+    setDeleting(true);
+    try {
+      await axios.delete(
+        `${API}/api/training-records/${recordId}`,
+        { 
+          headers: { Authorization: `Bearer ${token}` },
+          params: { reason: deleteReason || 'Deleted by admin' }
+        }
+      );
+      toast.success(`"${deletingItem.title}" deleted successfully`);
+      setDeleteDialogOpen(false);
+      setDeletingItem(null);
+      setDeleteReason('');
+      fetchTrainingData();
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete training');
+    } finally {
+      setDeleting(false);
+    }
+  };
+  
+  // Open delete confirmation
+  const openDeleteDialog = (item) => {
+    setDeletingItem(item);
+    setDeleteReason('');
+    setDeleteDialogOpen(true);
   };
 
   // Verify training record - Admin only
@@ -836,6 +882,19 @@ export default function AuditReadyTrainingMatrix({
                               </Button>
                             )
                           )}
+                          
+                          {/* Delete Button - Admin only */}
+                          {isAdmin && (item.record_id || item.id) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => openDeleteDialog(item)}
+                              data-testid={`delete-training-${item.code || item.id}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1153,6 +1212,73 @@ export default function AuditReadyTrainingMatrix({
           onRefresh?.();
         }}
       />
+      
+      {/* Delete Training Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-5 w-5" />
+              Delete Training Record
+            </DialogTitle>
+            <DialogDescription>
+              This will soft-delete "{deletingItem?.title}" from the employee's training records.
+              The record will be archived for audit purposes.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="p-3 bg-red-50 rounded-lg border border-red-100">
+              <p className="text-sm text-red-800">
+                <strong>Training:</strong> {deletingItem?.title}
+              </p>
+              {deletingItem?.completed_at && (
+                <p className="text-sm text-red-600 mt-1">
+                  Completed: {formatBackendDate(deletingItem.completed_at, { format: 'short' })}
+                </p>
+              )}
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Reason for deletion (required for audit trail)
+              </label>
+              <Input
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                placeholder="e.g., Test data, duplicate entry, uploaded in error..."
+                data-testid="delete-reason-input"
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDialogOpen(false);
+                setDeletingItem(null);
+                setDeleteReason('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteTraining}
+              disabled={deleting || !deleteReason.trim()}
+              data-testid="confirm-delete-btn"
+            >
+              {deleting ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Delete Training
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

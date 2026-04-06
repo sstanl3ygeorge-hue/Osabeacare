@@ -7616,10 +7616,13 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     induction_record = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
     if induction_record and induction_record.get("items"):
         items = induction_record.get("items", [])
-        categories["induction"]["total"] = len(items)
-        categories["induction"]["completed"] = sum(1 for i in items if i.get("status") == "completed")
+        # Count only mandatory items (exclude optional Safeguarding Children for adults)
+        mandatory_items = [i for i in items if i.get("mandatory", True)]
+        categories["induction"]["total"] = len(mandatory_items) if mandatory_items else 14
+        categories["induction"]["completed"] = sum(1 for i in mandatory_items if i.get("status") == "completed")
     else:
-        categories["induction"]["total"] = 15  # P0 FIX: Match DEFAULT_INDUCTION_ITEMS count (15 Care Certificate standards)
+        # P0 FIX: 14 mandatory Care Certificate standards (excludes optional Safeguarding Children)
+        categories["induction"]["total"] = 14
         categories["induction"]["completed"] = 0
     
     return {
@@ -12376,19 +12379,28 @@ async def verify_training(
     
     now = datetime.now(timezone.utc).isoformat()
     
+    # Get user's full name for verification stamp
+    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
+    user_name = user['email']
+    if user_doc:
+        if user_doc.get('name'):
+            user_name = user_doc['name']
+        elif user_doc.get('first_name'):
+            user_name = f"{user_doc.get('first_name', '')} {user_doc.get('last_name', '')}".strip()
+    
     await db.training_records.update_one(
         {"id": record.get("id")},  # Use actual record ID
         {"$set": {
             "verified": True,
             "verification_status": "verified",
-            "verified_by": user['email'],
+            "verified_by": user_name,
             "verified_at": now,
             "updated_at": now
         }}
     )
     
     # P0: Auto-complete corresponding induction checklist item
-    await auto_sync_induction_from_training(employee_id, record.get('training_name', ''), user['email'], now)
+    await auto_sync_induction_from_training(employee_id, record.get('training_name', ''), user_name, now)
     
     await log_audit_action(user['user_id'], "verify_training", "employee", employee_id, {
         "record_id": record.get("id"),
@@ -12398,7 +12410,7 @@ async def verify_training(
     return {
         "status": "success",
         "message": f"Training '{record.get('training_name')}' verified",
-        "verified_by": user['email'],
+        "verified_by": user_name,
         "verified_at": now
     }
 
@@ -25598,31 +25610,28 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
     # Note: Handbook may be optional for some orgs, don't add to blockers
     
     # ========== INDUCTION ==========
-    # Get induction checklist items
-    induction_items = await db.induction_checklist.find({
+    # P0 FIX: Query from the correct collection (induction_checklists, not induction_checklist)
+    induction_record = await db.induction_checklists.find_one({
         "employee_id": employee_id
-    }).to_list(50)
+    }, {"_id": 0})
     
-    if induction_items:
-        total_induction = len(induction_items)
-        completed_induction = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+    if induction_record and induction_record.get("items"):
+        induction_items = induction_record.get("items", [])
+        # Only count mandatory items for adults (exclude optional Safeguarding Children)
+        mandatory_items = [i for i in induction_items if i.get("mandatory", True)]
+        total_induction = len(mandatory_items) if mandatory_items else 15
+        completed_induction = len([i for i in induction_items if i.get("status") == "completed" and i.get("mandatory", True)])
         categories["induction"]["total"] = total_induction
         categories["induction"]["completed"] = completed_induction
         
         if completed_induction < total_induction:
-            blockers.append(f"Induction ({completed_induction}/{total_induction} items)")
+            blockers.append(f"Induction ({completed_induction}/{total_induction} Care Certificate standards)")
     else:
-        # Check if induction exists in employee record
-        induction_data = employee.get("induction_checklist", {})
-        if induction_data:
-            items = induction_data.get("items", [])
-            categories["induction"]["total"] = len(items)
-            categories["induction"]["completed"] = len([i for i in items if i.get("completed")])
-        else:
-            # Default induction items (15 Care Certificate Standards)
-            categories["induction"]["total"] = 15
-            categories["induction"]["completed"] = 0
-            blockers.append("Induction Checklist (0/15 items)")
+        # No induction record - use default 15 mandatory Care Certificate Standards
+        # (excludes optional Safeguarding Children)
+        categories["induction"]["total"] = 14  # 15 minus 1 optional (Safeguarding Children)
+        categories["induction"]["completed"] = 0
+        blockers.append("Induction Checklist (0/14 mandatory Care Certificate standards)")
     
     # ========== CALCULATE TOTALS ==========
     total_requirements = sum(cat["total"] for cat in categories.values())

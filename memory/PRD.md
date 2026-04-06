@@ -1311,3 +1311,99 @@ April 5, 2026
 - Reminder tracking fields (7 days before, day of check)
 - Audit logging for all actions
 
+---
+
+## P0 BUG FIX: Document Re-upload Flow (April 2026)
+
+### Issue Fixed
+When an admin deleted/rejected a document (e.g., marked DBS as "uploaded_in_error"), neither the admin nor the worker could upload the correct replacement:
+- Admin: The upload dialog was missing - clicking "Upload" did nothing
+- Worker: Dashboard showed "Pending Review" instead of allowing re-upload
+
+### Fix 1: Admin Upload Dialog Restored ✅
+**File**: `/app/frontend/src/pages/portal/EmployeeProfilePage.js` (lines 7076-7177)
+
+Added "Upload Document Evidence" dialog with:
+- Requirement dropdown: Right to Work, DBS Certificate, Identity (Passport/ID), Proof of Address, Training Certificate
+- File Label input (optional)
+- File picker accepting PDF, JPG, PNG, WebP (max 10MB)
+- Upload Evidence button
+
+Admin workflow:
+1. Navigate to employee profile → Compliance tab
+2. Scroll to document row (e.g., Right to Work, DBS)
+3. Click "Upload" button in Evidence section
+4. Select requirement type, add optional label, upload file
+5. Click "Upload Evidence" to save
+
+### Fix 2: Backend Document Matching Precision ✅
+**File**: `/app/backend/server.py` (lines 7757-7817)
+
+Problem: The `worker_dashboard` endpoint was matching `dbs_check` (a verification record) as a valid DBS certificate because "dbs" was a substring match.
+
+Solution: Added precise pattern matching with `include_patterns` and `exclude_patterns`:
+
+```python
+required_docs = {
+    "dbs": {
+        "name": "DBS Certificate",
+        "patterns": ["dbs", "dbs_certificate", "dbs_evidence"],
+        "exclude_patterns": ["dbs_check", "dbs_status_check", "dbs_update"]
+    },
+    # Similar patterns for RTW, Identity, POA
+}
+```
+
+This ensures:
+- `dbs_check` is NOT counted as a valid DBS certificate
+- If the only DBS document has status `uploaded_in_error`, worker sees "Documents Needed" with Upload button
+- Worker can re-upload the correct document
+
+### Testing Verified
+- Admin Upload Dialog: Opens correctly with 5 requirement options
+- Worker Dashboard: Shows DBS Certificate in "Documents Needed" section with Upload button
+- Backend API: `/api/worker/dashboard` correctly returns `dbs` in `missing_documents` list
+
+---
+
+## Pending/In Progress Issues
+
+### Issue: F811 Duplicate Function Definitions (server.py)
+- Status: NOT STARTED
+- Description: Python linting errors (F811 redefinition of unused functions) scattered across `server.py`
+- Root cause: The file is 52,000+ lines and has accumulated duplicate function definitions
+- Fix: Refactor `server.py` into modular FastAPI routers
+
+---
+
+## Upcoming Tasks
+
+### P1: End-to-End Integrity Audit
+- Verify sync matching between admin vs worker views for:
+  - Forms
+  - Trainings
+  - References
+  - Spot Checks
+
+### P2: Admin Dashboard Actionable Task Queue UI
+- Create centralized task queue for admins to process pending items
+
+### P2: server.py Refactoring
+- Split 52,000+ line file into modular routers:
+  - `/app/backend/routes/auth.py`
+  - `/app/backend/routes/employees.py`
+  - `/app/backend/routes/compliance.py`
+  - `/app/backend/routes/worker.py`
+  - etc.
+
+### P3: Supabase Auth Integration
+- Implement Supabase Auth with RLS policies
+- Migrate from JWT-based custom auth
+
+### P3: MongoDB to PostgreSQL Migration
+- Phase out MongoDB entirely
+- Migrate to PostgreSQL for better data integrity
+
+### P3: MFA (TOTP) for Admin Accounts
+- Add TOTP-based MFA for admin login security
+

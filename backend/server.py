@@ -8665,7 +8665,7 @@ async def worker_upload_document(
         "uploaded_at": now,
         "uploaded_by": f"worker_{employee_id}",
         "uploaded_by_worker": True,
-        "status": "pending",
+        "status": "uploaded",  # P0 FIX: Worker uploads should be "uploaded" not "pending"
         "verification_stamp": "not_verified",
         "is_active": True,
         "created_at": now

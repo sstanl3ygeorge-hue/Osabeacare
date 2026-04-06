@@ -112,9 +112,14 @@ REQUIRED_DOCUMENTS = [
 ]
 
 # Forms required for ALL roles
+# Source: "admin" = Admin creates/submits, "worker" = Worker fills via portal
 REQUIRED_FORMS = [
     {"id": "interview_record", "name": "Interview Record", "source": "admin"},
     {"id": "staff_health_questionnaire", "name": "Staff Health Questionnaire", "source": "worker"},
+    {"id": "staff_personal_info", "name": "Staff Personal Information", "source": "worker"},
+    {"id": "hmrc_starter_checklist", "name": "HMRC Starter Checklist", "source": "worker"},
+    {"id": "emergency_contacts", "name": "Emergency Contacts", "source": "worker"},
+    # Note: equal_opportunities is optional (required: False) - not included in compliance count
 ]
 
 # Role-specific requirements
@@ -141,6 +146,9 @@ CLEAR_LABELS = {
     "induction": "Induction Checklist (15 Care Certificate Standards)",
     "mandatory_training": "Mandatory Training (8 courses)",  # Updated: +IG +Prevent
     "staff_health_questionnaire": "Staff Health Questionnaire",
+    "staff_personal_info": "Staff Personal Information",
+    "hmrc_starter_checklist": "HMRC Starter Checklist",
+    "emergency_contacts": "Emergency Contacts",
     "employment_gaps": "Employment Gaps Explained",
     "nmc_registration": "NMC Registration",
     "gmc_registration": "GMC Registration",
@@ -833,37 +841,58 @@ async def get_unified_employee_status(
         
         categories["forms"]["total"] += 1
         
-        # Find matching form submission
+        # Find matching form submission - PREFER VERIFIED forms over just submitted
+        # P0 FIX: When multiple forms exist, use the verified one if available
         matched_form = None
+        verified_form = None
+        submitted_form = None
+        
         for form in all_forms:
             form_type = (form.get("form_type") or "").lower()
             if form_id in form_type or form_type in form_id:
-                matched_form = form
-                break
+                # Track verified forms separately
+                if form.get("verified") == True:
+                    verified_form = form
+                elif form.get("status") in ["submitted", "verified"]:
+                    if submitted_form is None:  # Keep first submitted
+                        submitted_form = form
         
-        is_complete = matched_form is not None
-        checks[form_id] = is_complete
+        # Prefer verified > submitted
+        matched_form = verified_form or submitted_form
+        
+        # P0 FIX: Form is complete ONLY if verified by admin (not just submitted)
+        # This ensures progress % only increases after admin verification
+        is_verified = matched_form is not None and matched_form.get("verified") == True
+        is_submitted = matched_form is not None and matched_form.get("status") in ["submitted", "verified"]
+        
+        checks[form_id] = is_verified
         
         item_data = {
             "id": form_id,
             "name": get_clear_label(form_id),
-            "completed": is_complete,
+            "completed": is_verified,
+            "submitted": is_submitted,
+            "verified": is_verified,
             "source": form_req.get("source"),
             "submitted_at": matched_form.get("submitted_at") if matched_form else None,
+            "verified_at": matched_form.get("verified_at") if matched_form else None,
         }
         
         categories["forms"]["items"].append(item_data)
         
-        if is_complete:
+        if is_verified:
             categories["forms"]["completed"] += 1
         else:
+            # Determine severity based on submission status
+            severity = "pending" if is_submitted else "critical"
+            reason = f"{get_clear_label(form_id)}: Awaiting verification" if is_submitted else f"{get_clear_label(form_id)}: Not completed"
             blockers.append({
                 "id": form_id,
                 "gate": form_id,
                 "label": get_clear_label(form_id),
-                "reason": f"{get_clear_label(form_id)}: Not completed",
+                "reason": reason,
                 "category": "forms",
-                "severity": "critical"
+                "severity": severity
             })
     
     # ==========================================================================

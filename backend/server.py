@@ -12592,31 +12592,55 @@ async def extract_training_from_certificate(file_bytes: bytes, filename: str) ->
             # Enhanced prompt for multi-training extraction with validity period detection
             extraction_prompt = """You are analyzing a training certificate image. Extract ALL training courses/modules mentioned.
 
-IMPORTANT INSTRUCTIONS:
-1. This certificate may contain MULTIPLE trainings/courses listed. Extract EACH ONE separately.
-2. Look for "Valid for X year" or "Valid for X months" badges/text - use this to calculate expiry from completion date
-3. Look for CSTF (Core Skills Training Framework) courses which are often bundled together
-4. Common multi-training certificates include Health & Safety Group certificates with 10+ courses
+CRITICAL INSTRUCTIONS - READ CAREFULLY:
+1. This certificate likely contains MULTIPLE trainings/courses in a TABLE format. Extract EVERY SINGLE ROW.
+2. CSTF certificates typically have 10-15 courses. DO NOT STOP after finding a few.
+3. Scan the ENTIRE image/document for all training entries.
+
+COMMON CSTF COURSES TO LOOK FOR (extract ALL that appear):
+- Fire Safety / Fire Awareness
+- Moving & Handling / Manual Handling (Levels 1 & 2)
+- Safeguarding Adults (Levels 1, 2, 3)
+- Safeguarding Children (Levels 1, 2, 3) - Note: mark as optional
+- Infection Prevention and Control
+- Health & Safety / Health Safety Awareness
+- Basic Life Support / BLS / Resuscitation
+- Information Governance / GDPR / Data Protection
+- Equality, Diversity and Human Rights / Equality & Diversity / EDI
+- Preventing Radicalisation / PREVENT
+- NHS Conflict Resolution / Conflict Resolution
+- Food Hygiene / Food Safety
+- Medication Awareness
+- Mental Capacity Act
+- Dementia Awareness
+- Person-Centred Care
+
+EXTRACTION RULES:
+1. Look for "Valid for X year" or "Valid for X months" - calculate expiry from completion date
+2. Each row in a training table = ONE training record
+3. Provider is usually in header (e.g., "The Health & Safety Group", "Skills for Health")
+4. Levels may be shown as "L1", "L2", "Level 1", "Levels 1 & 2", "Practical", "Theory"
 
 For EACH training found, provide:
-- training_name: The specific name of the training/course (e.g., "CSTF Fire Safety", "CSTF Moving & Handling Level 2")
+- training_name: Full name including CSTF prefix if present (e.g., "CSTF Fire Safety", "CSTF Information Governance")
 - completion_date: Date completed in ISO format YYYY-MM-DD
-- expiry_date: Calculated expiry date in ISO format YYYY-MM-DD
-  - If "Valid for 1 year" is shown, add 1 year to completion date
-  - If "Valid for 3 years" is shown, add 3 years to completion date
-  - If no validity mentioned, leave as null
+- expiry_date: Calculated expiry date in ISO format YYYY-MM-DD (add validity period to completion date)
 - validity_period: The validity text found (e.g., "Valid for 1 year", "Valid for 3 years", or null)
 - provider: Training provider name if visible
-- level: Training level if specified (e.g., "Level 1", "Level 2", "Levels 1 & 2")
+- level: Training level if specified (e.g., "Level 1", "Level 2", "Levels 1 & 2", "Practical")
+- is_optional: true if this is "Safeguarding Children" (not required for adult care), false otherwise
 
 Return ONLY a valid JSON array. Example for a multi-course certificate:
 [
-  {"training_name": "CSTF Fire Safety", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Practical"},
-  {"training_name": "CSTF Moving & Handling", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Levels 1 & 2"},
-  {"training_name": "CSTF Safeguarding Adults", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Levels 1 & 2"}
+  {"training_name": "CSTF Fire Safety", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Practical", "is_optional": false},
+  {"training_name": "CSTF Information Governance", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 1 year", "provider": "The Health & Safety Group", "level": "Theory", "is_optional": false},
+  {"training_name": "CSTF Equality Diversity and Human Rights", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 3 years", "provider": "The Health & Safety Group", "level": "Level 1", "is_optional": false},
+  {"training_name": "CSTF Preventing Radicalisation", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 3 years", "provider": "The Health & Safety Group", "level": null, "is_optional": false},
+  {"training_name": "CSTF NHS Conflict Resolution", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 3 years", "provider": "The Health & Safety Group", "level": null, "is_optional": false},
+  {"training_name": "CSTF Safeguarding Children", "completion_date": "2025-09-11", "expiry_date": "2026-09-11", "validity_period": "Valid for 3 years", "provider": "The Health & Safety Group", "level": "Level 3", "is_optional": true}
 ]
 
-If only ONE training is found, still return as array with one item.
+IMPORTANT: Extract EVERY training visible, even if there are 10+. Do not truncate the list.
 If no trainings detected, return empty array: []"""
 
             # Initialize chat with Gemini for vision
@@ -12680,6 +12704,11 @@ If no trainings detected, return empty array: []"""
                                 except Exception as calc_err:
                                     logger.warning(f"Failed to calculate expiry: {calc_err}")
                             
+                            # Check if this is optional (Safeguarding Children for adult care)
+                            is_optional = item.get('is_optional', False)
+                            if not is_optional and 'safeguarding' in training_name.lower() and 'children' in training_name.lower():
+                                is_optional = True
+                            
                             extracted_trainings.append({
                                 "training_name": training_name,
                                 "completion_date": completion_date,
@@ -12688,11 +12717,13 @@ If no trainings detected, return empty array: []"""
                                 "provider": item.get('provider'),
                                 "level": item.get('level'),
                                 "certificate_file": filename,
-                                "extracted_by": "emergent_gemini_vision" if is_image else "emergent_gemini_text"
+                                "extracted_by": "emergent_gemini_vision" if is_image else "emergent_gemini_text",
+                                "is_optional": is_optional,
+                                "confidence": "high"
                             })
                     
                     if extracted_trainings:
-                        logger.info(f"AI extracted {len(extracted_trainings)} trainings from certificate")
+                        logger.info(f"AI extracted {len(extracted_trainings)} trainings from certificate: {[t['training_name'] for t in extracted_trainings]}")
                         return extracted_trainings
         except Exception as e:
             logger.warning(f"AI extraction failed: {e}", exc_info=True)
@@ -12704,18 +12735,20 @@ If no trainings detected, return empty array: []"""
             "Safeguarding Children": r"Safeguarding.*Children|Child\s+Safeguarding|CSTF\s+Safeguarding\s+Children",
             "Manual Handling": r"Manual\s*Handling|Moving\s*(?:and|&)\s*Handling|CSTF\s+Moving\s*(?:and|&)\s*Handling",
             "Fire Safety": r"Fire\s*Safety|Fire\s*Awareness|Fire\s*Marshal|CSTF\s+Fire\s+Safety",
-            "Health & Safety": r"Health\s*(?:&|and)?\s*Safety|CSTF\s+Health",
-            "Infection Control": r"Infection\s*(?:Control|Prevention)|CSTF\s+Infection",
+            "Health & Safety": r"Health\s*(?:&|and)?\s*Safety|CSTF\s+Health\s+Safety|Health\s+Safety\s+Awareness",
+            "Infection Control": r"Infection\s*(?:Control|Prevention)|CSTF\s+Infection\s+(?:Prevention|Control)",
             "Basic Life Support": r"Basic\s*Life\s*Support|BLS|CPR|Resuscitation|CSTF\s+Resuscitation",
-            "Medication Administration": r"Medication|Medicine\s*Administration",
+            "Medication Administration": r"Medication|Medicine\s*Administration|Medication\s*Awareness",
             "Food Hygiene": r"Food\s*(?:Hygiene|Safety)|HACCP",
-            "Equality & Diversity": r"Equality|Diversity|EDI|CSTF\s+Equality",
-            "Data Protection": r"Data\s*Protection|GDPR|Information\s*Governance|CSTF\s+Information\s+Governance",
+            "Equality & Diversity": r"Equality.*Diversity|Diversity.*Equality|EDI|CSTF\s+Equality|Human\s+Rights",
+            "Information Governance": r"Information\s*Governance|Data\s*Protection|GDPR|CSTF\s+Information\s+Governance|IG\s+Training",
             "First Aid": r"First\s*Aid",
-            "Dementia Awareness": r"Dementia\s*Awareness",
-            "Mental Health Awareness": r"Mental\s*Health\s*Awareness",
-            "Conflict Resolution": r"Conflict\s*Resolution|CSTF\s+NHS\s+Conflict",
-            "Preventing Radicalisation": r"Prevent|Radicalisation|CSTF\s+Preventing\s+Radicalisation"
+            "Dementia Awareness": r"Dementia\s*Awareness|CSTF\s+Dementia",
+            "Mental Health Awareness": r"Mental\s*Health\s*Awareness|Mental\s+Capacity",
+            "Conflict Resolution": r"Conflict\s*Resolution|CSTF\s+(?:NHS\s+)?Conflict\s+Resolution|Violence\s+(?:and\s+)?Aggression",
+            "Preventing Radicalisation": r"Prevent(?:ing)?\s+(?:Duty|Strategy)?|Radicalisation|CSTF\s+Prevent(?:ing)?\s+Radicalisation|WRAP",
+            "Person-Centred Care": r"Person[- ]Centred\s+Care|PCC",
+            "Safeguarding Children (Optional)": r"Safeguarding\s*(?:of\s+)?Children|Child\s+(?:Protection|Safeguarding)|CSTF\s+Safeguarding\s+Children"
         }
         
         # Look for validity period in text

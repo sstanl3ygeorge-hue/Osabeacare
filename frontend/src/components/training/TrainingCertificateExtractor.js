@@ -23,6 +23,13 @@ import {
   TableRow,
 } from '../ui/table';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
+import {
   Upload,
   Loader2,
   FileText,
@@ -39,6 +46,26 @@ import { cn } from '../../lib/utils';
 import { useDropzone } from 'react-dropzone';
 
 const API = process.env.REACT_APP_BACKEND_URL;
+
+// Common CSTF trainings for quick selection
+const COMMON_CSTF_TRAININGS = [
+  { name: "CSTF Fire Safety", validity: "1 year" },
+  { name: "CSTF Moving & Handling", validity: "1 year" },
+  { name: "CSTF Safeguarding Adults", validity: "3 years" },
+  { name: "CSTF Infection Prevention and Control", validity: "1 year" },
+  { name: "CSTF Health & Safety", validity: "3 years" },
+  { name: "CSTF Basic Life Support", validity: "1 year" },
+  { name: "CSTF Information Governance / GDPR", validity: "1 year" },
+  { name: "CSTF Equality, Diversity and Human Rights", validity: "3 years" },
+  { name: "CSTF Preventing Radicalisation (PREVENT)", validity: "3 years" },
+  { name: "CSTF NHS Conflict Resolution", validity: "3 years" },
+  { name: "CSTF Food Hygiene", validity: "3 years" },
+  { name: "CSTF Medication Awareness", validity: "1 year" },
+  { name: "CSTF Dementia Awareness", validity: "3 years" },
+  { name: "CSTF Mental Capacity Act", validity: "3 years" },
+  { name: "CSTF Safeguarding Children (Optional)", validity: "3 years" },
+  { name: "Other", validity: null },
+];
 
 /**
  * TrainingCertificateExtractor - AI-powered training extraction with preview step
@@ -68,7 +95,8 @@ export default function TrainingCertificateExtractor({
     name: '',
     completion_date: '',
     expiry_date: '',
-    reason: ''
+    reason: '',
+    showCustomName: false
   });
 
   // Dropzone for file upload
@@ -173,6 +201,10 @@ export default function TrainingCertificateExtractor({
       return;
     }
 
+    // Check if training is optional (Safeguarding Children)
+    const isOptional = manualEntry.name.toLowerCase().includes('safeguarding') && 
+                       manualEntry.name.toLowerCase().includes('children');
+
     setExtractedTrainings(prev => [...prev, {
       id: `manual_${Date.now()}`,
       training_name: manualEntry.name,
@@ -180,10 +212,11 @@ export default function TrainingCertificateExtractor({
       expiry_date: manualEntry.expiry_date || null,
       provider: 'Manual Entry',
       confidence: 'high',
-      manual: true
+      manual: true,
+      is_optional: isOptional
     }]);
     setSelectedItems(prev => [...prev, extractedTrainings.length]);
-    setManualEntry({ name: '', completion_date: '', expiry_date: '', reason: '' });
+    setManualEntry({ name: '', completion_date: '', expiry_date: '', reason: '', showCustomName: false });
     setShowManualEntry(false);
     toast.success('Training added');
   };
@@ -392,15 +425,20 @@ export default function TrainingCertificateExtractor({
                           />
                         </TableCell>
                         <TableCell>
-                          {training.manual ? (
-                            <Badge className="bg-purple-100 text-purple-700">Manual</Badge>
-                          ) : training.confidence === 'high' ? (
-                            <Badge className="bg-green-100 text-green-700">High</Badge>
-                          ) : training.confidence === 'medium' ? (
-                            <Badge className="bg-amber-100 text-amber-700">Medium</Badge>
-                          ) : (
-                            <Badge className="bg-red-100 text-red-700">Low</Badge>
-                          )}
+                          <div className="flex flex-col gap-1">
+                            {training.is_optional && (
+                              <Badge className="bg-gray-100 text-gray-600 text-[10px]">Optional</Badge>
+                            )}
+                            {training.manual ? (
+                              <Badge className="bg-purple-100 text-purple-700">Manual</Badge>
+                            ) : training.confidence === 'high' ? (
+                              <Badge className="bg-green-100 text-green-700">High</Badge>
+                            ) : training.confidence === 'medium' ? (
+                              <Badge className="bg-amber-100 text-amber-700">Medium</Badge>
+                            ) : (
+                              <Badge className="bg-red-100 text-red-700">Low</Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Button
@@ -432,16 +470,60 @@ export default function TrainingCertificateExtractor({
                 <Plus className="h-4 w-4" />
                 Add Training Manually
               </h4>
+              <p className="text-xs text-gray-500">
+                If AI missed a training from the certificate, add it manually here.
+              </p>
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <Label>Training Name *</Label>
-                  <Input
+                  <Label>Select Training Type</Label>
+                  <Select 
                     value={manualEntry.name}
-                    onChange={(e) => setManualEntry(prev => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g., Safeguarding Adults"
-                    data-testid="manual-training-name"
-                  />
+                    onValueChange={(value) => {
+                      const training = COMMON_CSTF_TRAININGS.find(t => t.name === value);
+                      setManualEntry(prev => ({ 
+                        ...prev, 
+                        name: value === 'Other' ? '' : value,
+                        showCustomName: value === 'Other'
+                      }));
+                      // Auto-calculate expiry if we have completion date and validity
+                      if (manualEntry.completion_date && training?.validity) {
+                        const years = parseInt(training.validity);
+                        if (!isNaN(years)) {
+                          const date = new Date(manualEntry.completion_date);
+                          date.setFullYear(date.getFullYear() + years);
+                          setManualEntry(prev => ({ 
+                            ...prev, 
+                            name: value === 'Other' ? '' : value,
+                            showCustomName: value === 'Other',
+                            expiry_date: date.toISOString().split('T')[0]
+                          }));
+                        }
+                      }
+                    }}
+                  >
+                    <SelectTrigger data-testid="manual-training-select">
+                      <SelectValue placeholder="Select a CSTF training..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COMMON_CSTF_TRAININGS.map(training => (
+                        <SelectItem key={training.name} value={training.name}>
+                          {training.name} {training.validity && `(${training.validity})`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+                {manualEntry.showCustomName && (
+                  <div className="col-span-2">
+                    <Label>Custom Training Name *</Label>
+                    <Input
+                      value={manualEntry.name}
+                      onChange={(e) => setManualEntry(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Enter training name..."
+                      data-testid="manual-training-name"
+                    />
+                  </div>
+                )}
                 <div>
                   <Label>Completion Date *</Label>
                   <Input
@@ -465,7 +547,7 @@ export default function TrainingCertificateExtractor({
                   <Input
                     value={manualEntry.reason}
                     onChange={(e) => setManualEntry(prev => ({ ...prev, reason: e.target.value }))}
-                    placeholder="e.g., Original certificate not available"
+                    placeholder="e.g., AI missed this training from certificate"
                     data-testid="manual-reason"
                   />
                 </div>

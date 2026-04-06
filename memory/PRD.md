@@ -1583,3 +1583,57 @@ Updated `DEFAULT_INDUCTION_ITEMS` in `/app/backend/server.py` (line 49773) with 
 - Backend: 100% pass rate (9 tests)
 - Frontend: 100% pass rate
 - All 5 issues confirmed fixed
+
+---
+
+## COMPLETED: AI Training Extraction Enhancement (April 2026)
+
+### Problem Statement
+The AI training extraction was missing several CSTF trainings from certificates:
+- Information Governance / GDPR
+- Equality, Diversity and Human Rights
+- Preventing Radicalisation (PREVENT)
+- NHS Conflict Resolution
+- Also: Safeguarding Children should be marked as optional for adult care
+
+### Solution Implemented
+
+#### 1. Enhanced AI Extraction Prompt
+Updated the Gemini Vision prompt in `/app/backend/server.py` to:
+- Explicitly list all 15+ common CSTF courses to look for
+- Instruct AI to scan the ENTIRE certificate, not stop after finding a few
+- Include detailed extraction rules for validity periods
+
+#### 2. Added is_optional Flag
+- Trainings like "Safeguarding Children" now marked as `is_optional: true`
+- Backend auto-detects and sets this flag
+- Frontend shows "Optional" badge for these trainings
+
+#### 3. Improved Regex Fallback Patterns
+Added patterns for previously missed trainings:
+- `Information Governance / GDPR`: r"Information\\s*Governance|Data\\s*Protection|GDPR|..."
+- `Equality & Diversity`: r"Equality.*Diversity|Diversity.*Equality|EDI|Human\\s+Rights|..."
+- `Preventing Radicalisation`: r"Prevent(?:ing)?\\s+(?:Duty|Strategy)?|Radicalisation|WRAP|..."
+- `Conflict Resolution`: r"Conflict\\s*Resolution|Violence\\s+(?:and\\s+)?Aggression|..."
+
+#### 4. Manual Entry Dropdown
+Added `COMMON_CSTF_TRAININGS` dropdown with 15 pre-defined CSTF trainings:
+- Fire Safety (1 year), Moving & Handling (1 year)
+- Safeguarding Adults (3 years), Infection Prevention (1 year)
+- Health & Safety (3 years), Basic Life Support (1 year)
+- Information Governance / GDPR (1 year)
+- Equality, Diversity and Human Rights (3 years)
+- Preventing Radicalisation PREVENT (3 years)
+- NHS Conflict Resolution (3 years)
+- And more...
+
+Auto-calculates expiry date based on selected training's validity period.
+
+### Files Modified
+- `/app/backend/server.py` - Enhanced extraction_prompt, regex patterns, is_optional field
+- `/app/frontend/src/components/training/TrainingCertificateExtractor.js` - Added dropdown, Optional badge
+
+### Testing
+- Backend extraction endpoint working correctly
+- Frontend displays Optional badge for Safeguarding Children
+- Manual entry dropdown functional with auto-expiry calculation

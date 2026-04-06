@@ -1888,6 +1888,53 @@ async def get_unified_employee_status(employee_id, db, user_role="admin"):
   - Import unified_compliance_engine
   - `/unified-progress` → calls `get_unified_employee_status()`
   - `/pre-employment-gates` → calls `get_unified_employee_status()`
+
+---
+
+## COMPLETED: Recruitment Pipeline Unified Blockers Fix (April 2026)
+
+### Problem Statement
+The Recruitment Pipeline page showed TWO SEPARATE blocker lists with DIFFERENT items:
+- "WHAT'S BLOCKING PROMOTION (5 items)" - Reference 1, Reference 2, Interview Record, PoA, Induction
+- "7 Blocking Requirements" - Identity verification, PoA, Reference 1, Reference 2, Staff Health, etc.
+
+Users were confused because the SAME employee showed different blocking items in different panels.
+
+### Root Cause
+The endpoints were using separate calculation logic:
+- `ConsolidatedStatusPanel` → `/unified-progress` + `/pre-employment-gates` (unified) ✅
+- `DualRowComplianceSection` → `/compliance-file` (separate legacy logic) ❌
+
+### Solution
+Updated `/compliance-file` endpoint to get blockers from `get_unified_employee_status()`:
+```python
+# P0 FIX: Get blockers from the SINGLE SOURCE OF TRUTH
+unified_status = await get_unified_employee_status(employee_id, db, ...)
+blocking_rows = [
+    {"message": b.get("reason")} for b in unified_status["blockers"]
+]
+```
+
+Also updated `/compliance-requirements` to populate `safety_blocking_reasons` from unified source.
+
+### Verification
+Both panels now show **IDENTICAL 10 items**:
+1. Reference 1: Not verified
+2. Reference 2: Not verified
+3. Staff Health Questionnaire: Not completed
+4. Proof of Address (2 documents required): Awaiting verification
+5. Manual Handling / Moving & Handling: Not verified
+6. Fire Safety: Not verified
+7. Health & Safety: Not verified
+8. Basic Life Support (BLS): Not verified
+9. Infection Prevention & Control: Not verified
+10. Induction: 1 of 15 Care Certificate standards complete
+
+### Files Modified
+- `/app/backend/server.py`:
+  - `/compliance-file` endpoint - Uses `get_unified_employee_status()` for blockers
+  - `/compliance-requirements` endpoint - Populates `safety_blocking_reasons` from unified source
+
   - `/worker/dashboard` → calls `get_unified_employee_status()`
   - `/compliance-requirements` → includes `unified_progress` in response
   - `calculate_completion_percentage()` → calls `get_unified_employee_status()`

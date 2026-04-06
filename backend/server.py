@@ -20226,6 +20226,13 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             "complete": unified_status["progress"]["completed"],
             "total": unified_status["progress"]["total"],
         }
+        # P0 FIX: Override safety_blocking_reasons with unified blockers
+        # This ensures the "X Blocking Requirements" panel uses the SAME list
+        result["statuses"]["safety_blocking_reasons"] = [
+            b.get("reason", b.get("label", "Unknown")) for b in unified_status["blockers"]
+        ]
+        result["statuses"]["safety_blocking"] = len(unified_status["blockers"]) > 0
+        result["statuses"]["is_work_ready"] = unified_status["is_work_ready"]
     except Exception as e:
         logger.warning(f"Failed to get unified status for {employee_id}: {e}")
         # Keep original calculation as fallback
@@ -42509,22 +42516,40 @@ async def get_compliance_file(
     }
     
     # =========================================================================
-    # CALCULATE SUMMARY
+    # CALCULATE SUMMARY - P0 FIX: Use UNIFIED blockers from unified_compliance_engine
     # =========================================================================
     
-    # Count blocking rows
-    blocking_rows = []
-    for section_key, section in sections.items():
-        if "rows" in section:
-            for row in section["rows"]:
-                if row.get("affects_readiness") and row.get("blocker_text"):
-                    blocking_rows.append({
-                        "section": section_key,
-                        "row_key": row.get("key"),
-                        "message": row.get("blocker_text")
-                    })
+    # P0 FIX: Get blockers from the SINGLE SOURCE OF TRUTH
+    # This ensures "X Blocking Requirements" matches "What's Blocking Promotion"
+    try:
+        unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
+        unified_blockers = unified_status.get("blockers", [])
+        
+        # Convert unified blockers to blocking_rows format
+        blocking_rows = []
+        for b in unified_blockers:
+            blocking_rows.append({
+                "section": b.get("category", "other"),
+                "row_key": b.get("id", "unknown"),
+                "message": b.get("reason", b.get("label", "Unknown blocker")),
+                "severity": b.get("severity", "critical"),
+                "gate": b.get("gate", b.get("id"))
+            })
+    except Exception as e:
+        logger.warning(f"Failed to get unified blockers for compliance-file: {e}")
+        # Fallback to legacy calculation if unified fails
+        blocking_rows = []
+        for section_key, section in sections.items():
+            if "rows" in section:
+                for row in section["rows"]:
+                    if row.get("affects_readiness") and row.get("blocker_text"):
+                        blocking_rows.append({
+                            "section": section_key,
+                            "row_key": row.get("key"),
+                            "message": row.get("blocker_text")
+                        })
     
-    # Count awaiting review rows
+    # Count awaiting review rows (keep legacy behavior for this)
     awaiting_review_rows = []
     for section_key, section in sections.items():
         if "rows" in section:
@@ -42543,7 +42568,7 @@ async def get_compliance_file(
         
         "summary": {
             "blocking_requirements": len(blocking_rows),
-            "blocking_items": blocking_rows[:5],  # Top 5 blockers
+            "blocking_items": blocking_rows,  # All blockers from unified source
             "awaiting_review": len(awaiting_review_rows),
             "total_pending_requests": len([r for r in requests if r.get("status") in ["sent", "clicked", "action_started"]])
         },

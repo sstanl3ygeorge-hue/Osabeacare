@@ -1112,19 +1112,47 @@ export default function EmployeeProfilePage() {
         formData.append('file_label', documentLabel);
       }
       
-      // Use the unified evidence upload endpoint
-      await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'multipart/form-data'
+      // Use special endpoint for application form with AI extraction
+      if (selectedRequirement === 'application_form') {
+        formData.append('auto_extract', 'true');
+        formData.append('notes', documentLabel || 'Admin uploaded existing application form');
+        
+        const response = await axios.post(`${API}/employees/${employeeId}/upload-existing-application`, formData, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        
+        if (response.data.extraction) {
+          toast.success('Application form uploaded & extraction complete!', {
+            duration: 6000,
+            description: `${response.data.extraction.fields?.length || 0} fields extracted. Review them in the Profile section.`
+          });
+        } else if (response.data.extraction_error) {
+          toast.warning('Application form uploaded, but extraction failed', {
+            duration: 5000,
+            description: response.data.extraction_error
+          });
+        } else {
+          toast.success('Application form uploaded successfully');
         }
-      });
+      } else {
+        // Use the unified evidence upload endpoint for other documents
+        await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
+          headers: { 
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        });
+        
+        // POST-UPLOAD FEEDBACK - Clear guidance on next step
+        toast.success('Document uploaded — please review and approve', {
+          duration: 5000,
+          description: 'Check the document is clear and correct, then mark as approved.'
+        });
+      }
       
-      // POST-UPLOAD FEEDBACK - Clear guidance on next step
-      toast.success('Document uploaded — please review and approve', {
-        duration: 5000,
-        description: 'Check the document is clear and correct, then mark as approved.'
-      });
       setUploadDialogOpen(false);
       setSelectedRequirement('');
       setSelectedDocType('');
@@ -7116,6 +7144,18 @@ export default function EmployeeProfilePage() {
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-amber-500" />
                       Proof of Address
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="cv">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-cyan-500" />
+                      CV / Resume
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="application_form">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-pink-500" />
+                      Application Form (PDF)
                     </div>
                   </SelectItem>
                   <SelectItem value="right_to_work_check">

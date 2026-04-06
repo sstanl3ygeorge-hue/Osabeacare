@@ -28,7 +28,7 @@ import { toast } from 'sonner';
 import { 
   FileSignature, CheckCircle, XCircle, Clock, AlertTriangle, 
   ChevronDown, ChevronUp, Mail, Phone, Edit, History, Eye,
-  Download, Send, Loader2, FileText, User, UserCheck
+  Download, Send, Loader2, FileText, User, UserCheck, RotateCcw
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -202,6 +202,52 @@ export default function AgreementRow({
     }
   };
 
+  // Handle unverify submission (for error correction)
+  const handleUnverify = async () => {
+    const reason = prompt('Enter reason for unverifying (min 3 characters):');
+    if (!reason || reason.length < 3) {
+      if (reason) toast.error('Reason must be at least 3 characters');
+      return;
+    }
+    
+    const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
+    if (!submissionId) {
+      // Fallback to legacy unverify
+      if (acknowledgement_data?.id) {
+        setIsProcessing(true);
+        try {
+          await axios.post(
+            `${API}/employees/${employeeId}/agreements/${acknowledgement_data.id}/unverify`,
+            { reason },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          toast.success('Agreement unverified - now pending re-review');
+          if (onRefresh) onRefresh();
+        } catch (err) {
+          toast.error(err.response?.data?.detail || 'Failed to unverify');
+        } finally {
+          setIsProcessing(false);
+        }
+      }
+      return;
+    }
+    
+    setIsProcessing(true);
+    try {
+      await axios.post(
+        `${API}/agreement-submissions/${submissionId}/unverify`,
+        { reason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Agreement unverified - now pending re-review');
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to unverify');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Handle PDF export
   const handleExportPDF = async () => {
     const submissionId = submission_data?.id || acknowledgement_data?.submission_id;
@@ -362,6 +408,21 @@ export default function AgreementRow({
                   data-testid={`export-pdf-${key}`}
                 >
                   <Download className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              
+              {/* Unverify button for verified agreements (error correction) */}
+              {lifecycleStatus === 'verified' && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={(e) => { e.stopPropagation(); handleUnverify(); }}
+                  disabled={isProcessing}
+                  className="h-8 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 rounded-lg"
+                  data-testid={`unverify-${key}`}
+                  title="Unverify agreement (for error correction)"
+                >
+                  {isProcessing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
                 </Button>
               )}
             </>

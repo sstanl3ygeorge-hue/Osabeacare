@@ -15508,6 +15508,143 @@ async def get_employee_extractions(
     return {"extractions": extractions}
 
 
+@api_router.post("/employees/{employee_id}/upload-existing-application")
+async def upload_existing_application_form(
+    employee_id: str,
+    file: UploadFile = File(...),
+    auto_extract: bool = Form(True),
+    notes: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Upload an existing application form PDF for an employee.
+    
+    Use this for employees who already have a filled application form (PDF)
+    rather than making them re-apply through the online form.
+    
+    - Stores the PDF as the 'application_form' document
+    - Optionally triggers AI extraction to populate profile fields
+    - CQC Audit: Tracks who uploaded and when
+    
+    Extracted data goes to REVIEW queue - admin must approve before applying to profile.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Validate file type
+    ext = file.filename.split(".")[-1].lower() if "." in file.filename else ""
+    if ext not in ['pdf', 'jpg', 'jpeg', 'png', 'webp']:
+        raise HTTPException(
+            status_code=400, 
+            detail="Only PDF, JPG, PNG, WEBP files are accepted for application forms"
+        )
+    
+    # Read file
+    contents = await file.read()
+    
+    # Validate file content
+    is_valid, detected_type, error_msg = validate_file_content(contents, file.content_type)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    # Upload to storage
+    first_name = (employee.get('first_name') or 'Unknown').strip()
+    last_name = (employee.get('last_name') or 'Employee').strip()
+    employee_name = f"{first_name}{last_name}".replace(' ', '_')
+    timestamp = datetime.now(timezone.utc).strftime('%d-%m-%Y_%H%M%S')
+    filename = f"{employee_name}_application_form_{timestamp}.{ext}"
+    path = f"{APP_NAME}/documents/{employee_id}/application_form/{filename}"
+    
+    put_object(path, contents, file.content_type or "application/octet-stream")
+    
+    # Check for existing application form document
+    existing = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "requirement_id": "application_form"
+    })
+    
+    doc_id = str(uuid.uuid4())
+    
+    if existing:
+        # Supersede existing document
+        await db.employee_documents.update_one(
+            {"id": existing['id']},
+            {"$set": {"record_status": "superseded", "superseded_at": now, "superseded_by": doc_id}}
+        )
+    
+    # Create new document record
+    doc_data = {
+        "id": doc_id,
+        "employee_id": employee_id,
+        "document_type_id": "application_form",
+        "document_type_name": "Application Form",
+        "category": "4_Recruitment_Record",
+        "requirement_id": "application_form",
+        "requirement_name": "Application Form",
+        "document_label": "Existing Application Form (Admin Uploaded)",
+        "file_url": path,
+        "original_filename": file.filename,
+        "file_type": detected_type,
+        "content_type": file.content_type or "application/pdf",
+        "status": DocumentStatus.UPLOADED,
+        "record_status": "active",
+        "uploaded_by": user['user_id'],
+        "uploaded_by_name": user.get('name', 'Admin'),
+        "uploaded_at": now,
+        "admin_uploaded": True,  # Flag for CQC audit
+        "upload_notes": notes,
+        "version_number": (existing.get('version_number', 0) + 1) if existing else 1,
+        "created_at": now
+    }
+    
+    await db.employee_documents.insert_one(doc_data)
+    
+    await log_audit_action(
+        user['user_id'],
+        "upload_existing_application",
+        "employee_documents",
+        doc_id,
+        {
+            "employee_id": employee_id,
+            "filename": file.filename,
+            "admin_uploaded": True,
+            "notes": notes,
+            "auto_extract": auto_extract
+        }
+    )
+    
+    result = {
+        "document_id": doc_id,
+        "employee_id": employee_id,
+        "status": "uploaded",
+        "message": "Application form uploaded successfully",
+        "extraction": None
+    }
+    
+    # Trigger extraction if requested
+    if auto_extract:
+        try:
+            # Call the extraction endpoint internally
+            extraction_result = await extract_from_application_form(
+                employee_id=employee_id,
+                document_id=doc_id,
+                user=user
+            )
+            result["extraction"] = extraction_result
+            result["message"] = "Application form uploaded and extraction complete. Review extracted fields."
+        except HTTPException as e:
+            result["extraction_error"] = str(e.detail)
+            result["message"] = f"Application form uploaded. Extraction failed: {e.detail}"
+        except Exception as e:
+            result["extraction_error"] = str(e)
+            result["message"] = f"Application form uploaded. Extraction failed: {str(e)}"
+    
+    return result
+
+
 # NOTE: This endpoint MUST be defined BEFORE /extractions/{extraction_id} to avoid route conflict
 @api_router.get("/extractions/pending-review")
 async def get_pending_extraction_reviews_profile(
@@ -35005,6 +35142,53 @@ class AgreementAcknowledgementService:
         return result
     
     @staticmethod
+    async def unverify_agreement(
+        acknowledgement_id: str,
+        unverified_by: str,
+        reason: str
+    ) -> Optional[dict]:
+        """
+        Unverify an agreement acknowledgement (for error correction).
+        CQC Audit: Tracks reason and who unverified for accountability.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        # First get the current state for audit
+        current = await db.agreement_acknowledgements.find_one({"id": acknowledgement_id})
+        if not current:
+            return None
+        
+        result = await db.agreement_acknowledgements.find_one_and_update(
+            {"id": acknowledgement_id},
+            {
+                "$set": {
+                    "verification_status": "pending",
+                    "unverified_at": now,
+                    "unverified_by": unverified_by,
+                    "unverify_reason": reason,
+                    # Clear previous verification
+                    "verified_at": None,
+                    "verified_by": None,
+                    "verification_notes": None
+                }
+            },
+            return_document=True
+        )
+        
+        if result:
+            await log_audit_action(unverified_by, "unverify_agreement", "agreement_acknowledgements", acknowledgement_id, {
+                "status": "unverified",
+                "reason": reason,
+                "previous_status": current.get("verification_status"),
+                "previous_verified_by": current.get("verified_by"),
+                "employee_id": current.get("employee_id"),
+                "agreement_type": current.get("agreement_type")
+            })
+            result.pop("_id", None)
+        
+        return result
+    
+    @staticmethod
     async def get_employee_agreements(employee_id: str) -> dict:
         """Get all agreement acknowledgements for an employee."""
         acknowledgements = await db.agreement_acknowledgements.find(
@@ -39639,6 +39823,34 @@ async def reject_agreement_acknowledgement(
     return result
 
 
+@api_router.post("/employees/{employee_id}/agreements/{acknowledgement_id}/unverify")
+async def unverify_agreement_acknowledgement(
+    employee_id: str,
+    acknowledgement_id: str,
+    reason: str = Body(..., embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Unverify an agreement acknowledgement (for error correction).
+    
+    CQC Audit: This action is logged with reason and reverses a verification.
+    Use when an agreement was verified by accident or needs re-review.
+    """
+    if not reason or len(reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason must be at least 3 characters")
+    
+    result = await AgreementAcknowledgementService.unverify_agreement(
+        acknowledgement_id=acknowledgement_id,
+        unverified_by=user['user_id'],
+        reason=reason.strip()
+    )
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+    
+    return result
+
+
 @api_router.post("/admin/agreements/supersede-admin-contracts")
 async def supersede_admin_signed_contracts(
     user: dict = Depends(require_admin)
@@ -39846,6 +40058,55 @@ async def reject_agreement_submission(
     
     if not result:
         raise HTTPException(status_code=404, detail="Submission not found")
+    
+    return result
+
+
+@api_router.post("/agreement-submissions/{submission_id}/unverify")
+async def unverify_agreement_submission(
+    submission_id: str,
+    reason: str = Body(..., embed=True),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Unverify an agreement submission (for error correction).
+    
+    CQC Audit: Logs reason and reverses verification status.
+    """
+    if not reason or len(reason.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Reason must be at least 3 characters")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get current state for audit
+    current = await db.agreement_submissions.find_one({"id": submission_id})
+    if not current:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    result = await db.agreement_submissions.find_one_and_update(
+        {"id": submission_id},
+        {
+            "$set": {
+                "verification_status": "pending",
+                "unverified_at": now,
+                "unverified_by": user['user_id'],
+                "unverify_reason": reason.strip(),
+                "verified_at": None,
+                "verified_by": None
+            }
+        },
+        return_document=True
+    )
+    
+    if result:
+        await log_audit_action(user['user_id'], "unverify_agreement_submission", "agreement_submissions", submission_id, {
+            "status": "unverified",
+            "reason": reason.strip(),
+            "previous_status": current.get("verification_status"),
+            "employee_id": current.get("employee_id"),
+            "template_id": current.get("template_id")
+        })
+        result.pop("_id", None)
     
     return result
 

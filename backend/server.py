@@ -11791,16 +11791,25 @@ async def get_employee_training_matrix(
     records_by_req = {}
     additional_records = []  # Non-mandatory training records
     
+    # Define mandatory training codes
+    mandatory_codes = {'safeguarding', 'manual_handling', 'infection_control', 
+                      'basic_life_support', 'bls', 'fire_safety', 'health_safety',
+                      'safeguarding_adults', 'safeguarding_children', 'moving_handling'}
+    
     for r in training_records:
-        req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_')
-        is_additional = r.get('is_additional', False)
+        req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_').replace('&', 'and')
+        training_name_lower = r.get('training_name', '').lower()
         
-        # Check if this is a mandatory training
-        mandatory_codes = {'safeguarding', 'manual_handling', 'infection_control', 
-                         'basic_life_support', 'bls', 'fire_safety', 'health_safety'}
-        if req_id in mandatory_codes or not is_additional:
-            records_by_req[req_id] = r
-        else:
+        # Check if this is a mandatory training (either by code or by name pattern)
+        is_mandatory = False
+        for code in mandatory_codes:
+            if code in req_id.lower() or code.replace('_', ' ') in training_name_lower:
+                is_mandatory = True
+                records_by_req[req_id] = r
+                break
+        
+        # If not mandatory, add to additional records
+        if not is_mandatory:
             additional_records.append(r)
     
     # Build enhanced matrix items
@@ -11831,6 +11840,7 @@ async def get_employee_training_matrix(
         
         matrix_item = {
             "code": code,
+            "id": record.get('id') or code,
             "title": item.get('title', code),
             "status": item.get('status', 'missing'),
             "detail": item.get('detail', ''),
@@ -11840,10 +11850,15 @@ async def get_employee_training_matrix(
             "expires_at": item.get('expires_at'),
             "days_until_expiry": item.get('days_until_expiry'),
             "has_evidence": has_evidence,
+            "is_verified": is_verified,
             "verified": is_verified,
+            "verified_by": record.get('verified_by'),
+            "verified_at": record.get('verified_at'),
             "record_id": record.get('id'),
-            "provider": record.get('provider_name'),
-            "validity_days": validity_days
+            "provider": record.get('provider_name') or record.get('provider'),
+            "validity_days": validity_days,
+            "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
+            "certificate_url": record.get('certificate_url')
         }
         matrix_items.append(matrix_item)
         
@@ -11883,17 +11898,22 @@ async def get_employee_training_matrix(
         
         additional_items.append({
             "code": record.get('id', ''),
+            "id": record.get('id', ''),
             "title": record.get('training_name', 'Unknown Training'),
             "status": status,
             "is_required": False,
             "is_additional": True,
             "completed_at": record.get('completion_date') or record.get('completed_at'),
             "expires_at": expires_at,
-            "has_evidence": bool(record.get('certificate_url') or record.get('evidence_files')),
+            "has_evidence": bool(record.get('certificate_url') or record.get('evidence_files') or record.get('certificate_document_id')),
+            "is_verified": record.get('verified', False),
             "verified": record.get('verified', False),
+            "verified_by": record.get('verified_by'),
+            "verified_at": record.get('verified_at'),
             "record_id": record.get('id'),
-            "provider": record.get('provider_name'),
-            "source_document_id": record.get('source_document_id'),
+            "provider": record.get('provider_name') or record.get('provider'),
+            "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
+            "certificate_url": record.get('certificate_url'),
             "needs_review": record.get('needs_review', False)
         })
     

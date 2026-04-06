@@ -1637,3 +1637,38 @@ Auto-calculates expiry date based on selected training's validity period.
 - Backend extraction endpoint working correctly
 - Frontend displays Optional badge for Safeguarding Children
 - Manual entry dropdown functional with auto-expiry calculation
+
+---
+
+## COMPLETED: Training Interface Fixes (April 2026)
+
+### Problem Statement
+The Training interface had several gaps:
+1. "Verified By" column was empty
+2. "Source Certificate" column was empty
+3. "All Qualifications" tab only showed mandatory 6, not all extracted trainings
+4. Induction checklist needed to be 15 items (already fixed)
+
+### Solution Implemented
+
+#### 1. Backend - Training Matrix Endpoint
+Updated `/api/employees/{id}/training/matrix` endpoint in `/app/backend/server.py`:
+- Added `verified_by` and `verified_at` fields to both mandatory and additional items
+- Added `source_document_id` and `certificate_url` fields for certificate linking
+- Fixed mandatory detection logic to use name patterns, not just `is_additional` flag
+- All non-mandatory trainings now appear in `additional_items` list
+
+#### 2. Frontend - AuditReadyTrainingMatrix.js
+Updated `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js`:
+- "Verified" column now shows verifier name under the badge
+- "Source Certificate" column now shows link for both `source_document_id` and `certificate_url`
+- "All Qualifications" tab displays combined mandatory + additional items
+
+### Files Modified
+- `/app/backend/server.py` - Training matrix endpoint now includes verified_by, source_document_id, certificate_url
+- `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js` - Updated columns to display new fields
+
+### Testing Verified
+- Backend: verified_by now populated with admin email
+- Backend: additional_items includes all non-mandatory trainings
+- Induction checklist: Confirmed 15 items

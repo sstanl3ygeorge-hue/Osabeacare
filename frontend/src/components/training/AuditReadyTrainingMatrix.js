@@ -484,7 +484,27 @@ export default function AuditReadyTrainingMatrix({
                       </TableCell>
                       <TableCell>{renderStatusBadge(item.status)}</TableCell>
                       <TableCell>
-                        {item.evidence?.length > 0 ? (
+                        {item.source_document_id ? (
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0 text-blue-600"
+                            onClick={() => onViewCertificate?.(item.source_document_id)}
+                          >
+                            <FileText className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                        ) : item.certificate_url ? (
+                          <a 
+                            href={item.certificate_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-sm text-blue-600 hover:underline"
+                          >
+                            <FileText className="h-3 w-3 mr-1" />
+                            View
+                          </a>
+                        ) : item.evidence?.length > 0 ? (
                           <div className="flex items-center gap-1">
                             <FileText className="h-4 w-4 text-gray-400" />
                             <span className="text-sm text-gray-600">
@@ -515,18 +535,16 @@ export default function AuditReadyTrainingMatrix({
                         )}
                       </TableCell>
                       <TableCell>
-                        {item.verified ? (
-                          item.evidence?.length > 0 || item.has_evidence ? (
-                            <Badge className="bg-green-100 text-green-700 border-green-200">
+                        {item.verified || item.is_verified ? (
+                          <div className="flex flex-col">
+                            <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
                               <CheckCircle className="h-3 w-3 mr-1" />
                               Verified
                             </Badge>
-                          ) : (
-                            <Badge className="bg-amber-100 text-amber-700 border-amber-200" title="Verified but no evidence file">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              No Evidence
-                            </Badge>
-                          )
+                            {item.verified_by && (
+                              <span className="text-xs text-gray-500 mt-1">{item.verified_by}</span>
+                            )}
+                          </div>
                         ) : item.status !== 'missing' ? (
                           <Badge className="bg-amber-100 text-amber-700 border-amber-200">
                             Unverified
@@ -708,6 +726,16 @@ export default function AuditReadyTrainingMatrix({
                             <LinkIcon className="h-3 w-3 mr-1" />
                             View Cert
                           </Button>
+                        ) : item.certificate_url ? (
+                          <a 
+                            href={item.certificate_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-sm text-blue-600 hover:underline"
+                          >
+                            <LinkIcon className="h-3 w-3 mr-1" />
+                            View Cert
+                          </a>
                         ) : (
                           <span className="text-sm text-gray-400">-</span>
                         )}

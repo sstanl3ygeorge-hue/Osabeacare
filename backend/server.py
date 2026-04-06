@@ -8178,33 +8178,38 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # ========== REFERENCES STATUS (P1: Worker Dashboard Sync) ==========
     # Get references for this employee - worker can see status but NOT referee answers
+    # NOTE: Admin uses `reference_X_*` format (e.g., reference_1_name, reference_1_response_data)
     references_status = []
     for ref_num in [1, 2]:
-        prefix = f"referee{ref_num}_"
+        prefix = f"reference_{ref_num}_"
         
-        # Check referee declaration
+        # Check referee declaration - admin stores as reference_X_name, reference_X_email
         referee_name = employee.get(f"{prefix}name", "")
         referee_email = employee.get(f"{prefix}email", "")
         is_declared = bool(referee_name and referee_email)
         
         # Check if request sent
-        request_sent = employee.get(f"{prefix}request_sent", False)
+        request_sent = bool(employee.get(f"{prefix}request_sent_at"))
         request_sent_at = employee.get(f"{prefix}request_sent_at")
         
-        # Check if response received
-        response_received = employee.get(f"{prefix}response_received", False)
+        # Check if response received - check for response_data or response_received_at
+        response_data = employee.get(f"{prefix}response_data")
         response_received_at = employee.get(f"{prefix}response_received_at")
+        response_received = bool(response_data) or bool(response_received_at)
         
-        # Check verification status
-        verification_status = employee.get(f"{prefix}verification_status", "pending")
+        # Check verification status - admin uses reference_X_verified boolean
+        is_verified = employee.get(f"{prefix}verified", False)
         verified_at = employee.get(f"{prefix}verified_at")
-        verified_by_name = employee.get(f"{prefix}verified_by_name")
+        verified_by = employee.get(f"{prefix}verified_by")
+        
+        # Check if rejected
+        is_rejected = employee.get(f"{prefix}rejected", False)
         
         # Determine display status
-        if verification_status == "verified":
+        if is_verified:
             status = "verified"
             status_label = "Verified"
-        elif verification_status == "rejected":
+        elif is_rejected:
             status = "rejected"
             status_label = "Rejected - Please contact admin"
         elif response_received:
@@ -8220,13 +8225,22 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             status = "not_declared"
             status_label = "Not declared"
         
+        # Get verified_by_name from admin users if we have verified_by user ID
+        verified_by_name = None
+        if verified_by:
+            admin_user = await db.users.find_one({"id": verified_by}, {"_id": 0, "first_name": 1, "last_name": 1})
+            if admin_user:
+                verified_by_name = f"{admin_user.get('first_name', '')} {admin_user.get('last_name', '')}".strip()
+        
         references_status.append({
             "reference_number": ref_num,
             "referee_name": referee_name if is_declared else None,  # Only show name if declared
+            "referee_company": employee.get(f"{prefix}company", "") if is_declared else None,
             "status": status,
             "status_label": status_label,
             "verified_at": verified_at,
-            "verified_by_name": verified_by_name
+            "verified_by_name": verified_by_name,
+            "response_received_at": response_received_at
         })
     
     # ========== INDUCTION CHECKLIST STATUS (P1: Worker Dashboard Sync) ==========

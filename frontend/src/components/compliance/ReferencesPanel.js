@@ -7,11 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Textarea } from '../ui/textarea';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
 import { 
   User, Mail, Phone, Building, Briefcase, Clock, CheckCircle, 
   XCircle, Send, AlertTriangle, Loader2, RefreshCw, Calendar,
-  MessageSquare, FileText, Plus, Edit
+  MessageSquare, FileText, Plus, Edit, Shield, Eye
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -46,6 +47,18 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
     position: '',
     relationship: ''
   });
+  
+  // Review Response modal state
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false);
+  const [reviewRefNum, setReviewRefNum] = useState(null);
+  
+  // Verify/Reject state
+  const [verifyDialogOpen, setVerifyDialogOpen] = useState(false);
+  const [verifyRefNum, setVerifyRefNum] = useState(null);
+  const [verifyAction, setVerifyAction] = useState('verify'); // 'verify' or 'reject'
+  const [verifyNotes, setVerifyNotes] = useState('');
+  const [mismatchReason, setMismatchReason] = useState('');
+  const [verifyLoading, setVerifyLoading] = useState(false);
 
   const fetchReferences = async () => {
     try {
@@ -101,6 +114,50 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
     setSelectedRef(refNum);
     setCustomMessage('');
     setSendDialogOpen(true);
+  };
+  
+  // Open review response modal
+  const openReviewDialog = (refNum) => {
+    setReviewRefNum(refNum);
+    setReviewDialogOpen(true);
+  };
+  
+  // Open verify/reject modal
+  const openVerifyDialog = (refNum, action = 'verify') => {
+    setVerifyRefNum(refNum);
+    setVerifyAction(action);
+    setVerifyNotes('');
+    setMismatchReason('');
+    setVerifyDialogOpen(true);
+  };
+  
+  // Handle verify/reject
+  const handleVerifyReference = async () => {
+    setVerifyLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API}/employees/${employeeId}/references/${verifyRefNum}/verify`,
+        {
+          action: verifyAction,
+          notes: verifyNotes,
+          mismatch_reason: mismatchReason || null
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success(verifyAction === 'verify' 
+        ? 'Reference verified successfully' 
+        : 'Reference rejected');
+      setVerifyDialogOpen(false);
+      fetchReferences();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      const msg = error.response?.data?.detail || `Failed to ${verifyAction} reference`;
+      toast.error(msg);
+    } finally {
+      setVerifyLoading(false);
+    }
   };
   
   const openAddDialog = (refNum) => {
@@ -352,7 +409,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
 
                         {/* Actions */}
                         {status !== 'verified' && declared.email && (
-                          <div className="pt-2 border-t">
+                          <div className="pt-2 border-t space-y-2">
                             {status === 'declared' || status === 'sent' ? (
                               <Button
                                 size="sm"
@@ -369,15 +426,39 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                                 {status === 'sent' ? 'Resend Request' : 'Send Request'}
                               </Button>
                             ) : status === 'response_received' ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="w-full rounded-lg"
-                                onClick={() => {/* Open verification drawer */}}
-                              >
-                                <FileText className="h-4 w-4 mr-2" />
-                                Review Response
-                              </Button>
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="w-full rounded-lg"
+                                  onClick={() => openReviewDialog(refNum)}
+                                  data-testid={`review-response-btn-${refNum}`}
+                                >
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  Review Response
+                                </Button>
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    className="flex-1 rounded-lg bg-green-600 hover:bg-green-700"
+                                    onClick={() => openVerifyDialog(refNum, 'verify')}
+                                    data-testid={`verify-reference-btn-${refNum}`}
+                                  >
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                    Verify
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="flex-1 rounded-lg"
+                                    onClick={() => openVerifyDialog(refNum, 'reject')}
+                                    data-testid={`reject-reference-btn-${refNum}`}
+                                  >
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                    Reject
+                                  </Button>
+                                </div>
+                              </>
                             ) : null}
                           </div>
                         )}
@@ -498,7 +579,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
               <Input
                 value={refereeForm.phone}
                 onChange={(e) => setRefereeForm({...refereeForm, phone: e.target.value})}
-                placeholder="e.g., 01onal234 567890"
+                placeholder="e.g., 01234 567890"
               />
             </div>
             
@@ -544,6 +625,151 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                 <Plus className="h-4 w-4 mr-2" />
               )}
               Add Referee
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Review Response Dialog */}
+      <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+        <DialogContent className="sm:max-w-2xl bg-white max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              Reference Response - Referee {reviewRefNum}
+            </DialogTitle>
+          </DialogHeader>
+          {reviewRefNum && references?.references?.[`reference_${reviewRefNum}`]?.response && (
+            <div className="space-y-4 py-4">
+              {/* Referee Info */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h4 className="font-medium mb-2">Referee Information</h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <p><span className="text-gray-500">Name:</span> {references.references[`reference_${reviewRefNum}`].declared?.name}</p>
+                  <p><span className="text-gray-500">Organisation:</span> {references.references[`reference_${reviewRefNum}`].declared?.organisation}</p>
+                  <p><span className="text-gray-500">Email:</span> {references.references[`reference_${reviewRefNum}`].declared?.email}</p>
+                  <p><span className="text-gray-500">Position:</span> {references.references[`reference_${reviewRefNum}`].declared?.job_title}</p>
+                </div>
+              </div>
+              
+              {/* Response Answers */}
+              <div className="space-y-3">
+                <h4 className="font-medium">Reference Answers</h4>
+                {Object.entries(references.references[`reference_${reviewRefNum}`].response).map(([key, value]) => {
+                  // Skip internal fields
+                  if (['submitted_at', 'ip_address', 'user_agent'].includes(key)) return null;
+                  
+                  return (
+                    <div key={key} className="border rounded-lg p-3">
+                      <p className="text-sm font-medium text-gray-600 mb-1">
+                        {key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                      </p>
+                      <p className="text-gray-900">{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : (value || 'N/A')}</p>
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Submission Info */}
+              {references.references[`reference_${reviewRefNum}`].response.submitted_at && (
+                <p className="text-xs text-gray-500 text-center">
+                  Submitted: {formatBackendDate(references.references[`reference_${reviewRefNum}`].response.submitted_at)}
+                </p>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setReviewDialogOpen(false)}>
+              Close
+            </Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700"
+              onClick={() => {
+                setReviewDialogOpen(false);
+                openVerifyDialog(reviewRefNum, 'verify');
+              }}
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Verify Reference
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Verify/Reject Dialog */}
+      <Dialog open={verifyDialogOpen} onOpenChange={setVerifyDialogOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {verifyAction === 'verify' ? (
+                <>
+                  <Shield className="h-5 w-5 text-green-600" />
+                  Verify Reference
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-5 w-5 text-red-600" />
+                  Reject Reference
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {verifyAction === 'verify' 
+                ? 'Confirm that this reference meets NHS employment standards.'
+                : 'Provide a reason for rejecting this reference.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {/* Mismatch Handling */}
+            {verifyAction === 'verify' && (
+              <div>
+                <Label>Organisation Mismatch Reason (if applicable)</Label>
+                <Select value={mismatchReason} onValueChange={setMismatchReason}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select if referee not in employment history" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">No mismatch</SelectItem>
+                    <SelectItem value="earlier_employment">Referee is from earlier employment</SelectItem>
+                    <SelectItem value="personal_reference">Referee is personal/professional reference</SelectItem>
+                    <SelectItem value="changed_employers">Applicant changed employers since declaration</SelectItem>
+                    <SelectItem value="other">Other (specify in notes)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            
+            <div>
+              <Label>{verifyAction === 'verify' ? 'Notes (Optional)' : 'Reason for Rejection *'}</Label>
+              <Textarea
+                value={verifyNotes}
+                onChange={(e) => setVerifyNotes(e.target.value)}
+                placeholder={verifyAction === 'verify' 
+                  ? 'Any additional notes...'
+                  : 'Explain why this reference is being rejected...'}
+                className="mt-1"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVerifyDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleVerifyReference}
+              disabled={verifyLoading || (verifyAction === 'reject' && !verifyNotes)}
+              className={verifyAction === 'verify' ? 'bg-green-600 hover:bg-green-700' : ''}
+              variant={verifyAction === 'reject' ? 'destructive' : 'default'}
+            >
+              {verifyLoading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : verifyAction === 'verify' ? (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              ) : (
+                <XCircle className="h-4 w-4 mr-2" />
+              )}
+              {verifyAction === 'verify' ? 'Verify Reference' : 'Reject Reference'}
             </Button>
           </DialogFooter>
         </DialogContent>

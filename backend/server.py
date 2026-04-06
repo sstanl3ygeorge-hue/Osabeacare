@@ -45391,6 +45391,127 @@ async def review_reference(
     }
 
 
+class ReferenceVerifyRequest(BaseModel):
+    action: str  # 'verify' or 'reject'
+    notes: Optional[str] = None
+    mismatch_reason: Optional[str] = None
+
+
+@api_router.post("/employees/{employee_id}/references/{reference_num}/verify")
+async def verify_or_reject_reference(
+    employee_id: str,
+    reference_num: int,
+    request: ReferenceVerifyRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Verify or reject a reference.
+    
+    Actions:
+    - verify: Mark reference as verified
+    - reject: Mark reference as rejected with reason
+    
+    Mismatch handling:
+    - earlier_employment: Referee is from earlier employment
+    - personal_reference: Referee is personal/professional reference
+    - changed_employers: Applicant changed employers since declaration
+    - other: Other reason (specify in notes)
+    """
+    if reference_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
+    
+    if request.action not in ['verify', 'reject']:
+        raise HTTPException(status_code=400, detail="action must be 'verify' or 'reject'")
+    
+    if request.action == 'reject' and not request.notes:
+        raise HTTPException(status_code=400, detail="Rejection reason (notes) is required")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{reference_num}_"
+    requirement_id = f"reference_{reference_num}"
+    now = datetime.now(timezone.utc).isoformat()
+    
+    if request.action == 'verify':
+        # Verify the reference
+        update_data = {
+            f"{prefix}request_status": "verified",
+            f"{prefix}verified": True,
+            f"{prefix}verified_by": user['user_id'],
+            f"{prefix}verified_at": now,
+            f"{prefix}verification_notes": request.notes,
+        }
+        
+        if request.mismatch_reason:
+            update_data[f"{prefix}mismatch_documented"] = True
+            update_data[f"{prefix}mismatch_reason"] = request.mismatch_reason
+        
+        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+        
+        # Update document record as verified
+        await db.employee_documents.update_one(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {
+                "verified": True, 
+                "verified_by": user['user_id'], 
+                "verified_at": now,
+                "status": "verified"
+            }}
+        )
+        
+        await log_audit_action(user['user_id'], "verify_reference", "employee", employee_id, {
+            "reference_num": reference_num,
+            "action": "verified",
+            "mismatch_reason": request.mismatch_reason,
+            "notes": request.notes,
+            "employee_id": employee_id
+        })
+        
+        return {
+            "status": "success",
+            "message": f"Reference {reference_num} verified",
+            "verified_at": now
+        }
+    else:
+        # Reject the reference
+        update_data = {
+            f"{prefix}request_status": "rejected",
+            f"{prefix}verified": False,
+            f"{prefix}rejected_by": user['user_id'],
+            f"{prefix}rejected_at": now,
+            f"{prefix}rejection_reason": request.notes,
+        }
+        
+        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+        
+        # Update document record as rejected
+        await db.employee_documents.update_one(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {
+                "verified": False, 
+                "status": "rejected",
+                "rejected_by": user['user_id'],
+                "rejected_at": now,
+                "rejection_reason": request.notes
+            }}
+        )
+        
+        await log_audit_action(user['user_id'], "reject_reference", "employee", employee_id, {
+            "reference_num": reference_num,
+            "action": "rejected",
+            "reason": request.notes,
+            "employee_id": employee_id
+        })
+        
+        return {
+            "status": "success",
+            "message": f"Reference {reference_num} rejected",
+            "rejected_at": now
+        }
+
+
 @api_router.post("/employees/{employee_id}/verify-reference-strict")
 async def verify_reference_strict(
     employee_id: str,

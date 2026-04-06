@@ -1450,3 +1450,40 @@ Added sections:
 - Induction section shows 0/15 Complete with all 15 standards
 - Backend API returns `references` and `induction` data correctly
 
+---
+
+## P0 TRAINING EDIT DIALOG FIX (April 2026)
+
+### Issues Fixed
+1. **Training Edit Dialog causing blank page after save**
+   - Root cause: Frontend was calling POST `/api/training-records/{record_id}/correct` with wrong request format
+   - Fix: Changed to use PATCH `/api/employees/{employee_id}/training/{requirement_id}` endpoint
+   - Result: Dialog now saves correctly and stays on same page with success toast
+
+2. **Double `/api/api/` prefix in API calls**
+   - Root cause: `EmployeeProfilePage.js` defined `API = ${BACKEND_URL}/api` but some calls used `${API}/api/...`
+   - Fix: Removed duplicate `/api/` from forms endpoints
+   - Files affected: `EmployeeProfilePage.js` lines 866, 4074, 4100
+
+3. **Training documents endpoint 404**
+   - Root cause: Frontend called `/api/employees/{id}/documents` which doesn't exist
+   - Fix: Changed to `/api/employee-documents?employee_id=${employeeId}`
+   - File: `AuditReadyTrainingMatrix.js` line 141
+
+4. **"Verified" status shown without evidence**
+   - Enhancement: Added warning badge "No Evidence" when training is verified but has no certificate uploaded
+   - Shows CQC compliance warning in TrainingDetailDrawer Evidence tab
+   - Helps admins identify data integrity issues
+
+### Files Modified
+- `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js`
+- `/app/frontend/src/components/training/TrainingDetailDrawer.js`
+- `/app/frontend/src/pages/portal/EmployeeProfilePage.js`
+
+### Testing Verified
+- Edit dialog opens correctly with pre-filled dates
+- Save Changes button works - shows success toast, closes dialog, refreshes data
+- No blank page redirect
+- View button opens drawer correctly
+- Warning badge shows for verified items without evidence
+

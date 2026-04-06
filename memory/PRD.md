@@ -1186,6 +1186,39 @@ April 5, 2026
 
 ---
 
+## P0 Fixes Implemented (April 2026)
+
+### Document Verification Modal (CQC Compliant)
+- Created `DocumentVerificationModal` component with:
+  - Stamp type selection: Original Seen, Copy Verified, Online Check
+  - Proof of check upload (required - screenshot/PDF)
+  - Outcome selection: Verified, Information Present, Not Verified
+  - Reference number (optional)
+  - Notes field
+- Backend endpoint: `POST /api/employees/{id}/documents/verify`
+- Logs all verifications to audit trail
+
+### Action Buttons Replacement
+- Replaced all [Dropdown] buttons with specific action buttons:
+  - Interview Record → [Complete Interview]
+  - Contract Signed → [Locked] (until 100% complete)
+  - DBS, RTW, Identity, POA → [Verify with Evidence]
+  - References → [Review]
+  - Induction Checklist → [Start]
+  - Mandatory Training → [View Training]
+  - Health Questionnaire → [Send to Worker]
+  - NMC Registration → [View]
+
+### Audit Trail Improvements
+- Updated `log_audit_action` to include employee_id in all logs
+- Added user_name field for better readability
+- Fixed employee-specific audit queries
+
+### Route Fixes
+- Added `/portal/login` → `/login` redirect for backwards compatibility
+
+---
+
 ## Known Technical Debt
 - **F811 Duplicate Functions:** 140+ lint errors in `server.py` including duplicate function definitions
 - **server.py Size:** 51,000+ lines needs splitting into modular routers

@@ -1188,7 +1188,7 @@ April 5, 2026
 
 ## P0 Fixes Implemented (April 2026)
 
-### Document Verification Modal (CQC Compliant)
+### Document Verification Modal (CQC Compliant) ✅
 - Created `DocumentVerificationModal` component with:
   - Stamp type selection: Original Seen, Copy Verified, Online Check
   - Proof of check upload (required - screenshot/PDF)
@@ -1198,7 +1198,7 @@ April 5, 2026
 - Backend endpoint: `POST /api/employees/{id}/documents/verify`
 - Logs all verifications to audit trail
 
-### Action Buttons Replacement
+### Action Buttons Replacement ✅
 - Replaced all [Dropdown] buttons with specific action buttons:
   - Interview Record → [Complete Interview]
   - Contract Signed → [Locked] (until 100% complete)
@@ -1209,12 +1209,30 @@ April 5, 2026
   - Health Questionnaire → [Send to Worker]
   - NMC Registration → [View]
 
-### Audit Trail Improvements
-- Updated `log_audit_action` to include employee_id in all logs
-- Added user_name field for better readability
-- Fixed employee-specific audit queries
+### Document Viewer Modal ✅
+- Worker dashboard [View] button opens proper document viewer
+- Shows document preview (PDF/image)
+- Displays verification metadata:
+  - Verified status badge
+  - Stamp type (Original Document Seen, Copy Verified, Online Check)
+  - Upload date
+  - Verifier name and date
+- Actions: Open in New Tab, Download, Close
 
-### Route Fixes
+### Audit Trail Fixed ✅
+- Updated `log_audit_action` to include employee_id in all logs
+- Fixed `get_employee_audit_trail` query to search:
+  - employee_id field (new format)
+  - metadata.employee_id (legacy)
+  - entity_id when entity_type is employee
+- Audit trail now shows 21+ events per employee
+
+### Verification Metadata Display ✅
+- Worker dashboard shows "Verified by Admin User on 4 Apr 2026 • Original Document Seen"
+- Only shows "Verified" when actual verification with stamp exists
+- Backend returns: verification_stamp_label, verified_by_name, verified_at
+
+### Route Fixes ✅
 - Added `/portal/login` → `/login` redirect for backwards compatibility
 
 ---

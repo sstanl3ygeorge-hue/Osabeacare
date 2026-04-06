@@ -31105,10 +31105,11 @@ async def upload_application_cv(file: UploadFile = File(...)):
             storage_path = upload_result.get('path')
             logger.info(f"CV uploaded to Supabase: {storage_path}")
         else:
-            # Fallback to Emergent storage
-            from emergentintegrations.file_storage import upload_file
-            upload_result = upload_file(content, file.filename)
-            file_url = upload_result.get('url') if isinstance(upload_result, dict) else str(upload_result)
+            # Fallback to Emergent object storage
+            storage_path = f"{APP_NAME}/cv/{uuid.uuid4()}/{file.filename}"
+            content_type = file.content_type or 'application/pdf'
+            upload_result = put_object(storage_path, content, content_type)
+            file_url = upload_result.get('url') or f"{STORAGE_URL}/objects/{storage_path}"
             logger.info(f"CV uploaded to Emergent storage")
             
     except Exception as e:
@@ -46965,8 +46966,9 @@ async def submit_form_completion(token: str, form_data: dict):
             # Upload PDF to storage
             pdf_filename = f"{form_type}_{employee_id}_{submission_id[:8]}.pdf"
             try:
-                from emergentintegrations.file_storage import upload_file
-                pdf_url = await upload_file(pdf_bytes, pdf_filename, "application/pdf")
+                storage_path = f"{APP_NAME}/forms/{employee_id}/{pdf_filename}"
+                upload_result = put_object(storage_path, pdf_bytes, "application/pdf")
+                pdf_url = upload_result.get('url') or f"{STORAGE_URL}/objects/{storage_path}"
             except Exception as upload_err:
                 logger.error(f"PDF upload failed: {upload_err}")
                 pdf_url = None
@@ -53526,11 +53528,13 @@ class TrainingIntakeService:
         
         # Use GPT-5.2 Vision to extract multi-training data
         try:
-            from emergentintegrations.llm.chat import Chat
+            from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContent
             
             prompt = """Analyze this training certificate image and extract ALL training courses/modules present.
 
 This certificate may contain MULTIPLE training items (e.g., a mandatory training bundle with several courses).
+
+IMPORTANT: Look carefully at ALL rows in any tables. CSTF certificates often have 10-40+ courses.
 
 For EACH training course found, extract:
 1. course_title: The exact title as shown on the certificate
@@ -53558,20 +53562,49 @@ Return JSON format:
 }
 
 Important:
-- Extract ALL courses, even if there are many on a summary page
+- Extract ALL courses, even if there are 40+ on a summary page
 - Look for course tables, lists, or sections with multiple modules
 - If only one course, set is_multi_training to false
 - Preserve exact course titles for audit purposes"""
 
-            chat = Chat(
-                api_key=EMERGENT_KEY
-            ).with_model("openai", "gpt-5.2")
+            # Download the image using get_object (includes storage key)
+            import base64
             
-            response = await asyncio.to_thread(
-                chat.send_image,
-                prompt,
-                file_url
+            # Extract the storage path from the URL
+            storage_path = file_url.replace(f"{STORAGE_URL}/objects/", "")
+            
+            try:
+                image_bytes, content_type_header = get_object(storage_path)
+            except Exception as download_err:
+                logger.error(f"Failed to get object from storage: {download_err}")
+                return {"status": "error", "message": f"Failed to download image for extraction: {str(download_err)}"}
+            
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+            # Determine content type
+            if 'pdf' in storage_path.lower():
+                content_type = 'application/pdf'
+            elif 'png' in storage_path.lower():
+                content_type = 'image/png'
+            elif 'jpg' in storage_path.lower() or 'jpeg' in storage_path.lower():
+                content_type = 'image/jpeg'
+            else:
+                content_type = content_type_header or 'image/png'
+            
+            chat = LlmChat(
+                api_key=EMERGENT_KEY,
+                session_id=str(uuid.uuid4()),
+                system_message="You are a training certificate analyzer. Extract all training courses from certificates accurately."
             )
+            
+            # Create user message with image
+            user_msg = UserMessage(
+                text=prompt,
+                file_contents=[FileContent(content_type=content_type, file_content_base64=image_base64)]
+            )
+            
+            # The send_message is async, so await it directly
+            response = await chat.send_message(user_msg)
             
             # Parse JSON from response
             import json
@@ -53987,10 +54020,16 @@ async def upload_training_certificate_public(
         try:
             file_content = await file.read()
             file_ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'pdf'
-            file_key = f"training/{employee_id}/{uuid.uuid4()}.{file_ext}"
+            storage_path = f"{APP_NAME}/training/{employee_id}/{uuid.uuid4()}.{file_ext}"
             
-            from emergentintegrations.storage import upload_file_to_storage
-            file_url = upload_file_to_storage(file_key, file_content)
+            content_type = file.content_type or 'application/octet-stream'
+            if file_ext == 'pdf':
+                content_type = 'application/pdf'
+            elif file_ext in ['png', 'jpg', 'jpeg', 'webp']:
+                content_type = f'image/{file_ext.replace("jpg", "jpeg")}'
+            
+            upload_result = put_object(storage_path, file_content, content_type)
+            file_url = upload_result.get('url') or f"{STORAGE_URL}/objects/{storage_path}"
         except Exception as e:
             logger.error(f"File upload failed: {e}")
             continue
@@ -54088,11 +54127,20 @@ async def upload_and_intake_training(
     try:
         file_content = await file.read()
         file_ext = file.filename.split('.')[-1].lower() if '.' in file.filename else 'pdf'
-        file_key = f"training/{employee_id}/{uuid.uuid4()}.{file_ext}"
+        storage_path = f"{APP_NAME}/training/{employee_id}/{uuid.uuid4()}.{file_ext}"
         
-        from emergentintegrations.storage import upload_file_to_storage
-        file_url = upload_file_to_storage(file_key, file_content)
+        # Get content type
+        content_type = file.content_type or 'application/octet-stream'
+        if file_ext == 'pdf':
+            content_type = 'application/pdf'
+        elif file_ext in ['png', 'jpg', 'jpeg', 'webp']:
+            content_type = f'image/{file_ext.replace("jpg", "jpeg")}'
+        
+        # Upload using put_object
+        result = put_object(storage_path, file_content, content_type)
+        file_url = result.get("url") or f"{STORAGE_URL}/objects/{storage_path}"
     except Exception as e:
+        logger.error(f"Training certificate upload failed: {e}")
         raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
     
     # Create document record

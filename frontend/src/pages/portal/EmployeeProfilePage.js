@@ -7162,26 +7162,14 @@ export default function EmployeeProfilePage() {
                 File <span className="text-red-500">*</span>
               </Label>
               <FileUploaderInline
-                onUpload={(file) => setUploadFile(file)}
-                accept=".pdf,.jpg,.jpeg,.png,.webp"
-                maxSize={10 * 1024 * 1024}
-                className="border-2 border-dashed rounded-xl p-4"
+                onFileSelect={(file) => setUploadFile(file)}
+                selectedFile={uploadFile}
+                onClear={() => setUploadFile(null)}
+                acceptedTypes={['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp']}
+                maxSizeBytes={10 * 1024 * 1024}
+                placeholder="Choose file or drag here"
+                className="border-2 border-dashed rounded-xl"
               />
-              {uploadFile && (
-                <div className="flex items-center gap-2 p-2 bg-green-50 rounded-lg border border-green-200">
-                  <FileText className="h-4 w-4 text-green-600" />
-                  <span className="text-sm text-green-700 truncate flex-1">{uploadFile.name}</span>
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="sm"
-                    onClick={() => setUploadFile(null)}
-                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
-                  >
-                    <XCircle className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
               <p className="text-xs text-gray-500">
                 Accepted: PDF, JPG, PNG, WebP (max 10MB)
               </p>

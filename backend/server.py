@@ -20173,51 +20173,66 @@ async def apply_verification_stamp(
                 "reference_code": payload.notes if payload.notes else None
             }
             
-            # Download the original file
-            import httpx
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(file_url)
-                if response.status_code == 200:
-                    original_bytes = response.content
-                    content_type = response.headers.get("content-type", "").lower()
+            # Download the original file - use get_object for storage files
+            original_bytes = None
+            content_type = None
+            
+            try:
+                # For storage paths (osabea-care/...), use get_object
+                if file_url.startswith("osabea-care/") or not file_url.startswith(("http://", "https://")):
+                    original_bytes, content_type = get_object(file_url)
+                else:
+                    # For full URLs, use httpx
+                    import httpx
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        response = await client.get(file_url)
+                        if response.status_code == 200:
+                            original_bytes = response.content
+                            content_type = response.headers.get("content-type", "").lower()
+            except Exception as fetch_err:
+                logger.error(f"Failed to fetch original file for stamping {doc_id}: {fetch_err}")
+                original_bytes = None
+            
+            if original_bytes:
+                content_type = (content_type or "").lower()
+                
+                # Determine file type and apply appropriate stamp
+                stamped_bytes = None
+                file_ext = None
+                
+                if "pdf" in content_type or file_url.lower().endswith(".pdf"):
+                    stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+                    file_ext = "pdf"
+                elif any(img_type in content_type for img_type in ["image/", "png", "jpg", "jpeg", "webp"]):
+                    # Determine original format
+                    if "png" in content_type or file_url.lower().endswith(".png"):
+                        original_format = "PNG"
+                        file_ext = "png"
+                    elif "jpeg" in content_type or "jpg" in content_type or file_url.lower().endswith((".jpg", ".jpeg")):
+                        original_format = "JPEG"
+                        file_ext = "jpg"
+                    else:
+                        original_format = "PNG"
+                        file_ext = "png"
+                    stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+                
+                if stamped_bytes:
+                    # Upload stamped file to storage
+                    import uuid as uuid_module
+                    stamped_filename = f"stamped_{doc_id}_{uuid_module.uuid4().hex[:8]}.{file_ext}"
                     
-                    # Determine file type and apply appropriate stamp
-                    stamped_bytes = None
-                    file_ext = None
+                    # Use Supabase storage if available, otherwise store locally
+                    from supabase_storage import upload_file_to_supabase
+                    stamped_file_url = await upload_file_to_supabase(
+                        stamped_bytes, 
+                        stamped_filename, 
+                        f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+                    )
                     
-                    if "pdf" in content_type or file_url.lower().endswith(".pdf"):
-                        stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
-                        file_ext = "pdf"
-                    elif any(img_type in content_type for img_type in ["image/", "png", "jpg", "jpeg", "webp"]):
-                        # Determine original format
-                        if "png" in content_type or file_url.lower().endswith(".png"):
-                            original_format = "PNG"
-                            file_ext = "png"
-                        elif "jpeg" in content_type or "jpg" in content_type or file_url.lower().endswith((".jpg", ".jpeg")):
-                            original_format = "JPEG"
-                            file_ext = "jpg"
-                        else:
-                            original_format = "PNG"
-                            file_ext = "png"
-                        stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
-                    
-                    if stamped_bytes:
-                        # Upload stamped file to storage
-                        import uuid as uuid_module
-                        stamped_filename = f"stamped_{doc_id}_{uuid_module.uuid4().hex[:8]}.{file_ext}"
-                        
-                        # Use Supabase storage if available, otherwise store locally
-                        from supabase_storage import upload_file_to_supabase
-                        stamped_file_url = await upload_file_to_supabase(
-                            stamped_bytes, 
-                            stamped_filename, 
-                            f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
-                        )
-                        
-                        if stamped_file_url:
-                            update_data["stamped_file_url"] = stamped_file_url
-                            update_data["stamp_burned_at"] = now
-                            logger.info(f"Visual stamp burned into document {doc_id}: {stamped_file_url}")
+                    if stamped_file_url:
+                        update_data["stamped_file_url"] = stamped_file_url
+                        update_data["stamp_burned_at"] = now
+                        logger.info(f"Visual stamp burned into document {doc_id}: {stamped_file_url}")
         except Exception as e:
             stamp_burn_error = str(e)
             logger.error(f"Failed to burn visual stamp into document {doc_id}: {e}")

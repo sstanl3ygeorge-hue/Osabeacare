@@ -25619,17 +25619,17 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
         induction_items = induction_record.get("items", [])
         # Only count mandatory items for adults (exclude optional Safeguarding Children)
         mandatory_items = [i for i in induction_items if i.get("mandatory", True)]
-        total_induction = len(mandatory_items) if mandatory_items else 15
-        completed_induction = len([i for i in induction_items if i.get("status") == "completed" and i.get("mandatory", True)])
+        total_induction = len(mandatory_items)
+        completed_induction = len([i for i in mandatory_items if i.get("status") == "completed"])
         categories["induction"]["total"] = total_induction
         categories["induction"]["completed"] = completed_induction
         
         if completed_induction < total_induction:
             blockers.append(f"Induction ({completed_induction}/{total_induction} Care Certificate standards)")
     else:
-        # No induction record - use default 15 mandatory Care Certificate Standards
+        # No induction record - use default 14 mandatory Care Certificate Standards
         # (excludes optional Safeguarding Children)
-        categories["induction"]["total"] = 14  # 15 minus 1 optional (Safeguarding Children)
+        categories["induction"]["total"] = 14
         categories["induction"]["completed"] = 0
         blockers.append("Induction Checklist (0/14 mandatory Care Certificate standards)")
     

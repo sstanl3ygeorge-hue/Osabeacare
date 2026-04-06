@@ -55103,6 +55103,11 @@ async def add_manual_training_record(
 # ================= END TRAINING INTAKE WIZARD ====================
 
 
+# Include verification routes
+from routes.verification_routes import router as verification_router, set_db as set_verification_db
+set_verification_db(db)
+api_router.include_router(verification_router)
+
 # Include router AFTER all routes are defined
 app.include_router(api_router)
 

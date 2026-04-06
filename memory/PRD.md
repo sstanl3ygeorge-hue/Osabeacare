@@ -2296,4 +2296,59 @@ Added "View Full Response" button to Reference cards in `/app/frontend/src/compo
 - References show as 2/2 complete when both referee responses are submitted
 - "View Full Response" modal displays all referee answers in organized format
 
+---
+
+## IN PROGRESS: Smart Verification System (April 2026)
+
+### Architecture
+Implements dual-evidence model for CQC audit-ready compliance:
+- **Evidence Tab**: Employee uploads (passport, utility bill, DBS cert)
+- **Verification Tab**: Admin uploads/generates verification proof
+- **Compliance %**: Only increases when VERIFICATION is APPROVED (not just evidence upload)
+
+### Backend Components Built
+1. **`/app/backend/routes/verification_routes.py`** - New modular router:
+   - `GET /api/verification/checklist-template/{requirement_id}` - Get checklist template
+   - `POST /api/verification/submit-checklist` - Submit admin verification checklist
+   - `POST /api/verification/approve` - Approve verification (counts toward compliance)
+   - `POST /api/verification/request-amendment` - Request employee to re-upload
+   - `GET /api/verification/employee/{id}/status` - Get verification status
+   - `POST /api/verification/reopen/{id}` - Reopen approved verification
+   - `POST /api/verification/extract-document/{id}` - AI extraction with Gemini
+
+2. **Updated `/app/backend/unified_compliance_engine.py`**:
+   - Fetches `verification_documents` collection
+   - Checks for `verification_approved: true` before counting as complete
+   - Updated blocker messages: "Evidence uploaded - awaiting admin verification"
+
+### Frontend Components Built
+1. **`VerificationChecklistModal.js`** - Admin completes per-document-type checklist:
+   - Identity: photo match, security features, expiry, details match
+   - POA: address match, within 6 months, acceptable type, name match
+   - RTW: share code verified, right to work confirmed
+   - DBS: update service checked, certificate number matches
+   - Auto-approves on submit for streamlined workflow
+
+2. **`AmendmentRequestDialog.js`** - Request employee to fix document:
+   - Reason codes: address_mismatch, document_too_old, name_mismatch, unclear, wrong_type, other
+   - Creates amendment request record for tracking
+   - Employee receives notification with specific reason
+
+3. **Updated `UploadRequirementCard.js`**:
+   - Added "Verify" button (opens checklist modal)
+   - Added "Amend" button (opens amendment dialog)
+
+### AI Features (Gemini Integration)
+- Extracts name, address, document date from uploaded documents
+- Validates against employee profile:
+  - Name match confidence score
+  - Address match (postcode comparison)
+  - Date validity (within 6 months for POA)
+
+### Pending Work
+- [ ] PDF generation with dual stamping (evidence + verification)
+- [ ] Email notifications for amendment requests
+- [ ] Worker dashboard amendment re-upload flow
+- [ ] Visual stamp embedding on PDF documents
+
 

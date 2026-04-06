@@ -13,6 +13,8 @@ import RequirementSectionShell from './RequirementSectionShell';
 import RequirementActionBar from './RequirementActionBar';
 import EvidenceReviewDialog from './EvidenceReviewDialog';
 import VerificationStampDialog from './VerificationStampDialog';
+import VerificationChecklistModal from './VerificationChecklistModal';
+import AmendmentRequestDialog from './AmendmentRequestDialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 
 // eslint-disable-next-line no-unused-vars
@@ -55,6 +57,7 @@ export default function UploadRequirementCard({
   onViewHistory,
   onPreviewFile,
   employeeId,
+  employeeName,
   onRefresh,
   isAuditor = false,
   // RTW Status - additive, non-breaking prop
@@ -73,6 +76,18 @@ export default function UploadRequirementCard({
   
   // Verification Stamp Dialog state
   const [stampDialog, setStampDialog] = useState({
+    isOpen: false,
+    file: null
+  });
+  
+  // NEW: Smart Verification Checklist Modal state
+  const [checklistModal, setChecklistModal] = useState({
+    isOpen: false,
+    file: null
+  });
+  
+  // NEW: Amendment Request Dialog state
+  const [amendmentDialog, setAmendmentDialog] = useState({
     isOpen: false,
     file: null
   });
@@ -368,6 +383,36 @@ export default function UploadRequirementCard({
                           >
                             <ClipboardCheck className="h-3 w-3 mr-1" />
                             Review
+                          </Button>
+                        )}
+                        
+                        {/* NEW: Complete Verification button - Smart Verification System */}
+                        {!isAuditor && file.status !== 'rejected' && !file.verification_stamp && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs text-green-600 border-green-200 hover:bg-green-50"
+                            onClick={() => setChecklistModal({ isOpen: true, file })}
+                            title="Complete verification checklist"
+                            data-testid={`${key}-verify-checklist-${file.file_id || file.id}`}
+                          >
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Verify
+                          </Button>
+                        )}
+                        
+                        {/* NEW: Request Amendment button */}
+                        {!isAuditor && file.status !== 'rejected' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-yellow-600 hover:text-yellow-700 hover:bg-yellow-50"
+                            onClick={() => setAmendmentDialog({ isOpen: true, file })}
+                            title="Request employee to re-upload"
+                            data-testid={`${key}-request-amendment-${file.file_id || file.id}`}
+                          >
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            Amend
                           </Button>
                         )}
                         
@@ -1455,6 +1500,38 @@ export default function UploadRequirementCard({
         requirementLabel={label}
         onStampApplied={(stampType) => {
           // Refresh parent data after stamp applied
+          if (onRefresh) {
+            onRefresh();
+          }
+        }}
+      />
+      
+      {/* NEW: Smart Verification Checklist Modal */}
+      <VerificationChecklistModal
+        isOpen={checklistModal.isOpen}
+        onClose={() => setChecklistModal({ isOpen: false, file: null })}
+        requirementId={key}
+        employeeId={employeeId}
+        employeeName={employeeName || 'Employee'}
+        evidenceDocument={checklistModal.file}
+        aiExtraction={checklistModal.file?.ai_extraction}
+        onVerificationComplete={() => {
+          setChecklistModal({ isOpen: false, file: null });
+          if (onRefresh) {
+            onRefresh();
+          }
+        }}
+      />
+      
+      {/* NEW: Amendment Request Dialog */}
+      <AmendmentRequestDialog
+        isOpen={amendmentDialog.isOpen}
+        onClose={() => setAmendmentDialog({ isOpen: false, file: null })}
+        documentId={amendmentDialog.file?.file_id || amendmentDialog.file?.id}
+        documentName={label}
+        employeeName={employeeName || 'Employee'}
+        onAmendmentRequested={() => {
+          setAmendmentDialog({ isOpen: false, file: null });
           if (onRefresh) {
             onRefresh();
           }

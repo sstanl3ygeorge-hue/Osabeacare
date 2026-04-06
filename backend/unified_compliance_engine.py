@@ -546,6 +546,19 @@ async def get_unified_employee_status(
     dbs_check = await db.dbs_checks.find_one({"employee_id": emp_id, "status": "verified"}, {"_id": 0})
     rtw_check = await db.rtw_checks.find_one({"employee_id": emp_id, "status": "verified"}, {"_id": 0})
     
+    # Get verification documents (NEW: Smart Verification System)
+    verification_docs = await db.verification_documents.find({
+        "employee_id": emp_id
+    }, {"_id": 0}).to_list(50)
+    
+    # Build a map of approved verifications by requirement_id
+    approved_verifications = {}
+    for vdoc in verification_docs:
+        if vdoc.get("verification_approved"):
+            req_id = vdoc.get("requirement_id")
+            if req_id:
+                approved_verifications[req_id] = vdoc
+    
     # ==========================================================================
     # INITIALIZE TRACKING
     # ==========================================================================
@@ -591,11 +604,19 @@ async def get_unified_employee_status(
         # Find matching documents
         matching_docs = find_docs_for_requirement(req_id)
         
-        # Count verified documents with stamps
+        # NEW: Check for approved verification documents FIRST
+        # This is the primary source of truth for CQC compliance
+        has_approved_verification = req_id in approved_verifications
+        
+        # Count verified documents with stamps (fallback for legacy data)
         verified_count = 0
         for doc in matching_docs:
             if is_document_verified_with_stamp(doc):
                 verified_count += 1
+        
+        # If we have an approved verification, that counts as 1 verified
+        if has_approved_verification:
+            verified_count = max(verified_count, 1)
         
         # Special handling for DBS and RTW from dedicated collections
         if req_id == "dbs" and dbs_check:
@@ -606,6 +627,16 @@ async def get_unified_employee_status(
         is_complete = verified_count >= min_count
         checks[req_id] = is_complete
         
+        # Determine current status for UI
+        if has_approved_verification:
+            verification_status = "verified"
+        elif req_id in [v.get("requirement_id") for v in verification_docs if v.get("status") == "pending_approval"]:
+            verification_status = "pending_approval"
+        elif len(matching_docs) > 0:
+            verification_status = "evidence_uploaded"
+        else:
+            verification_status = "not_started"
+        
         item_data = {
             "id": req_id,
             "name": get_clear_label(req_id),
@@ -614,6 +645,8 @@ async def get_unified_employee_status(
             "required_count": min_count,
             "has_upload": len(matching_docs) > 0,
             "requires_stamp": requires_stamp,
+            "has_approved_verification": has_approved_verification,
+            "verification_status": verification_status,
         }
         
         if include_details:
@@ -624,11 +657,18 @@ async def get_unified_employee_status(
         if is_complete:
             categories["documents"]["completed"] += 1
         else:
-            # Add to blockers with clear label (NOT email, NOT "U/S")
-            if len(matching_docs) > 0 and verified_count < min_count:
-                blocker_msg = f"{get_clear_label(req_id)}: Awaiting verification"
+            # Add to blockers with clear label - NEW: Updated messages for verification model
+            if has_approved_verification:
+                continue  # Should not happen, but skip if approved
+            elif req_id in [v.get("requirement_id") for v in verification_docs if v.get("status") == "pending_approval"]:
+                blocker_msg = f"{get_clear_label(req_id)}: Verification pending approval"
+                severity = "pending"
+            elif len(matching_docs) > 0:
+                blocker_msg = f"{get_clear_label(req_id)}: Evidence uploaded - awaiting admin verification"
+                severity = "pending"
             else:
-                blocker_msg = f"{get_clear_label(req_id)}: Not uploaded"
+                blocker_msg = f"{get_clear_label(req_id)}: No evidence uploaded"
+                severity = "critical"
             
             blockers.append({
                 "id": req_id,
@@ -637,7 +677,9 @@ async def get_unified_employee_status(
                 "reason": blocker_msg,
                 "category": "documents",
                 "has_upload": len(matching_docs) > 0,
-                "severity": "pending" if len(matching_docs) > 0 else "critical"
+                "has_verification": req_id in [v.get("requirement_id") for v in verification_docs],
+                "verification_status": verification_status,
+                "severity": severity
             })
     
     # ==========================================================================

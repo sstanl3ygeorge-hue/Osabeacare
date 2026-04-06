@@ -392,6 +392,7 @@ export default function DualRowComplianceSection({
           onViewHistory={() => handleViewHistory(sectionKey, section.title)}
           onPreviewFile={onPreviewFile}
           employeeId={employeeId}
+          employeeName={employeeName}
           onRefresh={handleRefresh}
           isAuditor={isAuditor}
           rtwStatus={rtwStatus}

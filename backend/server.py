@@ -8945,7 +8945,7 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
 
 @api_router.get("/worker/forms/{form_id}")
 async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_worker)):
-    """Get saved form data for resuming"""
+    """Get saved form data for resuming, with auto-fill from employee profile"""
     employee_id = worker.get("employee_id")
     
     if form_id not in WORKER_FORM_DEFINITIONS:
@@ -8972,11 +8972,101 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
         "form_id": form_id
     }, {"_id": 0})
     
+    # Get the actual form definition with sections from FORM_BASED_REQUIREMENTS
+    form_def_with_sections = FORM_BASED_REQUIREMENTS.get(form_id)
+    
+    # Build auto-fill data from employee profile
+    auto_fill_data = {}
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    
+    if employee and form_def_with_sections:
+        # Helper functions for building composite values
+        def build_full_address():
+            parts = [
+                employee.get("address_line_1"),
+                employee.get("address_line_2"),
+                employee.get("city"),
+                employee.get("county"),
+                employee.get("postcode"),
+                employee.get("country")
+            ]
+            return ", ".join(filter(None, parts))
+        
+        def build_full_name():
+            parts = [
+                employee.get("first_name"),
+                employee.get("middle_name"),
+                employee.get("last_name")
+            ]
+            return " ".join(filter(None, parts))
+        
+        def build_nok_address():
+            parts = [
+                employee.get("next_of_kin_address_line_1") or employee.get("next_of_kin_address"),
+                employee.get("next_of_kin_city"),
+                employee.get("next_of_kin_postcode")
+            ]
+            return ", ".join(filter(None, parts))
+        
+        # Map of auto_fill keys to values
+        field_value_map = {
+            "full_name": build_full_name(),
+            "first_name": employee.get("first_name"),
+            "middle_name": employee.get("middle_name"),
+            "last_name": employee.get("last_name"),
+            "title": employee.get("title"),
+            "date_of_birth": employee.get("date_of_birth"),
+            "job_title": employee.get("role"),
+            "role": employee.get("role"),
+            "full_address": build_full_address(),
+            "address": build_full_address(),
+            "address_line_1": employee.get("address_line_1"),
+            "address_line_2": employee.get("address_line_2"),
+            "city": employee.get("city"),
+            "county": employee.get("county"),
+            "postcode": employee.get("postcode"),
+            "country": employee.get("country"),
+            "phone": employee.get("phone"),
+            "contact_number": employee.get("phone"),
+            "phone_primary": employee.get("phone"),
+            "email": employee.get("email"),
+            "ni_number": employee.get("ni_number"),
+            "start_date": employee.get("start_date"),
+            "next_of_kin_name": employee.get("next_of_kin_name") or employee.get("emergency_contact_name"),
+            "emergency_name": employee.get("next_of_kin_name") or employee.get("emergency_contact_name"),
+            "next_of_kin_relationship": employee.get("next_of_kin_relationship") or employee.get("emergency_contact_relationship"),
+            "emergency_relationship": employee.get("next_of_kin_relationship") or employee.get("emergency_contact_relationship"),
+            "next_of_kin_phone": employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone"),
+            "emergency_phone": employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone"),
+            "next_of_kin_address": build_nok_address(),
+            "emergency_address": build_nok_address(),
+            "has_driving_licence": "Yes" if employee.get("has_driving_licence") else ("No" if employee.get("has_driving_licence") == False else None),
+            "driving_licence_number": employee.get("driving_licence_number"),
+            "has_own_vehicle": "Yes" if employee.get("has_own_vehicle") else ("No" if employee.get("has_own_vehicle") == False else None),
+            "vehicle_registration": employee.get("vehicle_registration"),
+            "today": datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+        }
+        
+        # Build auto-fill data by matching auto_fill keys in form definition
+        for section in form_def_with_sections.get("sections", []):
+            for field in section.get("fields", []):
+                field_id = field.get("id")
+                auto_fill_key = field.get("auto_fill")
+                
+                if auto_fill_key and auto_fill_key in field_value_map:
+                    value = field_value_map[auto_fill_key]
+                    if value is not None and value != "":
+                        auto_fill_data[field_id] = value
+    
+    # Merge: saved progress takes precedence over auto-fill
+    merged_data = {**auto_fill_data, **(progress.get("data", {}) if progress else {})}
+    
     return {
         "form_id": form_id,
-        "form_definition": WORKER_FORM_DEFINITIONS[form_id],
+        "form_definition": form_def_with_sections or WORKER_FORM_DEFINITIONS[form_id],
         "status": "in_progress" if progress else "not_started",
-        "data": progress.get("data", {}) if progress else {},
+        "data": merged_data,
+        "auto_fill_data": auto_fill_data,  # Return separately so frontend knows what was auto-filled
         "last_saved": progress.get("last_saved") if progress else None,
         "can_edit": True
     }

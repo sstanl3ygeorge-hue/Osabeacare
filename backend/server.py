@@ -8085,13 +8085,17 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # ========== UNIFIED PROGRESS (P0 FIX: Single Source of Truth) ==========
     # Use get_unified_employee_status() - SAME function as Admin views
     # CIA Triad: Integrity (same data), Availability (filtered for worker role)
+    unified_training_items = []
     try:
-        unified_status = await get_unified_employee_status(employee_id, db, user_role="worker")
+        unified_status = await get_unified_employee_status(employee_id, db, user_role="worker", include_details=True)
         progress_percentage = unified_status["progress"]["percentage"]
         total_required = unified_status["progress"]["total"]
         total_completed = unified_status["progress"]["completed"]
         unified_blockers = unified_status.get("blockers", [])
         has_blockers = len(unified_blockers) > 0 or not contract_signed
+        
+        # P0 FIX: Use unified engine's training data for consistency
+        unified_training_items = unified_status.get("category_details", {}).get("training", {}).get("items", [])
     except Exception as e:
         logger.error(f"Unified progress failed for {employee_id}: {e}")
         # Fallback to original calculation if unified progress fails
@@ -8102,6 +8106,22 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         progress_percentage = round((total_completed / total_required) * 100) if total_required > 0 else 0
         has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
         unified_blockers = []
+    
+    # P0 FIX: Override all_mandatory_trainings with unified engine data if available
+    # This ensures Worker Portal shows SAME data as Admin view
+    if unified_training_items:
+        all_mandatory_trainings = []
+        for item in unified_training_items:
+            # Map unified engine format to worker dashboard format
+            all_mandatory_trainings.append({
+                "id": item.get("id"),
+                "name": item.get("name"),
+                "status": "complete" if item.get("completed") else ("expired" if "expired" in (item.get("invalid_reason") or "").lower() else "missing"),
+                "completion_date": None,  # Not tracked in unified
+                "expiry_date": item.get("expiry_date"),
+                "verified": item.get("verified", False),
+                "record_id": None
+            })
     
     # Determine work readiness status
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
@@ -25522,7 +25542,7 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
     - CQC Level: Audit-ready with verifier names
     """
     # P0 FIX: SINGLE SOURCE OF TRUTH - unified_compliance_engine
-    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin")
+    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=True)
     
     if unified_status.get("error"):
         raise HTTPException(status_code=404, detail=unified_status["error"])
@@ -25547,6 +25567,7 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
         "completed_requirements": unified_status["progress"]["completed"],
         "total_requirements": unified_status["progress"]["total"],
         "categories": unified_status["categories"],
+        "category_details": unified_status.get("category_details", {}),  # Include full details
         "blockers": [b["reason"] for b in unified_status["blockers"]],  # String list for compatibility
         "blocker_details": unified_status["blockers"],  # Full blocker objects with severity
         "is_work_ready": unified_status["is_work_ready"],

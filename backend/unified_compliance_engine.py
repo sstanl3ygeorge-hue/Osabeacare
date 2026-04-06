@@ -151,6 +151,24 @@ def is_document_verified_with_stamp(doc: dict) -> bool:
     return has_valid_stamp or (has_verified_status and verified_flag)
 
 
+def normalize_training_name(name: str) -> str:
+    """
+    Normalize training name for matching purposes.
+    Removes special characters (&, /, -, etc.) and extra spaces.
+    This ensures "Health & Safety" matches "health safety".
+    """
+    if not name:
+        return ""
+    # Convert to lowercase
+    name = name.lower()
+    # Replace common separators with space
+    for char in ['&', '/', '-', ',', '(', ')', ':']:
+        name = name.replace(char, ' ')
+    # Collapse multiple spaces and strip
+    name = ' '.join(name.split())
+    return name
+
+
 def is_training_valid(training: dict) -> Tuple[bool, Optional[str]]:
     """
     Check if training is valid (verified and not expired).
@@ -457,16 +475,23 @@ async def get_unified_employee_status(
         })
     
     # ==========================================================================
-    # CHECK 3: MANDATORY TRAINING (6 items)
+    # CHECK 3: MANDATORY TRAINING (8 items)
     # ==========================================================================
     
-    # Build training lookup by name
+    # Build training lookup by NORMALIZED name (fixes "Health & Safety" vs "health safety" mismatch)
     training_by_name = {}
     for t in all_training:
         t_name = (t.get("training_name") or t.get("course_name") or "").lower()
         t_type = (t.get("training_type") or "").lower()
-        training_by_name[t_name] = t
-        training_by_name[t_type] = t
+        # Only add non-empty keys
+        if t_name:
+            training_by_name[t_name] = t
+        if t_type:
+            training_by_name[t_type] = t
+        # Also store by normalized name for better matching
+        normalized = normalize_training_name(t_name)
+        if normalized:
+            training_by_name[normalized] = t
     
     verified_training = {}  # Track which trainings are verified (for induction sync)
     
@@ -475,11 +500,32 @@ async def get_unified_employee_status(
         t_name = training_req["name"]
         induction_sync_id = training_req.get("induction_sync")
         
-        # Find matching training record
+        # Find matching training record using normalized names
         matched_training = None
-        search_terms = [t_id, t_id.replace("_", " "), t_id.replace("_", "")]
+        
+        # Generate search terms (normalized)
+        search_terms = [
+            t_id,
+            t_id.replace("_", " "),
+            t_id.replace("_", ""),
+            normalize_training_name(t_name),
+            normalize_training_name(t_id.replace("_", " ")),
+        ]
+        # Remove duplicates and empty strings
+        search_terms = [s for s in dict.fromkeys(search_terms) if s]
+        
         for term in search_terms:
             for key, training in training_by_name.items():
+                # Skip empty keys
+                if not key:
+                    continue
+                # Normalize the key for comparison
+                normalized_key = normalize_training_name(key)
+                # Check both directions with normalized comparison
+                if term in normalized_key or normalized_key in term:
+                    matched_training = training
+                    break
+                # Also check exact key match
                 if term in key or key in term:
                     matched_training = training
                     break
@@ -893,6 +939,7 @@ def filter_for_worker(data: dict) -> dict:
         "blockers": data.get("blockers"),  # Same blockers so worker knows what to do
         "blocker_count": data.get("blocker_count"),
         "categories": data.get("categories"),
+        "category_details": data.get("category_details"),  # Worker needs this for dashboard sync
         "is_work_ready": data.get("is_work_ready"),
         # Don't expose detailed checks or internal gates to workers
     }

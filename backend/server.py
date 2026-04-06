@@ -7265,6 +7265,10 @@ async def exchange_session(session_id: str = Header(None, alias="X-Session-ID"))
 class WorkerLoginRequest(BaseModel):
     email: EmailStr
 
+class WorkerPasswordLoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
 class WorkerVerifyRequest(BaseModel):
     token: str
 
@@ -7373,6 +7377,65 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
             # Don't expose error to user
     
     return {"success": True, "message": "If an account exists, you will receive a login link"}
+
+
+# Default password for all workers/applicants (for testing)
+WORKER_DEFAULT_PASSWORD = "Welcome123!"
+
+@api_router.post("/worker/login")
+async def worker_password_login(request: WorkerPasswordLoginRequest):
+    """
+    Password-based login for workers/applicants.
+    
+    All workers use the same default password: Welcome123!
+    This is for testing purposes - in production, use magic links.
+    """
+    email = request.email.lower().strip()
+    
+    # Find employee by email
+    employee = await db.employees.find_one(
+        {"email": {"$regex": f"^{email}$", "$options": "i"}},
+        {"_id": 0, "id": 1, "email": 1, "first_name": 1, "last_name": 1, "status": 1, "role": 1}
+    )
+    
+    if not employee:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Check password (all workers use the same default password)
+    if request.password != WORKER_DEFAULT_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    # Generate session token
+    session_token = jwt.encode({
+        "employee_id": employee["id"],
+        "email": employee["email"],
+        "role": "worker",
+        "type": "worker_session",
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
+    }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    
+    # Log the login
+    await log_audit_action(
+        employee["id"],
+        "worker_login",
+        "employee",
+        employee["id"],
+        {"login_method": "password", "email": email}
+    )
+    
+    return {
+        "success": True,
+        "token": session_token,
+        "employee": {
+            "id": employee["id"],
+            "email": employee["email"],
+            "first_name": employee.get("first_name"),
+            "last_name": employee.get("last_name"),
+            "status": employee.get("status"),
+            "role": employee.get("role")
+        }
+    }
+
 
 @api_router.post("/worker/verify-login")
 async def worker_verify_login(request: WorkerVerifyRequest):

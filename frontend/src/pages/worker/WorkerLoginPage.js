@@ -1,85 +1,63 @@
 import { useState } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Mail, Loader2, CheckCircle, ArrowLeft } from 'lucide-react';
+import { User, Lock, Loader2, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export default function WorkerLoginPage() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!email) {
-      toast.error('Please enter your email');
+    if (!email || !password) {
+      toast.error('Please enter your email and password');
       return;
     }
 
     setLoading(true);
     try {
-      await axios.post(`${API}/worker/request-login`, { email });
-      setSent(true);
-      toast.success('Login link sent! Check your email');
+      const response = await axios.post(`${API}/worker/login`, { 
+        email, 
+        password 
+      });
+      
+      if (response.data.success && response.data.token) {
+        // Store token and employee info
+        localStorage.setItem('workerToken', response.data.token);
+        localStorage.setItem('workerEmail', response.data.employee.email);
+        localStorage.setItem('workerEmployeeId', response.data.employee.id);
+        localStorage.setItem('workerName', `${response.data.employee.first_name} ${response.data.employee.last_name}`);
+        
+        toast.success('Login successful!');
+        navigate('/worker/dashboard');
+      } else {
+        toast.error('Login failed. Please check your credentials.');
+      }
     } catch (error) {
-      toast.error('Failed to send login link. Please try again.');
+      const message = error.response?.data?.detail || 'Invalid email or password';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
-
-  if (sent) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-        <Card className="max-w-md w-full border-0 shadow-2xl">
-          <CardContent className="py-12 text-center">
-            <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <CheckCircle className="h-10 w-10 text-green-600" />
-            </div>
-            <h2 className="text-2xl font-semibold mb-2 text-slate-800">Check Your Email</h2>
-            <p className="text-slate-600 mb-6">
-              We've sent a login link to <strong className="text-slate-800">{email}</strong>
-            </p>
-            <div className="bg-slate-50 rounded-lg p-4 text-left space-y-2">
-              <p className="text-sm text-slate-600">
-                <span className="font-medium text-slate-700">1.</span> Open the email from Osabea Healthcare
-              </p>
-              <p className="text-sm text-slate-600">
-                <span className="font-medium text-slate-700">2.</span> Click "Access My Dashboard"
-              </p>
-              <p className="text-sm text-slate-600">
-                <span className="font-medium text-slate-700">3.</span> You'll be logged in automatically
-              </p>
-            </div>
-            <p className="text-xs text-slate-500 mt-6">
-              The link expires in 24 hours. If you don't see the email, check your spam folder.
-            </p>
-            <Button 
-              variant="ghost" 
-              className="mt-4 text-slate-600"
-              onClick={() => setSent(false)}
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Try a different email
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
       <Card className="max-w-md w-full border-0 shadow-2xl">
         <CardHeader className="text-center pb-2">
           <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <Mail className="h-8 w-8 text-white" />
+            <User className="h-8 w-8 text-white" />
           </div>
           <CardTitle className="text-2xl font-bold text-slate-800">Applicant Portal</CardTitle>
           <p className="text-sm text-slate-500 mt-2">
@@ -103,6 +81,29 @@ export default function WorkerLoginPage() {
                 data-testid="worker-email-input"
               />
             </div>
+            
+            <div>
+              <Label className="text-slate-700">Password</Label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-12 text-base pr-10"
+                  required
+                  data-testid="worker-password-input"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </button>
+              </div>
+            </div>
+            
             <Button 
               type="submit" 
               disabled={loading} 
@@ -112,16 +113,18 @@ export default function WorkerLoginPage() {
               {loading ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : (
-                <Mail className="h-5 w-5" />
+                <Lock className="h-5 w-5" />
               )}
-              {loading ? 'Sending...' : 'Send Login Link'}
+              {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
           
-          <div className="mt-6 pt-6 border-t border-slate-100 text-center">
-            <p className="text-xs text-slate-500">
-              No password needed - we'll email you a secure link
-            </p>
+          <div className="mt-6 pt-6 border-t border-slate-100">
+            <div className="bg-blue-50 rounded-lg p-4 text-center">
+              <p className="text-sm text-blue-800 font-medium">Default Password</p>
+              <p className="text-lg text-blue-900 font-mono mt-1">Welcome123!</p>
+              <p className="text-xs text-blue-600 mt-2">Use this password for your first login</p>
+            </div>
           </div>
           
           <div className="mt-6 text-center space-y-2">
@@ -134,7 +137,7 @@ export default function WorkerLoginPage() {
             </Link>
             <span className="text-slate-300 mx-2">|</span>
             <Link 
-              to="/login" 
+              to="/portal/login" 
               className="text-sm text-slate-500 hover:text-slate-700"
             >
               Admin/Staff Login

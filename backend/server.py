@@ -98,6 +98,15 @@ from work_readiness_engine import (
     can_sign_contract,
     can_promote_to_active_legacy as can_promote_to_active
 )
+# P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
+# All progress/blocker calculations MUST use this module
+from unified_compliance_engine import (
+    get_unified_employee_status,
+    sync_induction_with_training,
+    CARE_CERTIFICATE_STANDARDS,
+    MANDATORY_TRAINING_HCA,
+    get_clear_label,
+)
 from interview_questions import (
     get_interview_questions_for_role,
     get_role_interview_config,
@@ -8018,15 +8027,17 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     contract_signed = bool(contract_ack)
     
     # ========== UNIFIED PROGRESS (P0 FIX: Single Source of Truth) ==========
-    # Use the same unified progress calculation as Admin view for consistency
+    # Use get_unified_employee_status() - SAME function as Admin views
+    # CIA Triad: Integrity (same data), Availability (filtered for worker role)
     try:
-        unified_progress_data = await compute_unified_progress_internal(employee_id, employee)
-        progress_percentage = unified_progress_data.get("overall_percentage", 0)
-        total_required = unified_progress_data.get("total_requirements", 0)
-        total_completed = unified_progress_data.get("completed_requirements", 0)
-        unified_blockers = unified_progress_data.get("blockers", [])
+        unified_status = await get_unified_employee_status(employee_id, db, user_role="worker")
+        progress_percentage = unified_status["progress"]["percentage"]
+        total_required = unified_status["progress"]["total"]
+        total_completed = unified_status["progress"]["completed"]
+        unified_blockers = unified_status.get("blockers", [])
         has_blockers = len(unified_blockers) > 0 or not contract_signed
-    except Exception:
+    except Exception as e:
+        logger.error(f"Unified progress failed for {employee_id}: {e}")
         # Fallback to original calculation if unified progress fails
         total_required = len(required_docs) + 1 + len(mandatory_trainings)  # +1 for second POA
         total_completed = len([d for d in completed_docs if not d.get("partial")]) + len(completed_trainings)
@@ -20192,6 +20203,29 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
     )
     result["work_readiness_3tier"] = work_readiness_3tier
     
+    # === P0 FIX: ADD UNIFIED PROGRESS FOR SINGLE SOURCE OF TRUTH ===
+    # Include unified progress data so all UI components can use the same numbers
+    try:
+        unified_status = await get_unified_employee_status(employee_id, db, user_role="admin")
+        result["unified_progress"] = {
+            "percentage": unified_status["progress"]["percentage"],
+            "completed": unified_status["progress"]["completed"],
+            "total": unified_status["progress"]["total"],
+            "blockers": unified_status["blockers"],
+            "can_promote": unified_status["can_promote"],
+            "is_work_ready": unified_status["is_work_ready"],
+        }
+        # Also update statuses.overall_compliance to match unified progress
+        result["statuses"]["overall_compliance"] = {
+            "percentage": unified_status["progress"]["percentage"],
+            "complete": unified_status["progress"]["completed"],
+            "total": unified_status["progress"]["total"],
+        }
+    except Exception as e:
+        logger.warning(f"Failed to get unified status for {employee_id}: {e}")
+        # Keep original calculation as fallback
+        result["unified_progress"] = None
+    
     return result
 
 @api_router.post("/employees/{employee_id}/upload-document")
@@ -25363,51 +25397,48 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
     """
     Get unified progress for an employee - SINGLE SOURCE OF TRUTH.
     
-    P0 FIX: Now calls compute_unified_progress_internal to ensure Admin and Worker
-    views use IDENTICAL progress calculations. No more duplicate logic.
+    P0 FIX: Now uses get_unified_employee_status() from unified_compliance_engine.
+    ALL views (Admin, Worker, Audit) use this SAME function.
     
-    Returns:
-    - overall_percentage: Single percentage for all compliance
-    - completed_requirements: Number of requirements completed
-    - total_requirements: Total requirements (role-aware)
-    - categories: Breakdown by category
-    - blockers: List of actionable items blocking work readiness
+    Standards:
+    - CIA Triad: Integrity (same data for all views)
+    - 5 E's: Effective, Easy to Learn (clear labels)
+    - NHS Level: Complete employment checks
+    - CQC Level: Audit-ready with verifier names
     """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
+    # P0 FIX: SINGLE SOURCE OF TRUTH - unified_compliance_engine
+    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin")
     
-    # P0 FIX: Use the SAME internal function as Worker Dashboard
-    # This is the SINGLE SOURCE OF TRUTH for progress calculations
-    progress_data = await compute_unified_progress_internal(employee_id, employee)
+    if unified_status.get("error"):
+        raise HTTPException(status_code=404, detail=unified_status["error"])
     
-    # Determine professional registration requirements
-    job_role = (employee.get("job_role") or employee.get("role") or "").lower()
+    # Determine professional registration requirements from role
+    role = unified_status.get("role", "").lower()
     requires_prof_reg = False
     prof_reg_type = None
-    if "nurse" in job_role or "midwife" in job_role:
+    if "nurse" in role or "midwife" in role:
         requires_prof_reg = True
         prof_reg_type = "NMC"
-    elif "doctor" in job_role or "physician" in job_role or "consultant" in job_role:
+    elif "doctor" in role or "physician" in role:
         requires_prof_reg = True
         prof_reg_type = "GMC"
-    elif "physio" in job_role or "occupational" in job_role or "paramedic" in job_role:
+    elif "physio" in role or "paramedic" in role:
         requires_prof_reg = True
         prof_reg_type = "HCPC"
-    elif "social worker" in job_role:
-        requires_prof_reg = True
-        prof_reg_type = "SWE"
     
     return {
         "employee_id": employee_id,
-        "overall_percentage": progress_data.get("overall_percentage", 0),
-        "completed_requirements": progress_data.get("completed_requirements", 0),
-        "total_requirements": progress_data.get("total_requirements", 0),
-        "categories": progress_data.get("categories", {}),
-        "blockers": progress_data.get("blockers", []),
-        "is_work_ready": len(progress_data.get("blockers", [])) == 0,
+        "overall_percentage": unified_status["progress"]["percentage"],
+        "completed_requirements": unified_status["progress"]["completed"],
+        "total_requirements": unified_status["progress"]["total"],
+        "categories": unified_status["categories"],
+        "blockers": [b["reason"] for b in unified_status["blockers"]],  # String list for compatibility
+        "blocker_details": unified_status["blockers"],  # Full blocker objects with severity
+        "is_work_ready": unified_status["is_work_ready"],
+        "can_promote": unified_status["can_promote"],
         "role_requires_professional_registration": requires_prof_reg,
-        "professional_registration_type": prof_reg_type
+        "professional_registration_type": prof_reg_type,
+        "checks": unified_status["checks"],
     }
 
 
@@ -52363,37 +52394,27 @@ async def get_pre_employment_gates(
 ):
     """
     Get pre-employment gates status for an employee.
-    These are the REQUIRED checks before an employee can be promoted to Active status.
     
-    Gates for Healthcare Assistant (12 total):
-    1. Interview Record completed
-    2. Contract signed
-    3. DBS verified + stamped
-    4. Right to Work verified + stamped
-    5. Identity verified + stamped
-    6. Proof of Address (2 documents) verified + stamped
-    7. Reference 1 verified
-    8. Reference 2 verified
-    9. Induction Checklist complete
-    10. Mandatory Training complete + not expired (6 items)
-    11. Health Questionnaire completed
-    12. Employment gaps explained
+    P0 FIX: Now uses get_unified_employee_status() - SINGLE SOURCE OF TRUTH.
+    This endpoint returns the SAME data as /unified-progress, just formatted for gates UI.
     
-    Additional Gates for Nurse role (14 total):
-    13. NMC registration verified
-    14. Professional Indemnity Insurance
+    Standards:
+    - CIA Triad: Integrity (same data as all other views)
+    - 5 E's: Clear labels, verified items NEVER shown as blockers
+    - NHS Level: Complete employment checks (12 for HCA, 14 for Nurse)
+    - CQC Level: Audit-ready
     """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
+    # P0 FIX: SINGLE SOURCE OF TRUTH - unified_compliance_engine
+    unified_status = await get_unified_employee_status(employee_id, db, user_role="admin")
     
-    # Use the work readiness engine for comprehensive checks
-    can_promote, checks = await can_promote_to_active(employee_id, db)
+    if unified_status.get("error"):
+        raise HTTPException(status_code=404, detail=unified_status["error"])
     
-    role = employee.get("role", "Healthcare Assistant")
+    role = unified_status.get("role", "Healthcare Assistant")
     is_nurse = "nurse" in role.lower()
+    checks = unified_status.get("checks", {})
     
-    # Build detailed gates response matching user's 12 requirements
+    # Build gates from unified checks (SAME data, different format)
     gates = {
         "interview_record": {
             "num": 1,
@@ -52433,20 +52454,20 @@ async def get_pre_employment_gates(
         },
         "reference_1": {
             "num": 7,
-            "passed": checks.get("references", False),  # Both refs together
+            "passed": checks.get("reference_1", False),
             "label": "Reference 1 Verified",
             "requirement": "Must be verified by admin"
         },
         "reference_2": {
             "num": 8,
-            "passed": checks.get("references", False),
+            "passed": checks.get("reference_2", False),
             "label": "Reference 2 Verified",
             "requirement": "Must be verified by admin"
         },
         "induction": {
             "num": 9,
             "passed": checks.get("induction", False),
-            "label": "Induction Checklist",
+            "label": "Induction Checklist (15 Care Certificate Standards)",
             "requirement": "All 15 Care Certificate standards complete"
         },
         "mandatory_training": {
@@ -52457,19 +52478,19 @@ async def get_pre_employment_gates(
         },
         "health_questionnaire": {
             "num": 11,
-            "passed": checks.get("health_declaration", False),
-            "label": "Health Questionnaire",
+            "passed": checks.get("staff_health_questionnaire", False),
+            "label": "Staff Health Questionnaire",
             "requirement": "Completed by worker"
         },
         "employment_gaps": {
             "num": 12,
-            "passed": checks.get("employment_gaps_explained", True),  # Default True if no gaps
+            "passed": checks.get("employment_gaps_explained", True),
             "label": "Employment Gaps Explained",
             "requirement": "All gaps have explanations"
         }
     }
     
-    # Add NMC and Professional Indemnity for nurses (14 gates total)
+    # Add nurse-specific gates
     if is_nurse:
         gates["nmc_registration"] = {
             "num": 13,
@@ -52487,23 +52508,17 @@ async def get_pre_employment_gates(
     gates_list = list(gates.values())
     gates_passed = sum(1 for g in gates_list if g["passed"])
     total_gates = len(gates_list)
-    all_gates_passed = gates_passed == total_gates
     
-    # Build blockers list
-    blockers = [
-        {"gate": k, "label": v["label"]}
-        for k, v in gates.items() if not v["passed"]
-    ]
-    
+    # Use blockers directly from unified status (SAME list as other views)
     return {
         "employee_id": employee_id,
         "role": role,
         "gates": gates,
         "gates_passed": gates_passed,
         "total_gates": total_gates,
-        "all_gates_passed": all_gates_passed,
-        "can_promote": can_promote,
-        "blockers": blockers,
+        "all_gates_passed": unified_status["can_promote"],
+        "can_promote": unified_status["can_promote"],
+        "blockers": unified_status["blockers"],  # SAME blockers as unified-progress
         "raw_checks": checks
     }
 

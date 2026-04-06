@@ -49548,6 +49548,152 @@ async def update_competency_record(
     return {"success": True, "id": competency_id, "status": payload.status}
 
 
+class CompetencyScheduleRequest(BaseModel):
+    competency_type: str
+    competency_name: str
+    scheduled_date: str
+    notes: Optional[str] = None
+
+
+@api_router.post("/employees/{employee_id}/competencies/schedule")
+async def schedule_competency_assessment(
+    employee_id: str,
+    payload: CompetencyScheduleRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Schedule a future competency assessment.
+    Creates a record with 'scheduled' status and sets up reminder dates.
+    Reminders will be triggered at 60, 30, and 7 days before the scheduled date.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create the scheduled assessment record
+    record_id = str(uuid.uuid4())
+    record = {
+        "id": record_id,
+        "employee_id": employee_id,
+        "competency_type": payload.competency_type,
+        "competency_name": payload.competency_name,
+        "status": "scheduled",
+        "scheduled_date": payload.scheduled_date,
+        "notes": payload.notes,
+        "scheduled_by": user['user_id'],
+        "scheduled_at": now,
+        "created_at": now,
+        "assessment_history": [{
+            "date": now,
+            "action": "scheduled",
+            "scheduled_date": payload.scheduled_date,
+            "by": user['user_id'],
+            "notes": payload.notes
+        }],
+        # Reminder tracking
+        "reminder_60_sent": False,
+        "reminder_30_sent": False,
+        "reminder_7_sent": False
+    }
+    
+    await db.competency_records.insert_one(record)
+    
+    await log_audit_action(user['user_id'], "schedule_competency_assessment", "competency_record", record_id, {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "competency_type": payload.competency_type,
+        "scheduled_date": payload.scheduled_date
+    })
+    
+    return {
+        "success": True,
+        "id": record_id,
+        "message": f"Assessment scheduled for {payload.scheduled_date}"
+    }
+
+
+class CompetencyRecordResultRequest(BaseModel):
+    status: str  # competent, not_competent, training_required
+    notes: Optional[str] = None
+    review_due_date: Optional[str] = None
+
+
+@api_router.put("/employees/{employee_id}/competencies/{competency_id}/record-result")
+async def record_competency_result(
+    employee_id: str,
+    competency_id: str,
+    payload: CompetencyRecordResultRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record the result of a competency assessment.
+    Updates the status and sets the next review due date (defaults to 1 year from today).
+    """
+    record = await db.competency_records.find_one({"id": competency_id, "employee_id": employee_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="Competency record not found")
+    
+    now = datetime.now(timezone.utc)
+    now_str = now.isoformat()
+    
+    # Calculate review due date (default 1 year from today)
+    if payload.review_due_date:
+        review_due = payload.review_due_date
+    else:
+        review_due = (now + timedelta(days=365)).strftime('%Y-%m-%d')
+    
+    # Get user info for history
+    user_info = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]},
+        {"_id": 0, "name": 1, "email": 1}
+    )
+    user_name = user_info.get("name", user_info.get("email", "Admin")) if user_info else "Admin"
+    
+    # Add to history
+    history_entry = {
+        "date": now_str,
+        "action": "result_recorded",
+        "status": payload.status,
+        "by": user['user_id'],
+        "by_name": user_name,
+        "notes": payload.notes
+    }
+    
+    update_data = {
+        "status": payload.status,
+        "assessment_date": now_str,
+        "assessed_by": user['user_id'],
+        "assessed_by_name": user_name,
+        "review_due_date": review_due,
+        "last_assessed": now_str,
+        "notes": payload.notes
+    }
+    
+    await db.competency_records.update_one(
+        {"id": competency_id},
+        {
+            "$set": update_data,
+            "$push": {"assessment_history": history_entry}
+        }
+    )
+    
+    await log_audit_action(user['user_id'], "record_competency_result", "competency_record", competency_id, {
+        "employee_id": employee_id,
+        "competency_type": record.get("competency_type"),
+        "status": payload.status,
+        "review_due_date": review_due
+    })
+    
+    return {
+        "success": True,
+        "status": payload.status,
+        "review_due_date": review_due,
+        "message": f"Result recorded. Next review due: {review_due}"
+    }
+
+
 @api_router.get("/employees/{employee_id}/missing-competencies")
 async def get_missing_competencies(
     employee_id: str,
@@ -49830,6 +49976,128 @@ async def update_spot_check(
     })
     
     return {"success": True, "id": spot_check_id, "outcome": payload.outcome}
+
+
+class SpotCheckScheduleRequest(BaseModel):
+    type: str
+    area: str
+    scheduled_date: str
+    notes: Optional[str] = None
+
+
+@api_router.post("/employees/{employee_id}/spot-checks/schedule")
+async def schedule_spot_check(
+    employee_id: str,
+    payload: SpotCheckScheduleRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Schedule a future spot check.
+    Reminders will be triggered at 7 days before and on the day of the check.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get scheduler name
+    scheduler = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]},
+        {"_id": 0, "name": 1, "email": 1}
+    )
+    scheduler_name = scheduler.get("name", scheduler.get("email", "Admin")) if scheduler else "Admin"
+    
+    spot_check_id = str(uuid.uuid4())
+    record = {
+        "id": spot_check_id,
+        "employee_id": employee_id,
+        "type": payload.type,
+        "area": payload.area,
+        "outcome": "scheduled",  # Special status for scheduled checks
+        "status": "scheduled",
+        "scheduled_date": payload.scheduled_date,
+        "notes": payload.notes,
+        "scheduled_by": user['user_id'],
+        "scheduled_by_name": scheduler_name,
+        "created_at": now,
+        "reminder_7_sent": False,
+        "reminder_day_sent": False
+    }
+    
+    await db.spot_checks.insert_one(record)
+    
+    await log_audit_action(user['user_id'], "schedule_spot_check", "spot_check", spot_check_id, {
+        "employee_id": employee_id,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "type": payload.type,
+        "area": payload.area,
+        "scheduled_date": payload.scheduled_date
+    })
+    
+    return {
+        "success": True,
+        "id": spot_check_id,
+        "message": f"Spot check scheduled for {payload.scheduled_date}"
+    }
+
+
+class SpotCheckRecordOutcomeRequest(BaseModel):
+    outcome: str  # pass, needs_improvement, fail
+    notes: Optional[str] = None
+    follow_up_required: bool = False
+    follow_up_date: Optional[str] = None
+
+
+@api_router.put("/employees/{employee_id}/spot-checks/{spot_check_id}/record-outcome")
+async def record_spot_check_outcome(
+    employee_id: str,
+    spot_check_id: str,
+    payload: SpotCheckRecordOutcomeRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record the outcome of a scheduled spot check.
+    """
+    record = await db.spot_checks.find_one({"id": spot_check_id, "employee_id": employee_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="Spot check not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get assessor name
+    assessor = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]},
+        {"_id": 0, "name": 1, "email": 1}
+    )
+    assessor_name = assessor.get("name", assessor.get("email", "Admin")) if assessor else "Admin"
+    
+    update_data = {
+        "outcome": payload.outcome,
+        "status": "completed",
+        "notes": payload.notes,
+        "follow_up_required": payload.follow_up_required,
+        "follow_up_date": payload.follow_up_date if payload.follow_up_required else None,
+        "assessed_at": now,
+        "assessed_by": user['user_id'],
+        "assessed_by_name": assessor_name
+    }
+    
+    await db.spot_checks.update_one({"id": spot_check_id}, {"$set": update_data})
+    
+    await log_audit_action(user['user_id'], "record_spot_check_outcome", "spot_check", spot_check_id, {
+        "employee_id": employee_id,
+        "type": record.get("type"),
+        "area": record.get("area"),
+        "outcome": payload.outcome,
+        "follow_up_required": payload.follow_up_required
+    })
+    
+    return {
+        "success": True,
+        "outcome": payload.outcome,
+        "message": f"Outcome recorded: {payload.outcome}"
+    }
 
 
 @api_router.get("/spot-check-options")

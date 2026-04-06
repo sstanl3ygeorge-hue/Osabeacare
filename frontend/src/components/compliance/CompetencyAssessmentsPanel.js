@@ -83,6 +83,8 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [recordResultDialogOpen, setRecordResultDialogOpen] = useState(false);
   const [selectedCompetency, setSelectedCompetency] = useState(null);
   
   // Form state
@@ -91,6 +93,20 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
     competency_name: '',
     status: '',
     review_due_date: '',
+    notes: ''
+  });
+  
+  // Schedule assessment form
+  const [scheduleData, setScheduleData] = useState({
+    competency_type: '',
+    competency_name: '',
+    scheduled_date: '',
+    notes: ''
+  });
+  
+  // Record result form
+  const [resultData, setResultData] = useState({
+    status: '',
     notes: ''
   });
 
@@ -199,6 +215,74 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
   const openHistoryDialog = (competency) => {
     setSelectedCompetency(competency);
     setHistoryDialogOpen(true);
+  };
+  
+  // Schedule a future assessment
+  const handleScheduleAssessment = async () => {
+    if (!scheduleData.competency_type || !scheduleData.scheduled_date) {
+      toast.error('Please fill in required fields');
+      return;
+    }
+
+    setActionLoading('schedule');
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/competencies/schedule`,
+        scheduleData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Assessment scheduled');
+      setScheduleDialogOpen(false);
+      setScheduleData({ competency_type: '', competency_name: '', scheduled_date: '', notes: '' });
+      fetchCompetencies();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to schedule assessment');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+  
+  // Record result for a scheduled assessment
+  const handleRecordResult = async () => {
+    if (!selectedCompetency || !resultData.status) {
+      toast.error('Please select a status');
+      return;
+    }
+
+    setActionLoading('record');
+    try {
+      // Calculate next review date (1 year from today)
+      const nextReviewDate = new Date();
+      nextReviewDate.setFullYear(nextReviewDate.getFullYear() + 1);
+      
+      await axios.put(
+        `${API}/employees/${employeeId}/competencies/${selectedCompetency.id}/record-result`,
+        {
+          status: resultData.status,
+          notes: resultData.notes,
+          review_due_date: nextReviewDate.toISOString().split('T')[0]
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Result recorded - Next review set for ' + nextReviewDate.toLocaleDateString());
+      setRecordResultDialogOpen(false);
+      setResultData({ status: '', notes: '' });
+      setSelectedCompetency(null);
+      fetchCompetencies();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to record result');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+  
+  // Open record result dialog
+  const openRecordResultDialog = (competency) => {
+    setSelectedCompetency(competency);
+    setResultData({ status: '', notes: '' });
+    setRecordResultDialogOpen(true);
   };
 
   const getStatusBadge = (status) => {
@@ -374,6 +458,15 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
               >
                 <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
               </Button>
+              <Button 
+                variant="outline"
+                size="sm"
+                onClick={() => setScheduleDialogOpen(true)}
+                data-testid="schedule-assessment-btn"
+              >
+                <Calendar className="h-4 w-4 mr-1" />
+                Schedule
+              </Button>
               <Button
                 size="sm"
                 onClick={() => setAddDialogOpen(true)}
@@ -490,6 +583,19 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {/* Record Result button for scheduled or overdue */}
+                          {(comp.status === 'scheduled' || overdue) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 text-green-600 border-green-200 hover:bg-green-50"
+                              onClick={() => openRecordResultDialog(comp)}
+                              data-testid={`record-result-btn-${comp.id}`}
+                            >
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Record Result
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -560,6 +666,185 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
           <DialogFooter>
             <Button variant="outline" onClick={() => setHistoryDialogOpen(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Schedule Assessment Dialog */}
+      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              Schedule Future Assessment
+            </DialogTitle>
+            <DialogDescription>
+              Schedule a competency assessment for a future date. Reminders will be sent at 60, 30, and 7 days before.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Competency Type */}
+            <div className="space-y-2">
+              <Label>Competency Type <span className="text-red-500">*</span></Label>
+              <Select
+                value={scheduleData.competency_type}
+                onValueChange={(value) => {
+                  const type = COMPETENCY_TYPES.find(t => t.value === value);
+                  setScheduleData({
+                    ...scheduleData,
+                    competency_type: value,
+                    competency_name: type?.label || value
+                  });
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select competency type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {COMPETENCY_TYPES.map(type => (
+                    <SelectItem key={type.value} value={type.value}>
+                      <span className="flex items-center gap-2">
+                        {type.label}
+                        {type.is_critical && (
+                          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-red-50 text-red-600 border-red-200">
+                            Critical
+                          </Badge>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Scheduled Date */}
+            <div className="space-y-2">
+              <Label>Assessment Due Date <span className="text-red-500">*</span></Label>
+              <Input
+                type="date"
+                value={scheduleData.scheduled_date}
+                onChange={(e) => setScheduleData({ ...scheduleData, scheduled_date: e.target.value })}
+                min={new Date().toISOString().split('T')[0]}
+              />
+              <p className="text-xs text-gray-500">
+                Reminders: 60 days, 30 days, and 7 days before due date
+              </p>
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-2">
+              <Label>Notes (Optional)</Label>
+              <Textarea
+                value={scheduleData.notes}
+                onChange={(e) => setScheduleData({ ...scheduleData, notes: e.target.value })}
+                placeholder="Any specific areas to assess..."
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleScheduleAssessment}
+              disabled={actionLoading === 'schedule' || !scheduleData.competency_type || !scheduleData.scheduled_date}
+            >
+              {actionLoading === 'schedule' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Calendar className="h-4 w-4 mr-2" />
+              )}
+              Schedule Assessment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Record Result Dialog */}
+      <Dialog open={recordResultDialogOpen} onOpenChange={setRecordResultDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Record Assessment Result
+            </DialogTitle>
+            <DialogDescription>
+              Record the outcome of the competency assessment. Next review will automatically be set to 1 year from today.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedCompetency && (
+            <div className="space-y-4 py-4">
+              {/* Competency Info */}
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <p className="font-medium">{selectedCompetency.competency_name}</p>
+                {selectedCompetency.scheduled_date && (
+                  <p className="text-sm text-gray-500">
+                    Scheduled: {formatBackendDate(selectedCompetency.scheduled_date)}
+                  </p>
+                )}
+              </div>
+
+              {/* Status */}
+              <div className="space-y-2">
+                <Label>Result <span className="text-red-500">*</span></Label>
+                <Select
+                  value={resultData.status}
+                  onValueChange={(v) => setResultData({ ...resultData, status: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select outcome..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map(status => (
+                      <SelectItem key={status.value} value={status.value}>
+                        {status.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <Label>Notes (Optional)</Label>
+                <Textarea
+                  value={resultData.notes}
+                  onChange={(e) => setResultData({ ...resultData, notes: e.target.value })}
+                  placeholder="Observations, areas for improvement..."
+                  rows={3}
+                />
+              </div>
+              
+              {/* Next Review Notice */}
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                <p className="text-sm text-blue-700">
+                  <Clock className="h-4 w-4 inline mr-1" />
+                  Next review will be automatically set to: <strong>{new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toLocaleDateString()}</strong>
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecordResultDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRecordResult}
+              disabled={actionLoading === 'record' || !resultData.status}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {actionLoading === 'record' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              )}
+              Record Result
             </Button>
           </DialogFooter>
         </DialogContent>

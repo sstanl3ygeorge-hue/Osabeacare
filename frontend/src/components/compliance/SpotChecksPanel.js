@@ -80,12 +80,30 @@ export default function SpotChecksPanel({ employeeId, employeeName, onRefresh })
   // Dialog states
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
+  const [recordOutcomeDialogOpen, setRecordOutcomeDialogOpen] = useState(false);
   const [selectedCheck, setSelectedCheck] = useState(null);
   
   // Form state
   const [formData, setFormData] = useState({
     type: '',
     area: '',
+    outcome: '',
+    notes: '',
+    follow_up_required: false,
+    follow_up_date: ''
+  });
+  
+  // Schedule form state
+  const [scheduleData, setScheduleData] = useState({
+    type: '',
+    area: '',
+    scheduled_date: '',
+    notes: ''
+  });
+  
+  // Record outcome form state
+  const [outcomeData, setOutcomeData] = useState({
     outcome: '',
     notes: '',
     follow_up_required: false,
@@ -238,6 +256,66 @@ export default function SpotChecksPanel({ employeeId, employeeName, onRefresh })
     const now = new Date();
     const daysUntilDue = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
     return daysUntilDue <= 7 && daysUntilDue > 0;
+  };
+  
+  // Schedule a future spot check
+  const handleScheduleSpotCheck = async () => {
+    if (!scheduleData.type || !scheduleData.area || !scheduleData.scheduled_date) {
+      toast.error('Please fill in required fields');
+      return;
+    }
+
+    setActionLoading('schedule');
+    try {
+      await axios.post(
+        `${API}/employees/${employeeId}/spot-checks/schedule`,
+        scheduleData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Spot check scheduled');
+      setScheduleDialogOpen(false);
+      setScheduleData({ type: '', area: '', scheduled_date: '', notes: '' });
+      fetchSpotChecks();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to schedule spot check');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+  
+  // Open record outcome dialog
+  const openRecordOutcomeDialog = (check) => {
+    setSelectedCheck(check);
+    setOutcomeData({ outcome: '', notes: '', follow_up_required: false, follow_up_date: '' });
+    setRecordOutcomeDialogOpen(true);
+  };
+  
+  // Record outcome for a scheduled spot check
+  const handleRecordOutcome = async () => {
+    if (!selectedCheck || !outcomeData.outcome) {
+      toast.error('Please select an outcome');
+      return;
+    }
+
+    setActionLoading('outcome');
+    try {
+      await axios.put(
+        `${API}/employees/${employeeId}/spot-checks/${selectedCheck.id}/record-outcome`,
+        outcomeData,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Outcome recorded');
+      setRecordOutcomeDialogOpen(false);
+      setOutcomeData({ outcome: '', notes: '', follow_up_required: false, follow_up_date: '' });
+      setSelectedCheck(null);
+      fetchSpotChecks();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to record outcome');
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const renderFormDialog = (isEdit = false) => (
@@ -418,6 +496,15 @@ export default function SpotChecksPanel({ employeeId, employeeName, onRefresh })
                 <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setScheduleDialogOpen(true)}
+                data-testid="schedule-spot-check-btn"
+              >
+                <Calendar className="h-4 w-4 mr-1" />
+                Schedule
+              </Button>
+              <Button
                 size="sm"
                 onClick={() => setAddDialogOpen(true)}
                 data-testid="add-spot-check-btn"
@@ -558,6 +645,215 @@ export default function SpotChecksPanel({ employeeId, employeeName, onRefresh })
       
       {/* Edit Dialog */}
       {renderFormDialog(true)}
+      
+      {/* Schedule Spot Check Dialog */}
+      <Dialog open={scheduleDialogOpen} onOpenChange={setScheduleDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary" />
+              Schedule Spot Check
+            </DialogTitle>
+            <DialogDescription>
+              Schedule a future spot check. Reminders will be sent 7 days before and on the day of the check.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {/* Check Type */}
+            <div className="space-y-2">
+              <Label>Check Type <span className="text-red-500">*</span></Label>
+              <Select
+                value={scheduleData.type}
+                onValueChange={(v) => setScheduleData({ ...scheduleData, type: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {SPOT_CHECK_TYPES.map(type => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Area */}
+            <div className="space-y-2">
+              <Label>Area to Observe <span className="text-red-500">*</span></Label>
+              <Select
+                value={scheduleData.area}
+                onValueChange={(v) => setScheduleData({ ...scheduleData, area: v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select area..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {SPOT_CHECK_AREAS.map(area => (
+                    <SelectItem key={area.value} value={area.value}>
+                      {area.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Scheduled Date */}
+            <div className="space-y-2">
+              <Label>Scheduled Date <span className="text-red-500">*</span></Label>
+              <Input
+                type="date"
+                value={scheduleData.scheduled_date}
+                onChange={(e) => setScheduleData({ ...scheduleData, scheduled_date: e.target.value })}
+                min={new Date().toISOString().split('T')[0]}
+              />
+              <p className="text-xs text-gray-500">
+                Reminders: 7 days before and on the day of the check
+              </p>
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-2">
+              <Label>Notes (Optional)</Label>
+              <Textarea
+                value={scheduleData.notes}
+                onChange={(e) => setScheduleData({ ...scheduleData, notes: e.target.value })}
+                placeholder="Any specific focus areas..."
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setScheduleDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleScheduleSpotCheck}
+              disabled={actionLoading === 'schedule' || !scheduleData.type || !scheduleData.area || !scheduleData.scheduled_date}
+            >
+              {actionLoading === 'schedule' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Calendar className="h-4 w-4 mr-2" />
+              )}
+              Schedule Spot Check
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Record Outcome Dialog */}
+      <Dialog open={recordOutcomeDialogOpen} onOpenChange={setRecordOutcomeDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Record Spot Check Outcome
+            </DialogTitle>
+            <DialogDescription>
+              Record the outcome of the spot check observation.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {selectedCheck && (
+            <div className="space-y-4 py-4">
+              {/* Spot Check Info */}
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <p className="font-medium">{getAreaLabel(selectedCheck.area)}</p>
+                <p className="text-sm text-gray-500">{getTypeLabel(selectedCheck.type)}</p>
+                {selectedCheck.scheduled_date && (
+                  <p className="text-sm text-gray-500">
+                    Scheduled: {formatBackendDate(selectedCheck.scheduled_date)}
+                  </p>
+                )}
+              </div>
+
+              {/* Outcome */}
+              <div className="space-y-2">
+                <Label>Outcome <span className="text-red-500">*</span></Label>
+                <Select
+                  value={outcomeData.outcome}
+                  onValueChange={(v) => setOutcomeData({ ...outcomeData, outcome: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select outcome..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OUTCOME_OPTIONS.map(outcome => (
+                      <SelectItem key={outcome.value} value={outcome.value}>
+                        <span className="flex items-center gap-2">
+                          <outcome.icon className={cn("h-4 w-4", 
+                            outcome.value === 'pass' ? 'text-green-600' : 
+                            outcome.value === 'needs_improvement' ? 'text-amber-600' : 'text-red-600'
+                          )} />
+                          {outcome.label}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Notes */}
+              <div className="space-y-2">
+                <Label>Observations & Notes</Label>
+                <Textarea
+                  value={outcomeData.notes}
+                  onChange={(e) => setOutcomeData({ ...outcomeData, notes: e.target.value })}
+                  placeholder="Describe what was observed, any concerns, and recommendations..."
+                  rows={4}
+                />
+              </div>
+
+              {/* Follow-up Required */}
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="outcome_follow_up_required"
+                  checked={outcomeData.follow_up_required}
+                  onCheckedChange={(checked) => setOutcomeData({ ...outcomeData, follow_up_required: checked })}
+                />
+                <Label htmlFor="outcome_follow_up_required" className="cursor-pointer">
+                  Follow-up required
+                </Label>
+              </div>
+
+              {/* Follow-up Date */}
+              {outcomeData.follow_up_required && (
+                <div className="space-y-2">
+                  <Label>Follow-up Date <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="date"
+                    value={outcomeData.follow_up_date}
+                    onChange={(e) => setOutcomeData({ ...outcomeData, follow_up_date: e.target.value })}
+                    min={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRecordOutcomeDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleRecordOutcome}
+              disabled={actionLoading === 'outcome' || !outcomeData.outcome}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {actionLoading === 'outcome' ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              )}
+              Record Outcome
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

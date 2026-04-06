@@ -25466,14 +25466,16 @@ async def get_unified_progress(employee_id: str, user: dict = Depends(get_curren
             pass
     
     # ========== FORMS ==========
-    # Required forms (exclude optional ones like Equal Opportunities)
+    # Required forms - must match MANDATORY_ITEMS definitions
+    # These are form-generated items that employees must complete
     required_forms = {
-        "staff_health_questionnaire": "Health Questionnaire",
-        "staff_personal_info": "Personal Information",
+        "staff_personal_info": "Staff Personal Information",
         "hmrc_starter_checklist": "HMRC Starter Checklist",
-        "emergency_contacts": "Emergency Contacts"
+        "interview_record": "Interview Record",
+        "recruitment_checklist": "Recruitment Compliance Checklist"
     }
     # Note: equal_opportunities is OPTIONAL, not counted
+    # Note: health_screening, induction are tracked separately
     
     categories["forms"]["total"] = len(required_forms)
     

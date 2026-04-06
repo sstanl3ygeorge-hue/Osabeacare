@@ -1407,3 +1407,46 @@ This ensures:
 ### P3: MFA (TOTP) for Admin Accounts
 - Add TOTP-based MFA for admin login security
 
+---
+
+## P1 WORKER DASHBOARD SYNC: References & Induction (April 2026)
+
+### Issue Fixed
+Worker dashboard was missing critical compliance visibility sections:
+- References status (2 required)
+- Induction Checklist progress (15 Care Certificate standards)
+
+### Fix: Backend Enhancement
+**File**: `/app/backend/server.py` (lines 8179-8278)
+
+Added to `worker_dashboard` response:
+1. **References Status**:
+   - Shows status progression: Not declared → Declared → Sent → Response received → Verified/Rejected
+   - Includes referee name (if declared), verification timestamp, verified_by_name
+   - Worker sees status but NOT referee answers or admin notes
+
+2. **Induction Checklist Progress**:
+   - All 15 Care Certificate standards returned with completion status
+   - Progress count (completed/total)
+   - Worker sees which items are complete (read-only - admin marks complete)
+
+### Fix: Frontend Enhancement
+**File**: `/app/frontend/src/pages/worker/WorkerDashboard.js` (lines 771-895)
+
+Added sections:
+1. **References (2 required)**:
+   - Badge: "1/2 Verified" or "0/2 Verified"
+   - Reference 1 & 2 cards showing status, referee name, verification details
+   - Color-coded: green (verified), blue (response received), amber (sent), slate (not declared), red (rejected)
+
+2. **Induction Checklist (15 items)**:
+   - Progress bar
+   - Badge: "0/15 Complete"
+   - Grid of all 15 Care Certificate standards with checkmarks
+   - Note: "Your supervisor will mark items complete during your induction period"
+
+### Testing Verified
+- References section shows 1/2 Verified with correct status labels
+- Induction section shows 0/15 Complete with all 15 standards
+- Backend API returns `references` and `induction` data correctly
+

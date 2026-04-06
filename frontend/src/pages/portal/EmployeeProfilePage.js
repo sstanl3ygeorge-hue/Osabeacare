@@ -35,6 +35,8 @@ import EditEmploymentHistoryDialog from '../../components/admin/EditEmploymentHi
 import EditReferenceDialog from '../../components/admin/EditReferenceDialog';
 import EditDeclarationsDialog from '../../components/admin/EditDeclarationsDialog';
 import SupersedeContractDialog from '../../components/admin/SupersedeContractDialog';
+import DocumentVerificationModal from '../../components/admin/DocumentVerificationModal';
+import DocumentViewerModal from '../../components/admin/DocumentViewerModal';
 import { 
   InductionChecklistPanel, 
   CompetencyRecordsPanel, 
@@ -307,6 +309,12 @@ export default function EmployeeProfilePage() {
   const [docExtractionDocumentId, setDocExtractionDocumentId] = useState(null);
   const [docExtractionDocumentName, setDocExtractionDocumentName] = useState('');
   const [docExtractionContext, setDocExtractionContext] = useState(null); // Full context for modal header
+  
+  // Document Verification & Viewer Modal States (CQC P0 Compliance)
+  const [verificationModalOpen, setVerificationModalOpen] = useState(false);
+  const [verificationDocument, setVerificationDocument] = useState(null);
+  const [viewerModalOpen, setViewerModalOpen] = useState(false);
+  const [viewerDocument, setViewerDocument] = useState(null);
   
   const { token, isAuditor, isAdmin, user } = useAuth();
   
@@ -1211,6 +1219,29 @@ export default function EmployeeProfilePage() {
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to verify requirement');
     }
+  };
+  
+  // Open Document Verification Modal with evidence upload (CQC P0)
+  const handleOpenVerificationModal = (document, requirementId = null) => {
+    const docData = {
+      ...document,
+      document_type: document.document_type || document.requirement_id || requirementId,
+      id: document.id || document.document_id
+    };
+    setVerificationDocument(docData);
+    setVerificationModalOpen(true);
+  };
+  
+  // Open Document Viewer Modal (CQC P0)
+  const handleOpenViewerModal = (document) => {
+    setViewerDocument(document);
+    setViewerModalOpen(true);
+  };
+  
+  // Handle successful verification from modal
+  const handleVerificationComplete = async () => {
+    await fetchData();
+    await fetchCompliance();
   };
 
   // Delete a specific document (for multi-file requirements)
@@ -3704,6 +3735,25 @@ export default function EmployeeProfilePage() {
           onRefresh={() => {
             fetchEmployee();
             fetchComplianceFile();
+          }}
+          onVerifyWithEvidence={(gateKey, gateData) => {
+            // Open verification modal with the relevant document
+            const docData = {
+              document_type: gateKey,
+              requirement_id: gateKey,
+              id: gateData?.document_id || gateData?.id
+            };
+            handleOpenVerificationModal(docData, gateKey);
+          }}
+          onViewDocument={(gateKey, gateData) => {
+            // Open document viewer modal
+            const docData = {
+              document_type: gateKey,
+              requirement_id: gateKey,
+              file_url: gateData?.file_url,
+              id: gateData?.document_id || gateData?.id
+            };
+            handleOpenViewerModal(docData);
           }}
         />
       </div>
@@ -7125,6 +7175,35 @@ export default function EmployeeProfilePage() {
         onSuccess={() => {
           fetchEmployee();
           fetchComplianceFile();
+        }}
+      />
+      
+      {/* Document Verification Modal (CQC P0) */}
+      <DocumentVerificationModal
+        open={verificationModalOpen}
+        onClose={() => {
+          setVerificationModalOpen(false);
+          setVerificationDocument(null);
+        }}
+        document={verificationDocument}
+        employeeId={employeeId}
+        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        onVerified={handleVerificationComplete}
+      />
+      
+      {/* Document Viewer Modal (CQC P0) */}
+      <DocumentViewerModal
+        open={viewerModalOpen}
+        onClose={() => {
+          setViewerModalOpen(false);
+          setViewerDocument(null);
+        }}
+        document={viewerDocument}
+        employeeId={employeeId}
+        employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+        onVerify={(doc) => {
+          setViewerModalOpen(false);
+          handleOpenVerificationModal(doc);
         }}
       />
     </div>

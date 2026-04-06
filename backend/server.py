@@ -8163,11 +8163,12 @@ async def worker_upload_document(
     
     await db.employee_documents.insert_one(doc_record)
     
-    # Log the upload
+    # Log the upload - include employee_id for audit trail querying
     await log_audit_action(f"worker_{employee_id}", "worker_document_upload", "employee", employee_id, {
         "requirement_id": requirement_id,
         "document_id": doc_id,
-        "file_name": file.filename
+        "file_name": file.filename,
+        "employee_id": employee_id  # Important for audit trail queries
     })
     
     # Send admin notification about document upload
@@ -19451,7 +19452,8 @@ async def upload_document_for_requirement(
             
             await log_audit_action(user['user_id'], "upload_document", "employee_document", doc_id, {
                 "requirement_id": requirement_id,
-                "filename": file.filename
+                "filename": file.filename,
+                "employee_id": employee_id  # Include for audit trail queries
             })
     
     doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -19490,7 +19492,10 @@ async def upload_employee_document(
         }}
     )
     
-    await log_audit_action(user['user_id'], "upload_document", "employee_document", doc_id, {"filename": file.filename})
+    await log_audit_action(user['user_id'], "upload_document", "employee_document", doc_id, {
+        "filename": file.filename,
+        "employee_id": doc['employee_id']  # Include for audit trail queries
+    })
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     return EmployeeDocumentResponse(**updated_doc)
@@ -19758,7 +19763,8 @@ async def mark_employee_document_uploaded_in_error(
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
     await log_audit_action(user['user_id'], "mark_document_uploaded_in_error", "employee_document", doc_id, {
         "reason": payload.reason,
-        "requirement_id": doc.get('requirement_id')
+        "requirement_id": doc.get('requirement_id'),
+        "employee_id": doc.get('employee_id')  # Include for audit trail queries
     })
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -20256,6 +20262,157 @@ async def download_stamped_document(
     except Exception as e:
         logging.error(f"Failed to download document: {e}")
         raise HTTPException(status_code=500, detail="Failed to download document")
+
+
+@api_router.post("/employees/{employee_id}/documents/verify")
+async def verify_document_with_evidence(
+    employee_id: str,
+    stamp_type: str = Form(...),
+    outcome: str = Form(...),
+    proof_file: UploadFile = File(...),
+    document_id: str = Form(...),
+    document_type: str = Form(...),
+    reference_number: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Enhanced document verification with evidence upload.
+    
+    CQC Regulation 17 compliant:
+    - Requires stamp type (original_seen, copy_verified, online_check)
+    - Requires proof of verification (screenshot/PDF)
+    - Requires outcome selection
+    - All actions logged to audit trail
+    """
+    # Validate stamp type
+    valid_stamp_types = ['original_seen', 'copy_verified', 'online_check']
+    if stamp_type not in valid_stamp_types:
+        raise HTTPException(status_code=400, detail=f"Invalid stamp type. Valid options: {valid_stamp_types}")
+    
+    # Validate outcome
+    valid_outcomes = ['verified', 'information_present', 'not_verified']
+    if outcome not in valid_outcomes:
+        raise HTTPException(status_code=400, detail=f"Invalid outcome. Valid options: {valid_outcomes}")
+    
+    # Validate proof file
+    allowed_types = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf']
+    if proof_file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Proof file must be PNG, JPG, or PDF")
+    
+    # Check employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Find the document
+    doc = await db.employee_documents.find_one({"id": document_id})
+    if not doc:
+        # Try finding by requirement_id for this employee
+        doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "requirement_id": document_type
+        })
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Save proof file
+    proof_dir = "/app/uploads/verification_proofs"
+    os.makedirs(proof_dir, exist_ok=True)
+    
+    proof_filename = f"proof_{employee_id}_{document_type}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    proof_ext = proof_file.filename.split('.')[-1] if '.' in proof_file.filename else 'pdf'
+    proof_path = f"{proof_dir}/{proof_filename}.{proof_ext}"
+    
+    try:
+        content = await proof_file.read()
+        with open(proof_path, 'wb') as f:
+            f.write(content)
+        proof_url = f"/uploads/verification_proofs/{proof_filename}.{proof_ext}"
+    except Exception as e:
+        logging.error(f"Failed to save proof file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save proof file")
+    
+    # Get verifier info
+    verifier = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]},
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    verifier_name = ""
+    if verifier:
+        verifier_name = verifier.get('name') or f"{verifier.get('first_name', '')} {verifier.get('last_name', '')}".strip()
+        if not verifier_name:
+            verifier_name = verifier.get('email', user.get('email', 'Admin'))
+    else:
+        verifier_name = user.get('email', 'Admin')
+    
+    now = datetime.now(timezone.utc).isoformat()
+    verification_id = str(uuid.uuid4())[:12].upper()
+    
+    # Stamp type labels
+    stamp_labels = {
+        'original_seen': {'label': 'Original Seen', 'audit_text': 'Original document physically verified'},
+        'copy_verified': {'label': 'Copy Verified', 'audit_text': 'Copy compared with original'},
+        'online_check': {'label': 'Online Check', 'audit_text': 'Verified via online system'}
+    }
+    
+    # Determine status based on outcome
+    status_map = {
+        'verified': 'verified',
+        'information_present': 'verified',
+        'not_verified': 'rejected'
+    }
+    
+    # Update document
+    update_data = {
+        "verification_stamp": stamp_type,
+        "verification_stamp_label": stamp_labels[stamp_type]['label'],
+        "verification_stamp_audit_text": stamp_labels[stamp_type]['audit_text'],
+        "verification_outcome": outcome,
+        "verification_proof_url": proof_url,
+        "verification_reference_number": reference_number,
+        "verification_notes": notes,
+        "verification_id": verification_id,
+        "verified": outcome in ['verified', 'information_present'],
+        "verified_by": user['user_id'],
+        "verified_by_name": verifier_name,
+        "verified_at": now,
+        "status": status_map[outcome]
+    }
+    
+    await db.employee_documents.update_one({"id": doc['id']}, {"$set": update_data})
+    
+    # Log to audit trail with full details
+    await log_audit_action(
+        user_id=user['user_id'],
+        action="document_verification",
+        entity_type="employee_document",
+        entity_id=doc['id'],
+        metadata={
+            "employee_id": employee_id,
+            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "document_type": document_type,
+            "stamp_type": stamp_type,
+            "stamp_label": stamp_labels[stamp_type]['label'],
+            "outcome": outcome,
+            "proof_file": proof_url,
+            "reference_number": reference_number,
+            "notes": notes,
+            "verification_id": verification_id,
+            "verifier_name": verifier_name
+        }
+    )
+    
+    updated_doc = await db.employee_documents.find_one({"id": doc['id']}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "message": f"Document verified with {stamp_labels[stamp_type]['label']}",
+        "verification_id": verification_id,
+        "outcome": outcome,
+        "document": EmployeeDocumentResponse(**updated_doc) if updated_doc else None
+    }
 
 
 @api_router.post("/employees/{employee_id}/requirements/{requirement_id}/verify-all")
@@ -25415,13 +25572,28 @@ async def get_expiry_alerts_dashboard(user: dict = Depends(get_current_user)):
 # ==================== AUDIT LOG ROUTES ====================
 
 async def log_audit_action(user_id: str, action: str, entity_type: str, entity_id: str, metadata: dict):
+    """
+    Log an audit action with optional employee_id extraction from metadata.
+    CQC Regulation 17: All actions must be logged with timestamp and user.
+    """
+    # Get user info for better audit trail
+    user_info = await db.users.find_one(
+        {"$or": [{"user_id": user_id}, {"id": user_id}]},
+        {"_id": 0, "name": 1, "email": 1}
+    )
+    user_name = user_info.get("name", user_info.get("email", "Unknown")) if user_info else "System"
+    
     audit_doc = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
+        "user_name": user_name,
         "action": action,
         "entity_type": entity_type,
         "entity_id": entity_id,
         "metadata": metadata,
+        # Extract employee_id from metadata if present for easier querying
+        "employee_id": metadata.get("employee_id") if metadata else None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.audit_logs.insert_one(audit_doc)
@@ -25442,9 +25614,17 @@ async def log_audit_change(
     Enhanced audit logging for CQC compliance.
     Captures before/after values and mandatory reason for change.
     """
+    # Get user info for better audit trail
+    user_info = await db.users.find_one(
+        {"$or": [{"user_id": user_id}, {"id": user_id}]},
+        {"_id": 0, "name": 1, "email": 1}
+    )
+    user_name = user_info.get("name", user_info.get("email", "Unknown")) if user_info else "System"
+    
     audit_doc = {
         "id": str(uuid.uuid4()),
         "user_id": user_id,
+        "user_name": user_name,
         "action": action,
         "entity_type": entity_type,
         "entity_id": entity_id,
@@ -25455,6 +25635,9 @@ async def log_audit_change(
             "reason": reason
         },
         "metadata": metadata or {},
+        # Extract employee_id from metadata if present
+        "employee_id": metadata.get("employee_id") if metadata else None,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.audit_logs.insert_one(audit_doc)

@@ -124,7 +124,9 @@ export default function ConsolidatedStatusPanel({
   personStage,
   recruitmentApproved,
   onNavigateToTab,
-  onRefresh
+  onRefresh,
+  onVerifyWithEvidence,  // NEW: Callback to open verification modal
+  onViewDocument         // NEW: Callback to open document viewer
 }) {
   const { token } = useAuth();
   const navigate = useNavigate();
@@ -465,7 +467,14 @@ export default function ConsolidatedStatusPanel({
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => onNavigateToTab?.(action.tab)}
+                              onClick={() => {
+                                // If this is a verification action and callback is provided, use it
+                                if (action.label === 'Verify with Evidence' && onVerifyWithEvidence) {
+                                  onVerifyWithEvidence(blocker.gate, gateData);
+                                } else {
+                                  onNavigateToTab?.(action.tab);
+                                }
+                              }}
                               className={cn(
                                 severity === 'CRITICAL' 
                                   ? "text-red-600 border-red-200 hover:bg-red-50"

@@ -1382,18 +1382,44 @@ export default function WorkerDashboard() {
           
           {/* Document Preview */}
           <div className="flex-1 min-h-[400px] overflow-auto bg-gray-100 rounded-lg">
-            {viewerDocument?.file_url ? (
+            {viewerDocument?.id ? (
+              // P0 FIX: Use proper API endpoint for document viewing
+              viewerDocument.file_url?.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                <div className="flex items-center justify-center p-4 h-full">
+                  <img 
+                    src={`${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/file`}
+                    alt={viewerDocument.name}
+                    className="max-w-full max-h-full object-contain rounded shadow-lg"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.nextSibling.style.display = 'flex';
+                    }}
+                  />
+                  <div className="hidden flex-col items-center justify-center h-full text-gray-500">
+                    <FileText className="h-16 w-16 mb-3" />
+                    <p>Failed to load image</p>
+                  </div>
+                </div>
+              ) : (
+                <iframe
+                  src={`${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/file#toolbar=0`}
+                  className="w-full h-full min-h-[500px] rounded"
+                  title={viewerDocument.name}
+                />
+              )
+            ) : viewerDocument?.file_url ? (
+              // Fallback for documents without proper ID
               viewerDocument.file_url.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
                 <div className="flex items-center justify-center p-4 h-full">
                   <img 
-                    src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`}
+                    src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url.startsWith('/api') ? '' : '/api'}${viewerDocument.file_url}`}
                     alt={viewerDocument.name}
                     className="max-w-full max-h-full object-contain rounded shadow-lg"
                   />
                 </div>
               ) : (
                 <iframe
-                  src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}#toolbar=0`}
+                  src={`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url.startsWith('/api') ? '' : '/api'}${viewerDocument.file_url}#toolbar=0`}
                   className="w-full h-full min-h-[500px] rounded"
                   title={viewerDocument.name}
                 />
@@ -1407,11 +1433,16 @@ export default function WorkerDashboard() {
           </div>
           
           <DialogFooter className="gap-2 pt-4 border-t">
-            {viewerDocument?.file_url && (
+            {(viewerDocument?.id || viewerDocument?.file_url) && (
               <>
                 <Button 
                   variant="outline" 
-                  onClick={() => window.open(`${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`, '_blank')}
+                  onClick={() => {
+                    const url = viewerDocument.id 
+                      ? `${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/file`
+                      : `${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`;
+                    window.open(url, '_blank');
+                  }}
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Open in New Tab
@@ -1419,8 +1450,11 @@ export default function WorkerDashboard() {
                 <Button 
                   variant="outline" 
                   onClick={() => {
+                    const url = viewerDocument.id 
+                      ? `${process.env.REACT_APP_BACKEND_URL}/api/employee-documents/${viewerDocument.id}/download`
+                      : `${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`;
                     const link = document.createElement('a');
-                    link.href = `${process.env.REACT_APP_BACKEND_URL}${viewerDocument.file_url}`;
+                    link.href = url;
                     link.download = viewerDocument.file_name || viewerDocument.name || 'document';
                     link.click();
                   }}

@@ -53,24 +53,55 @@ MANDATORY_TRAINING_HCA = [
     {"id": "prevent", "name": "Prevent (Counter-Terrorism Awareness)", "induction_sync": None},
 ]
 
-# 15 Care Certificate Standards for Induction (Adults only - no Safeguarding Children)
+# 15 Care Certificate Standards for Induction (Adults ONLY - NO Safeguarding Children)
+# These are the official NHS Care Certificate standards for adult social care
+# Auto-complete mapping: When training is verified, corresponding induction item auto-completes
 CARE_CERTIFICATE_STANDARDS = [
-    {"id": "understand_your_role", "num": 1, "name": "Understand Your Role", "training_sync": None},
-    {"id": "personal_development", "num": 2, "name": "Your Personal Development", "training_sync": None},
-    {"id": "duty_of_care", "num": 3, "name": "Duty of Care", "training_sync": None},
-    {"id": "equality_diversity", "num": 4, "name": "Equality and Diversity", "training_sync": None},
-    {"id": "work_person_centred", "num": 5, "name": "Work in a Person-Centred Way", "training_sync": None},
-    {"id": "communication", "num": 6, "name": "Communication", "training_sync": None},
-    {"id": "privacy_dignity", "num": 7, "name": "Privacy and Dignity", "training_sync": None},
-    {"id": "fluids_nutrition", "num": 8, "name": "Fluids and Nutrition", "training_sync": None},
-    {"id": "awareness_mental_health", "num": 9, "name": "Awareness of Mental Health, Dementia and Learning Disabilities", "training_sync": None},
-    {"id": "safeguarding_adults", "num": 10, "name": "Safeguarding Adults", "training_sync": "safeguarding_adults"},
-    {"id": "basic_life_support", "num": 11, "name": "Basic Life Support", "training_sync": "basic_life_support"},
-    {"id": "health_safety", "num": 12, "name": "Health and Safety", "training_sync": "health_safety"},
-    {"id": "infection_control", "num": 13, "name": "Infection Prevention and Control", "training_sync": "infection_control"},
-    {"id": "moving_handling", "num": 14, "name": "Handle Information / Moving & Handling", "training_sync": "manual_handling"},
-    {"id": "fire_safety", "num": 15, "name": "Fire Safety", "training_sync": "fire_safety"},
+    {"id": "understand_your_role", "num": 1, "name": "Understand Your Role", "training_sync": None, "auto_complete": "manual"},
+    {"id": "personal_development", "num": 2, "name": "Your Personal Development", "training_sync": None, "auto_complete": "manual"},
+    {"id": "duty_of_care", "num": 3, "name": "Duty of Care", "training_sync": None, "auto_complete": "manual"},
+    {"id": "equality_diversity", "num": 4, "name": "Equality and Diversity", "training_sync": "equality_diversity", "auto_complete": "training"},
+    {"id": "work_person_centred", "num": 5, "name": "Work in a Person-Centred Way", "training_sync": None, "auto_complete": "manual"},
+    {"id": "communication", "num": 6, "name": "Communication", "training_sync": None, "auto_complete": "interview"},
+    {"id": "privacy_dignity", "num": 7, "name": "Privacy and Dignity", "training_sync": None, "auto_complete": "manual"},
+    {"id": "fluids_nutrition", "num": 8, "name": "Fluids and Nutrition", "training_sync": "food_hygiene", "auto_complete": "training"},
+    {"id": "awareness_mental_health", "num": 9, "name": "Awareness of Mental Health, Dementia and Learning Disabilities", "training_sync": "mental_health", "auto_complete": "training"},
+    {"id": "safeguarding_adults", "num": 10, "name": "Safeguarding Adults", "training_sync": "safeguarding_adults", "auto_complete": "training"},
+    {"id": "basic_life_support", "num": 11, "name": "Basic Life Support", "training_sync": "basic_life_support", "auto_complete": "training"},
+    {"id": "health_safety", "num": 12, "name": "Health and Safety", "training_sync": "health_safety", "auto_complete": "training"},
+    {"id": "handling_information", "num": 13, "name": "Handling Information", "training_sync": "information_governance", "auto_complete": "training"},
+    {"id": "infection_control", "num": 14, "name": "Infection Prevention and Control", "training_sync": "infection_control", "auto_complete": "training"},
+    {"id": "shadow_shift", "num": 15, "name": "Shadow Shift Completed", "training_sync": None, "auto_complete": "manual"},
 ]
+
+# Training → Induction Auto-Complete Mapping (P0 CRITICAL)
+# When a training is verified, automatically mark the corresponding induction item as complete
+TRAINING_TO_INDUCTION_MAP = {
+    # Training ID → Induction ID
+    "safeguarding_adults": "safeguarding_adults",
+    "safeguarding": "safeguarding_adults",
+    "manual_handling": "moving_handling",  # Maps to Moving & Handling if exists
+    "moving_handling": "moving_handling",
+    "fire_safety": "fire_safety",
+    "health_safety": "health_safety",
+    "health_and_safety": "health_safety",
+    "basic_life_support": "basic_life_support",
+    "bls": "basic_life_support",
+    "infection_control": "infection_control",
+    "infection_prevention": "infection_control",
+    "information_governance": "handling_information",
+    "gdpr": "handling_information",
+    "data_protection": "handling_information",
+    "equality_diversity": "equality_diversity",
+    "equality_and_diversity": "equality_diversity",
+    "food_hygiene": "fluids_nutrition",
+    "nutrition": "fluids_nutrition",
+    "mental_health": "awareness_mental_health",
+    "dementia": "awareness_mental_health",
+    "learning_disabilities": "awareness_mental_health",
+    "medication_administration": None,  # No direct induction mapping
+    "medication_awareness": None,
+}
 
 # Documents required for ALL roles
 REQUIRED_DOCUMENTS = [
@@ -167,6 +198,162 @@ def normalize_training_name(name: str) -> str:
     # Collapse multiple spaces and strip
     name = ' '.join(name.split())
     return name
+
+
+def get_induction_item_for_training(training_id: str, training_name: str = None) -> Optional[str]:
+    """
+    Get the induction item ID that should be auto-completed when a training is verified.
+    Uses fuzzy matching if exact match not found.
+    
+    Returns: induction_item_id or None
+    """
+    # First try exact match from mapping
+    normalized_id = normalize_training_name(training_id)
+    
+    # Direct mapping lookup
+    if training_id in TRAINING_TO_INDUCTION_MAP:
+        return TRAINING_TO_INDUCTION_MAP[training_id]
+    
+    if normalized_id in TRAINING_TO_INDUCTION_MAP:
+        return TRAINING_TO_INDUCTION_MAP[normalized_id]
+    
+    # Try fuzzy matching on training name
+    if training_name:
+        normalized_name = normalize_training_name(training_name)
+        
+        # Check each mapping key
+        for key, induction_id in TRAINING_TO_INDUCTION_MAP.items():
+            normalized_key = normalize_training_name(key)
+            if normalized_key in normalized_name or normalized_name in normalized_key:
+                return induction_id
+    
+    return None
+
+
+async def auto_complete_induction_from_training(
+    db,
+    employee_id: str,
+    training_id: str,
+    training_name: str,
+    verified_by: str,
+    verified_by_name: str = None
+) -> dict:
+    """
+    Auto-complete the corresponding induction item when a training is verified.
+    
+    P0 CRITICAL: This ensures training verification syncs with induction checklist.
+    
+    Returns: {auto_completed: bool, induction_item: str, message: str}
+    """
+    result = {
+        "auto_completed": False,
+        "induction_item": None,
+        "induction_item_name": None,
+        "message": "No matching induction item"
+    }
+    
+    # Find matching induction item
+    induction_item_id = get_induction_item_for_training(training_id, training_name)
+    
+    if not induction_item_id:
+        return result
+    
+    # Find the induction item details
+    induction_item = next(
+        (item for item in CARE_CERTIFICATE_STANDARDS if item["id"] == induction_item_id),
+        None
+    )
+    
+    if not induction_item:
+        return result
+    
+    result["induction_item"] = induction_item_id
+    result["induction_item_name"] = induction_item["name"]
+    
+    # Get or create induction checklist for employee
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    if not checklist:
+        # Create new checklist with this item completed
+        completed_items = {
+            induction_item_id: {
+                "completed": True,
+                "completed_at": now,
+                "completed_by": verified_by,
+                "completed_by_name": verified_by_name or verified_by,
+                "auto_completed_from": f"training:{training_id}",
+                "training_name": training_name
+            }
+        }
+        
+        await db.induction_checklists.insert_one({
+            "id": f"induction_{employee_id}",
+            "employee_id": employee_id,
+            "items": completed_items,
+            "total_items": 15,
+            "created_at": now,
+            "updated_at": now
+        })
+        
+        result["auto_completed"] = True
+        result["message"] = f"Created induction checklist and auto-completed '{induction_item['name']}' from {training_name} training"
+    else:
+        # Update existing checklist
+        items = checklist.get("items", {})
+        
+        # Check if already completed
+        if items.get(induction_item_id, {}).get("completed"):
+            result["message"] = f"Induction item '{induction_item['name']}' already completed"
+            return result
+        
+        # Mark as completed
+        items[induction_item_id] = {
+            "completed": True,
+            "completed_at": now,
+            "completed_by": verified_by,
+            "completed_by_name": verified_by_name or verified_by,
+            "auto_completed_from": f"training:{training_id}",
+            "training_name": training_name
+        }
+        
+        await db.induction_checklists.update_one(
+            {"employee_id": employee_id},
+            {
+                "$set": {
+                    "items": items,
+                    "updated_at": now
+                }
+            }
+        )
+        
+        result["auto_completed"] = True
+        result["message"] = f"Auto-completed induction item '{induction_item['name']}' from {training_name} training"
+    
+    # Log to audit trail
+    try:
+        await db.audit_logs.insert_one({
+            "id": f"audit_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+            "action": "induction_auto_complete",
+            "entity_type": "induction_checklist",
+            "entity_id": f"induction_{employee_id}",
+            "employee_id": employee_id,
+            "user_id": verified_by,
+            "user_name": verified_by_name,
+            "details": {
+                "training_id": training_id,
+                "training_name": training_name,
+                "induction_item_id": induction_item_id,
+                "induction_item_name": induction_item["name"],
+                "auto_completed": True
+            },
+            "timestamp": now
+        })
+    except Exception as e:
+        logger.warning(f"Failed to log induction auto-complete audit: {e}")
+    
+    return result
 
 
 def is_training_valid(training: dict) -> Tuple[bool, Optional[str]]:

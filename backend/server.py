@@ -103,8 +103,10 @@ from work_readiness_engine import (
 from unified_compliance_engine import (
     get_unified_employee_status,
     sync_induction_with_training,
+    auto_complete_induction_from_training,
     CARE_CERTIFICATE_STANDARDS,
     MANDATORY_TRAINING_HCA,
+    TRAINING_TO_INDUCTION_MAP,
     get_clear_label,
 )
 from interview_questions import (
@@ -7818,6 +7820,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 display_status = doc.get("status", "uploaded")
             
             completed_docs.append({
+                "id": doc.get("id"),  # P0 FIX: Include document ID for file viewing endpoint
                 "type": doc_type,
                 "name": doc_name,
                 "verified": is_verified,
@@ -7860,6 +7863,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             )
             file_url = poa_doc.get("stamped_file_url") if is_verified else poa_doc.get("file_url")
             completed_docs.append({
+                "id": poa_doc.get("id"),  # P0 FIX: Include document ID for file viewing
                 "type": "proof_of_address",
                 "name": "Proof of Address (1 of 2)",
                 "verified": is_verified,
@@ -7868,7 +7872,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "file_name": poa_doc.get("file_name") or poa_doc.get("original_filename"),
                 "document_id": poa_doc.get("id"),
                 "partial": True,
-                "status": "verified" if is_verified else "pending_verification"
+                "status": "verified" if is_verified else "pending_verification",
+                "verified_by_name": poa_doc.get("verification_stamp_by_name") or poa_doc.get("verified_by_name"),
+                "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
             })
         missing_docs.append({
             "type": "proof_of_address_2",
@@ -12471,39 +12477,63 @@ async def verify_training(
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Get user's full name for verification stamp
-    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
-    user_name = user['email']
+    # P0 FIX: Get user's full name for verification stamp (not email)
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
+    if not user_doc:
+        user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
+    
+    user_name = "Admin"  # Default fallback
     if user_doc:
         if user_doc.get('name'):
             user_name = user_doc['name']
         elif user_doc.get('first_name'):
             user_name = f"{user_doc.get('first_name', '')} {user_doc.get('last_name', '')}".strip()
     
+    # If still no name, use email but format it nicely
+    if user_name == "Admin" and user.get('email'):
+        email = user['email']
+        # Convert email to display name: john.doe@email.com -> John Doe
+        name_part = email.split('@')[0]
+        user_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
+    
     await db.training_records.update_one(
         {"id": record.get("id")},  # Use actual record ID
         {"$set": {
             "verified": True,
             "verification_status": "verified",
-            "verified_by": user_name,
+            "verified_by": user_name,  # P0 FIX: Store name, not email
+            "verified_by_id": user['user_id'],  # Store ID for audit trail
             "verified_at": now,
             "updated_at": now
         }}
     )
     
     # P0: Auto-complete corresponding induction checklist item
-    await auto_sync_induction_from_training(employee_id, record.get('training_name', ''), user_name, now)
+    training_id = record.get('requirement_id') or record.get('code') or record.get('training_name', '').lower().replace(' ', '_')
+    training_name = record.get('training_name', '')
+    
+    induction_result = await auto_complete_induction_from_training(
+        db=db,
+        employee_id=employee_id,
+        training_id=training_id,
+        training_name=training_name,
+        verified_by=user['user_id'],
+        verified_by_name=user_name
+    )
     
     await log_audit_action(user['user_id'], "verify_training", "employee", employee_id, {
         "record_id": record.get("id"),
-        "training_name": record.get('training_name')
+        "training_name": record.get('training_name'),
+        "verified_by_name": user_name,
+        "induction_auto_complete": induction_result
     })
     
     return {
         "status": "success",
         "message": f"Training '{record.get('training_name')}' verified",
         "verified_by": user_name,
-        "verified_at": now
+        "verified_at": now,
+        "induction_auto_complete": induction_result
     }
 
 
@@ -20813,20 +20843,39 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Get verifier name
-    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
-    verifier_name = verifier.get('name') if verifier else None
+    # P0 FIX: Get verifier's full name (not email)
+    verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1, "first_name": 1, "last_name": 1})
+    if not verifier:
+        verifier = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "name": 1, "first_name": 1, "last_name": 1})
+    
+    verifier_name = "Admin"
+    if verifier:
+        if verifier.get('name'):
+            verifier_name = verifier['name']
+        elif verifier.get('first_name'):
+            verifier_name = f"{verifier.get('first_name', '')} {verifier.get('last_name', '')}".strip()
+    
+    # Fallback: format email as name
+    if verifier_name == "Admin" and user.get('email'):
+        email = user['email']
+        name_part = email.split('@')[0]
+        verifier_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
     
     update_data = {
         "verified": True,
         "verified_by": user['user_id'],
-        "verified_by_name": verifier_name,
+        "verified_by_name": verifier_name,  # P0 FIX: Store name, not email
         "verified_at": now,
         "status": "approved"  # Ensure status is approved
     }
     
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
-    await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {"verified": True})
+    await log_audit_action(user['user_id'], "verify_document", "employee_document", doc_id, {
+        "verified": True,
+        "verified_by_name": verifier_name,
+        "document_type": doc.get("requirement_id"),
+        "employee_id": doc.get("employee_id")
+    })
     
     updated_doc = await db.employee_documents.find_one({"id": doc_id}, {"_id": 0})
     
@@ -24853,37 +24902,70 @@ async def verify_training_record(record_id: str, user: dict = Depends(require_ma
     
     now = datetime.now(timezone.utc).isoformat()
     
-    # Get user name for verification
-    user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0})
-    verified_by_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
+    # P0 FIX: Get user's full name (not email) for verification stamp
+    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
+    if not user_doc:
+        user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
+    
+    verified_by_name = "Admin"
+    if user_doc:
+        if user_doc.get('name'):
+            verified_by_name = user_doc['name']
+        elif user_doc.get('first_name'):
+            verified_by_name = f"{user_doc.get('first_name', '')} {user_doc.get('last_name', '')}".strip()
+    
+    # Fallback: format email as name
+    if verified_by_name == "Admin" and user.get('email'):
+        email = user['email']
+        name_part = email.split('@')[0]
+        verified_by_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
     
     await db.training_records.update_one(
         {"id": record_id},
         {"$set": {
             "verified": True,
             "verified_by": verified_by_name,
+            "verified_by_id": user['user_id'],
             "verified_at": now,
             "updated_at": now
         }}
     )
     
     # P0: Auto-complete corresponding induction checklist item
+    induction_result = None
     if record.get('employee_id'):
-        await auto_sync_induction_from_training(record['employee_id'], record.get('training_name', ''), verified_by_name, now)
+        training_id = record.get('requirement_id') or record.get('code') or record.get('training_name', '').lower().replace(' ', '_')
+        induction_result = await auto_complete_induction_from_training(
+            db=db,
+            employee_id=record['employee_id'],
+            training_id=training_id,
+            training_name=record.get('training_name', ''),
+            verified_by=user['user_id'],
+            verified_by_name=verified_by_name
+        )
     
     await log_audit_action(
         user['user_id'], 
         "verify_training", 
         "training_record", 
         record_id, 
-        {"training_name": record['training_name']}
+        {
+            "training_name": record['training_name'],
+            "verified_by_name": verified_by_name,
+            "induction_auto_complete": induction_result
+        }
     )
     
     # Update employee compliance
     await update_employee_compliance(record['employee_id'])
     
     updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    return {"success": True, "message": "Training verified successfully", "training_record": updated}
+    return {
+        "success": True, 
+        "message": "Training verified successfully", 
+        "training_record": updated,
+        "induction_auto_complete": induction_result
+    }
 
 
 @api_router.post("/training-records/{record_id}/unverify")

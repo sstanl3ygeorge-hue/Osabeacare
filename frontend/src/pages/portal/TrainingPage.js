@@ -88,7 +88,7 @@ export default function TrainingPage() {
   
   // Initialize filter from URL params
   const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
-  const { token, isAuditor } = useAuth();
+  const { token, isAuditor, loading: authLoading } = useAuth();
 
   // Sync filter to URL
   useEffect(() => {
@@ -134,15 +134,39 @@ export default function TrainingPage() {
   });
 
   const fetchData = async () => {
+    console.log('[TrainingPage] fetchData called. Token:', token ? 'exists' : 'null');
+    if (!token) {
+      console.warn('[TrainingPage] No token available for fetching training data');
+      setLoading(false);
+      return;
+    }
+    
     try {
+      setLoading(true);
+      console.log('[TrainingPage] Starting data fetch...');
+      const headers = { Authorization: `Bearer ${token}` };
+      
       const [trainingRes, employeesRes, summaryRes, extractionsRes] = await Promise.all([
-        axios.get(`${API}/training-records`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get(`${API}/training/matrix/summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null),
-        axios.get(`${API}/document-extractions/pending-review?limit=50`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null)
+        axios.get(`${API}/training-records`, { headers }),
+        axios.get(`${API}/employees`, { headers }),
+        axios.get(`${API}/training/matrix/summary`, { headers }).catch((err) => {
+          console.warn('[TrainingPage] Matrix summary fetch failed:', err);
+          return null;
+        }),
+        axios.get(`${API}/document-extractions/pending-review?limit=50`, { headers }).catch((err) => {
+          console.warn('[TrainingPage] Extractions fetch failed:', err);
+          return null;
+        })
       ]);
-      setTraining(trainingRes.data);
-      setEmployees(employeesRes.data);
+      
+      console.log('[TrainingPage] Data fetched:', {
+        trainingCount: trainingRes?.data?.length,
+        employeesCount: employeesRes?.data?.length,
+        summary: summaryRes?.data
+      });
+      
+      setTraining(trainingRes.data || []);
+      setEmployees(employeesRes.data || []);
       
       // Set summary from backend (canonical source)
       if (summaryRes?.data) {
@@ -157,15 +181,19 @@ export default function TrainingPage() {
         setPendingExtractions(trainingExtractions);
       }
     } catch (error) {
-      console.error('Failed to fetch data:', error);
+      console.error('Failed to fetch training data:', error);
+      toast.error('Failed to load training data. Please refresh the page.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
-  }, [token]);
+    // Only fetch data when auth is complete and token is available
+    if (!authLoading && token) {
+      fetchData();
+    }
+  }, [token, authLoading]);
 
   const handleAddTraining = async (e) => {
     e.preventDefault();

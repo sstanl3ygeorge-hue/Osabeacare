@@ -119,14 +119,6 @@ export default function WorkerLoginPage() {
             </Button>
           </form>
           
-          <div className="mt-6 pt-6 border-t border-slate-100">
-            <div className="bg-blue-50 rounded-lg p-4 text-center">
-              <p className="text-sm text-blue-800 font-medium">Default Password</p>
-              <p className="text-lg text-blue-900 font-mono mt-1">Welcome123!</p>
-              <p className="text-xs text-blue-600 mt-2">Use this password for your first login</p>
-            </div>
-          </div>
-          
           <div className="mt-6 text-center space-y-2">
             <Link 
               to="/" 

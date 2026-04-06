@@ -1672,3 +1672,62 @@ Updated `/app/frontend/src/components/training/AuditReadyTrainingMatrix.js`:
 - Backend: verified_by now populated with admin email
 - Backend: additional_items includes all non-mandatory trainings
 - Induction checklist: Confirmed 15 items
+
+---
+
+## COMPLETED: Induction Auto-Sync with Training + Re-extract Feature (April 2026)
+
+### Problem Statement
+1. Induction Checklist was NOT synced with Training status:
+   - Safeguarding training ✅ Verified, but Induction showed "Safeguarding Adults REQUIRED"
+   - Same issue for Manual Handling, Fire Safety, Health & Safety, BLS, Infection Control
+
+2. Expiry dates not extracted correctly from certificates - need Re-extract button
+
+### Solution Implemented
+
+#### 1. Induction Auto-Sync with Verified Trainings
+Updated `GET /api/employees/{id}/induction-checklist` in `/app/backend/server.py`:
+
+**Mapping Logic:**
+| Induction Item | Training Pattern Match |
+|----------------|----------------------|
+| Safeguarding Adults | safeguarding, safeguard |
+| Basic Life Support | bls, basic life support, resuscitation, cpr |
+| Health and Safety | health and safety, health & safety |
+| Infection Prevention and Control | infection, infection control |
+| Equality and Diversity | equality, diversity, edi |
+| Handling Information | data protection, gdpr, information governance |
+| Moving & Handling | manual handling, moving and handling |
+| Fire Safety | fire safety, fire awareness |
+| ...and more (15 total items) |
+
+**Behavior:**
+- When induction checklist is fetched, it queries verified trainings
+- Matches training names to induction items using pattern matching
+- Auto-marks matching items as "completed"
+- Shows "Auto (Training: {name})" as completed_by_name
+- Saves sync to database for persistence
+
+#### 2. Re-extract Feature for Certificates
+Added `POST /api/employees/{id}/training/re-extract` endpoint:
+- Reads existing certificate file from URL or document_id
+- Re-runs AI extraction with enhanced prompts
+- Returns preview of extracted trainings
+- Marks items as "Update" if they match existing records
+- Logs re-extraction to audit trail
+
+**Frontend Changes in TrainingDetailDrawer.js:**
+- Added "Re-extract" button next to training title
+- Shows only for admin with certificate available
+- Opens preview modal showing all detected trainings
+- Select/deselect, review dates, then save
+
+### Files Modified
+- `/app/backend/server.py` - Auto-sync logic in get_induction_checklist, re-extract endpoint
+- `/app/frontend/src/components/training/TrainingDetailDrawer.js` - Re-extract button and modal
+
+### Testing Verified
+- API test: Lawrence Egbeni now shows 5/15 induction items auto-completed
+- Auto-sync working: Safeguarding, BLS, Health & Safety, Infection Control all synced
+- 15-item Care Certificate standard confirmed

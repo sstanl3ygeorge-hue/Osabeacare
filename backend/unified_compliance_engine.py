@@ -1018,11 +1018,10 @@ async def get_unified_employee_status(
     completed_requirements = sum(cat["completed"] for cat in categories.values())
     
     # Add nurse-specific requirements to total
+    # P0 FIX: Nurse = 33 base + 1 (NMC) = 34 requirements
     if is_nurse:
-        total_requirements += 2  # NMC + Indemnity
+        total_requirements += 1  # NMC Registration only
         if checks.get("professional_registration"):
-            completed_requirements += 1
-        if checks.get("professional_indemnity"):
             completed_requirements += 1
     
     overall_percentage = round((completed_requirements / total_requirements) * 100) if total_requirements > 0 else 0

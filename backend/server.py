@@ -7683,13 +7683,13 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     induction_record = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
     if induction_record and induction_record.get("items"):
         items = induction_record.get("items", [])
-        # Count only mandatory items (exclude optional Safeguarding Children for adults)
+        # Count only mandatory items (Adults only - 15 Care Certificate standards)
         mandatory_items = [i for i in items if i.get("mandatory", True)]
-        categories["induction"]["total"] = len(mandatory_items) if mandatory_items else 14
+        categories["induction"]["total"] = len(mandatory_items) if mandatory_items else 15
         categories["induction"]["completed"] = sum(1 for i in mandatory_items if i.get("status") == "completed")
     else:
-        # P0 FIX: 14 mandatory Care Certificate standards (excludes optional Safeguarding Children)
-        categories["induction"]["total"] = 14
+        # P0 FIX: 15 mandatory Care Certificate standards (Adults ONLY - NO Safeguarding Children)
+        categories["induction"]["total"] = 15
         categories["induction"]["completed"] = 0
     
     return {
@@ -8349,9 +8349,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     total_items = 0
     
     # Mapping from induction item name to training verification (matches DEFAULT_INDUCTION_ITEMS)
+    # P0 FIX: Adults ONLY - NO Safeguarding Children
     INDUCTION_TRAINING_MAP = {
         "safeguarding adults": ["safeguarding", "safeguard", "safeguard_adults"],
-        "safeguarding children": ["safeguarding children", "child protection"],
         "health and safety": ["health_safety", "health safety", "health & safety", "cstf_health"],
         "infection prevention and control": ["infection", "infection control", "infection_control", "cstf_infection"],
         "basic life support": ["bls", "basic life", "basic_life", "resuscitation"],
@@ -8404,8 +8404,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "synced_from_training": is_training_complete and not is_complete_in_checklist
             })
     else:
-        # No induction record - show default 15 Care Certificate standards
-        # P0 FIX: Match DEFAULT_INDUCTION_ITEMS exactly (15 items)
+        # No induction record - show default 15 Care Certificate standards (Adults ONLY)
+        # P0 FIX: EXACTLY 15 items - NO Safeguarding Children
         care_certificate_standards = [
             {"name": "Understand Your Role", "mandatory": True},
             {"name": "Your Personal Development", "mandatory": True},
@@ -8415,13 +8415,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             {"name": "Communication", "mandatory": True},
             {"name": "Privacy and Dignity", "mandatory": True},
             {"name": "Fluids and Nutrition", "mandatory": True},
-            {"name": "Mental Health, Dementia and Learning Disabilities", "mandatory": True},
+            {"name": "Awareness of Mental Health, Dementia and Learning Disabilities", "mandatory": True},
             {"name": "Safeguarding Adults", "mandatory": True},
-            {"name": "Safeguarding Children", "mandatory": False},  # Only if working with children
             {"name": "Basic Life Support", "mandatory": True},
             {"name": "Health and Safety", "mandatory": True},
             {"name": "Handling Information", "mandatory": True},
             {"name": "Infection Prevention and Control", "mandatory": True},
+            {"name": "Shadow Shift Completed", "mandatory": True},
         ]
         for std in care_certificate_standards:
             std_name = std["name"]
@@ -50375,13 +50375,13 @@ DEFAULT_INDUCTION_ITEMS = [
     {"name": "Communication", "mandatory": True, "order": 6, "training_link": None},
     {"name": "Privacy and Dignity", "mandatory": True, "order": 7, "training_link": None},
     {"name": "Fluids and Nutrition", "mandatory": True, "order": 8, "training_link": "food_hygiene"},
-    {"name": "Mental Health, Dementia and Learning Disabilities", "mandatory": True, "order": 9, "training_link": None},
+    {"name": "Awareness of Mental Health, Dementia and Learning Disabilities", "mandatory": True, "order": 9, "training_link": None},
     {"name": "Safeguarding Adults", "mandatory": True, "order": 10, "training_link": "safeguarding"},
-    {"name": "Safeguarding Children", "mandatory": False, "order": 11, "training_link": None},  # Only if working with children
-    {"name": "Basic Life Support", "mandatory": True, "order": 12, "training_link": "bls"},
-    {"name": "Health and Safety", "mandatory": True, "order": 13, "training_link": "health_safety"},
-    {"name": "Handling Information", "mandatory": True, "order": 14, "training_link": "data_protection"},
-    {"name": "Infection Prevention and Control", "mandatory": True, "order": 15, "training_link": "infection_control"},
+    {"name": "Basic Life Support", "mandatory": True, "order": 11, "training_link": "bls"},
+    {"name": "Health and Safety", "mandatory": True, "order": 12, "training_link": "health_safety"},
+    {"name": "Handling Information", "mandatory": True, "order": 13, "training_link": "data_protection"},
+    {"name": "Infection Prevention and Control", "mandatory": True, "order": 14, "training_link": "infection_control"},
+    {"name": "Shadow Shift Completed", "mandatory": True, "order": 15, "training_link": None},
 ]
 
 # Mapping of induction items to training requirement codes for auto-completion

@@ -2352,4 +2352,110 @@ Implements dual-evidence model for CQC audit-ready compliance:
 - [ ] Worker dashboard amendment re-upload flow
 - [ ] Frontend display of stamped PDF download links
 
+---
+
+## COMPLETED: Osabea Interview Questions & Zero Hour Contract Integration (April 2026)
+
+### Interview Feature Enhancement
+Integrated the official Osabea Interview Questions template with:
+
+**8 Assessment Questions (0-3 Scoring Scale)**
+1. What interested you in applying for the position of Care Worker?
+2. How will you ensure that the person is supported to lead the life that they choose?
+3. Tell us about a time when you worked as part of a team to achieve a successful goal?
+4. What is it about your personality that makes you successful at building relationships and networks?
+5. Some of the individuals we support may become anxious and challenge. What do you feel you would need to know about an individual to help them?
+6. How would you know if you were doing a good job for them?
+7. What do you see as the benefits and challenges of supporting in the community?
+8. We need people that will be committed to the people they support and the team. How have you demonstrated commitment in a work setting before?
+
+**Scoring Criteria (0-3 scale per question)**
+- 0: Does not meet criteria
+- 1: Part meets criteria
+- 2: Meets criteria
+- 3: Exceeds criteria
+
+**Pass Threshold**: 11 points out of 24 (46%)
+
+**Role-Specific Questions**:
+- Support Workers/HCAs: 8 questions (max 24 points)
+- Nurses: 14 questions (8 base + 6 clinical, max 42 points)
+
+**API Endpoints**:
+- `GET /api/interview-config/{role}` - Get role-specific questions and scoring criteria
+- `POST /api/employees/{id}/interview-records` - Create V2 format interview record
+- `GET /api/employees/{id}/interview-records` - List interview records
+
+**Files Changed**:
+- `/app/backend/interview_questions.py` - Full Osabea question template with scoring criteria
+- `/app/backend/server.py` - V2 interview endpoints
+- `/app/frontend/src/components/compliance/InterviewFormPanel.js` - New UI with tabs
+
+### Zero Hour Contract Template Integration
+Integrated the official 908623 SMT Zero Hour Contract template with:
+
+**17 Contract Sections**:
+1. Parties
+2. Commencement of Employment
+3. Job Title and Duties
+4. Hours of Work
+5. Remuneration
+6. Expenses
+7. Holidays
+8. Sickness Absence
+9. Pension
+10. Termination
+11. Confidentiality
+12. Data Protection
+13. Disciplinary and Grievance Procedures
+14. Health and Safety
+15. General
+16. Exclusivity Clause (Void per 2015 Act)
+17. Acceptance (Signature section)
+
+**Auto-Fill Placeholders**:
+- [EMPLOYEE_NAME] - From employee profile
+- [EMPLOYEE_ADDRESS] - From employee address
+- [START_DATE] - From employee start date
+- [JOB_TITLE] - From employee role
+- [CONTRACT_DATE] - Generated date
+
+**API Endpoints**:
+- `GET /api/contract-templates` - List available templates
+- `GET /api/contract-templates/{id}` - Get template with full sections
+- `GET /api/employees/{id}/contract/preview` - Preview with auto-fill
+- `POST /api/employees/{id}/contract/generate` - Generate for signature
+- `POST /api/employees/{id}/contracts/{id}/sign` - Worker signs contract
+
+**Files Created**:
+- `/app/backend/contract_templates.py` - Zero Hour Contract template module
+
+---
+
+## CURRENT TASK BACKLOG
+
+### In Progress
+- [ ] Application Form → Profile Auto-Sync (PDF upload → AI extraction → Employee profile)
+- [ ] Profile Completion Wizard (for manually created employees)
+- [ ] CV Upload Option in Worker Dashboard
+
+### P1 - Important
+- [ ] Magic Link Email Flow verification
+- [ ] Worker portal reference declaration endpoint
+
+### P2 - Should Have
+- [ ] Refactor `server.py` into modular routers (55k+ lines currently)
+- [ ] Resolve F811 duplicate function definitions
+- [ ] Rate limiting on auth endpoints
+
+### P3 - Nice to Have
+- [ ] Supabase Auth integration with RLS policies
+- [ ] PostgreSQL migration (from MongoDB)
+- [ ] MFA (TOTP) for Admin accounts
+
+---
+
+## Test Coverage
+- `/app/backend/tests/test_osabea_interview_contract.py` - 12 tests for interview and contract APIs
+
 

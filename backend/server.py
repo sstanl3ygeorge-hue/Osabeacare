@@ -8782,11 +8782,17 @@ async def worker_upload_document(
     
     # Create document record
     doc_id = str(uuid.uuid4())
+    
+    # Determine if this is a training certificate upload
+    is_training_cert = requirement_id.startswith("training") or "training" in requirement_id.lower()
+    
     doc_record = {
         "id": doc_id,
         "employee_id": employee_id,
         "requirement_id": requirement_id,
         "document_type_id": requirement_id,
+        "document_type": "training_certificate" if is_training_cert else requirement_id,
+        "category": "training" if is_training_cert else "document",
         "file_name": file.filename,
         "original_filename": file.filename,
         "file_url": file_url,
@@ -8881,26 +8887,65 @@ async def worker_upload_document(
             if extracted_trainings:
                 logger.info(f"AI extracted {len(extracted_trainings)} training(s) from worker upload")
                 
-                # Store extracted training records (pending admin verification)
+                # Update document record with extraction count
+                await db.employee_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "extraction_count": len(extracted_trainings),
+                        "extraction_status": "completed",
+                        "extraction_date": now
+                    }}
+                )
+                
+                # Store extracted training records as proposed items (pending admin review)
+                proposed_items = []
                 for training in extracted_trainings:
-                    training_record = {
+                    training_name = training.get("training_name", "Unknown Training")
+                    
+                    # Check if this matches a mandatory training
+                    mandatory_codes = {
+                        "safeguarding": ["safeguarding", "safeguard", "protection"],
+                        "manual_handling": ["manual handling", "moving and handling", "people handling"],
+                        "fire_safety": ["fire safety", "fire awareness", "fire marshal"],
+                        "health_safety": ["health and safety", "health & safety", "h&s"],
+                        "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation"],
+                        "infection_control": ["infection control", "infection prevention", "ipc"],
+                        "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
+                        "prevent": ["prevent", "counter terrorism", "radicalisation"]
+                    }
+                    
+                    matched_code = None
+                    training_lower = training_name.lower()
+                    for code, keywords in mandatory_codes.items():
+                        if any(kw in training_lower for kw in keywords):
+                            matched_code = code
+                            break
+                    
+                    proposed_item = {
                         "id": str(uuid.uuid4()),
                         "employee_id": employee_id,
-                        "training_id": training.get("training_id", str(uuid.uuid4())),
-                        "training_name": training.get("training_name"),
-                        "course_name": training.get("course_name", training.get("training_name")),
+                        "source_document_id": doc_id,
+                        "source_document_url": file_url,
+                        "source_document_name": file.filename,
+                        "training_name": training_name,
+                        "course_name": training.get("course_name", training_name),
                         "provider": training.get("provider"),
                         "completion_date": training.get("completion_date"),
                         "expiry_date": training.get("expiry_date"),
-                        "certificate_url": file_url,
-                        "document_id": doc_id,
-                        "status": "pending_verification",  # Needs admin to verify
+                        "mapped_training_code": matched_code,
+                        "is_mandatory": matched_code is not None,
                         "ai_extracted": True,
                         "extraction_confidence": training.get("confidence", "medium"),
+                        "status": "proposed",  # Needs admin review
                         "uploaded_by_worker": True,
                         "created_at": now
                     }
-                    await db.training_records.insert_one(training_record)
+                    proposed_items.append(proposed_item)
+                
+                # Store proposed items for admin review
+                if proposed_items:
+                    await db.proposed_training_items.insert_many(proposed_items)
+                    logger.info(f"Created {len(proposed_items)} proposed training items for admin review")
                 
                 return {
                     "success": True,
@@ -8910,7 +8955,8 @@ async def worker_upload_document(
                     "ai_extraction": {
                         "extracted": True,
                         "trainings_found": len(extracted_trainings),
-                        "trainings": [t.get("training_name") for t in extracted_trainings]
+                        "trainings": [t.get("training_name") for t in extracted_trainings],
+                        "mandatory_matched": sum(1 for p in proposed_items if p.get("is_mandatory"))
                     },
                     "message": f"Training certificate uploaded. AI extracted {len(extracted_trainings)} training(s). Awaiting admin verification."
                 }

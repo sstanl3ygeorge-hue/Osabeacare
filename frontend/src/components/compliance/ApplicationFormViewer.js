@@ -1,0 +1,540 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
+import { 
+  FileText, User, Briefcase, MapPin, Phone, Mail, Calendar,
+  Shield, Heart, AlertTriangle, CheckCircle, Clock, Download,
+  Upload, Eye, Loader2, FileUp, Users, GraduationCap
+} from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../ui/dialog';
+import { toast } from 'sonner';
+import { formatBackendDate } from '../../lib/dateUtils';
+
+const API = process.env.REACT_APP_BACKEND_URL;
+
+// Section component for consistent styling
+const Section = ({ title, icon: Icon, children, className = "" }) => (
+  <div className={`bg-white border rounded-xl p-4 ${className}`}>
+    <h4 className="font-medium text-gray-800 flex items-center gap-2 mb-3 pb-2 border-b">
+      {Icon && <Icon className="h-4 w-4 text-primary" />}
+      {title}
+    </h4>
+    {children}
+  </div>
+);
+
+// Field display component
+const Field = ({ label, value, className = "" }) => (
+  <div className={className}>
+    <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+    <p className="text-sm font-medium text-gray-900">{value || <span className="text-gray-400 italic">Not provided</span>}</p>
+  </div>
+);
+
+// Declaration item component
+const DeclarationItem = ({ label, value, details }) => (
+  <div className="flex items-start gap-2 py-2 border-b last:border-0">
+    {value ? (
+      <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+    ) : (
+      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+    )}
+    <div>
+      <p className="text-sm text-gray-700">{label}</p>
+      {details && <p className="text-xs text-gray-500 mt-0.5">{details}</p>}
+    </div>
+  </div>
+);
+
+export default function ApplicationFormViewer({ employeeId, employeeName, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [applicationData, setApplicationData] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (employeeId) {
+      fetchApplicationData();
+    }
+  }, [employeeId]);
+
+  const fetchApplicationData = async () => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem('token');
+      
+      // Fetch form submissions for this employee
+      const response = await axios.get(`${API}/api/employees/${employeeId}/forms`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { requirement_id: 'application_form' }
+      });
+      
+      const forms = response.data.forms || response.data || [];
+      const appForm = forms.find(f => f.requirement_id === 'application_form');
+      
+      if (appForm) {
+        setApplicationData(appForm.form_data || appForm.data);
+        setPdfUrl(appForm.file_url || null);
+      }
+      
+      // Also check for uploaded PDF application
+      const docsResponse = await axios.get(`${API}/api/employees/${employeeId}/documents`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      const docs = docsResponse.data.documents || docsResponse.data || [];
+      const appPdf = docs.find(d => d.requirement_id === 'application_form_pdf');
+      if (appPdf?.file_url) {
+        setPdfUrl(appPdf.file_url);
+      }
+      
+    } catch (error) {
+      console.error('Failed to fetch application data:', error);
+      toast.error('Failed to load application data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePdfUpload = async (file) => {
+    if (!file) return;
+    
+    try {
+      setUploading(true);
+      const token = localStorage.getItem('token');
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('requirement_id', 'application_form_pdf');
+      formData.append('extract_data', 'true');
+      
+      const response = await axios.post(
+        `${API}/api/employees/${employeeId}/documents/upload`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      
+      toast.success('Application form uploaded successfully');
+      setShowUploadDialog(false);
+      fetchApplicationData();
+      
+    } catch (error) {
+      console.error('Upload failed:', error);
+      toast.error('Failed to upload application form');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!applicationData && !pdfUrl) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="py-12 text-center">
+          <FileText className="h-12 w-12 mx-auto text-gray-300 mb-4" />
+          <h3 className="text-lg font-medium text-gray-700 mb-2">No Application Form on File</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            This employee was created manually or their application form wasn't stored.
+          </p>
+          <Button onClick={() => setShowUploadDialog(true)} className="rounded-xl">
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Application Form (PDF)
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const personal = applicationData?.personal_details || {};
+  const contact = applicationData?.contact_details || {};
+  const address = applicationData?.address || {};
+  const roleAvail = applicationData?.role_availability || {};
+  const employment = applicationData?.employment_history || [];
+  const references = applicationData?.references || [];
+  const qualifications = applicationData?.qualifications || {};
+  const healthDecl = applicationData?.health_declaration || {};
+  const criminalDecl = applicationData?.criminal_declaration || {};
+  const rtwDecl = applicationData?.right_to_work || {};
+  const declarations = applicationData?.declarations || {};
+
+  return (
+    <>
+      <Card className="border-[#E4E8EB]">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Application Form
+              <Badge variant="outline" className="ml-2 bg-green-50 text-green-700">
+                Submitted
+              </Badge>
+            </CardTitle>
+            <div className="flex gap-2">
+              {pdfUrl && (
+                <Button variant="outline" size="sm" asChild className="rounded-xl">
+                  <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
+                    <Eye className="h-4 w-4 mr-1" />
+                    View PDF
+                  </a>
+                </Button>
+              )}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setShowUploadDialog(true)}
+                className="rounded-xl"
+              >
+                <FileUp className="h-4 w-4 mr-1" />
+                Upload PDF
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        
+        <CardContent>
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid grid-cols-5 mb-4">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="employment">Employment</TabsTrigger>
+              <TabsTrigger value="references">References</TabsTrigger>
+              <TabsTrigger value="declarations">Declarations</TabsTrigger>
+              <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
+            </TabsList>
+
+            {/* Overview Tab */}
+            <TabsContent value="overview" className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                {/* Personal Details */}
+                <Section title="Personal Details" icon={User}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Title" value={personal.title} />
+                    <Field label="First Name" value={personal.first_name} />
+                    <Field label="Middle Name" value={personal.middle_name} />
+                    <Field label="Last Name" value={personal.last_name} />
+                    <Field label="Preferred Name" value={personal.preferred_name} />
+                    <Field label="Date of Birth" value={formatBackendDate(personal.date_of_birth)} />
+                    <Field label="NI Number" value={personal.national_insurance} className="col-span-2" />
+                  </div>
+                </Section>
+
+                {/* Contact Details */}
+                <Section title="Contact Details" icon={Phone}>
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm">{contact.email || 'Not provided'}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Phone className="h-4 w-4 text-gray-400" />
+                      <span className="text-sm">{contact.phone || 'Not provided'}</span>
+                    </div>
+                    {contact.phone_secondary && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-gray-400" />
+                        <span className="text-sm">{contact.phone_secondary} (Secondary)</span>
+                      </div>
+                    )}
+                  </div>
+                </Section>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                {/* Address */}
+                <Section title="Address" icon={MapPin}>
+                  <div className="space-y-1 text-sm">
+                    <p>{address.address_line_1}</p>
+                    {address.address_line_2 && <p>{address.address_line_2}</p>}
+                    <p>{address.city}, {address.county}</p>
+                    <p className="font-medium">{address.postcode}</p>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Years at address: {address.years_at_current_address || 'Not specified'}
+                    </p>
+                  </div>
+                </Section>
+
+                {/* Role & Availability */}
+                <Section title="Role & Availability" icon={Briefcase}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Role Applied" value={roleAvail.role_applied} />
+                    <Field label="Availability" value={roleAvail.availability} />
+                    <Field label="Earliest Start" value={formatBackendDate(roleAvail.earliest_start_date)} />
+                    <Field label="Driving Licence" value={roleAvail.has_driving_licence ? 'Yes' : 'No'} />
+                    <Field label="Own Transport" value={roleAvail.has_own_transport ? 'Yes' : 'No'} />
+                    {roleAvail.preferred_locations && (
+                      <Field label="Preferred Locations" value={roleAvail.preferred_locations} className="col-span-2" />
+                    )}
+                  </div>
+                </Section>
+              </div>
+            </TabsContent>
+
+            {/* Employment Tab */}
+            <TabsContent value="employment" className="space-y-4">
+              {applicationData?.has_employment_gaps && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">Employment Gaps Declared</p>
+                    <p className="text-xs text-amber-700 mt-1">
+                      {applicationData.employment_gap_explanation || 'No explanation provided'}
+                    </p>
+                  </div>
+                </div>
+              )}
+              
+              {employment.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Briefcase className="h-10 w-10 mx-auto mb-2 text-gray-300" />
+                  <p>No employment history recorded</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {employment.map((job, index) => (
+                    <Section 
+                      key={index} 
+                      title={`${job.job_title || 'Position'} at ${job.employer_name || 'Company'}`}
+                      icon={Briefcase}
+                    >
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                        <Field label="Employer" value={job.employer_name} />
+                        <Field label="Job Title" value={job.job_title} />
+                        <Field label="Start Date" value={formatBackendDate(job.start_date)} />
+                        <Field label="End Date" value={job.is_current ? 'Present' : formatBackendDate(job.end_date)} />
+                      </div>
+                      {job.main_duties && (
+                        <div className="mt-2">
+                          <p className="text-xs text-gray-500 mb-1">Main Duties</p>
+                          <p className="text-sm text-gray-700 bg-gray-50 p-2 rounded">{job.main_duties}</p>
+                        </div>
+                      )}
+                      {job.reason_for_leaving && (
+                        <div className="mt-2">
+                          <p className="text-xs text-gray-500 mb-1">Reason for Leaving</p>
+                          <p className="text-sm text-gray-700">{job.reason_for_leaving}</p>
+                        </div>
+                      )}
+                    </Section>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* References Tab */}
+            <TabsContent value="references" className="space-y-4">
+              {references.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Users className="h-10 w-10 mx-auto mb-2 text-gray-300" />
+                  <p>No references recorded</p>
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 gap-4">
+                  {references.map((ref, index) => (
+                    <Section key={index} title={`Reference ${index + 1}`} icon={Users}>
+                      <div className="space-y-2">
+                        <Field label="Name" value={ref.referee_name} />
+                        <Field label="Job Title" value={ref.referee_job_title} />
+                        <Field label="Organisation" value={ref.referee_organisation} />
+                        <Field label="Email" value={ref.referee_email} />
+                        <Field label="Phone" value={ref.referee_phone} />
+                        <Field label="Relationship" value={ref.relationship} />
+                        <Field label="Years Known" value={ref.years_known ? `${ref.years_known} years` : null} />
+                        <div className="pt-2 border-t mt-2">
+                          <DeclarationItem 
+                            label="Professional Reference" 
+                            value={ref.is_professional} 
+                          />
+                          <DeclarationItem 
+                            label="Can contact before offer" 
+                            value={ref.can_contact_before_offer} 
+                          />
+                        </div>
+                      </div>
+                    </Section>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Declarations Tab */}
+            <TabsContent value="declarations" className="space-y-4">
+              <div className="grid md:grid-cols-2 gap-4">
+                {/* Right to Work */}
+                <Section title="Right to Work" icon={Shield}>
+                  <DeclarationItem 
+                    label="Has right to work in UK" 
+                    value={rtwDecl.has_right_to_work_uk}
+                  />
+                  <Field label="Citizenship Status" value={rtwDecl.citizenship_status} className="mt-2" />
+                  {rtwDecl.visa_type && <Field label="Visa Type" value={rtwDecl.visa_type} className="mt-2" />}
+                  {rtwDecl.visa_expiry && <Field label="Visa Expiry" value={formatBackendDate(rtwDecl.visa_expiry)} className="mt-2" />}
+                  {rtwDecl.share_code && <Field label="Share Code" value={rtwDecl.share_code} className="mt-2" />}
+                  <DeclarationItem 
+                    label="Requires sponsorship" 
+                    value={rtwDecl.requires_sponsorship}
+                  />
+                </Section>
+
+                {/* Criminal Declaration */}
+                <Section title="Criminal Record Declaration" icon={AlertTriangle}>
+                  <DeclarationItem 
+                    label="Understands DBS required" 
+                    value={criminalDecl.understands_dbs_required}
+                  />
+                  <DeclarationItem 
+                    label="Consents to DBS check" 
+                    value={criminalDecl.consents_to_dbs_check}
+                  />
+                  <DeclarationItem 
+                    label="Has criminal convictions" 
+                    value={criminalDecl.has_criminal_convictions}
+                    details={criminalDecl.conviction_details}
+                  />
+                  <DeclarationItem 
+                    label="Has spent convictions" 
+                    value={criminalDecl.has_spent_convictions}
+                  />
+                </Section>
+
+                {/* Health Declaration */}
+                <Section title="Health Declaration" icon={Heart}>
+                  <DeclarationItem 
+                    label="Can perform physical tasks" 
+                    value={healthDecl.can_perform_physical_tasks}
+                  />
+                  <DeclarationItem 
+                    label="Has back problems" 
+                    value={healthDecl.has_back_problems}
+                  />
+                  <DeclarationItem 
+                    label="Has mobility issues" 
+                    value={healthDecl.has_mobility_issues}
+                  />
+                  <DeclarationItem 
+                    label="Has health conditions" 
+                    value={healthDecl.has_health_conditions}
+                    details={healthDecl.health_condition_details}
+                  />
+                  <DeclarationItem 
+                    label="Requires reasonable adjustments" 
+                    value={healthDecl.requires_reasonable_adjustments}
+                    details={healthDecl.adjustment_details}
+                  />
+                  <DeclarationItem 
+                    label="Health declaration accurate" 
+                    value={healthDecl.health_declaration_accurate}
+                  />
+                </Section>
+
+                {/* General Declarations */}
+                <Section title="General Declarations" icon={CheckCircle}>
+                  <DeclarationItem 
+                    label="Information accurate" 
+                    value={declarations.information_accurate}
+                  />
+                  <DeclarationItem 
+                    label="Understands false info consequences" 
+                    value={declarations.understands_false_info_consequences}
+                  />
+                  <DeclarationItem 
+                    label="Consents to reference checks" 
+                    value={declarations.consents_to_reference_checks}
+                  />
+                  <DeclarationItem 
+                    label="Consents to background checks" 
+                    value={declarations.consents_to_background_checks}
+                  />
+                  <DeclarationItem 
+                    label="Consents to data processing" 
+                    value={declarations.consents_to_data_processing}
+                  />
+                </Section>
+              </div>
+            </TabsContent>
+
+            {/* Qualifications Tab */}
+            <TabsContent value="qualifications" className="space-y-4">
+              <Section title="Qualifications & Training" icon={GraduationCap}>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <Field label="Highest Qualification" value={qualifications.highest_qualification} />
+                  <Field label="Relevant Qualifications" value={qualifications.relevant_qualifications} />
+                  <DeclarationItem 
+                    label="Care Certificate Completed" 
+                    value={qualifications.care_certificate_completed}
+                  />
+                  <DeclarationItem 
+                    label="Mandatory Training Completed" 
+                    value={qualifications.mandatory_training_completed}
+                  />
+                </div>
+              </Section>
+
+              {applicationData?.additional_info && (
+                <Section title="Additional Information" icon={FileText}>
+                  <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                    {applicationData.additional_info}
+                  </p>
+                </Section>
+              )}
+
+              {applicationData?.how_heard && (
+                <div className="text-sm text-gray-500">
+                  <span className="font-medium">How did they hear about us:</span> {applicationData.how_heard}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Upload PDF Dialog */}
+      <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upload Application Form (PDF)</DialogTitle>
+            <DialogDescription>
+              Upload a scanned or PDF application form. The system will extract data automatically.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="border-2 border-dashed rounded-xl p-8 text-center">
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={(e) => handlePdfUpload(e.target.files[0])}
+              className="hidden"
+              id="pdf-upload"
+              disabled={uploading}
+            />
+            <label htmlFor="pdf-upload" className="cursor-pointer">
+              {uploading ? (
+                <Loader2 className="h-12 w-12 mx-auto text-primary animate-spin" />
+              ) : (
+                <FileUp className="h-12 w-12 mx-auto text-gray-400 mb-3" />
+              )}
+              <p className="text-sm text-gray-600">
+                {uploading ? 'Uploading...' : 'Click to select PDF file'}
+              </p>
+            </label>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

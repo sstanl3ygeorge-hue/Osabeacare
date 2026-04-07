@@ -37,6 +37,7 @@ import EditDeclarationsDialog from '../../components/admin/EditDeclarationsDialo
 import SupersedeContractDialog from '../../components/admin/SupersedeContractDialog';
 import DocumentVerificationModal from '../../components/admin/DocumentVerificationModal';
 import DocumentViewerModal from '../../components/admin/DocumentViewerModal';
+import ApplicationFormViewer from '../../components/compliance/ApplicationFormViewer';
 import { 
   InductionChecklistPanel, 
   CompetencyRecordsPanel, 
@@ -3987,6 +3988,14 @@ export default function EmployeeProfilePage() {
         {/* ========== TAB 3: FORMS ========== */}
         {/* Health Questionnaire, Personal Info, HMRC, Emergency Contacts */}
         <TabsContent value="forms">
+          {/* Application Form Viewer - Shows original submitted application */}
+          <div className="mb-6">
+            <ApplicationFormViewer
+              employeeId={employeeId}
+              employeeName={`${employee?.first_name} ${employee?.last_name}`}
+            />
+          </div>
+
           <Card className="border-[#E4E8EB] shadow-sm">
             <CardHeader>
               <CardTitle className="font-heading text-lg">Employee Forms</CardTitle>

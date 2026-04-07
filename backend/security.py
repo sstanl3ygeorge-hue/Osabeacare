@@ -258,11 +258,12 @@ def get_allowed_origins() -> list:
     """
     cors_env = os.environ.get('CORS_ORIGINS', '')
     
-    # Default allowed origins
+    # Default allowed origins - production domains
     allowed = [
         'https://app.osabeacares.co.uk',
         'https://www.osabeacares.co.uk',
         'https://osabeacares.co.uk',
+        'https://api.osabeacares.co.uk',  # API domain (for same-origin requests)
     ]
     
     # Add preview URL for development
@@ -270,14 +271,18 @@ def get_allowed_origins() -> list:
         allowed.extend([
             'https://caretrust-portal.preview.emergentagent.com',
             'http://localhost:3000',
+            'http://localhost:5173',
         ])
     
     # Add any custom origins from env
-    if cors_env and cors_env != '*':
+    if cors_env:
         for origin in cors_env.split(','):
             origin = origin.strip()
-            if origin and origin not in allowed:
+            if origin and origin not in allowed and origin != '*':
                 allowed.append(origin)
+    
+    # Log origins for debugging
+    print(f"[CORS] Allowed origins: {allowed}")
     
     return allowed
 

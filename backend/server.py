@@ -54758,12 +54758,17 @@ File available in system: {cert.get('file_url', 'Not uploaded')}
 
 # CORS middleware (router included after all routes are defined)
 # Use allowed origins from security module for production safety
+# IMPORTANT: Origins must include all production frontend domains
+cors_origins = get_allowed_origins()
+print(f"[STARTUP] CORS origins configured: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=get_allowed_origins(),
-    allow_methods=["*"],
+    allow_origins=cors_origins,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 # Security headers middleware

@@ -29,6 +29,23 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
 
+### -1. RTW/DBS "Confirm & Stamp All" Flow (2026-04-07)
+- **Components**: 
+  - Backend: `POST /api/employees/{id}/right_to_work/stamp-all`, `POST /api/employees/{id}/dbs/stamp-all`
+  - Frontend: `UploadRequirementCard.js` - "Confirm & Stamp All" button
+- **Problem Solved**: For NHS CQC compliance, document stamps must be applied ONLY at the END of verification, not during intermediate steps. This atomic stamp operation ensures both employee evidence AND admin verification proof are stamped together with a shared verification ID for audit linking.
+- **Features**:
+  - Button appears when: check exists + verified + evidence files exist + not all files stamped
+  - Single click stamps both evidence documents ("Original Verified") AND verification proof ("Online Check Completed")
+  - Shared 8-character verification ID links all stamps for audit trail
+  - Sets employee flags: `rtw_fully_verified=true`, `rtw_verification_id=XXXX`
+  - Visual stamps burned into PDFs via PyMuPDF (when available)
+- **Bug Fixes Applied**:
+  - Added `rtw_fully_verified`, `dbs_fully_verified` etc. fields to `EmployeeResponse` model
+  - Fixed `getStampDisplay()` TypeError when `verification_stamp` is object instead of string
+- **Testing**: 19/19 backend tests passed, endpoint verified via curl
+- **Compliance**: CIA Triad ✅ (Integrity via stamps), CQC Audit Ready ✅
+
 ### 0. Worker Dashboard CV Section UI (2026-04-07)
 - **Component**: `WorkerDashboard.js` - CV & Employment History card
 - **Features**:

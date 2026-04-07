@@ -29,6 +29,19 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
 
+### 5-Step Gated Workflow for RTW/DBS Verification (2026-04-07) ✅ VERIFIED
+- **Component**: `UploadRequirementCard.js` (lines 185-276, 385-442, 1731-1844)
+- **Problem Solved**: CQC compliance requires admins to verify documents in a specific order. The gated workflow prevents admins from recording checks before evidence is uploaded and accepted.
+- **Features**:
+  - 5-step progress indicator: Evidence → Review → Check → Proof → Stamp
+  - Visual progress bar with green (completed), purple (current), gray (pending) states
+  - "Record Check" button disabled until evidence is accepted
+  - Warning messages when trying to act out of order
+  - "Verification Complete" badge with Osabea logo when all steps done
+- **DOCX/TXT to PDF Conversion**: Backend auto-converts unsupported document formats before stamping
+- **Testing**: Visual verification complete (2026-04-07)
+- **Compliance**: 5 E's of Usability ✅, CQC Audit Ready ✅
+
 ### -2. Document Upload Limits & Agreements UI Fix (2026-04-07)
 - **Components**:
   - Frontend: `UploadRequirementCard.js` - Document upload limits

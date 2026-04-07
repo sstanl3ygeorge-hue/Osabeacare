@@ -6355,6 +6355,10 @@ class HealthDeclaration(BaseModel):
     has_condition_affecting_work: bool = False
     condition_details: Optional[str] = None
     
+    # General health conditions (for declarations storage)
+    has_health_conditions: bool = False
+    health_condition_details: Optional[str] = None
+    
     # Adjustments needed
     requires_reasonable_adjustments: bool = False
     adjustment_details: Optional[str] = None

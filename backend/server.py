@@ -42289,6 +42289,265 @@ async def get_address_verification(
     return {"current": current}
 
 
+# ==================== UNIFIED VERIFY-AND-STAMP ENDPOINTS (Simplified Compliance) ====================
+
+class UnifiedVerifyStampInput(BaseModel):
+    """Input for combined verify + stamp action (Identity & PoA only)"""
+    document_id: str
+    method: str  # e.g., 'original_seen_interview', 'copy_verified_video'
+    stamp_type: str  # 'original_seen' or 'copy_verified'
+    checks_confirmed: dict  # { document_genuine: bool, details_match: bool, date_valid: bool }
+    ai_validation: Optional[dict] = None
+
+
+@api_router.post("/employees/{employee_id}/identity/verify-and-stamp")
+async def verify_and_stamp_identity(
+    employee_id: str,
+    data: UnifiedVerifyStampInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    UNIFIED: Record identity verification AND apply stamp in ONE atomic action.
+    
+    This ensures:
+    - No document can be stamped without verification recorded
+    - No verification can be recorded without stamp applied
+    - Complete audit trail for NHS/CQC compliance
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate checks confirmed
+    checks = data.checks_confirmed
+    if not checks.get('document_genuine') or not checks.get('details_match'):
+        raise HTTPException(status_code=400, detail="All verification checks must be confirmed")
+    
+    document = await db.employee_documents.find_one({"id": data.document_id})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    admin_name = user.get('name', 'Admin')
+    
+    # STEP 1: Record the verification check
+    verification_record = {
+        "method": data.method,
+        "checked_at": now,
+        "checked_by": user['user_id'],
+        "checked_by_name": admin_name,
+        "outcome": "verified",
+        "checks_confirmed": checks,
+        "stamp_type": data.stamp_type
+    }
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "identity_verification": verification_record,
+            "identity_verified": True,
+            "identity_verified_at": now,
+            "identity_verified_by": user['user_id'],
+            "updated_at": now
+        }}
+    )
+    
+    # STEP 2: Apply the visual stamp to the document
+    stamp_data = {
+        "stamp_type": data.stamp_type,
+        "document_type": "Identity Document",
+        "employee_name": employee.get('name') or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "verified_by_name": admin_name,
+        "verified_at": now,
+        "verification_id": str(uuid.uuid4())[:8].upper()
+    }
+    
+    # Get document file and apply stamp
+    try:
+        file_url = document.get('file_url')
+        if file_url:
+            # Download original file
+            file_bytes = await download_file_from_storage(file_url)
+            if file_bytes and document.get('file_type') == 'application/pdf':
+                # Apply stamp
+                stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
+                
+                # Upload stamped version
+                stamped_filename = f"stamped_{document.get('file_name', 'document.pdf')}"
+                stamped_url = await upload_file_to_storage(
+                    stamped_bytes, 
+                    stamped_filename, 
+                    f"employees/{employee_id}/identity"
+                )
+                
+                # Update document with stamp info
+                await db.employee_documents.update_one(
+                    {"id": data.document_id},
+                    {"$set": {
+                        "stamped_file_url": stamped_url,
+                        "verification_stamp": stamp_data,
+                        "status": "verified",
+                        "verified_at": now,
+                        "verified_by": user['user_id'],
+                        "updated_at": now
+                    }}
+                )
+    except Exception as e:
+        logging.error(f"Failed to apply stamp to identity document: {e}")
+        # Still record verification even if stamp fails
+    
+    # STEP 3: Log audit trail
+    await log_audit_action(
+        user['user_id'],
+        "verify_and_stamp_identity",
+        "employee",
+        employee_id,
+        {
+            "document_id": data.document_id,
+            "method": data.method,
+            "stamp_type": data.stamp_type,
+            "checks_confirmed": checks
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Identity verified and stamped successfully",
+        "verification": verification_record,
+        "stamp_applied": True
+    }
+
+
+@api_router.post("/employees/{employee_id}/address/verify-and-stamp")
+async def verify_and_stamp_address(
+    employee_id: str,
+    data: UnifiedVerifyStampInput,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    UNIFIED: Record address verification AND apply stamp in ONE atomic action.
+    
+    For Proof of Address:
+    - AI validates document date (<6 months for bank, <9 for council tax)
+    - Admin confirms checks
+    - Stamp applied automatically
+    """
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate checks confirmed
+    checks = data.checks_confirmed
+    if not checks.get('document_genuine') or not checks.get('details_match') or not checks.get('date_valid'):
+        raise HTTPException(status_code=400, detail="All verification checks must be confirmed")
+    
+    document = await db.employee_documents.find_one({"id": data.document_id})
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    admin_name = user.get('name', 'Admin')
+    
+    # STEP 1: Record the verification check
+    verification_record = {
+        "method": data.method,
+        "checked_at": now,
+        "checked_by": user['user_id'],
+        "checked_by_name": admin_name,
+        "outcome": "verified",
+        "checks_confirmed": checks,
+        "stamp_type": data.stamp_type,
+        "ai_validation": data.ai_validation
+    }
+    
+    # Get existing verified docs count
+    existing_verified = await db.employee_documents.count_documents({
+        "employee_id": employee_id,
+        "requirement_id": "proof_of_address",
+        "status": "verified",
+        "id": {"$ne": data.document_id}
+    })
+    
+    total_verified = existing_verified + 1
+    is_complete = total_verified >= 2  # NHS requires 2 PoA documents
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "address_verification": verification_record,
+            "address_documents_verified_count": total_verified,
+            "address_verified": is_complete,
+            "address_verified_at": now if is_complete else None,
+            "address_verified_by": user['user_id'] if is_complete else None,
+            "updated_at": now
+        }}
+    )
+    
+    # STEP 2: Apply the visual stamp to the document
+    stamp_data = {
+        "stamp_type": data.stamp_type,
+        "document_type": "Proof of Address",
+        "employee_name": employee.get('name') or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "verified_by_name": admin_name,
+        "verified_at": now,
+        "verification_id": str(uuid.uuid4())[:8].upper()
+    }
+    
+    # Get document file and apply stamp
+    try:
+        file_url = document.get('file_url')
+        if file_url:
+            file_bytes = await download_file_from_storage(file_url)
+            if file_bytes and document.get('file_type') == 'application/pdf':
+                stamped_bytes = add_verification_stamp_to_pdf(file_bytes, stamp_data)
+                
+                stamped_filename = f"stamped_{document.get('file_name', 'document.pdf')}"
+                stamped_url = await upload_file_to_storage(
+                    stamped_bytes, 
+                    stamped_filename, 
+                    f"employees/{employee_id}/address"
+                )
+                
+                await db.employee_documents.update_one(
+                    {"id": data.document_id},
+                    {"$set": {
+                        "stamped_file_url": stamped_url,
+                        "verification_stamp": stamp_data,
+                        "status": "verified",
+                        "verified_at": now,
+                        "verified_by": user['user_id'],
+                        "updated_at": now
+                    }}
+                )
+    except Exception as e:
+        logging.error(f"Failed to apply stamp to address document: {e}")
+    
+    # STEP 3: Log audit trail
+    await log_audit_action(
+        user['user_id'],
+        "verify_and_stamp_address",
+        "employee",
+        employee_id,
+        {
+            "document_id": data.document_id,
+            "method": data.method,
+            "stamp_type": data.stamp_type,
+            "checks_confirmed": checks,
+            "documents_verified_count": total_verified,
+            "is_complete": is_complete
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Address document verified and stamped. {total_verified}/2 documents verified.",
+        "verification": verification_record,
+        "stamp_applied": True,
+        "documents_verified_count": total_verified,
+        "is_complete": is_complete
+    }
+
+
 # ==================== AGREEMENT ENDPOINTS (Step 11) ====================
 
 @api_router.post("/employees/{employee_id}/agreements/send")

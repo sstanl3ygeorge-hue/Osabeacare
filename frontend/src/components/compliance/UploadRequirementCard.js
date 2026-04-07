@@ -15,6 +15,7 @@ import EvidenceReviewDialog from './EvidenceReviewDialog';
 import VerificationStampDialog from './VerificationStampDialog';
 import VerificationChecklistModal from './VerificationChecklistModal';
 import AmendmentRequestDialog from './AmendmentRequestDialog';
+import QuickVerifyStampDialog from './QuickVerifyStampDialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 
 // eslint-disable-next-line no-unused-vars
@@ -90,6 +91,13 @@ export default function UploadRequirementCard({
   const [amendmentDialog, setAmendmentDialog] = useState({
     isOpen: false,
     file: null
+  });
+  
+  // NEW: Quick Verify & Stamp Dialog state (for Identity & PoA only)
+  const [quickVerifyDialog, setQuickVerifyDialog] = useState({
+    isOpen: false,
+    file: null,
+    aiValidation: null
   });
 
   if (!surface) return null;
@@ -352,8 +360,8 @@ export default function UploadRequirementCard({
                           </Badge>
                         )}
                         
-                        {/* Apply Verification Stamp button - show different states */}
-                        {!isAuditor && file.verified && (
+                        {/* Apply Verification Stamp button - For RTW and DBS only (complex checks) */}
+                        {!isAuditor && file.verified && (key === 'right_to_work' || key === 'dbs') && (
                           <Button
                             size="sm"
                             variant={file.verification_stamp ? "ghost" : "outline"}
@@ -371,8 +379,35 @@ export default function UploadRequirementCard({
                           </Button>
                         )}
                         
-                        {/* Review Evidence button - visible for non-verified files */}
-                        {!isAuditor && !file.verified && file.status !== 'rejected' && (
+                        {/* UNIFIED Verify & Stamp button - For Identity and PoA (simple checks) */}
+                        {!isAuditor && !file.verification_stamp && (key === 'identity' || key === 'proof_of_address') && file.status !== 'rejected' && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="h-7 px-3 text-xs bg-green-600 hover:bg-green-700 text-white"
+                            onClick={() => setQuickVerifyDialog({ 
+                              isOpen: true, 
+                              file,
+                              aiValidation: file.ai_extraction?.date_validation || null
+                            })}
+                            title="Verify document and apply stamp"
+                            data-testid={`${key}-verify-stamp-${file.file_id || file.id}`}
+                          >
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Verify & Stamp
+                          </Button>
+                        )}
+                        
+                        {/* Show verified badge for Identity/PoA after stamping */}
+                        {(key === 'identity' || key === 'proof_of_address') && file.verification_stamp && (
+                          <Badge className="bg-green-100 text-green-700 text-xs flex items-center gap-1">
+                            <CheckCircle className="h-3 w-3" />
+                            Verified & Stamped
+                          </Badge>
+                        )}
+                        
+                        {/* Review Evidence button - visible for non-verified files (RTW/DBS only) */}
+                        {!isAuditor && !file.verified && file.status !== 'rejected' && (key === 'right_to_work' || key === 'dbs') && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -386,8 +421,8 @@ export default function UploadRequirementCard({
                           </Button>
                         )}
                         
-                        {/* NEW: Complete Verification button - Smart Verification System */}
-                        {!isAuditor && file.status !== 'rejected' && !file.verification_stamp && (
+                        {/* NEW: Complete Verification button - Smart Verification System (RTW/DBS only) */}
+                        {!isAuditor && file.status !== 'rejected' && !file.verification_stamp && (key === 'right_to_work' || key === 'dbs') && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -1562,6 +1597,23 @@ export default function UploadRequirementCard({
         employeeName={employeeName || 'Employee'}
         onAmendmentRequested={() => {
           setAmendmentDialog({ isOpen: false, file: null });
+          if (onRefresh) {
+            onRefresh();
+          }
+        }}
+      />
+      
+      {/* NEW: Quick Verify & Stamp Dialog (Identity & PoA only) */}
+      <QuickVerifyStampDialog
+        isOpen={quickVerifyDialog.isOpen}
+        onClose={() => setQuickVerifyDialog({ isOpen: false, file: null, aiValidation: null })}
+        file={quickVerifyDialog.file}
+        employeeId={employeeId}
+        employeeName={employeeName || 'Employee'}
+        requirementType={key}
+        aiValidation={quickVerifyDialog.aiValidation}
+        onVerificationComplete={() => {
+          setQuickVerifyDialog({ isOpen: false, file: null, aiValidation: null });
           if (onRefresh) {
             onRefresh();
           }

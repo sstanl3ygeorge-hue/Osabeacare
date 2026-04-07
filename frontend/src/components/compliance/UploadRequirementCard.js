@@ -1619,6 +1619,7 @@ export default function UploadRequirementCard({
         documentId={amendmentDialog.file?.file_id || amendmentDialog.file?.id}
         documentName={label}
         employeeName={employeeName || 'Employee'}
+        requirementType={key}
         onAmendmentRequested={() => {
           setAmendmentDialog({ isOpen: false, file: null });
           if (onRefresh) {

@@ -8,7 +8,7 @@ import {
 } from '../ui/dropdown-menu';
 import { 
   MoreVertical, Eye, Download, CheckCircle, XCircle, 
-  FileSearch, Trash2, ArrowRight, RefreshCw, History
+  FileSearch, Trash2, ArrowRight, RefreshCw, History, Stamp
 } from 'lucide-react';
 
 /**
@@ -18,6 +18,7 @@ import {
  * - View / Download (always)
  * - Review Extraction (if extraction pending)
  * - Verify / Reject (if awaiting verification)
+ * - Remove Stamp (if stamped)
  * - Mark Uploaded in Error
  * - Supersede / Replace
  * - Move Category
@@ -30,6 +31,7 @@ export default function DocumentActionMenu({
   onVerify,
   onReject,
   onExtractReview,
+  onRemoveStamp,
   onMarkUploadedInError,
   onSupersede,
   onMoveCategory,
@@ -41,6 +43,7 @@ export default function DocumentActionMenu({
   const hasExtraction = file.extraction_status?.status === 'awaiting_review';
   const canVerify = !file.verified && !file.rejected && file.status !== 'superseded';
   const canReject = !file.verified && !file.rejected && file.status !== 'superseded';
+  const canRemoveStamp = !!file.verification_stamp || !!file.stamped_file_url;
   const canMarkError = file.status !== 'uploaded_in_error' && file.status !== 'superseded';
   const canSupersede = file.status !== 'superseded' && file.status !== 'uploaded_in_error';
   const canMove = file.status !== 'superseded' && file.status !== 'uploaded_in_error' && file.status !== 'rejected';
@@ -100,6 +103,17 @@ export default function DocumentActionMenu({
                 <span className="text-red-600">Reject</span>
               </DropdownMenuItem>
             )}
+          </>
+        )}
+
+        {/* Remove Stamp - If file has a stamp */}
+        {!isAuditor && canRemoveStamp && onRemoveStamp && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onRemoveStamp} data-testid="action-remove-stamp">
+              <Stamp className="h-4 w-4 mr-2 text-amber-600" />
+              <span className="text-amber-600">Remove Stamp</span>
+            </DropdownMenuItem>
           </>
         )}
 

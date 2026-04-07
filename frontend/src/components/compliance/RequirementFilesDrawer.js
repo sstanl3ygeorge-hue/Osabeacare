@@ -288,8 +288,38 @@ export default function RequirementFilesDrawer({
     }
   };
 
+  // Remove verification stamp from a file
+  const handleRemoveStamp = async (fileId) => {
+    if (!window.confirm('Are you sure you want to remove the CQC stamp from this document? This will revert to the original unstamped version.')) {
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await axios.delete(
+        `${API}/employee-documents/${fileId}/verification-stamp`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Stamp removed - document reverted to original');
+      fetchFiles();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to remove stamp');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Render file status badge
   const renderStatusBadge = (file) => {
+    // Show CQC Stamped badge prominently if stamped
+    if (file.stamped_file_url || file.verification_stamp) {
+      return (
+        <div className="flex items-center gap-1">
+          <Badge className="bg-purple-100 text-purple-700 text-xs">CQC Stamped</Badge>
+          {file.verified && <Badge className="bg-green-100 text-green-700 text-xs">Verified</Badge>}
+        </div>
+      );
+    }
     if (file.verified) {
       return <Badge className="bg-green-100 text-green-700 text-xs">Verified</Badge>;
     }
@@ -526,6 +556,7 @@ export default function RequirementFilesDrawer({
                             onVerify={() => handleVerify(file.file_id)}
                             onReject={() => setActionDialog({ open: true, type: 'reject', file })}
                             onExtractReview={() => onExtractReview && onExtractReview(file.file_id)}
+                            onRemoveStamp={() => handleRemoveStamp(file.file_id)}
                             onMarkUploadedInError={() => setActionDialog({ open: true, type: 'uploaded_in_error', file })}
                             onSupersede={() => setActionDialog({ open: true, type: 'supersede', file })}
                             onMoveCategory={() => setActionDialog({ open: true, type: 'move_category', file })}

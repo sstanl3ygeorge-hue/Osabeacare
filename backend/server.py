@@ -23438,7 +23438,7 @@ async def remove_verification_stamp(
     else:
         remover_name = user.get('email', 'Admin')
     
-    # Clear all stamp fields
+    # Clear all stamp fields - revert to original document
     update_data = {
         "verification_stamp": None,
         "verification_stamp_label": None,
@@ -23448,11 +23448,14 @@ async def remove_verification_stamp(
         "verification_stamp_by": None,
         "verification_stamp_by_name": None,
         "verification_stamp_at": None,
+        # Clear stamped file URL to revert to original document view
+        "stamped_file_url": None,
         # Track removal for audit
         "verification_stamp_removed_at": now,
         "verification_stamp_removed_by": user['user_id'],
         "verification_stamp_removed_by_name": remover_name,
-        "previous_verification_stamp": previous_stamp
+        "previous_verification_stamp": previous_stamp,
+        "previous_stamped_file_url": doc.get("stamped_file_url")  # Keep audit of what was removed
     }
     
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
@@ -44870,6 +44873,8 @@ async def get_compliance_file(
                     # FIX: Return API endpoint URL, not storage path
                     "file_url": f"/api/employee-documents/{d.get('id')}/file" if d.get("id") else None,
                     "download_url": f"/api/employee-documents/{d.get('id')}/download" if d.get("id") else None,
+                    # Stamped file URL - direct Supabase link for CQC-verified view
+                    "stamped_file_url": d.get("stamped_file_url"),
                     "content_type": d.get("content_type") or d.get("mime_type"),  # For preview support detection
                     "file_available": bool(d.get("file_url")),  # Availability status
                     "uploaded_at": d.get("uploaded_at") or d.get("created_at"),

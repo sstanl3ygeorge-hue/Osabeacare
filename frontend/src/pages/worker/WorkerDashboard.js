@@ -13,6 +13,9 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
+import { Checkbox } from '../../components/ui/checkbox';
+import { ScrollArea } from '../../components/ui/scroll-area';
+import { Briefcase, GraduationCap, Sparkles, Edit3 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -196,6 +199,16 @@ export default function WorkerDashboard() {
   const [viewerDocument, setViewerDocument] = useState(null);
   const [documentBlobUrl, setDocumentBlobUrl] = useState(null);
   const [documentLoading, setDocumentLoading] = useState(false);
+  // CV Extraction states
+  const [cvStatus, setCvStatus] = useState(null);
+  const [cvStatusLoading, setCvStatusLoading] = useState(false);
+  const [showCvVerificationModal, setShowCvVerificationModal] = useState(false);
+  const [cvPreview, setCvPreview] = useState(null);
+  const [cvPreviewLoading, setCvPreviewLoading] = useState(false);
+  const [cvVerifying, setCvVerifying] = useState(false);
+  const [cvEditMode, setCvEditMode] = useState(false);
+  const [editedEmploymentHistory, setEditedEmploymentHistory] = useState([]);
+  const [confirmCvAccuracy, setConfirmCvAccuracy] = useState(false);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -240,6 +253,135 @@ export default function WorkerDashboard() {
   useEffect(() => {
     fetchDashboard();
   }, [fetchDashboard]);
+
+  // Fetch CV extraction status
+  const fetchCvStatus = useCallback(async () => {
+    setCvStatusLoading(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/cv-extraction-status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCvStatus(response.data);
+    } catch (error) {
+      console.error('Failed to fetch CV status:', error);
+    } finally {
+      setCvStatusLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (dashboard) {
+      fetchCvStatus();
+    }
+  }, [dashboard, fetchCvStatus]);
+
+  // Fetch CV preview for verification
+  const fetchCvPreview = async () => {
+    setCvPreviewLoading(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/cv-extraction-preview`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCvPreview(response.data);
+      if (response.data.extraction_preview?.employment_history) {
+        setEditedEmploymentHistory(response.data.extraction_preview.employment_history);
+      }
+    } catch (error) {
+      console.error('Failed to fetch CV preview:', error);
+      toast.error('Failed to load CV extraction preview');
+    } finally {
+      setCvPreviewLoading(false);
+    }
+  };
+
+  // Open CV verification modal
+  const openCvVerificationModal = () => {
+    setShowCvVerificationModal(true);
+    setConfirmCvAccuracy(false);
+    setCvEditMode(false);
+    fetchCvPreview();
+  };
+
+  // Verify CV extraction
+  const handleVerifyCvExtraction = async () => {
+    if (!confirmCvAccuracy) {
+      toast.error('Please confirm the information is accurate');
+      return;
+    }
+    
+    setCvVerifying(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(`${API}/worker/cv-extraction-verify`, {
+        employment_history: editedEmploymentHistory,
+        education: cvPreview?.extraction_preview?.education || [],
+        skills: cvPreview?.extraction_preview?.skills || [],
+        confirm_accurate: true
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      toast.success('CV data verified! Your 10-year employment history form has been pre-filled.');
+      setShowCvVerificationModal(false);
+      fetchCvStatus();
+      fetchDashboard();
+    } catch (error) {
+      const message = error.response?.data?.detail || 'Failed to verify CV extraction';
+      toast.error(message);
+    } finally {
+      setCvVerifying(false);
+    }
+  };
+
+  // Handle CV file upload
+  const handleCvUpload = async (file) => {
+    if (!file) return;
+    
+    setUploading('cv');
+    const token = localStorage.getItem('workerToken');
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      await axios.post(
+        `${API}/worker/upload-document/cv`,
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      );
+      
+      toast.success('CV uploaded! AI is extracting your employment history...');
+      // Wait a moment for AI extraction to complete
+      setTimeout(() => {
+        fetchCvStatus();
+        fetchDashboard();
+      }, 2000);
+    } catch (error) {
+      const message = error.response?.data?.detail || 'Failed to upload CV';
+      toast.error(message);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  // Trigger CV file input
+  const triggerCvFileInput = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.doc,.docx';
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (file) handleCvUpload(file);
+    };
+    input.click();
+  };
   
   // Clean up blob URL when viewer closes or document changes
   useEffect(() => {
@@ -576,6 +718,176 @@ export default function WorkerDashboard() {
                   </div>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== CV EXTRACTION & 10-YEAR HISTORY SECTION ========== */}
+        {!isActiveEmployee && (
+          <Card className={`shadow-md border-0 ${
+            cvStatus?.verified ? 'bg-green-50/30' :
+            cvStatus?.needs_verification ? 'bg-blue-50/30' :
+            'bg-slate-50'
+          }`} data-testid="cv-extraction-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Briefcase className={`h-5 w-5 ${
+                      cvStatus?.verified ? 'text-green-600' :
+                      cvStatus?.needs_verification ? 'text-blue-600' :
+                      'text-slate-500'
+                    }`} />
+                    CV & Employment History
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    NHS requires 10-year employment history with gap explanations
+                  </p>
+                </div>
+                {cvStatusLoading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* No CV Uploaded */}
+              {!cvStatus?.has_cv && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
+                        <Upload className="h-6 w-6 text-amber-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-slate-800">Upload Your CV</p>
+                        <p className="text-sm text-slate-600">
+                          AI will extract your employment history to auto-fill your 10-year form
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={triggerCvFileInput}
+                      disabled={uploading === 'cv'}
+                      className="gap-2 bg-amber-600 hover:bg-amber-700"
+                      data-testid="upload-cv-btn"
+                    >
+                      {uploading === 'cv' ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                      Upload CV
+                    </Button>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-3">
+                    Accepted formats: PDF, DOC, DOCX (max 10MB)
+                  </p>
+                </div>
+              )}
+
+              {/* CV Uploaded - Needs Verification */}
+              {cvStatus?.has_cv && cvStatus?.needs_verification && !cvStatus?.verified && (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Sparkles className="h-6 w-6 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-blue-800">Review Your Extracted Data</p>
+                        <p className="text-sm text-blue-700">
+                          AI found {cvStatus?.employment_history?.jobs_found || 0} jobs in your CV. Please verify the data.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={openCvVerificationModal}
+                      className="gap-2 bg-blue-600 hover:bg-blue-700"
+                      data-testid="review-cv-extraction-btn"
+                    >
+                      <Eye className="h-4 w-4" />
+                      Review & Verify
+                    </Button>
+                  </div>
+                  
+                  {/* Preview summary */}
+                  <div className="grid grid-cols-3 gap-3 mt-3">
+                    <div className="bg-white rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-blue-600">{cvStatus?.employment_history?.jobs_found || 0}</p>
+                      <p className="text-xs text-slate-500">Jobs Found</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-amber-600">{cvStatus?.gaps?.total || 0}</p>
+                      <p className="text-xs text-slate-500">Gaps Detected</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-red-600">{cvStatus?.overlaps?.total || 0}</p>
+                      <p className="text-xs text-slate-500">Overlaps</p>
+                    </div>
+                  </div>
+                  
+                  {(cvStatus?.overlaps?.total > 0 || cvStatus?.gaps?.unexplained > 0) && (
+                    <div className="mt-3 p-3 bg-amber-100 rounded-lg">
+                      <p className="text-sm text-amber-800 flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        {cvStatus?.overlaps?.total > 0 && `${cvStatus.overlaps.total} date overlap(s) detected. `}
+                        {cvStatus?.gaps?.unexplained > 0 && `${cvStatus.gaps.unexplained} gap(s) need explanation.`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* CV Verified */}
+              {cvStatus?.verified && (
+                <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                        <CheckCircle className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-green-800">CV Data Verified</p>
+                        <p className="text-sm text-green-700">
+                          {cvStatus?.employment_history?.jobs_found || 0} jobs verified • {formatDate(cvStatus?.verified_at)}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge className="bg-green-100 text-green-700">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Verified
+                    </Badge>
+                  </div>
+                  
+                  {/* 10-Year Form Status */}
+                  {cvStatus?.ten_year_form_status && (
+                    <div className="mt-3 pt-3 border-t border-green-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-green-600" />
+                          <span className="text-sm text-green-800">10-Year Employment History Form</span>
+                        </div>
+                        {cvStatus.ten_year_form_status.status === 'verified' ? (
+                          <Badge className="bg-green-100 text-green-700 text-xs">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Verified
+                          </Badge>
+                        ) : cvStatus.ten_year_form_status.status === 'submitted' ? (
+                          <Badge className="bg-blue-100 text-blue-700 text-xs">
+                            <Clock className="h-3 w-3 mr-1" />
+                            Submitted
+                          </Badge>
+                        ) : cvStatus.ten_year_form_status.auto_populated ? (
+                          <Badge className="bg-amber-100 text-amber-700 text-xs">
+                            <Sparkles className="h-3 w-3 mr-1" />
+                            Pre-filled - Complete & Submit
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-slate-100 text-slate-600 text-xs">Not Started</Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
@@ -1657,6 +1969,254 @@ export default function WorkerDashboard() {
             <Button variant="outline" onClick={closeDocumentViewer}>
               Close
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* CV Extraction Verification Modal */}
+      <Dialog open={showCvVerificationModal} onOpenChange={setShowCvVerificationModal}>
+        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-blue-600" />
+              Review Your CV Extraction
+            </DialogTitle>
+            <p className="text-sm text-slate-500">
+              Please review the information extracted from your CV. You can edit any incorrect data before confirming.
+            </p>
+          </DialogHeader>
+
+          {cvPreviewLoading ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="h-10 w-10 animate-spin text-blue-600 mb-4" />
+              <p className="text-slate-600">Loading extracted data...</p>
+            </div>
+          ) : cvPreview?.has_pending_verification ? (
+            <ScrollArea className="flex-1 max-h-[60vh] pr-4">
+              {/* Employment History */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                    <Briefcase className="h-4 w-4 text-blue-600" />
+                    Employment History ({cvPreview.extraction_preview?.jobs_found || 0} jobs)
+                  </h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCvEditMode(!cvEditMode)}
+                    className="gap-1 text-blue-600"
+                    data-testid="edit-cv-data-btn"
+                  >
+                    <Edit3 className="h-4 w-4" />
+                    {cvEditMode ? 'Done Editing' : 'Edit'}
+                  </Button>
+                </div>
+
+                <div className="space-y-3">
+                  {editedEmploymentHistory.map((job, idx) => (
+                    <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-200" data-testid={`cv-job-${idx}`}>
+                      {cvEditMode ? (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs text-slate-500">Job Title</label>
+                            <input
+                              type="text"
+                              value={job.job_title || ''}
+                              onChange={(e) => {
+                                const updated = [...editedEmploymentHistory];
+                                updated[idx] = { ...updated[idx], job_title: e.target.value };
+                                setEditedEmploymentHistory(updated);
+                              }}
+                              className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-500">Employer</label>
+                            <input
+                              type="text"
+                              value={job.employer || ''}
+                              onChange={(e) => {
+                                const updated = [...editedEmploymentHistory];
+                                updated[idx] = { ...updated[idx], employer: e.target.value };
+                                setEditedEmploymentHistory(updated);
+                              }}
+                              className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs text-slate-500">Start Date</label>
+                              <input
+                                type="date"
+                                value={job.start_date || ''}
+                                onChange={(e) => {
+                                  const updated = [...editedEmploymentHistory];
+                                  updated[idx] = { ...updated[idx], start_date: e.target.value };
+                                  setEditedEmploymentHistory(updated);
+                                }}
+                                className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-slate-500">End Date</label>
+                              <input
+                                type="date"
+                                value={job.end_date || ''}
+                                onChange={(e) => {
+                                  const updated = [...editedEmploymentHistory];
+                                  updated[idx] = { ...updated[idx], end_date: e.target.value };
+                                  setEditedEmploymentHistory(updated);
+                                }}
+                                className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"
+                                placeholder="Leave empty if current"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="font-medium text-slate-800">{job.job_title || 'Unknown Role'}</p>
+                            <p className="text-sm text-slate-600">{job.employer || 'Unknown Employer'}</p>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {job.start_date ? formatDate(job.start_date) : 'Unknown'} - {job.end_date ? formatDate(job.end_date) : 'Present'}
+                            </p>
+                          </div>
+                          <Badge className="bg-slate-100 text-slate-600 text-xs">
+                            {idx + 1}
+                          </Badge>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {editedEmploymentHistory.length === 0 && (
+                    <div className="text-center py-6 text-slate-500">
+                      <Briefcase className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p>No employment history extracted</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Validation Issues */}
+              {cvPreview.validation?.has_issues && (
+                <div className="mb-6">
+                  <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-3">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    Issues Detected
+                  </h3>
+                  
+                  {/* Overlaps */}
+                  {cvPreview.validation?.overlaps?.length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-sm text-red-700 font-medium mb-2">Date Overlaps:</p>
+                      <div className="space-y-2">
+                        {cvPreview.validation.overlaps.map((overlap, idx) => (
+                          <div key={idx} className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                            <p className="font-medium">{overlap.message}</p>
+                            <p className="text-xs mt-1">
+                              {overlap.job1_employer} overlaps with {overlap.job2_employer} ({overlap.overlap_days} days)
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Gaps */}
+                  {cvPreview.validation?.gaps?.length > 0 && (
+                    <div>
+                      <p className="text-sm text-amber-700 font-medium mb-2">Employment Gaps (&gt;28 days):</p>
+                      <div className="space-y-2">
+                        {cvPreview.validation.gaps.filter(g => g.needs_explanation).map((gap, idx) => (
+                          <div key={idx} className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+                            <p>{gap.message}</p>
+                            <p className="text-xs mt-1">
+                              {formatDate(gap.start_date)} - {formatDate(gap.end_date)} ({gap.duration_days} days)
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <p className="text-xs text-slate-500 mt-3">
+                    You'll be asked to explain gaps when completing the 10-Year Employment History form.
+                  </p>
+                </div>
+              )}
+
+              {/* Education */}
+              {cvPreview.extraction_preview?.education?.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-3">
+                    <GraduationCap className="h-4 w-4 text-purple-600" />
+                    Education ({cvPreview.extraction_preview.education.length})
+                  </h3>
+                  <div className="space-y-2">
+                    {cvPreview.extraction_preview.education.map((edu, idx) => (
+                      <div key={idx} className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                        <p className="font-medium text-slate-800">{edu.qualification || edu.degree}</p>
+                        <p className="text-sm text-slate-600">{edu.institution}</p>
+                        {edu.year && <p className="text-xs text-slate-500">{edu.year}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Confirmation Checkbox */}
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl mt-4">
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="confirm-cv-accuracy"
+                    checked={confirmCvAccuracy}
+                    onCheckedChange={setConfirmCvAccuracy}
+                    className="mt-1"
+                    data-testid="confirm-cv-accuracy-checkbox"
+                  />
+                  <label htmlFor="confirm-cv-accuracy" className="text-sm text-slate-700 cursor-pointer">
+                    I confirm that the information shown above is accurate and matches my actual employment history.
+                    I understand this data will be used to pre-fill my 10-Year Employment History form.
+                  </label>
+                </div>
+              </div>
+            </ScrollArea>
+          ) : cvPreview?.already_verified ? (
+            <div className="text-center py-12">
+              <CheckCircle className="h-16 w-16 text-green-600 mx-auto mb-4" />
+              <p className="text-lg font-medium text-green-800">Already Verified</p>
+              <p className="text-sm text-slate-600 mt-2">
+                Your CV data was verified on {formatDate(cvPreview.verified_at)}
+              </p>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <AlertCircle className="h-16 w-16 text-slate-400 mx-auto mb-4" />
+              <p className="text-slate-600">No pending verification found</p>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowCvVerificationModal(false)}>
+              Cancel
+            </Button>
+            {cvPreview?.has_pending_verification && (
+              <Button
+                onClick={handleVerifyCvExtraction}
+                disabled={!confirmCvAccuracy || cvVerifying}
+                className="gap-2 bg-green-600 hover:bg-green-700"
+                data-testid="verify-cv-extraction-btn"
+              >
+                {cvVerifying ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-4 w-4" />
+                )}
+                Verify & Confirm
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

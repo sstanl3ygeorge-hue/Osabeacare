@@ -4260,11 +4260,11 @@ export default function EmployeeProfilePage() {
                       <div key={idx} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-medium text-gray-800">{job.employer || job.company}</p>
+                            <p className="font-medium text-gray-800">{job.employer || job.company || job.employer_name}</p>
                             <p className="text-sm text-gray-600">{job.job_title || job.position}</p>
                           </div>
                           <p className="text-xs text-gray-500">
-                            {job.start_date} - {job.end_date || 'Present'}
+                            {formatBackendDate(job.start_date, { format: 'short' })} - {job.end_date ? formatBackendDate(job.end_date, { format: 'short' }) : 'Present'}
                           </p>
                         </div>
                       </div>
@@ -4340,28 +4340,7 @@ export default function EmployeeProfilePage() {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {/* ============================================ */}
-                  {/* EMPLOYMENT GAP VERIFICATION PANEL */}
-                  {/* Shows detected gaps and verification status */}
-                  {/* ============================================ */}
-                  {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
-                    <div className="mb-4">
-                      <EmploymentGapPanel
-                        employeeId={employeeId}
-                        employeeName={`${employee?.first_name} ${employee?.last_name}`}
-                        initialData={{
-                          has_gaps: true,
-                          gaps: complianceFile.sections.employment_history.rows[0].gaps,
-                          evaluation: complianceFile.sections.employment_history.rows[0].gap_evaluation
-                        }}
-                        isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
-                        onGapUpdate={() => {
-                          fetchCompliance();
-                          fetchComplianceFile();
-                        }}
-                      />
-                    </div>
-                  )}
+                  {/* Employment Gap Verification moved to Employment History tab only */}
 
                   {/* ============================================ */}
                   {/* DUAL-ROW COMPLIANCE SECTION (Phase 4A) */}

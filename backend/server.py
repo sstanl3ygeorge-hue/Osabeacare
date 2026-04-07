@@ -6382,6 +6382,7 @@ class RightToWorkDeclaration(BaseModel):
     visa_expiry: Optional[str] = None  # If applicable
     share_code: Optional[str] = None  # For online RTW check
     requires_sponsorship: bool = False
+    has_unlimited_right_to_work: bool = True  # Default to True, will be False if visa_expiry set
 
 
 # ============================================================================

@@ -92,7 +92,11 @@ export default function RequirementFilesDrawer({
       return;
     }
     
-    if (!file.file_url || !file.file_available) {
+    // Use stamped file URL if available, otherwise use original
+    const fileUrl = file.stamped_file_url || file.file_url;
+    const isStamped = !!file.stamped_file_url;
+    
+    if (!fileUrl || !file.file_available) {
       toast.error('File URL not available. The file may have been moved or deleted.');
       return;
     }
@@ -104,15 +108,15 @@ export default function RequirementFilesDrawer({
     if (isPreviewable && onPreviewFile) {
       // Use the preview modal - pass full file object for consistency
       onPreviewFile({
-        file_url: file.file_url,
-        file_name: file.file_name || file.file_label || 'Document',
+        file_url: fileUrl,
+        file_name: isStamped ? `[STAMPED] ${file.file_name || file.file_label || 'Document'}` : (file.file_name || file.file_label || 'Document'),
         mime_type: mimeType,
         file_id: file.file_id
       });
     } else {
       // Fallback to download/open in new tab
       try {
-        window.open(file.file_url, '_blank');
+        window.open(fileUrl, '_blank');
         if (!isPreviewable) {
           toast.info(`Opening ${file.file_name || 'file'} for download (preview not supported for this file type)`);
         }
@@ -456,6 +460,12 @@ export default function RequirementFilesDrawer({
                                    file.source_type === 'form_submission' ? 'Form Submission' :
                                    file.source_type === 'request_response' ? 'Request Response' :
                                    file.source_type}
+                                </p>
+                              )}
+                              {file.stamped_file_url && (
+                                <p className="text-purple-600 flex items-center gap-1">
+                                  <CheckCircle className="h-3 w-3" />
+                                  <span className="font-medium">CQC Stamped</span>
                                 </p>
                               )}
                               {file.expiry_date && (

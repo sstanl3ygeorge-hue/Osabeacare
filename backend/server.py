@@ -20658,6 +20658,9 @@ async def get_requirement_files(
             # FIX: Return API endpoint URL, not storage path
             "file_url": f"/api/employee-documents/{doc['id']}/file",
             "download_url": f"/api/employee-documents/{doc['id']}/download",
+            # Stamped file URL for CQC-compliant versions
+            "stamped_file_url": doc.get('stamped_file_url'),
+            "verification_stamp": doc.get('verification_stamp'),
             "file_label": doc.get('document_label'),
             "mime_type": doc.get('content_type') or doc.get('mime_type'),  # For preview support detection
             "content_type": doc.get('content_type') or doc.get('mime_type'),

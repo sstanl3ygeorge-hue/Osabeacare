@@ -530,10 +530,13 @@ export default function UploadRequirementCard({
                             variant="ghost"
                             className="h-7 w-7 p-0 text-gray-500 hover:text-blue-600"
                             onClick={() => onPreviewFile({
-                              file_url: `/api/employee-documents/${file.file_id || file.id}/file`,
-                              file_name: file.file_name || file.original_filename || 'Document'
+                              // Use stamped file URL if available, otherwise original
+                              file_url: file.stamped_file_url || `/api/employee-documents/${file.file_id || file.id}/file`,
+                              file_name: file.stamped_file_url 
+                                ? `[STAMPED] ${file.file_name || file.original_filename || 'Document'}`
+                                : file.file_name || file.original_filename || 'Document'
                             })}
-                            title="View file"
+                            title={file.stamped_file_url ? "View stamped document" : "View file"}
                             data-testid={`${key}-evidence-view-${file.file_id || file.id}`}
                           >
                             <Eye className="h-3.5 w-3.5" />

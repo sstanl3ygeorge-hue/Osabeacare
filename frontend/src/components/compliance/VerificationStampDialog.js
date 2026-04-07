@@ -56,31 +56,31 @@ export default function VerificationStampDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
 
-  // Verification stamp options
+  // Verification stamp options - Osabea Healthcare Solutions branded
   const STAMP_OPTIONS = [
+    {
+      value: 'document_verified',
+      label: 'Document Verified',
+      description: 'General document verification (digital docs, online checks)',
+      icon: FileCheck,
+      iconColor: 'text-sky-600',
+      badgeColor: 'bg-sky-100 text-sky-800 border-sky-200'
+    },
     {
       value: 'original_seen',
       label: 'Original Document Seen',
-      description: 'Physical original document was personally verified',
+      description: 'Admin physically saw and verified the ORIGINAL document',
       icon: Eye,
-      iconColor: 'text-emerald-600',
-      badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200'
+      iconColor: 'text-purple-600',
+      badgeColor: 'bg-purple-100 text-purple-800 border-purple-200'
     },
     {
       value: 'copy_verified',
       label: 'Copy Verified',
-      description: 'Copy verified against original or trusted source',
+      description: 'Verifying a photocopy or scanned copy of an original',
       icon: FileCheck,
-      iconColor: 'text-blue-600',
-      badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
-    },
-    {
-      value: 'online_check',
-      label: 'Online Check Completed',
-      description: 'Verified via official online service (e.g., Home Office right to work check)',
-      icon: Globe,
-      iconColor: 'text-indigo-600',
-      badgeColor: 'bg-indigo-100 text-indigo-800 border-indigo-200'
+      iconColor: 'text-amber-600',
+      badgeColor: 'bg-amber-100 text-amber-800 border-amber-200'
     },
     {
       value: 'not_verified',
@@ -288,9 +288,9 @@ export default function VerificationStampDialog({
                       </p>
                     </div>
                     <Badge className={`text-[10px] ${option.badgeColor}`}>
-                      {option.value === 'original_seen' ? 'ORIGINAL VERIFIED' :
-                       option.value === 'copy_verified' ? 'COPY VERIFIED' :
-                       option.value === 'online_check' ? 'ONLINE VERIFIED' : 'NOT VERIFIED'}
+                      {option.value === 'document_verified' ? 'DOCUMENT VERIFIED' :
+                       option.value === 'original_seen' ? 'ORIGINAL SEEN' :
+                       option.value === 'copy_verified' ? 'COPY VERIFIED' : 'NOT VERIFIED'}
                     </Badge>
                   </div>
                 );

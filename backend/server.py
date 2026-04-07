@@ -2540,16 +2540,22 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     Add a visible verification stamp to a PDF document.
     The stamp is permanently embedded and cannot be removed.
     
-    NHS Safer Recruitment Compliant:
-    - Shows verifier name and initials
+    Osabea Healthcare Solutions Compliant:
+    - Company logo embedded
+    - Shows verifier name
     - Includes date and time
     - Document hash for tamper detection
     - Unique verification ID for audit trail
     
+    Stamp Types:
+    - document_verified: General verification (blue/green)
+    - original_seen: Admin physically saw original (purple)
+    - copy_verified: Verifying a photocopy (amber)
+    
     Args:
         input_pdf_bytes: Original PDF file as bytes
         stamp_data: {
-            "stamp_type": "original_seen" | "copy_verified" | "online_check",
+            "stamp_type": "document_verified" | "original_seen" | "copy_verified",
             "verified_by_name": "Jane Smith",
             "verified_at": "2026-04-04T10:30:00Z",
             "employee_name": "John Doe",
@@ -2562,6 +2568,7 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     """
     from io import BytesIO
     import hashlib
+    import os
     
     # Calculate document hash for tamper detection (CIA Triad - Integrity)
     doc_hash = hashlib.sha256(input_pdf_bytes).hexdigest()[:12].upper()
@@ -2575,30 +2582,44 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     
     output = PdfWriter()
     
-    # Stamp configuration based on type
+    # Osabea stamp configuration based on type
     stamp_config = {
+        "document_verified": {
+            "text": "DOCUMENT VERIFIED",
+            "border_color": Color(0.055, 0.647, 0.914, alpha=0.95),  # Blue #0ea5e9
+            "text_color": Color(0.020, 0.576, 0.537, alpha=0.95),   # Green #059669
+            "bg_colors": [Color(0.941, 0.976, 1, alpha=0.98), Color(0.878, 0.949, 0.992, alpha=0.98)]  # Light blue gradient
+        },
         "original_seen": {
             "text": "ORIGINAL DOCUMENT SEEN",
-            "color": Color(0, 0.5, 0, alpha=0.85),  # Green
-            "bg_color": Color(0.92, 0.98, 0.92, alpha=0.95)
+            "border_color": Color(0.545, 0.361, 0.965, alpha=0.95),  # Purple #8b5cf6
+            "text_color": Color(0.486, 0.227, 0.929, alpha=0.95),   # Purple #7c3aed
+            "bg_colors": [Color(0.980, 0.961, 1, alpha=0.98), Color(0.953, 0.910, 1, alpha=0.98)]  # Light purple gradient
         },
         "copy_verified": {
-            "text": "COPY VERIFIED WITH ORIGINAL",
-            "color": Color(0, 0.4, 0.8, alpha=0.85),  # Blue
-            "bg_color": Color(0.92, 0.95, 1, alpha=0.95)
+            "text": "COPY VERIFIED",
+            "border_color": Color(0.961, 0.620, 0.043, alpha=0.95),  # Amber #f59e0b
+            "text_color": Color(0.851, 0.467, 0.024, alpha=0.95),   # Amber #d97706
+            "bg_colors": [Color(1, 0.984, 0.922, alpha=0.98), Color(0.996, 0.953, 0.780, alpha=0.98)]  # Light amber gradient
         },
+        # Legacy mappings for backwards compatibility
         "online_check": {
-            "text": "ONLINE CHECK COMPLETED",
-            "color": Color(0.5, 0.25, 0.7, alpha=0.85),  # Purple
-            "bg_color": Color(0.96, 0.92, 1, alpha=0.95)
+            "text": "DOCUMENT VERIFIED",
+            "border_color": Color(0.055, 0.647, 0.914, alpha=0.95),
+            "text_color": Color(0.020, 0.576, 0.537, alpha=0.95),
+            "bg_colors": [Color(0.941, 0.976, 1, alpha=0.98), Color(0.878, 0.949, 0.992, alpha=0.98)]
         }
     }
     
-    config = stamp_config.get(stamp_data.get("stamp_type", "copy_verified"), stamp_config["copy_verified"])
+    stamp_type = stamp_data.get("stamp_type", "document_verified")
+    config = stamp_config.get(stamp_type, stamp_config["document_verified"])
     
-    # Extract verifier initials for NHS compliance (signed verification)
+    # Extract verifier name
     verifier_name = stamp_data.get('verified_by_name', 'Admin')
-    verifier_initials = ''.join([n[0].upper() for n in verifier_name.split() if n])[:3]
+    
+    # Load Osabea logo
+    logo_path = os.path.join(os.path.dirname(__file__), 'osabea_logo.png')
+    has_logo = os.path.exists(logo_path)
     
     # Create stamp overlay
     packet = BytesIO()
@@ -2608,53 +2629,61 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     page_width = 612  # letter width in points
     page_height = 792  # letter height in points
     
-    box_width = 260  # Slightly wider for NHS compliance badge
-    box_height = 110  # Taller to fit all NHS-required info
+    box_width = 280
+    box_height = 95
     box_x = page_width - box_width - 15
     box_y = 15
     
-    # Draw background box with rounded corners effect
-    c.setFillColor(config["bg_color"])
-    c.setStrokeColor(config["color"])
-    c.setLineWidth(2)
-    c.roundRect(box_x, box_y, box_width, box_height, 5, fill=1, stroke=1)
+    # Draw background box
+    c.setFillColor(config["bg_colors"][0])
+    c.setStrokeColor(config["border_color"])
+    c.setLineWidth(2.5)
+    c.roundRect(box_x, box_y, box_width, box_height, 6, fill=1, stroke=1)
     
-    # Draw NHS Compliance badge (top right of stamp)
-    c.setFillColor(Color(0, 0.3, 0.6, alpha=0.9))  # NHS Blue
-    c.roundRect(box_x + box_width - 55, box_y + box_height - 18, 50, 14, 2, fill=1, stroke=0)
-    c.setFillColor(Color(1, 1, 1))  # White text
-    c.setFont("Helvetica-Bold", 6)
-    c.drawString(box_x + box_width - 52, box_y + box_height - 14, "NHS COMPLIANT")
+    # Draw logo if available
+    logo_width = 55
+    logo_height = 40
+    logo_x = box_x + 10
+    logo_y = box_y + box_height - logo_height - 12
     
-    # Draw checkmark circle with verifier initials
-    c.setFillColor(config["color"])
-    c.circle(box_x + 22, box_y + box_height - 28, 12, fill=1, stroke=0)
-    c.setFillColor(Color(1, 1, 1))  # White initials
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(box_x + 22, box_y + box_height - 32, verifier_initials)
+    if has_logo:
+        try:
+            c.drawImage(logo_path, logo_x, logo_y, width=logo_width, height=logo_height, preserveAspectRatio=True, mask='auto')
+        except Exception as e:
+            logging.warning(f"Failed to add logo to stamp: {e}")
+            has_logo = False
+    
+    # Text starting position (after logo)
+    text_x = logo_x + logo_width + 10 if has_logo else box_x + 15
     
     # Draw stamp header text
-    c.setFillColor(config["color"])
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(box_x + 40, box_y + box_height - 28, config["text"])
+    c.setFillColor(config["text_color"])
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(text_x, box_y + box_height - 20, config["text"])
     
-    # Draw details
-    c.setFillColor(black)
-    c.setFont("Helvetica", 8)
-    y_pos = box_y + box_height - 45
+    # Draw "Seen by" for original_seen type
+    y_pos = box_y + box_height - 34
+    c.setFillColor(Color(0.118, 0.161, 0.212, alpha=1))  # Dark slate
     
-    doc_type = stamp_data.get('document_type', 'Document')
-    c.drawString(box_x + 12, y_pos, f"Document: {doc_type[:35]}")
-    y_pos -= 11
+    if stamp_type == "original_seen":
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(text_x, y_pos, f"Seen by: {verifier_name[:28]}")
+        y_pos -= 11
+        c.setFont("Helvetica", 8)
+    else:
+        c.setFont("Helvetica", 8)
+        c.drawString(text_x, y_pos, f"Verified by: {verifier_name[:28]}")
+        y_pos -= 11
     
-    emp_name = stamp_data.get('employee_name', 'N/A')
-    c.drawString(box_x + 12, y_pos, f"Employee: {emp_name[:35]}")
-    y_pos -= 11
-    
-    c.drawString(box_x + 12, y_pos, f"Verified by: {verifier_name[:25]} ({verifier_initials})")
+    # Company name
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(config["border_color"])
+    c.drawString(text_x, y_pos, "Osabea Healthcare Solutions LTD")
     y_pos -= 11
     
     # Format date
+    c.setFillColor(Color(0.4, 0.45, 0.5, alpha=1))
+    c.setFont("Helvetica", 7)
     try:
         verified_at = stamp_data.get("verified_at", "")
         if verified_at:
@@ -2662,20 +2691,19 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
                 verified_dt = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
             else:
                 verified_dt = verified_at
-            date_str = verified_dt.strftime('%d %b %Y %H:%M UTC')
+            date_str = verified_dt.strftime('%d %b %Y')
         else:
-            date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')
+            date_str = datetime.now(timezone.utc).strftime('%d %b %Y')
     except:
-        date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')
+        date_str = datetime.now(timezone.utc).strftime('%d %b %Y')
     
-    c.drawString(box_x + 12, y_pos, f"Date: {date_str}")
-    
-    # Add verification ID and document hash at bottom (CIA Triad - Integrity)
-    c.setFont("Helvetica-Oblique", 6)
-    c.setFillColor(gray)
     verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8].upper())
-    c.drawString(box_x + 12, box_y + 14, f"Verification ID: {verification_id}")
-    c.drawString(box_x + 12, box_y + 5, f"Document Hash: {doc_hash} (SHA-256)")
+    c.drawString(text_x, y_pos, f"Date: {date_str} | Ref: {verification_id}")
+    
+    # Add document hash at very bottom (CIA Triad - Integrity)
+    c.setFont("Helvetica", 5)
+    c.setFillColor(Color(0.6, 0.6, 0.6, alpha=1))
+    c.drawString(box_x + 10, box_y + 4, f"Hash: {doc_hash}")
     
     c.save()
     

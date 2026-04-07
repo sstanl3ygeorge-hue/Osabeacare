@@ -311,12 +311,36 @@ export default function RequirementFilesDrawer({
 
   // Render file status badge
   const renderStatusBadge = (file) => {
-    // Show CQC Stamped badge prominently if stamped
+    // Show Osabea Verified badge prominently if stamped
     if (file.stamped_file_url || file.verification_stamp) {
+      const stampType = typeof file.verification_stamp === 'object' 
+        ? file.verification_stamp?.stamp_type 
+        : file.verification_stamp;
+      
+      // Badge colors based on stamp type
+      const badgeStyles = {
+        document_verified: 'bg-sky-50 text-sky-700 border-sky-200',
+        original_seen: 'bg-purple-50 text-purple-700 border-purple-200',
+        copy_verified: 'bg-amber-50 text-amber-700 border-amber-200',
+        online_check: 'bg-sky-50 text-sky-700 border-sky-200', // Legacy
+      };
+      
+      const badgeLabels = {
+        document_verified: 'Verified',
+        original_seen: 'Original Seen',
+        copy_verified: 'Copy Verified',
+        online_check: 'Verified',
+      };
+      
+      const badgeClass = badgeStyles[stampType] || badgeStyles.document_verified;
+      const badgeLabel = badgeLabels[stampType] || 'Verified';
+      
       return (
-        <div className="flex items-center gap-1">
-          <Badge className="bg-purple-100 text-purple-700 text-xs">CQC Stamped</Badge>
-          {file.verified && <Badge className="bg-green-100 text-green-700 text-xs">Verified</Badge>}
+        <div className="flex items-center gap-1.5">
+          <Badge className={`text-xs border flex items-center gap-1 ${badgeClass}`}>
+            <img src="/osabea_logo.png" alt="" className="h-3 w-auto" />
+            <span>{badgeLabel}</span>
+          </Badge>
         </div>
       );
     }

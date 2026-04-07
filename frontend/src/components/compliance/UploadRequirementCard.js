@@ -258,18 +258,19 @@ export default function UploadRequirementCard({
     return fallbackName || 'Unknown';
   };
 
-  // Get stamp display info
+  // Get stamp display info - Osabea branded
   const getStampDisplay = (stamp) => {
     // Handle both string stamp types and full stamp objects
     const stampType = typeof stamp === 'object' ? stamp?.stamp_type : stamp;
     
     const stamps = {
-      'original_seen': { label: 'ORIGINAL VERIFIED', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-      'copy_verified': { label: 'COPY VERIFIED', className: 'bg-blue-100 text-blue-700 border-blue-200' },
-      'online_check': { label: 'ONLINE VERIFIED', className: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
-      'not_verified': { label: 'NOT VERIFIED', className: 'bg-red-100 text-red-700 border-red-200' }
+      'document_verified': { label: 'Verified', className: 'bg-sky-50 text-sky-700 border-sky-200', showLogo: true },
+      'original_seen': { label: 'Original Seen', className: 'bg-purple-50 text-purple-700 border-purple-200', showLogo: true },
+      'copy_verified': { label: 'Copy Verified', className: 'bg-amber-50 text-amber-700 border-amber-200', showLogo: true },
+      'online_check': { label: 'Verified', className: 'bg-sky-50 text-sky-700 border-sky-200', showLogo: true }, // Legacy
+      'not_verified': { label: 'NOT VERIFIED', className: 'bg-red-100 text-red-700 border-red-200', showLogo: false }
     };
-    return stamps[stampType] || { label: stampType?.toUpperCase?.()?.replace(/_/g, ' ') || 'VERIFIED', className: 'bg-gray-100 text-gray-600 border-gray-200' };
+    return stamps[stampType] || { label: 'Verified', className: 'bg-green-50 text-green-700 border-green-200', showLogo: true };
   };
 
   // Get outcome display
@@ -377,16 +378,19 @@ export default function UploadRequirementCard({
                               {formatBackendDate(file.uploaded_at, { format: 'medium' })}
                               {file.uploaded_by && ` • ${file.uploaded_by}`}
                             </span>
-                            {/* Verification Stamp Badge - ENHANCED */}
+                            {/* Verification Stamp Badge - Osabea Branded */}
                             {file.verification_stamp && (() => {
                               const stampInfo = getStampDisplay(file.verification_stamp);
                               return (
                                 <div className="flex flex-col">
                                   <Badge 
-                                    className={`text-[9px] px-1.5 py-0.5 font-semibold ${stampInfo.className}`}
+                                    className={`text-[9px] px-1.5 py-0.5 font-semibold border flex items-center gap-1 ${stampInfo.className}`}
                                     data-testid={`${key}-stamp-badge-${file.file_id || file.id}`}
                                   >
-                                    <Stamp className="h-2.5 w-2.5 mr-1" />
+                                    {stampInfo.showLogo && (
+                                      <img src="/osabea_logo.png" alt="" className="h-2.5 w-auto" />
+                                    )}
+                                    {!stampInfo.showLogo && <Stamp className="h-2.5 w-2.5" />}
                                     {stampInfo.label}
                                   </Badge>
                                   {(file.verification_stamp_by_name || file.verification_stamp_at) && (

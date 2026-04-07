@@ -15,19 +15,42 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 | CQC Audit Readiness | 4.7 / 5.0 |
 | Launch Readiness | 4.3 / 5.0 |
 
-**Test Results:** 42/48 tests passed (87.5%)
+**Test Results:** 42/48 tests passed (87.5%) → Updated: 17/17 CQC expiry tests passed
 
 ### CQC Compliance Verified:
 - ✅ Safer Recruitment (Regulation 19) - FULLY COMPLIANT
 - ✅ Mandatory Training (Regulation 18) - COMPLIANT
 - ✅ Document Management - FULLY COMPLIANT
 - ✅ Contract Management - FULLY COMPLIANT
+- ✅ **Automated Expiry Reminders** - FULLY COMPLIANT (NEW)
 
 ### Full Audit Report: `/app/test_reports/cqc_audit_report_2026-04-07.md`
 
 ---
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
+
+### Comprehensive Automated Expiry Reminder System (2026-04-07) ✅ VERIFIED
+- **Backend**: `server.py` - `comprehensive_expiry_reminder_job()`, `send_document_expiry_reminder_email()`, `get_expiring_documents()`
+- **Frontend**: `DocumentExpiryAlerts.js` (NEW), `TrainingExpiryAlerts.js` (existing)
+- **Problem Solved**: CQC requires proactive tracking and notification of expiring compliance items. This system automatically reminds workers and admins of upcoming expirations.
+- **Features**:
+  - **Multi-tier Reminders**: 30 days, 14 days, 7 days, 1 day before expiry
+  - **Document Types Tracked**: DBS, Right to Work, Professional Registration (NMC, GMC), Identity, all documents with expiry dates
+  - **Training Expiry**: All 8 mandatory training certificates tracked
+  - **Worker Emails**: Beautiful HTML emails with urgency-color-coded tables, direct upload links
+  - **Admin Daily Digest**: Summary email of all expiring items across organization
+  - **APScheduler Cron Job**: Runs daily at 8:00 AM automatically
+  - **Manual Trigger**: Admin can click "Send All Reminders" button on dashboard
+- **API Endpoints**:
+  - `GET /api/admin/expiring-documents?days=30` - List all expiring documents
+  - `GET /api/admin/training-expiry-alerts?days=60` - List all expiring training
+  - `POST /api/admin/send-all-expiry-reminders` - Manually trigger all reminders
+- **Dashboard Components**:
+  - `DocumentExpiryAlerts.js` - Shows DBS/RTW/Professional Registration expiring (critical/warning/upcoming)
+  - `TrainingExpiryAlerts.js` - Shows training certificates expiring (critical/warning/upcoming)
+- **Testing**: 17/17 backend tests passed, frontend components verified
+- **Compliance**: CQC Audit Ready ✅, 5 E's of Usability ✅
 
 ### 5-Step Gated Workflow for RTW/DBS Verification (2026-04-07) ✅ VERIFIED
 - **Component**: `UploadRequirementCard.js` (lines 185-276, 385-442, 1731-1844)

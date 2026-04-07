@@ -20620,9 +20620,12 @@ async def get_requirement_files(
     active_files = []
     historical_files = []
     
+    # IMPORTANT: Keep this in sync with build_evidence_row EXCLUDED_STATUSES
+    HISTORICAL_STATUSES = ['superseded', 'rejected', 'uploaded_in_error', 'moved', 'archived', 'deleted', 'misfiled']
+    
     for doc in all_docs:
         file_status = doc.get('status', 'active')
-        is_historical = file_status in ['superseded', 'rejected', 'uploaded_in_error', 'moved', 'archived', 'deleted']
+        is_historical = file_status in HISTORICAL_STATUSES
         
         # Get request linkage if exists
         request_linkage = None

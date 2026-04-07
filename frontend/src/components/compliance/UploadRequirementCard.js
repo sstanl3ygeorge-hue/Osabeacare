@@ -1543,12 +1543,25 @@ export default function UploadRequirementCard({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                      /* No proof file - show softer warning if check is already verified */
+                      <div className={`flex items-center gap-2 p-3 rounded-lg border ${
+                        checkVerified 
+                          ? 'bg-blue-50 border-blue-200'  // Softer: check verified but proof missing
+                          : 'bg-amber-50 border-amber-200' // Stronger: need proof to complete
+                      }`}>
+                        {checkVerified ? (
+                          <FileText className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                        ) : (
+                          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />
+                        )}
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-amber-800">No proof file attached</p>
-                          <p className="text-xs text-amber-600">
-                            Upload proof documentation for compliance audit trail.
+                          <p className={`text-sm font-medium ${checkVerified ? 'text-blue-800' : 'text-amber-800'}`}>
+                            {checkVerified ? 'Proof file recommended' : 'Proof file required'}
+                          </p>
+                          <p className={`text-xs ${checkVerified ? 'text-blue-600' : 'text-amber-600'}`}>
+                            {checkVerified 
+                              ? 'Upload proof documentation to strengthen audit trail.'
+                              : 'Upload proof of check (e.g., Home Office screenshot) for compliance.'}
                           </p>
                         </div>
                       </div>

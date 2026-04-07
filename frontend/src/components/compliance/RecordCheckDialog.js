@@ -8,7 +8,7 @@ import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from 'sonner';
-import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle, Info, ExternalLink, RefreshCw } from 'lucide-react';
+import { Loader2, Shield, Upload, FileText, X, CheckCircle, AlertTriangle, Info, ExternalLink, RefreshCw, ChevronDown } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -372,6 +372,9 @@ export default function RecordCheckDialog({
   const [uploadedProofId, setUploadedProofId] = useState(null);
   const [uploadedProofName, setUploadedProofName] = useState(null);
   const fileInputRef = useRef(null);
+  
+  // Progressive disclosure - collapse result details by default
+  const [showResultDetails, setShowResultDetails] = useState(false);
   
   const { token } = useAuth();
 
@@ -1073,42 +1076,24 @@ export default function RecordCheckDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* EVIDENCE WARNING - Show if no accepted evidence */}
-          {!hasAcceptedEvidence && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-red-800">
-                  <p className="font-medium">No accepted evidence</p>
-                  <p className="text-xs mt-0.5">You should accept at least one evidence file before recording the verification check.</p>
+          {/* COMPLIANCE CHECKLIST - Consolidated warning */}
+          {(!hasAcceptedEvidence || (hasAcceptedEvidence && !hasStampedEvidence)) && (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+              <p className="text-xs font-medium text-slate-700 mb-2">Pre-check Checklist</p>
+              <div className="space-y-1.5">
+                <div className={`flex items-center gap-2 text-xs ${hasAcceptedEvidence ? 'text-green-600' : 'text-amber-600'}`}>
+                  {hasAcceptedEvidence ? <CheckCircle className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                  <span>{hasAcceptedEvidence ? 'Evidence accepted' : 'Accept at least one evidence file first'}</span>
                 </div>
+                {hasAcceptedEvidence && (
+                  <div className={`flex items-center gap-2 text-xs ${hasStampedEvidence ? 'text-green-600' : 'text-slate-500'}`}>
+                    {hasStampedEvidence ? <CheckCircle className="h-3 w-3" /> : <Info className="h-3 w-3" />}
+                    <span>{hasStampedEvidence ? 'Evidence stamped' : 'Optional: Apply verification stamp to evidence'}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
-          
-          {/* STAMP WARNING - Show if evidence accepted but not stamped */}
-          {hasAcceptedEvidence && !hasStampedEvidence && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <Info className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-                <div className="text-sm text-amber-800">
-                  <p className="font-medium">No stamped evidence</p>
-                  <p className="text-xs mt-0.5">Consider applying a verification stamp (Original Seen, Copy Verified, etc.) to accepted evidence files for audit trail.</p>
-                </div>
-              </div>
-            </div>
-          )}
-          
-          {/* COMPLIANCE ALERT */}
-          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-amber-800">
-                <p className="font-medium">Compliance Requirement</p>
-                <p className="text-xs mt-0.5">Upload proof of the check (e.g., Home Office screenshot, DBS Update Service result) before saving.</p>
-              </div>
-            </div>
-          </div>
 
           {/* PROOF FILE UPLOAD - MANDATORY */}
           <div className="space-y-2">
@@ -1428,15 +1413,35 @@ export default function RecordCheckDialog({
           {/* ============================================== */}
           {isRTW && (
             <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
-              <div className="flex items-center gap-2">
-                <Shield className="h-4 w-4 text-slate-600" />
-                <h4 className="text-sm font-semibold text-slate-800">Right to Work Result</h4>
-                {extractionResult && (
-                  <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">
-                    AI Extracted
-                  </span>
-                )}
-              </div>
+              <button
+                type="button"
+                className="w-full flex items-center justify-between"
+                onClick={() => setShowResultDetails(!showResultDetails)}
+              >
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-slate-600" />
+                  <h4 className="text-sm font-semibold text-slate-800">Right to Work Result</h4>
+                  {extractionResult && (
+                    <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">
+                      AI Extracted
+                    </span>
+                  )}
+                </div>
+                <ChevronDown className={`h-4 w-4 text-slate-500 transition-transform ${showResultDetails ? 'rotate-180' : ''}`} />
+              </button>
+              
+              {/* Collapsed preview - show key info */}
+              {!showResultDetails && (formData.permission_type || extractionResult) && (
+                <div className="text-sm text-slate-600 bg-white p-2 rounded border border-slate-100">
+                  {formData.permission_type && <span className="font-medium">{formData.permission_type}</span>}
+                  {formData.permission_end_date && <span className="ml-2 text-slate-500">• Expires: {formData.permission_end_date}</span>}
+                  {formData.share_code && <span className="ml-2 text-slate-500">• Code: {formData.share_code}</span>}
+                </div>
+              )}
+              
+              {/* Expandable details */}
+              {showResultDetails && (
+                <div className="space-y-4 pt-2 border-t border-slate-200">
               
               {/* Permission Type - Full width, prominent */}
               <div className="space-y-1">
@@ -1565,6 +1570,8 @@ export default function RecordCheckDialog({
                     <AlertTriangle className="h-3 w-3 inline mr-1" />
                     Permission ends {formData.permission_end_date}. Set a follow-up date 28 days before.
                   </p>
+                </div>
+              )}
                 </div>
               )}
             </div>

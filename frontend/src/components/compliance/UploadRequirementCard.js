@@ -241,13 +241,16 @@ export default function UploadRequirementCard({
 
   // Get stamp display info
   const getStampDisplay = (stamp) => {
+    // Handle both string stamp types and full stamp objects
+    const stampType = typeof stamp === 'object' ? stamp?.stamp_type : stamp;
+    
     const stamps = {
       'original_seen': { label: 'ORIGINAL VERIFIED', className: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
       'copy_verified': { label: 'COPY VERIFIED', className: 'bg-blue-100 text-blue-700 border-blue-200' },
       'online_check': { label: 'ONLINE VERIFIED', className: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
       'not_verified': { label: 'NOT VERIFIED', className: 'bg-red-100 text-red-700 border-red-200' }
     };
-    return stamps[stamp] || { label: stamp?.toUpperCase()?.replace(/_/g, ' '), className: 'bg-gray-100 text-gray-600 border-gray-200' };
+    return stamps[stampType] || { label: stampType?.toUpperCase?.()?.replace(/_/g, ' ') || 'VERIFIED', className: 'bg-gray-100 text-gray-600 border-gray-200' };
   };
 
   // Get outcome display

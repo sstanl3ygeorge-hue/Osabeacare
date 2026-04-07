@@ -4637,6 +4637,15 @@ class EmployeeResponse(BaseModel):
     criminal_offence_declared: Optional[Any] = None
     professional_misconduct_declared: Optional[Any] = None
     health_issue_declared: Optional[Any] = None
+    # RTW/DBS Stamp-All verification status fields
+    rtw_fully_verified: Optional[bool] = None
+    rtw_verification_id: Optional[str] = None
+    rtw_stamped_at: Optional[str] = None
+    rtw_stamped_by: Optional[str] = None
+    dbs_fully_verified: Optional[bool] = None
+    dbs_verification_id: Optional[str] = None
+    dbs_stamped_at: Optional[str] = None
+    dbs_stamped_by: Optional[str] = None
 
 # Document Type Models
 class DocumentTypeCreate(BaseModel):

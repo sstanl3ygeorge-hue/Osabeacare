@@ -29,6 +29,23 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
 
+### -2. Document Upload Limits & Agreements UI Fix (2026-04-07)
+- **Components**:
+  - Frontend: `UploadRequirementCard.js` - Document upload limits
+  - Frontend: `WorkerDashboard.js` - Agreements section text fix
+- **Document Upload Limits**:
+  - RTW (Right to Work): max 2 documents
+  - DBS: max 1 document
+  - Identity: max 2 documents
+  - Proof of Address: max 3 documents
+  - Upload button disabled when at limit with amber warning message
+- **Agreements UI Fix**:
+  - "Contract Acceptance" now shows "Sign contract in the section below" with "See Below ↓" badge
+  - "Employee Handbook" shows "Acknowledge during contract signing" with "Pending" badge
+  - Fixed misleading "Pending your signature" text that had no actionable UI
+- **Compliance**: NHS CQC document management standards
+- **Testing**: Frontend 100% verified (iteration_180)
+
 ### -1. RTW/DBS "Confirm & Stamp All" Flow (2026-04-07)
 - **Components**: 
   - Backend: `POST /api/employees/{id}/right_to_work/stamp-all`, `POST /api/employees/{id}/dbs/stamp-all`

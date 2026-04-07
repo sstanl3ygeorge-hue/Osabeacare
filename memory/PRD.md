@@ -43,6 +43,25 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
   - `POST /api/worker/cv-extraction-verify` - Worker confirms extraction
 - **Testing**: All frontend tests passed (iteration_177)
 
+### 0.5. Reference-Employment Mismatch Explanation Workflow (2026-04-07)
+- **Components**: `WorkerDashboard.js` - Reference Mismatch Alert Card + Explanation Modal
+- **Problem Solved**: NHS Safer Recruitment requires references to be traceable to employment history. When mismatches occur, workers must explain discrepancies.
+- **Worker Portal Features**:
+  - Alert card shows when references don't match employment history
+  - Lists each mismatched reference with "Explain" button
+  - Modal with dropdown for explanation types (agency work, company name change, supervisor not HR, volunteer work, etc.)
+  - Textarea for detailed explanation (20 char minimum)
+  - Status badges: "Action Required" → "Under Review" → "Accepted/Rejected"
+- **Admin Features**:
+  - View worker explanations on Reference-Employment Cross Check panel
+  - Accept/Reject explanations with admin notes
+- **API Endpoints**:
+  - `GET /api/worker/reference-mismatches` - Get mismatches needing explanation
+  - `POST /api/worker/reference-mismatches/{ref_num}/explain` - Submit explanation
+  - `POST /api/references/{employee_id}/{ref_num}/review-mismatch-explanation` - Admin review
+- **Compliance**: CIA Triad ✅, 5 E's of Usability ✅, NHS Safer Recruitment (Regulation 19) ✅
+- **Testing**: All tests passed (iteration_178)
+
 ### 1. 10-Year Employment History Form (CQC/NHS Legal Requirement)
 - **Endpoint**: `GET /api/worker/forms/employment_history_10yr`
 - **Features**:

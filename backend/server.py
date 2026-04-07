@@ -8504,6 +8504,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             if admin_user:
                 verified_by_name = f"{admin_user.get('first_name', '')} {admin_user.get('last_name', '')}".strip()
         
+        # Check for employment mismatch status
+        mismatch_explanation = employee.get(f"{prefix}mismatch_explanation")
+        mismatch_explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
+        mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
+        
         references_status.append({
             "reference_number": ref_num,
             "referee_name": referee_name if is_declared else None,  # Only show name if declared
@@ -8514,7 +8519,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "can_provide_new": data_cleared or status == "not_declared",  # Worker can input new details
             "verified_at": verified_at,
             "verified_by_name": verified_by_name,
-            "response_received_at": response_received_at
+            "response_received_at": response_received_at,
+            # Mismatch explanation fields
+            "has_mismatch_explanation": mismatch_explanation is not None,
+            "mismatch_explanation_status": mismatch_explanation_status,
+            "mismatch_admin_decision": mismatch_admin_decision
         })
     
     # ========== INDUCTION CHECKLIST STATUS (P1: Worker Dashboard Sync) ==========
@@ -10503,6 +10512,177 @@ async def verify_cv_extraction(
         "form_pre_populated": not existing_form and len(verification.employment_history) > 0,
         "next_step": "explain_gaps" if unexplained_gaps else "submit_form",
         "message": f"CV data verified. {'You have ' + str(len(unexplained_gaps)) + ' employment gaps to explain.' if unexplained_gaps else 'No gaps to explain - you can submit your 10-Year Employment History form.'}"
+    }
+
+
+# ========== REFERENCE-EMPLOYMENT MISMATCH EXPLANATION (Worker Self-Service) ==========
+
+class ReferenceMismatchExplanation(BaseModel):
+    """Worker explanation for why a reference doesn't match employment history"""
+    reference_number: int
+    explanation_type: str  # agency_work, company_name_change, supervisor_not_hr, volunteer_work, international_work, other
+    explanation_text: str
+    additional_notes: Optional[str] = None
+
+
+@api_router.get("/worker/reference-mismatches")
+async def get_worker_reference_mismatches(worker: dict = Depends(get_current_worker)):
+    """
+    Get reference-employment mismatches that need worker explanation.
+    NHS Safer Recruitment requires traceable references - discrepancies must be documented.
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get employment history from various sources
+    cv_employment = employee.get("cv_extracted_employment_history", [])
+    form_employment = employee.get("employment_history", [])
+    app_employment = []
+    
+    # Check application form for employment history
+    application = await db.applications.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0, "employment_history": 1}
+    )
+    if application:
+        app_employment = application.get("employment_history", [])
+    
+    # Combine all employment records
+    all_employment = cv_employment + form_employment + app_employment
+    employment_employers = set()
+    for emp in all_employment:
+        employer = emp.get("employer") or emp.get("company") or emp.get("organisation")
+        if employer:
+            employment_employers.add(employer.lower().strip())
+    
+    mismatches = []
+    
+    # Check each reference for matches
+    for ref_num in [1, 2]:
+        prefix = f"reference_{ref_num}_"
+        
+        referee_name = employee.get(f"{prefix}name", "")
+        referee_company = employee.get(f"{prefix}company", "")
+        referee_email = employee.get(f"{prefix}email", "")
+        
+        if not referee_name:
+            continue  # Reference not declared yet
+        
+        # Check if referee company matches any employment record
+        has_match = False
+        if referee_company:
+            company_lower = referee_company.lower().strip()
+            for emp_employer in employment_employers:
+                # Fuzzy match - check if one contains the other
+                if company_lower in emp_employer or emp_employer in company_lower:
+                    has_match = True
+                    break
+        
+        # Get existing explanation if any
+        existing_explanation = employee.get(f"{prefix}mismatch_explanation")
+        explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
+        
+        if not has_match:
+            mismatches.append({
+                "reference_number": ref_num,
+                "referee_name": referee_name,
+                "referee_company": referee_company,
+                "referee_email": referee_email,
+                "mismatch_type": "employer_not_in_history",
+                "message": f"Referee '{referee_name}' from '{referee_company}' not found in your declared employment history",
+                "existing_explanation": existing_explanation,
+                "explanation_status": explanation_status,
+                "admin_decision": employee.get(f"{prefix}mismatch_admin_decision"),
+                "admin_notes": employee.get(f"{prefix}mismatch_admin_notes"),
+                "needs_explanation": explanation_status == "not_submitted"
+            })
+    
+    return {
+        "has_mismatches": len(mismatches) > 0,
+        "mismatch_count": len(mismatches),
+        "mismatches": mismatches,
+        "employment_records_count": len(all_employment),
+        "explanation_types": [
+            {"value": "agency_work", "label": "Referee is from agency/bank work (not direct employer)"},
+            {"value": "company_name_change", "label": "Company changed name or merged"},
+            {"value": "supervisor_not_hr", "label": "Referee was my supervisor, not HR/company"},
+            {"value": "volunteer_work", "label": "This was volunteer/unpaid work not in employment history"},
+            {"value": "international_work", "label": "International work not fully documented"},
+            {"value": "short_term_contract", "label": "Short-term contract not listed in main history"},
+            {"value": "other", "label": "Other reason (please explain)"}
+        ]
+    }
+
+
+@api_router.post("/worker/reference-mismatches/{ref_num}/explain")
+async def submit_reference_mismatch_explanation(
+    ref_num: int,
+    explanation: ReferenceMismatchExplanation,
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Worker submits explanation for why their reference doesn't match employment history.
+    Creates audit trail for CQC compliance.
+    """
+    employee_id = worker.get("employee_id")
+    
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="Invalid reference number")
+    
+    if explanation.reference_number != ref_num:
+        raise HTTPException(status_code=400, detail="Reference number mismatch")
+    
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    
+    # Verify reference exists
+    if not employee.get(f"{prefix}name"):
+        raise HTTPException(status_code=400, detail="Reference not declared")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    explanation_data = {
+        "type": explanation.explanation_type,
+        "text": explanation.explanation_text,
+        "additional_notes": explanation.additional_notes,
+        "submitted_at": now,
+        "submitted_by_worker": True
+    }
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}mismatch_explanation": explanation_data,
+            f"{prefix}mismatch_explanation_status": "submitted",
+            f"{prefix}mismatch_explanation_submitted_at": now,
+            "updated_at": now
+        }}
+    )
+    
+    # Log audit trail
+    await log_audit_action(
+        employee_id,
+        "submit_reference_mismatch_explanation",
+        "employee",
+        employee_id,
+        {
+            "reference_number": ref_num,
+            "explanation_type": explanation.explanation_type,
+            "explanation_preview": explanation.explanation_text[:100]
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Explanation for Reference {ref_num} submitted successfully",
+        "status": "submitted",
+        "next_step": "Admin will review your explanation"
     }
 
 
@@ -39083,6 +39263,74 @@ async def override_reference_mismatch(
     return await ReferenceIntegrityService.override_mismatch(
         employee_id, ref_num, override_reason, user['user_id']
     )
+
+
+class MismatchExplanationReview(BaseModel):
+    """Admin review of worker's mismatch explanation"""
+    decision: str  # accepted, rejected, needs_clarification
+    admin_notes: str
+
+
+@api_router.post("/references/{employee_id}/{ref_num}/review-mismatch-explanation")
+async def review_mismatch_explanation(
+    employee_id: str,
+    ref_num: int,
+    review: MismatchExplanationReview,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin reviews worker's explanation for reference-employment mismatch.
+    Creates audit trail for CQC compliance.
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="Invalid reference number")
+    
+    if review.decision not in ["accepted", "rejected", "needs_clarification"]:
+        raise HTTPException(status_code=400, detail="Invalid decision")
+    
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    prefix = f"reference_{ref_num}_"
+    
+    # Check worker submitted explanation
+    if not employee.get(f"{prefix}mismatch_explanation"):
+        raise HTTPException(status_code=400, detail="No worker explanation to review")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}mismatch_admin_decision": review.decision,
+            f"{prefix}mismatch_admin_notes": review.admin_notes,
+            f"{prefix}mismatch_reviewed_at": now,
+            f"{prefix}mismatch_reviewed_by": user['user_id'],
+            f"{prefix}mismatch_explanation_status": "reviewed",
+            "updated_at": now
+        }}
+    )
+    
+    # Log audit trail
+    await log_audit_action(
+        user['user_id'],
+        "review_reference_mismatch_explanation",
+        "employee",
+        employee_id,
+        {
+            "reference_number": ref_num,
+            "decision": review.decision,
+            "admin_notes_preview": review.admin_notes[:100] if review.admin_notes else ""
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Reference {ref_num} mismatch explanation {review.decision}",
+        "decision": review.decision,
+        "reviewed_at": now
+    }
 
 
 @api_router.post("/references/{employee_id}/{ref_num}/reject")

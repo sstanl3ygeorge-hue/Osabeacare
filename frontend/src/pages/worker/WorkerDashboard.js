@@ -15,7 +15,9 @@ import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
 import { Checkbox } from '../../components/ui/checkbox';
 import { ScrollArea } from '../../components/ui/scroll-area';
-import { Briefcase, GraduationCap, Sparkles, Edit3 } from 'lucide-react';
+import { Briefcase, GraduationCap, Sparkles, Edit3, Link2, MessageSquare } from 'lucide-react';
+import { Textarea } from '../../components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -209,6 +211,13 @@ export default function WorkerDashboard() {
   const [cvEditMode, setCvEditMode] = useState(false);
   const [editedEmploymentHistory, setEditedEmploymentHistory] = useState([]);
   const [confirmCvAccuracy, setConfirmCvAccuracy] = useState(false);
+  // Reference mismatch explanation states
+  const [referenceMismatches, setReferenceMismatches] = useState(null);
+  const [showMismatchExplanationModal, setShowMismatchExplanationModal] = useState(false);
+  const [selectedMismatch, setSelectedMismatch] = useState(null);
+  const [mismatchExplanationType, setMismatchExplanationType] = useState('');
+  const [mismatchExplanationText, setMismatchExplanationText] = useState('');
+  const [submittingMismatchExplanation, setSubmittingMismatchExplanation] = useState(false);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -273,8 +282,66 @@ export default function WorkerDashboard() {
   useEffect(() => {
     if (dashboard) {
       fetchCvStatus();
+      fetchReferenceMismatches();
     }
   }, [dashboard, fetchCvStatus]);
+
+  // Fetch reference-employment mismatches
+  const fetchReferenceMismatches = async () => {
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/reference-mismatches`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setReferenceMismatches(response.data);
+    } catch (error) {
+      console.error('Failed to fetch reference mismatches:', error);
+    }
+  };
+
+  // Open mismatch explanation modal
+  const openMismatchExplanationModal = (mismatch) => {
+    setSelectedMismatch(mismatch);
+    setMismatchExplanationType('');
+    setMismatchExplanationText('');
+    setShowMismatchExplanationModal(true);
+  };
+
+  // Submit mismatch explanation
+  const handleSubmitMismatchExplanation = async () => {
+    if (!mismatchExplanationType) {
+      toast.error('Please select a reason for the mismatch');
+      return;
+    }
+    if (!mismatchExplanationText || mismatchExplanationText.length < 20) {
+      toast.error('Please provide a detailed explanation (at least 20 characters)');
+      return;
+    }
+    
+    setSubmittingMismatchExplanation(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(
+        `${API}/worker/reference-mismatches/${selectedMismatch.reference_number}/explain`,
+        {
+          reference_number: selectedMismatch.reference_number,
+          explanation_type: mismatchExplanationType,
+          explanation_text: mismatchExplanationText
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('Explanation submitted! Admin will review.');
+      setShowMismatchExplanationModal(false);
+      fetchReferenceMismatches();
+      fetchDashboard();
+    } catch (error) {
+      const message = error.response?.data?.detail || 'Failed to submit explanation';
+      toast.error(message);
+    } finally {
+      setSubmittingMismatchExplanation(false);
+    }
+  };
 
   // Fetch CV preview for verification
   const fetchCvPreview = async () => {
@@ -645,6 +712,119 @@ export default function WorkerDashboard() {
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
+
+        {/* ========== REFERENCE-EMPLOYMENT MISMATCH ALERT ========== */}
+        {!isActiveEmployee && referenceMismatches?.has_mismatches && (
+          <Card className="shadow-md border-0 border-l-4 border-l-amber-500 bg-amber-50/50" data-testid="reference-mismatch-alert">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg text-amber-800">
+                    <Link2 className="h-5 w-5" />
+                    Reference-Employment Mismatch
+                  </CardTitle>
+                  <p className="text-xs text-amber-700 mt-1">
+                    {referenceMismatches.mismatch_count} reference(s) don't match your declared employment history
+                  </p>
+                </div>
+                <Badge className="bg-amber-100 text-amber-700">
+                  Action Required
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {referenceMismatches.mismatches.map((mismatch, idx) => (
+                  <div 
+                    key={idx}
+                    className={`p-4 rounded-xl border ${
+                      mismatch.explanation_status === 'submitted' ? 'bg-blue-50 border-blue-200' :
+                      mismatch.mismatch_admin_decision === 'accepted' ? 'bg-green-50 border-green-200' :
+                      mismatch.mismatch_admin_decision === 'rejected' ? 'bg-red-50 border-red-200' :
+                      'bg-white border-amber-200'
+                    }`}
+                    data-testid={`mismatch-ref-${mismatch.reference_number}`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          mismatch.explanation_status === 'submitted' ? 'bg-blue-100' :
+                          mismatch.mismatch_admin_decision === 'accepted' ? 'bg-green-100' :
+                          'bg-amber-100'
+                        }`}>
+                          {mismatch.mismatch_admin_decision === 'accepted' ? (
+                            <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : mismatch.explanation_status === 'submitted' ? (
+                            <Clock className="h-5 w-5 text-blue-600" />
+                          ) : (
+                            <AlertTriangle className="h-5 w-5 text-amber-600" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate-800">
+                            Reference {mismatch.reference_number}: {mismatch.referee_name}
+                          </p>
+                          <p className="text-sm text-slate-600">{mismatch.referee_company}</p>
+                          <p className="text-xs text-amber-700 mt-1">{mismatch.message}</p>
+                          
+                          {/* Show existing explanation */}
+                          {mismatch.existing_explanation && (
+                            <div className="mt-2 p-2 bg-slate-100 rounded-lg">
+                              <p className="text-xs text-slate-600">
+                                <span className="font-medium">Your explanation:</span> {mismatch.existing_explanation.text}
+                              </p>
+                            </div>
+                          )}
+                          
+                          {/* Show admin decision */}
+                          {mismatch.mismatch_admin_decision && (
+                            <p className={`text-xs mt-1 ${
+                              mismatch.mismatch_admin_decision === 'accepted' ? 'text-green-600' :
+                              mismatch.mismatch_admin_decision === 'rejected' ? 'text-red-600' :
+                              'text-blue-600'
+                            }`}>
+                              Admin decision: {mismatch.mismatch_admin_decision}
+                              {mismatch.admin_notes && ` - ${mismatch.admin_notes}`}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col items-end gap-2">
+                        {mismatch.mismatch_admin_decision === 'accepted' ? (
+                          <Badge className="bg-green-100 text-green-700 text-xs">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Accepted
+                          </Badge>
+                        ) : mismatch.explanation_status === 'submitted' ? (
+                          <Badge className="bg-blue-100 text-blue-700 text-xs">
+                            <Clock className="h-3 w-3 mr-1" />
+                            Under Review
+                          </Badge>
+                        ) : (
+                          <Button
+                            size="sm"
+                            onClick={() => openMismatchExplanationModal(mismatch)}
+                            className="gap-1 bg-amber-600 hover:bg-amber-700"
+                            data-testid={`explain-mismatch-${mismatch.reference_number}`}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                            Explain
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <p className="text-xs text-amber-700 mt-4 p-3 bg-amber-100/50 rounded-lg">
+                NHS Safer Recruitment requires that all references are verified against your employment history. 
+                Please explain any discrepancies to help us complete your compliance check.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Professional Registration Status - if applicable */}
         {professional_registration && (
@@ -2217,6 +2397,98 @@ export default function WorkerDashboard() {
                 Verify & Confirm
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reference Mismatch Explanation Modal */}
+      <Dialog open={showMismatchExplanationModal} onOpenChange={setShowMismatchExplanationModal}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link2 className="h-5 w-5 text-amber-600" />
+              Explain Reference Mismatch
+            </DialogTitle>
+            <p className="text-sm text-slate-500">
+              Help us understand why this reference doesn't appear in your employment history
+            </p>
+          </DialogHeader>
+
+          {selectedMismatch && (
+            <div className="space-y-4">
+              {/* Mismatch Details */}
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                <p className="font-medium text-slate-800">
+                  Reference {selectedMismatch.reference_number}: {selectedMismatch.referee_name}
+                </p>
+                <p className="text-sm text-slate-600">{selectedMismatch.referee_company}</p>
+                <p className="text-xs text-amber-700 mt-2">{selectedMismatch.message}</p>
+              </div>
+
+              {/* Explanation Type */}
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-2 block">
+                  Why doesn't this referee match your employment history?
+                </label>
+                <Select value={mismatchExplanationType} onValueChange={setMismatchExplanationType}>
+                  <SelectTrigger data-testid="mismatch-explanation-type">
+                    <SelectValue placeholder="Select a reason..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {referenceMismatches?.explanation_types?.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Explanation Text */}
+              <div>
+                <label className="text-sm font-medium text-slate-700 mb-2 block">
+                  Please provide more details
+                </label>
+                <Textarea
+                  value={mismatchExplanationText}
+                  onChange={(e) => setMismatchExplanationText(e.target.value)}
+                  placeholder="Explain why this referee is from a different employer than shown in your employment history. For example: 'I worked through ABC Agency who placed me at XYZ Care Home. My referee was from the agency, not the care home.'"
+                  className="min-h-[120px]"
+                  data-testid="mismatch-explanation-text"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  {mismatchExplanationText.length}/20 minimum characters
+                </p>
+              </div>
+
+              {/* NHS Compliance Note */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs text-blue-700">
+                  <Shield className="h-3 w-3 inline mr-1" />
+                  NHS Safer Recruitment requires documented justification for any discrepancies. 
+                  Your explanation will be reviewed by admin and recorded for CQC audit purposes.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowMismatchExplanationModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitMismatchExplanation}
+              disabled={!mismatchExplanationType || mismatchExplanationText.length < 20 || submittingMismatchExplanation}
+              className="gap-2 bg-amber-600 hover:bg-amber-700"
+              data-testid="submit-mismatch-explanation-btn"
+            >
+              {submittingMismatchExplanation ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <MessageSquare className="h-4 w-4" />
+              )}
+              Submit Explanation
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

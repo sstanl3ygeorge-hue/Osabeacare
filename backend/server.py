@@ -11234,6 +11234,35 @@ async def sign_contract(
         upsert=True
     )
     
+    # Also acknowledge the Employee Handbook when contract is signed (bundled together for UX)
+    await db.agreement_acknowledgements.update_one(
+        {
+            "employee_id": employee_id,
+            "agreement_type": "handbook_acknowledgement"
+        },
+        {
+            "$set": {
+                "status": "signed",
+                "acknowledged": True,
+                "acknowledged_at": now.isoformat(),
+                "signed_at": now.isoformat(),
+                "signer_name": request.full_name,
+                "signer_employee_code": employee.get("employee_code"),
+                "completion_mode": "bundled_with_contract",
+                "verification_status": "verified",  # Auto-verify when bundled with contract
+                "verified_at": now.isoformat(),
+                "verified_by": "system_auto_verify"
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "agreement_type": "handbook_acknowledgement",
+                "created_at": now.isoformat()
+            }
+        },
+        upsert=True
+    )
+    
     # Log audit
     await log_audit_action(f"worker_{employee_id}", "contract_signed", "employee", employee_id, {
         "signature_url": signature_url,

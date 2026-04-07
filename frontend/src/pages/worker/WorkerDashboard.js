@@ -1729,31 +1729,32 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== AGREEMENTS (P0: Contract & Handbook Status) ========== */}
-        {agreements && agreements.length > 0 && (
+        {/* Filter out contract_acceptance since it's covered by Employment Contract section below */}
+        {agreements && agreements.filter(a => a.id !== 'contract_acceptance').length > 0 && (
           <Card className="shadow-md border-0" data-testid="agreements-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <PenTool className="h-5 w-5 text-purple-500" />
-                    Agreements
+                    Acknowledgements
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    Contract and handbook acknowledgements
+                    Completed when you sign your employment contract
                   </p>
                 </div>
                 <Badge className={`${
-                  agreements.every(a => a.verified) ? 'bg-green-100 text-green-700' :
-                  agreements.some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
+                  agreements.filter(a => a.id !== 'contract_acceptance').every(a => a.verified) ? 'bg-green-100 text-green-700' :
+                  agreements.filter(a => a.id !== 'contract_acceptance').some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
-                  {agreements.filter(a => a.verified).length} of {agreements.length} Verified
+                  {agreements.filter(a => a.id !== 'contract_acceptance' && a.verified).length} of {agreements.filter(a => a.id !== 'contract_acceptance').length} Verified
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {agreements.map((agreement) => (
+                {agreements.filter(a => a.id !== 'contract_acceptance').map((agreement) => (
                   <div
                     key={agreement.id}
                     className={`p-4 rounded-xl border ${
@@ -1825,8 +1826,11 @@ export default function WorkerDashboard() {
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <FileText className="h-5 w-5 text-red-500" />
-                Employment Contract
+                Employment Contract & Handbook
               </CardTitle>
+              <p className="text-xs text-slate-500 mt-1">
+                Signing your contract also acknowledges the Employee Handbook
+              </p>
             </CardHeader>
             <CardContent>
               {contractEligibility?.can_sign ? (

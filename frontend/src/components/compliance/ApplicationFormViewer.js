@@ -83,11 +83,11 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
       }
       
       // Also check for uploaded PDF application
-      const docsResponse = await axios.get(`${API}/api/employees/${employeeId}/documents`, {
+      const docsResponse = await axios.get(`${API}/api/employee-documents?employee_id=${employeeId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      const docs = docsResponse.data.documents || docsResponse.data || [];
+      const docs = docsResponse.data || [];
       const appPdf = docs.find(d => d.requirement_id === 'application_form_pdf');
       if (appPdf?.file_url) {
         setPdfUrl(appPdf.file_url);
@@ -114,7 +114,7 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
       formData.append('extract_data', 'true');
       
       const response = await axios.post(
-        `${API}/api/employees/${employeeId}/documents/upload`,
+        `${API}/api/employees/${employeeId}/upload-document`,
         formData,
         {
           headers: {

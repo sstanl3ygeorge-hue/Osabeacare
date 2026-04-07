@@ -563,6 +563,15 @@ export default function DualRowComplianceSection({
                     employeeName={employeeName}
                     onRefresh={handleRefresh}
                     onOpenForm={(formKey, formType, submissionId) => {
+                      // SPECIAL CASE: Application forms use a dedicated viewer
+                      // They don't have an editable template - view only
+                      if (formKey === 'application_form') {
+                        setApplicationFormDrawer({
+                          isOpen: true,
+                          submissionId
+                        });
+                        return;
+                      }
                       setFormDrawer({
                         isOpen: true,
                         formKey,

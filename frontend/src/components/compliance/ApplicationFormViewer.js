@@ -162,10 +162,41 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
     );
   }
 
-  const personal = applicationData?.personal_details || {};
-  const contact = applicationData?.contact_details || {};
-  const address = applicationData?.address || {};
-  const roleAvail = applicationData?.role_availability || {};
+  // Handle both nested structure (personal_details.first_name) and flat structure (first_name)
+  const personal = applicationData?.personal_details || {
+    title: applicationData?.title,
+    first_name: applicationData?.first_name,
+    middle_name: applicationData?.middle_name,
+    last_name: applicationData?.last_name,
+    preferred_name: applicationData?.preferred_name,
+    date_of_birth: applicationData?.date_of_birth,
+    national_insurance: applicationData?.national_insurance || applicationData?.ni_number,
+  };
+  
+  const contact = applicationData?.contact_details || {
+    email: applicationData?.email,
+    phone: applicationData?.phone,
+    phone_secondary: applicationData?.phone_secondary,
+  };
+  
+  const address = applicationData?.address || {
+    line_1: applicationData?.address_line_1,
+    line_2: applicationData?.address_line_2,
+    city: applicationData?.city,
+    county: applicationData?.county,
+    postcode: applicationData?.postcode,
+    country: applicationData?.country,
+    years_at_address: applicationData?.years_at_current_address,
+  };
+  
+  const roleAvail = applicationData?.role_availability || {
+    role_applied: applicationData?.role_applied,
+    availability: applicationData?.availability,
+    earliest_start_date: applicationData?.earliest_start_date,
+    has_driving_licence: applicationData?.has_driving_licence,
+    has_own_transport: applicationData?.has_own_transport,
+  };
+  
   const employment = applicationData?.employment_history || [];
   const references = applicationData?.references || [];
   const qualifications = applicationData?.qualifications || {};
@@ -173,6 +204,7 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
   const criminalDecl = applicationData?.criminal_declaration || {};
   const rtwDecl = applicationData?.right_to_work || {};
   const declarations = applicationData?.declarations || {};
+  const gapExplanation = applicationData?.employment_gap_explanation || applicationData?.gap_explanation;
 
   return (
     <>
@@ -259,12 +291,13 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
                 {/* Address */}
                 <Section title="Address" icon={MapPin}>
                   <div className="space-y-1 text-sm">
-                    <p>{address.address_line_1}</p>
-                    {address.address_line_2 && <p>{address.address_line_2}</p>}
-                    <p>{address.city}, {address.county}</p>
+                    <p>{address.line_1 || address.address_line_1 || address.line1}</p>
+                    {(address.line_2 || address.address_line_2 || address.line2) && <p>{address.line_2 || address.address_line_2 || address.line2}</p>}
+                    <p>{address.city}{address.county ? `, ${address.county}` : ''}</p>
                     <p className="font-medium">{address.postcode}</p>
+                    {address.country && <p className="text-xs text-gray-500">{address.country}</p>}
                     <p className="text-xs text-gray-500 mt-2">
-                      Years at address: {address.years_at_current_address || 'Not specified'}
+                      Years at address: {address.years_at_address || address.years_at_current_address || 'Not specified'}
                     </p>
                   </div>
                 </Section>

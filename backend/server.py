@@ -32684,6 +32684,9 @@ async def submit_structured_application(form: StructuredApplicationForm):
     # ==================== 3. LINK CV IF UPLOADED ====================
     
     if form.cv_file_id:
+        # Get the CV document with extraction data
+        cv_doc = await db.employee_documents.find_one({"id": form.cv_file_id}, {"_id": 0})
+        
         # Update the CV document to link to this applicant
         await db.employee_documents.update_one(
             {"id": form.cv_file_id},
@@ -32694,6 +32697,34 @@ async def submit_structured_application(form: StructuredApplicationForm):
                 "updated_at": now
             }}
         )
+        
+        # If CV had extraction data, copy to employee record for 10-Year Employment History form
+        if cv_doc and cv_doc.get("cv_extraction"):
+            cv_extraction = cv_doc["cv_extraction"]
+            await db.employees.update_one(
+                {"id": app_id},
+                {"$set": {
+                    "cv_document_id": form.cv_file_id,
+                    "cv_extracted_employment_history": cv_extraction.get("employment_history", []),
+                    "cv_extracted_education": cv_extraction.get("education", []),
+                    "cv_extracted_skills": cv_extraction.get("skills", []),
+                    "cv_gaps_detected": [
+                        {
+                            "gap_id": f"gap_{i}",
+                            "start_date": g.get("start_date"),
+                            "end_date": g.get("end_date"),
+                            "duration_days": g.get("duration_days"),
+                            "message": g.get("message"),
+                            "explanation": None,
+                            "verified": False
+                        }
+                        for i, g in enumerate(cv_extraction.get("gaps_detected", [])) if g.get("needs_explanation")
+                    ],
+                    "cv_gaps_all_explained": len([g for g in cv_extraction.get("gaps_detected", []) if g.get("needs_explanation")]) == 0,
+                    "cv_extracted_at": cv_extraction.get("extracted_at", now)
+                }}
+            )
+            logger.info(f"CV extraction data linked to applicant {app_id}")
     
     # ==================== 4. CREATE FOLLOW-UP REQUIREMENT SLOTS ====================
     # Uses StageGateService to generate role-based requirement slots
@@ -33046,11 +33077,50 @@ async def upload_application_cv(file: UploadFile = File(...)):
     
     await db.employee_documents.insert_one(doc_data)
     
-    return {
+    # AI EXTRACTION: Extract employment history from CV immediately
+    extraction_result = None
+    try:
+        extraction_result = await extract_employment_history_from_cv(content, file.filename, None)
+        
+        if extraction_result.get("status") == "success":
+            # Store extraction in the document record for later use
+            await db.employee_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "cv_extraction": {
+                        "status": "completed",
+                        "employment_history": extraction_result.get("employment_history", []),
+                        "education": extraction_result.get("education", []),
+                        "skills": extraction_result.get("skills", []),
+                        "full_name": extraction_result.get("full_name"),
+                        "gaps_detected": extraction_result.get("gaps_detected", []),
+                        "total_jobs_found": extraction_result.get("total_jobs_found", 0),
+                        "extracted_at": now
+                    }
+                }}
+            )
+            logger.info(f"CV extraction completed: {extraction_result.get('total_jobs_found', 0)} jobs found")
+    except Exception as e:
+        logger.warning(f"CV extraction failed during application upload: {e}")
+        # Continue without extraction - can be done later
+    
+    response = {
         "file_id": doc_id,
         "file_name": file.filename,
         "message": "CV uploaded successfully. Include this file_id in your application."
     }
+    
+    # Add extraction info to response if successful
+    if extraction_result and extraction_result.get("status") == "success":
+        response["extraction"] = {
+            "jobs_found": extraction_result.get("total_jobs_found", 0),
+            "gaps_detected": len([g for g in extraction_result.get("gaps_detected", []) if g.get("needs_explanation")]),
+            "employment_history": extraction_result.get("employment_history", [])[:5],  # First 5 jobs for preview
+            "full_name": extraction_result.get("full_name")
+        }
+        response["message"] = f"CV uploaded and analyzed. Found {extraction_result.get('total_jobs_found', 0)} jobs."
+    
+    return response
 
 
 # ==================== UNIVERSAL DOCUMENT EXTRACTION PIPELINE ====================

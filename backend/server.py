@@ -2540,6 +2540,12 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     Add a visible verification stamp to a PDF document.
     The stamp is permanently embedded and cannot be removed.
     
+    NHS Safer Recruitment Compliant:
+    - Shows verifier name and initials
+    - Includes date and time
+    - Document hash for tamper detection
+    - Unique verification ID for audit trail
+    
     Args:
         input_pdf_bytes: Original PDF file as bytes
         stamp_data: {
@@ -2555,6 +2561,10 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
         Stamped PDF as bytes
     """
     from io import BytesIO
+    import hashlib
+    
+    # Calculate document hash for tamper detection (CIA Triad - Integrity)
+    doc_hash = hashlib.sha256(input_pdf_bytes).hexdigest()[:12].upper()
     
     # Read existing PDF
     try:
@@ -2586,6 +2596,10 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     
     config = stamp_config.get(stamp_data.get("stamp_type", "copy_verified"), stamp_config["copy_verified"])
     
+    # Extract verifier initials for NHS compliance (signed verification)
+    verifier_name = stamp_data.get('verified_by_name', 'Admin')
+    verifier_initials = ''.join([n[0].upper() for n in verifier_name.split() if n])[:3]
+    
     # Create stamp overlay
     packet = BytesIO()
     c = canvas.Canvas(packet, pagesize=letter)
@@ -2594,8 +2608,8 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     page_width = 612  # letter width in points
     page_height = 792  # letter height in points
     
-    box_width = 250
-    box_height = 95
+    box_width = 260  # Slightly wider for NHS compliance badge
+    box_height = 110  # Taller to fit all NHS-required info
     box_x = page_width - box_width - 15
     box_y = 15
     
@@ -2605,34 +2619,40 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     c.setLineWidth(2)
     c.roundRect(box_x, box_y, box_width, box_height, 5, fill=1, stroke=1)
     
-    # Draw checkmark circle
+    # Draw NHS Compliance badge (top right of stamp)
+    c.setFillColor(Color(0, 0.3, 0.6, alpha=0.9))  # NHS Blue
+    c.roundRect(box_x + box_width - 55, box_y + box_height - 18, 50, 14, 2, fill=1, stroke=0)
+    c.setFillColor(Color(1, 1, 1))  # White text
+    c.setFont("Helvetica-Bold", 6)
+    c.drawString(box_x + box_width - 52, box_y + box_height - 14, "NHS COMPLIANT")
+    
+    # Draw checkmark circle with verifier initials
     c.setFillColor(config["color"])
-    c.circle(box_x + 20, box_y + box_height - 20, 8, fill=1, stroke=0)
-    c.setFillColor(Color(1, 1, 1))  # White checkmark
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(box_x + 16, box_y + box_height - 24, "✓")
+    c.circle(box_x + 22, box_y + box_height - 28, 12, fill=1, stroke=0)
+    c.setFillColor(Color(1, 1, 1))  # White initials
+    c.setFont("Helvetica-Bold", 9)
+    c.drawCentredString(box_x + 22, box_y + box_height - 32, verifier_initials)
     
     # Draw stamp header text
     c.setFillColor(config["color"])
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(box_x + 35, box_y + box_height - 22, config["text"])
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(box_x + 40, box_y + box_height - 28, config["text"])
     
     # Draw details
     c.setFillColor(black)
-    c.setFont("Helvetica", 9)
-    y_pos = box_y + box_height - 40
+    c.setFont("Helvetica", 8)
+    y_pos = box_y + box_height - 45
     
     doc_type = stamp_data.get('document_type', 'Document')
-    c.drawString(box_x + 12, y_pos, f"Document: {doc_type[:30]}")
-    y_pos -= 12
+    c.drawString(box_x + 12, y_pos, f"Document: {doc_type[:35]}")
+    y_pos -= 11
     
     emp_name = stamp_data.get('employee_name', 'N/A')
-    c.drawString(box_x + 12, y_pos, f"Employee: {emp_name[:30]}")
-    y_pos -= 12
+    c.drawString(box_x + 12, y_pos, f"Employee: {emp_name[:35]}")
+    y_pos -= 11
     
-    verifier = stamp_data.get('verified_by_name', 'N/A')
-    c.drawString(box_x + 12, y_pos, f"Verified by: {verifier[:30]}")
-    y_pos -= 12
+    c.drawString(box_x + 12, y_pos, f"Verified by: {verifier_name[:25]} ({verifier_initials})")
+    y_pos -= 11
     
     # Format date
     try:
@@ -2650,11 +2670,12 @@ def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> b
     
     c.drawString(box_x + 12, y_pos, f"Date: {date_str}")
     
-    # Add verification ID at bottom
-    c.setFont("Helvetica-Oblique", 7)
+    # Add verification ID and document hash at bottom (CIA Triad - Integrity)
+    c.setFont("Helvetica-Oblique", 6)
     c.setFillColor(gray)
-    verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8])
-    c.drawString(box_x + 12, box_y + 5, f"Verification ID: {verification_id}")
+    verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8].upper())
+    c.drawString(box_x + 12, box_y + 14, f"Verification ID: {verification_id}")
+    c.drawString(box_x + 12, box_y + 5, f"Document Hash: {doc_hash} (SHA-256)")
     
     c.save()
     

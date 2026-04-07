@@ -165,7 +165,7 @@ export default function WorkerFormPage() {
   const [lastSaved, setLastSaved] = useState(null);
   const [canEdit, setCanEdit] = useState(true);
 
-  const formDefinition = FORM_FIELDS[formId];
+  const formDefinition = FORM_FIELDS[formId] || formMeta;
 
   useEffect(() => {
     fetchFormData();
@@ -318,6 +318,23 @@ export default function WorkerFormPage() {
           </RadioGroup>
         );
       
+      case 'checkbox':
+        return (
+          <div className="flex items-start space-x-3 mt-2">
+            <input
+              type="checkbox"
+              id={field.id}
+              checked={!!value}
+              onChange={(e) => handleFieldChange(field.id, e.target.checked)}
+              disabled={!canEdit}
+              className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <Label htmlFor={field.id} className="font-normal cursor-pointer text-sm text-slate-600">
+              {field.label}
+            </Label>
+          </div>
+        );
+      
       default:
         return null;
     }
@@ -346,7 +363,7 @@ export default function WorkerFormPage() {
     );
   }
 
-  const FormIcon = formDefinition.icon;
+  const FormIcon = formDefinition.icon || FileText;
 
   return (
     <div className="min-h-screen bg-slate-50">

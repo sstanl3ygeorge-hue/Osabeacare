@@ -9278,6 +9278,20 @@ WORKER_FORM_DEFINITIONS = {
         "description": "Who to contact in case of emergency",
         "required": True,
         "admin_requirement_id": "emergency_contacts"
+    },
+    "employment_history_10yr": {
+        "name": "10-Year Employment History",
+        "description": "Full employment history for the past 10 years with gap explanations (CQC requirement)",
+        "required": True,
+        "admin_requirement_id": "employment_history",
+        "role_aware": False  # All roles require this
+    },
+    "pre_interview_questionnaire": {
+        "name": "Pre-Interview Questionnaire", 
+        "description": "Complete this questionnaire before your interview - your responses will be reviewed during the interview",
+        "required": True,
+        "admin_requirement_id": "interview",
+        "role_aware": True  # Questions vary by role
     }
 }
 
@@ -9340,6 +9354,326 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
     return {"forms": forms}
 
 
+# ============================================================================
+# PRE-INTERVIEW QUESTIONNAIRE (Role-Aware Worker Self-Service)
+# ============================================================================
+
+async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
+    """
+    Get role-specific interview questions for worker to complete before interview.
+    Questions are taken from interview_questions.py based on employee's role.
+    """
+    # Uses imports from top of file: get_interview_questions_for_role, get_administrative_questions, INTERVIEW_SCORING
+    
+    # Get employee profile for role
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    role = employee.get("role", "Support Worker") if employee else "Support Worker"
+    job_title = employee.get("job_title", role)
+    
+    # Get role-specific questions
+    questions = get_interview_questions_for_role(job_title or role)
+    admin_questions = get_administrative_questions()
+    
+    # Check if already submitted
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "pre_interview_questionnaire"
+    }, {"_id": 0})
+    
+    if submission and submission.get("status") in ["submitted", "verified", "interview_completed"]:
+        return {
+            "form_id": "pre_interview_questionnaire",
+            "status": submission.get("status"),
+            "data": submission.get("form_data", {}),
+            "submitted_at": submission.get("submitted_at"),
+            "can_edit": False,
+            "interview_completed": submission.get("status") == "interview_completed",
+            "admin_scores": submission.get("admin_scores"),
+            "admin_notes": submission.get("admin_notes")
+        }
+    
+    # Get saved progress
+    progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": "pre_interview_questionnaire"
+    }, {"_id": 0})
+    
+    # Build form definition with role-specific questions
+    form_definition = {
+        "id": "pre_interview_questionnaire",
+        "name": "Pre-Interview Questionnaire",
+        "description": f"Complete this questionnaire before your interview. Your written responses will be reviewed during the interview. ({len(questions)} questions for {job_title or role})",
+        "role": job_title or role,
+        "instructions": [
+            "Please answer each question thoughtfully and thoroughly.",
+            "Your responses will be reviewed by the interviewer before your interview.",
+            "During the interview, you may be asked follow-up questions based on your answers.",
+            "Be honest and provide specific examples where possible."
+        ],
+        "sections": [
+            {
+                "id": "main_questions",
+                "title": f"Interview Questions ({len(questions)} questions)",
+                "description": "Answer each question based on your experience and understanding of the role.",
+                "fields": [
+                    {
+                        "id": q["id"],
+                        "type": "textarea",
+                        "label": q["question"],
+                        "required": q.get("required", True),
+                        "category": q.get("category"),
+                        "skills_assessed": q.get("skills_assessed"),
+                        "expected_answer_notes": q.get("expected_answer_notes"),  # Help text
+                        "placeholder": "Please provide a detailed response...",
+                        "order": q.get("order", i + 1)
+                    }
+                    for i, q in enumerate(questions)
+                ]
+            },
+            {
+                "id": "administrative",
+                "title": "Administrative Information",
+                "description": "Please provide the following information.",
+                "fields": [
+                    {
+                        "id": q["id"],
+                        "type": "text" if q["type"] == "text" else ("checkbox" if q["type"] == "yes_no" else "date"),
+                        "label": q["question"],
+                        "required": False
+                    }
+                    for q in admin_questions
+                ]
+            }
+        ],
+        "scoring": INTERVIEW_SCORING,
+        "max_score": len(questions) * 3,
+        "pass_score": INTERVIEW_SCORING["minimum_total_score"]
+    }
+    
+    return {
+        "form_id": "pre_interview_questionnaire",
+        "form_definition": form_definition,
+        "status": "in_progress" if progress else "not_started",
+        "data": progress.get("data", {}) if progress else {},
+        "last_saved": progress.get("last_saved") if progress else None,
+        "can_edit": True,
+        "role": job_title or role,
+        "question_count": len(questions)
+    }
+
+
+# ============================================================================
+# 10-YEAR EMPLOYMENT HISTORY FORM (CQC/NHS Requirement)
+# ============================================================================
+
+async def get_employment_history_form_data(employee_id: str, worker: dict):
+    """
+    Get employment history form with 10-year requirement and gap detection.
+    Pre-populates with any existing employment history from profile.
+    """
+    from datetime import datetime, timedelta
+    
+    # Get employee profile
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    existing_history = employee.get("employment_history", []) if employee else []
+    
+    # Check if already submitted
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    if submission and submission.get("status") in ["submitted", "verified"]:
+        return {
+            "form_id": "employment_history_10yr",
+            "status": submission.get("status"),
+            "data": submission.get("form_data", {}),
+            "submitted_at": submission.get("submitted_at"),
+            "can_edit": False
+        }
+    
+    # Get saved progress
+    progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    # Calculate 10-year boundary
+    ten_years_ago = (datetime.now() - timedelta(days=365*10)).strftime('%Y-%m-%d')
+    
+    # Detect gaps in existing history
+    gaps = _detect_10yr_employment_gaps(existing_history, ten_years_ago)
+    
+    form_definition = {
+        "id": "employment_history_10yr",
+        "name": "10-Year Employment History",
+        "description": "CQC Safer Recruitment requires a full account of your employment, education, and activities for the past 10 years. All gaps must be explained.",
+        "instructions": [
+            f"Please provide details of ALL employment, education, voluntary work, and other activities from {ten_years_ago} to present.",
+            "Include any periods of unemployment, travel, caring responsibilities, or other activities.",
+            "All gaps longer than 28 days MUST be explained.",
+            "This information will be verified through references and other checks."
+        ],
+        "ten_year_start_date": ten_years_ago,
+        "sections": [
+            {
+                "id": "employment_entries",
+                "title": "Employment History",
+                "description": "List all employment in chronological order (most recent first)",
+                "repeatable": True,
+                "min_entries": 1,
+                "fields": [
+                    {"id": "employer_name", "type": "text", "label": "Employer Name", "required": True},
+                    {"id": "job_title", "type": "text", "label": "Job Title / Position", "required": True},
+                    {"id": "start_date", "type": "date", "label": "Start Date", "required": True},
+                    {"id": "end_date", "type": "date", "label": "End Date (leave blank if current)", "required": False},
+                    {"id": "is_current", "type": "checkbox", "label": "This is my current job", "required": False},
+                    {"id": "employer_address", "type": "text", "label": "Employer Address", "required": False},
+                    {"id": "employer_phone", "type": "text", "label": "Employer Phone", "required": False},
+                    {"id": "supervisor_name", "type": "text", "label": "Supervisor/Manager Name", "required": False},
+                    {"id": "supervisor_email", "type": "email", "label": "Supervisor/Manager Email", "required": False},
+                    {"id": "duties", "type": "textarea", "label": "Main Duties and Responsibilities", "required": True},
+                    {"id": "reason_for_leaving", "type": "textarea", "label": "Reason for Leaving", "required": False}
+                ]
+            },
+            {
+                "id": "gap_explanations",
+                "title": "Gap Explanations",
+                "description": "Explain any gaps in your employment history (unemployment, travel, education, caring responsibilities, etc.)",
+                "repeatable": True,
+                "min_entries": 0,
+                "fields": [
+                    {"id": "gap_start_date", "type": "date", "label": "Gap Start Date", "required": True},
+                    {"id": "gap_end_date", "type": "date", "label": "Gap End Date", "required": True},
+                    {"id": "gap_type", "type": "select", "label": "Type of Gap", "required": True, "options": [
+                        {"value": "unemployment", "label": "Unemployment / Job Seeking"},
+                        {"value": "education", "label": "Education / Training"},
+                        {"value": "travel", "label": "Travel"},
+                        {"value": "caring", "label": "Caring Responsibilities"},
+                        {"value": "health", "label": "Health / Medical"},
+                        {"value": "maternity_paternity", "label": "Maternity / Paternity Leave"},
+                        {"value": "voluntary", "label": "Voluntary Work"},
+                        {"value": "other", "label": "Other"}
+                    ]},
+                    {"id": "gap_explanation", "type": "textarea", "label": "Detailed Explanation", "required": True,
+                     "placeholder": "Please provide details of what you were doing during this period..."}
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "description": "Please confirm the accuracy of the information provided",
+                "fields": [
+                    {"id": "declaration_confirmed", "type": "checkbox", "label": "I confirm that the information provided is complete and accurate to the best of my knowledge. I understand that providing false or misleading information may result in my application being rejected or employment being terminated.", "required": True},
+                    {"id": "declaration_date", "type": "date", "label": "Date", "required": True, "auto_fill": "today"},
+                    {"id": "declaration_signature", "type": "text", "label": "Type your full name as digital signature", "required": True}
+                ]
+            }
+        ],
+        "detected_gaps": gaps,
+        "gap_threshold_days": 28  # Gaps > 28 days need explanation
+    }
+    
+    # Merge existing history with saved progress
+    merged_data = {}
+    if existing_history:
+        merged_data["employment_entries"] = existing_history
+    if progress:
+        merged_data.update(progress.get("data", {}))
+    
+    return {
+        "form_id": "employment_history_10yr",
+        "form_definition": form_definition,
+        "status": "in_progress" if progress else "not_started",
+        "data": merged_data,
+        "last_saved": progress.get("last_saved") if progress else None,
+        "can_edit": True,
+        "detected_gaps": gaps,
+        "ten_year_start": ten_years_ago
+    }
+
+
+def _detect_10yr_employment_gaps(employment_history: list, ten_year_start: str) -> list:
+    """
+    Detect gaps in employment history that need explanation.
+    Returns list of gap periods.
+    """
+    from datetime import datetime
+    
+    if not employment_history:
+        return [{
+            "start_date": ten_year_start,
+            "end_date": datetime.now().strftime('%Y-%m-%d'),
+            "duration_days": (datetime.now() - datetime.strptime(ten_year_start, '%Y-%m-%d')).days,
+            "needs_explanation": True,
+            "message": "No employment history provided - please add your full 10-year history"
+        }]
+    
+    gaps = []
+    
+    # Sort by start date
+    sorted_history = sorted(
+        employment_history,
+        key=lambda x: x.get("start_date", "9999-99-99")
+    )
+    
+    # Check gap from 10-year start to first job
+    if sorted_history:
+        first_start = sorted_history[0].get("start_date")
+        if first_start and first_start > ten_year_start:
+            try:
+                gap_days = (datetime.strptime(first_start, '%Y-%m-%d') - datetime.strptime(ten_year_start, '%Y-%m-%d')).days
+                if gap_days > 28:
+                    gaps.append({
+                        "start_date": ten_year_start,
+                        "end_date": first_start,
+                        "duration_days": gap_days,
+                        "needs_explanation": True,
+                        "message": f"Gap of {gap_days} days before first recorded employment"
+                    })
+            except:
+                pass
+    
+    # Check gaps between jobs
+    for i in range(len(sorted_history) - 1):
+        current_end = sorted_history[i].get("end_date")
+        next_start = sorted_history[i + 1].get("start_date")
+        
+        if current_end and next_start:
+            try:
+                gap_days = (datetime.strptime(next_start, '%Y-%m-%d') - datetime.strptime(current_end, '%Y-%m-%d')).days
+                if gap_days > 28:
+                    gaps.append({
+                        "start_date": current_end,
+                        "end_date": next_start,
+                        "duration_days": gap_days,
+                        "needs_explanation": True,
+                        "message": f"Gap of {gap_days} days between {sorted_history[i].get('employer_name', 'previous job')} and {sorted_history[i+1].get('employer_name', 'next job')}"
+                    })
+            except:
+                pass
+    
+    # Check gap from last job to today (if not current)
+    if sorted_history:
+        last_job = sorted_history[-1]
+        if not last_job.get("is_current") and last_job.get("end_date"):
+            try:
+                gap_days = (datetime.now() - datetime.strptime(last_job["end_date"], '%Y-%m-%d')).days
+                if gap_days > 28:
+                    gaps.append({
+                        "start_date": last_job["end_date"],
+                        "end_date": datetime.now().strftime('%Y-%m-%d'),
+                        "duration_days": gap_days,
+                        "needs_explanation": True,
+                        "message": f"Gap of {gap_days} days from last employment to present"
+                    })
+            except:
+                pass
+    
+    return gaps
+
+
+
 @api_router.get("/worker/forms/{form_id}")
 async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_worker)):
     """Get saved form data for resuming, with auto-fill from employee profile"""
@@ -9347,6 +9681,14 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     
     if form_id not in WORKER_FORM_DEFINITIONS:
         raise HTTPException(status_code=404, detail="Form not found")
+    
+    # Special handling for pre-interview questionnaire - return role-specific questions
+    if form_id == "pre_interview_questionnaire":
+        return await get_pre_interview_questionnaire_data(employee_id, worker)
+    
+    # Special handling for 10-year employment history
+    if form_id == "employment_history_10yr":
+        return await get_employment_history_form_data(employee_id, worker)
     
     # Check if already submitted
     submission = await db.form_submissions.find_one({
@@ -53489,7 +53831,198 @@ async def create_interview_record(
     return {"success": True, "record": record}
 
 
-@api_router.put("/employees/{employee_id}/interview-records/{record_id}")
+# ============================================================================
+# ADMIN: Review Worker Pre-Interview Questionnaire & Score
+# ============================================================================
+
+class PreInterviewReviewRequest(BaseModel):
+    interview_date: str
+    interview_method: str = "video_call"  # video_call, in_person, phone
+    question_scores: dict  # {question_id: score 0-3}
+    question_notes: Optional[dict] = None  # {question_id: admin notes}
+    overall_notes: Optional[str] = None
+    decision: str  # "proceed", "second_interview", "reject"
+    interviewer_signature: str
+
+@api_router.get("/employees/{employee_id}/pre-interview-questionnaire")
+async def get_worker_pre_interview_submission(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get worker's pre-interview questionnaire submission for admin review.
+    Shows worker's written responses alongside interview questions.
+    """
+    from interview_questions import get_interview_questions_for_role, INTERVIEW_SCORING
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    role = employee.get("job_title") or employee.get("role", "Support Worker")
+    questions = get_interview_questions_for_role(role)
+    
+    # Get worker's submission
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "pre_interview_questionnaire"
+    }, {"_id": 0})
+    
+    # Get admin's review/scoring if exists
+    admin_review = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "interview_record",
+        "linked_questionnaire": True
+    }, {"_id": 0})
+    
+    return {
+        "employee": {
+            "id": employee_id,
+            "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "role": role,
+            "email": employee.get("email")
+        },
+        "questions": questions,
+        "scoring": INTERVIEW_SCORING,
+        "worker_submission": {
+            "status": submission.get("status") if submission else "not_submitted",
+            "responses": submission.get("form_data", {}) if submission else {},
+            "submitted_at": submission.get("submitted_at") if submission else None
+        },
+        "admin_review": {
+            "status": admin_review.get("status") if admin_review else "not_reviewed",
+            "scores": admin_review.get("form_data", {}).get("question_scores") if admin_review else None,
+            "notes": admin_review.get("form_data", {}).get("question_notes") if admin_review else None,
+            "decision": admin_review.get("form_data", {}).get("decision") if admin_review else None,
+            "reviewed_at": admin_review.get("submitted_at") if admin_review else None,
+            "reviewed_by": admin_review.get("submitted_by_name") if admin_review else None
+        },
+        "can_review": submission is not None and submission.get("status") == "submitted"
+    }
+
+
+@api_router.post("/employees/{employee_id}/pre-interview-questionnaire/review")
+async def review_pre_interview_questionnaire(
+    employee_id: str,
+    request: PreInterviewReviewRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Admin reviews worker's pre-interview questionnaire and scores each response.
+    This creates a formal interview record linked to the worker's submission.
+    """
+    from interview_questions import get_interview_questions_for_role, calculate_interview_result
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Verify worker has submitted the questionnaire
+    worker_submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "pre_interview_questionnaire",
+        "status": "submitted"
+    })
+    
+    if not worker_submission:
+        raise HTTPException(status_code=400, detail="Worker has not submitted their pre-interview questionnaire")
+    
+    role = employee.get("job_title") or employee.get("role", "Support Worker")
+    
+    # Calculate interview result
+    result = calculate_interview_result(request.question_scores, role)
+    
+    now = datetime.now(timezone.utc).isoformat()
+    record_id = f"interview_{uuid.uuid4().hex[:12]}"
+    
+    # Create the official interview record
+    form_data = {
+        "interview_date": request.interview_date,
+        "interview_method": request.interview_method,
+        "interviewer_name": user.get('name', 'System Admin'),
+        "candidate_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "vacancy_job_title": role,
+        "question_scores": request.question_scores,
+        "question_notes": request.question_notes or {},
+        "worker_responses": worker_submission.get("form_data", {}),  # Include worker's original responses
+        "overall_notes": request.overall_notes,
+        "decision": request.decision,
+        "interviewer_signature": request.interviewer_signature,
+        "signed_at": now,
+        # Calculated scores
+        "total_score": result["total_score"],
+        "max_score": result["max_score"],
+        "percentage": result["percentage"],
+        "passed": result["passed"],
+        "recommendation": result["recommendation"],
+        "format_version": "v2_osabea_with_questionnaire"
+    }
+    
+    record = {
+        "id": record_id,
+        "employee_id": employee_id,
+        "requirement_id": "interview_record",
+        "form_type": "interview_record",
+        "form_data": form_data,
+        "data": form_data,
+        "status": "submitted",
+        "verified": True,  # Admin submission = auto-verified
+        "linked_questionnaire": True,  # Flag that this is linked to worker questionnaire
+        "linked_questionnaire_id": worker_submission.get("id"),
+        "created_at": now,
+        "created_by": user['user_id'],
+        "created_by_name": user.get('name', 'System Admin'),
+        "submitted_at": now,
+        "submitted_by": user['user_id'],
+        "submitted_by_name": user.get('name', 'System Admin'),
+        "verified_at": now,
+        "verified_by": user['user_id'],
+        "verified_by_name": user.get('name', 'System Admin')
+    }
+    
+    await db.form_submissions.insert_one(record)
+    
+    # Update worker's questionnaire status
+    await db.form_submissions.update_one(
+        {"_id": worker_submission["_id"]},
+        {"$set": {
+            "status": "interview_completed",
+            "admin_scores": request.question_scores,
+            "admin_notes": request.question_notes,
+            "reviewed_at": now,
+            "reviewed_by": user['user_id'],
+            "reviewed_by_name": user.get('name', 'System Admin'),
+            "interview_record_id": record_id
+        }}
+    )
+    
+    # Update employee status based on decision
+    if request.decision == "proceed":
+        current_status = employee.get('status')
+        if current_status in ['new', 'screening', 'interview']:
+            await db.employees.update_one(
+                {"id": employee_id},
+                {"$set": {"status": "compliance_review", "updated_at": now}}
+            )
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "pre_interview_reviewed", "form_submissions", record_id, {
+        "employee_id": employee_id,
+        "decision": request.decision,
+        "total_score": result["total_score"],
+        "passed": result["passed"]
+    })
+    
+    record.pop("_id", None)
+    return {
+        "success": True,
+        "record": record,
+        "result": result,
+        "message": f"Interview review completed. Score: {result['total_score']}/{result['max_score']} ({result['percentage']}%) - {result['recommendation']}"
+    }
+
+
+
 async def update_interview_record(
     employee_id: str,
     record_id: str,

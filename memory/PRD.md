@@ -27,6 +27,41 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ---
 
+## NEW FEATURES IMPLEMENTED (2026-04-07)
+
+### 1. 10-Year Employment History Form (CQC/NHS Legal Requirement)
+- **Endpoint**: `GET /api/worker/forms/employment_history_10yr`
+- **Features**:
+  - Collects full 10-year employment history
+  - Automatic gap detection algorithm (gaps > 28 days flagged)
+  - Workers must explain ALL gaps (education, caring, travel, health, etc.)
+  - Declaration with digital signature
+  - Pre-populates from existing employee profile data
+- **Form Sections**: Employment Entries (repeatable), Gap Explanations (repeatable), Declaration
+
+### 2. Pre-Interview Questionnaire (Role-Aware Self-Service)
+- **Endpoint**: `GET /api/worker/forms/pre_interview_questionnaire`
+- **Features**:
+  - Worker completes interview questions on their dashboard BEFORE the interview
+  - Role-aware: Different questions for Support Worker, HCA, Nurse, etc.
+  - Questions pulled from Osabea Interview Questions system
+  - Admin reviews written responses during/after video call
+  - Admin scores each answer (0-3) and signs off
+- **Form Sections**: Role-Specific Questions, Administrative Information
+
+### 3. Admin Pre-Interview Review & Sign-Off
+- **Endpoints**:
+  - `GET /api/employees/{id}/pre-interview-questionnaire` - View worker's submission
+  - `POST /api/employees/{id}/pre-interview-questionnaire/review` - Score and sign off
+- **Features**:
+  - Shows worker's written responses alongside expected answers
+  - Admin scores each question (0-3 scale)
+  - Records interview date, method (video/in-person/phone)
+  - Decision: Proceed / Second Interview / Reject
+  - Auto-creates official interview record linked to questionnaire
+
+---
+
 ## Core Requirements
 - 2-tier work readiness: `onboarding` (Conditional Offer) vs `active_employee` (Unconditional Offer)
 - Automatic promotion when all NHS compliance checks pass

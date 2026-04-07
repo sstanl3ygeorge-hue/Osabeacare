@@ -9,6 +9,7 @@ import EmployeeAvatar from '../../components/portal/EmployeeAvatar';
 import AdminTaskQueue from '../../components/admin/AdminTaskQueue';
 import ActionableTaskQueue from '../../components/admin/ActionableTaskQueue';
 import TrainingExpiryAlerts from '../../components/admin/TrainingExpiryAlerts';
+import DocumentExpiryAlerts from '../../components/admin/DocumentExpiryAlerts';
 import {
   Users, UserPlus, AlertTriangle, FileX, Shield, ShieldCheck,
   FileCheck, CalendarClock, ArrowRight, Loader2, Upload, FileText,
@@ -369,8 +370,11 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* TRAINING EXPIRY ALERTS */}
-      <TrainingExpiryAlerts />
+      {/* EXPIRY ALERTS - Training and Documents side by side */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        <TrainingExpiryAlerts />
+        <DocumentExpiryAlerts />
+      </div>
 
       {/* SECONDARY: Workforce Readiness + Onboarding Progress */}
       <div className="grid lg:grid-cols-2 gap-6">

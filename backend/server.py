@@ -49247,17 +49247,27 @@ def start_scheduler():
             misfire_grace_time=3600  # Allow catch-up within 1 hour
         )
         
-        # Add daily training expiry reminder job (runs at 8am)
+        # Add comprehensive expiry reminder job (runs daily at 8am)
+        # This handles BOTH training AND documents (DBS, RTW, Professional Registration)
+        scheduler.add_job(
+            comprehensive_expiry_reminder_job,
+            CronTrigger(hour=8, minute=0),  # Daily at 8:00 AM
+            id="comprehensive_expiry_reminders",
+            replace_existing=True,
+            misfire_grace_time=7200  # Allow catch-up within 2 hours
+        )
+        
+        # Legacy training-only job (kept for backwards compatibility, runs at 8:30am)
         scheduler.add_job(
             training_expiry_reminder_job,
-            CronTrigger(hour=8, minute=0),  # Daily at 8:00 AM
+            CronTrigger(hour=8, minute=30),  # Daily at 8:30 AM
             id="training_expiry_reminders",
             replace_existing=True,
             misfire_grace_time=7200  # Allow catch-up within 2 hours
         )
         
         scheduler.start()
-        logger.info("APScheduler started for scheduled bulk requests and training expiry reminders")
+        logger.info("APScheduler started: bulk requests (hourly), comprehensive expiry reminders (8am daily), training reminders (8:30am daily)")
 
 
 # ==================== TRAINING EXPIRY REMINDER SYSTEM ====================
@@ -49600,6 +49610,641 @@ async def get_training_expiry_alerts(
         "upcoming": upcoming,
         "upcoming_count": len(upcoming),
         "total_expiring": len(expiring_trainings),
+        "threshold_days": days
+    }
+
+
+# ==================== COMPREHENSIVE AUTOMATED REMINDER SYSTEM ====================
+# CQC Compliant - Multi-tier reminders for all expiring items
+# Reminder tiers: 30 days, 14 days, 7 days, 1 day before expiry
+
+REMINDER_TIERS = [30, 14, 7, 1]  # Days before expiry to send reminders
+
+async def get_expiring_documents(days_threshold: int = 30) -> List[dict]:
+    """
+    Get all documents (DBS, RTW, Identity, Professional Registration) expiring within threshold.
+    """
+    now = datetime.now(timezone.utc)
+    threshold_date = now + timedelta(days=days_threshold)
+    
+    expiring_docs = []
+    
+    # Get all employees with their documents
+    employees = await db.employees.find(
+        {"status": {"$in": ["onboarding", "active"]}},
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1, 
+         "dbs_expiry_date": 1, "rtw_expiry_date": 1, "professional_registrations": 1}
+    ).to_list(1000)
+    
+    for emp in employees:
+        emp_id = emp.get("id")
+        emp_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+        emp_email = emp.get("email")
+        
+        # Check DBS expiry
+        dbs_expiry = emp.get("dbs_expiry_date")
+        if dbs_expiry:
+            try:
+                if isinstance(dbs_expiry, str):
+                    dbs_dt = datetime.fromisoformat(dbs_expiry.replace('Z', '+00:00'))
+                else:
+                    dbs_dt = dbs_expiry
+                
+                if now < dbs_dt <= threshold_date:
+                    days_left = (dbs_dt - now).days
+                    expiring_docs.append({
+                        "employee_id": emp_id,
+                        "employee_name": emp_name,
+                        "employee_email": emp_email,
+                        "document_type": "dbs",
+                        "document_name": "DBS Certificate",
+                        "expiry_date": dbs_dt.isoformat(),
+                        "days_until_expiry": days_left
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to parse DBS expiry for {emp_id}: {e}")
+        
+        # Check RTW expiry
+        rtw_expiry = emp.get("rtw_expiry_date")
+        if rtw_expiry:
+            try:
+                if isinstance(rtw_expiry, str):
+                    rtw_dt = datetime.fromisoformat(rtw_expiry.replace('Z', '+00:00'))
+                else:
+                    rtw_dt = rtw_expiry
+                
+                if now < rtw_dt <= threshold_date:
+                    days_left = (rtw_dt - now).days
+                    expiring_docs.append({
+                        "employee_id": emp_id,
+                        "employee_name": emp_name,
+                        "employee_email": emp_email,
+                        "document_type": "right_to_work",
+                        "document_name": "Right to Work",
+                        "expiry_date": rtw_dt.isoformat(),
+                        "days_until_expiry": days_left
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to parse RTW expiry for {emp_id}: {e}")
+        
+        # Check Professional Registrations (NMC, GMC, etc.)
+        registrations = emp.get("professional_registrations", [])
+        for reg in registrations:
+            reg_expiry = reg.get("registration_expiry_date") or reg.get("expiry_date")
+            if reg_expiry:
+                try:
+                    if isinstance(reg_expiry, str):
+                        reg_dt = datetime.fromisoformat(reg_expiry.replace('Z', '+00:00'))
+                    else:
+                        reg_dt = reg_expiry
+                    
+                    if now < reg_dt <= threshold_date:
+                        days_left = (reg_dt - now).days
+                        reg_body = reg.get("body", "Professional")
+                        expiring_docs.append({
+                            "employee_id": emp_id,
+                            "employee_name": emp_name,
+                            "employee_email": emp_email,
+                            "document_type": "professional_registration",
+                            "document_name": f"{reg_body} Registration",
+                            "registration_body": reg_body,
+                            "registration_number": reg.get("pin") or reg.get("registration_number"),
+                            "expiry_date": reg_dt.isoformat(),
+                            "days_until_expiry": days_left
+                        })
+                except Exception as e:
+                    logger.warning(f"Failed to parse registration expiry for {emp_id}: {e}")
+    
+    # Also check employee_documents collection for stamped documents with expiry
+    docs_with_expiry = await db.employee_documents.find({
+        "expiry_date": {"$exists": True, "$ne": None},
+        "status": {"$nin": ["deleted", "superseded", "rejected"]}
+    }, {"_id": 0}).to_list(500)
+    
+    for doc in docs_with_expiry:
+        doc_expiry = doc.get("expiry_date")
+        if doc_expiry:
+            try:
+                if isinstance(doc_expiry, str):
+                    doc_dt = datetime.fromisoformat(doc_expiry.replace('Z', '+00:00'))
+                else:
+                    doc_dt = doc_expiry
+                
+                if now < doc_dt <= threshold_date:
+                    days_left = (doc_dt - now).days
+                    emp_id = doc.get("employee_id")
+                    
+                    # Get employee details
+                    emp = await db.employees.find_one({"id": emp_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1})
+                    if emp:
+                        expiring_docs.append({
+                            "employee_id": emp_id,
+                            "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+                            "employee_email": emp.get("email"),
+                            "document_type": doc.get("requirement_id") or doc.get("document_type_name", "document"),
+                            "document_name": doc.get("document_type_name") or doc.get("filename", "Document"),
+                            "expiry_date": doc_dt.isoformat(),
+                            "days_until_expiry": days_left
+                        })
+            except Exception as e:
+                pass
+    
+    return expiring_docs
+
+
+async def send_document_expiry_reminder_email(
+    employee_email: str,
+    employee_name: str,
+    expiring_documents: List[dict],
+    portal_url: str = None
+) -> bool:
+    """
+    Send email reminder to worker about expiring documents (DBS, RTW, Professional Registration).
+    """
+    if not resend.api_key or not employee_email:
+        logger.warning(f"Cannot send document expiry email: API key={bool(resend.api_key)}, email={employee_email}")
+        return False
+    
+    # Format document list for email
+    doc_list_html = ""
+    for doc in expiring_documents:
+        expiry_date = doc.get('expiry_date', 'Unknown')
+        days_left = doc.get('days_until_expiry', 0)
+        
+        if isinstance(expiry_date, str):
+            try:
+                exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+                expiry_date = exp_dt.strftime('%d %B %Y')
+            except:
+                pass
+        
+        urgency_color = "#dc2626" if days_left <= 7 else "#f59e0b" if days_left <= 14 else "#3b82f6"
+        urgency_label = "URGENT" if days_left <= 7 else "WARNING" if days_left <= 14 else "Upcoming"
+        
+        doc_list_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">{doc.get('document_name', 'Document')}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">{expiry_date}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; color: {urgency_color}; font-weight: 600;">
+                {days_left} days <span style="font-size: 10px;">({urgency_label})</span>
+            </td>
+        </tr>
+        """
+    
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    
+    # Determine overall urgency for subject line
+    min_days = min(d.get('days_until_expiry', 999) for d in expiring_documents)
+    urgency_prefix = "🚨 URGENT: " if min_days <= 7 else "⚠️ " if min_days <= 14 else ""
+    
+    email_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: white; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden;">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #dc2626, #f59e0b); padding: 32px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">Document Renewal Required</h1>
+                </div>
+                
+                <!-- Content -->
+                <div style="padding: 32px;">
+                    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                        Hi {employee_name},
+                    </p>
+                    
+                    <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                        This is a reminder that the following compliance documents are <strong>expiring soon</strong> and require renewal:
+                    </p>
+                    
+                    <!-- Document Table -->
+                    <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px; background: #f9fafb; border-radius: 8px; overflow: hidden;">
+                        <thead>
+                            <tr style="background: #fee2e2;">
+                                <th style="padding: 12px; text-align: left; color: #991b1b; font-weight: 600;">Document</th>
+                                <th style="padding: 12px; text-align: left; color: #991b1b; font-weight: 600;">Expiry Date</th>
+                                <th style="padding: 12px; text-align: left; color: #991b1b; font-weight: 600;">Time Left</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {doc_list_html}
+                        </tbody>
+                    </table>
+                    
+                    <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 16px; border-radius: 0 8px 8px 0; margin-bottom: 24px;">
+                        <p style="color: #991b1b; margin: 0; font-size: 14px;">
+                            <strong>⚠️ Important:</strong> If these documents expire, your work readiness status will be affected and you may not be able to continue working until they are renewed.
+                        </p>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 32px;">
+                        <a href="{frontend_url}/worker/login" 
+                           style="display: inline-block; background: #dc2626; color: white; padding: 14px 32px; 
+                                  border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+                            Upload Renewed Documents
+                        </a>
+                    </div>
+                    
+                    <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin-top: 24px; text-align: center;">
+                        Need help? Contact your manager or HR department.
+                    </p>
+                </div>
+                
+                <!-- Footer -->
+                <div style="background: #f8fafc; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                        This is an automated reminder from Osabea Healthcare Compliance Portal.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": "Osabea Healthcare <compliance@osabea.care>",
+            "to": [employee_email],
+            "subject": f"{urgency_prefix}Document Renewal Required - {len(expiring_documents)} Item(s) Expiring",
+            "html": email_html
+        })
+        logger.info(f"Document expiry reminder sent to {employee_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send document expiry reminder to {employee_email}: {e}")
+        return False
+
+
+async def send_admin_expiry_digest_email(
+    admin_email: str,
+    admin_name: str,
+    expiring_trainings: List[dict],
+    expiring_documents: List[dict]
+) -> bool:
+    """
+    Send daily digest email to admin with all expiring items across the organization.
+    """
+    if not resend.api_key or not admin_email:
+        return False
+    
+    total_items = len(expiring_trainings) + len(expiring_documents)
+    if total_items == 0:
+        return False  # Nothing to report
+    
+    # Group trainings by employee
+    training_by_emp = {}
+    for t in expiring_trainings:
+        emp_name = t.get('employee_name', 'Unknown')
+        if emp_name not in training_by_emp:
+            training_by_emp[emp_name] = []
+        training_by_emp[emp_name].append(t)
+    
+    # Group documents by employee
+    docs_by_emp = {}
+    for d in expiring_documents:
+        emp_name = d.get('employee_name', 'Unknown')
+        if emp_name not in docs_by_emp:
+            docs_by_emp[emp_name] = []
+        docs_by_emp[emp_name].append(d)
+    
+    # Build HTML sections
+    training_section = ""
+    if expiring_trainings:
+        training_rows = ""
+        for emp_name, trainings in sorted(training_by_emp.items()):
+            for t in trainings:
+                days = t.get('days_until_expiry', 0)
+                color = "#dc2626" if days <= 7 else "#f59e0b" if days <= 14 else "#3b82f6"
+                training_rows += f"""
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{emp_name}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{t.get('training_name', 'Unknown')}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: {color}; font-weight: 600;">{days} days</td>
+                </tr>
+                """
+        training_section = f"""
+        <h3 style="color: #1f2937; margin: 24px 0 12px 0;">📚 Expiring Training ({len(expiring_trainings)} items)</h3>
+        <table style="width: 100%; border-collapse: collapse; background: #f9fafb; border-radius: 8px; font-size: 14px;">
+            <thead><tr style="background: #f3f4f6;">
+                <th style="padding: 8px; text-align: left;">Employee</th>
+                <th style="padding: 8px; text-align: left;">Training</th>
+                <th style="padding: 8px; text-align: left;">Days Left</th>
+            </tr></thead>
+            <tbody>{training_rows}</tbody>
+        </table>
+        """
+    
+    doc_section = ""
+    if expiring_documents:
+        doc_rows = ""
+        for emp_name, docs in sorted(docs_by_emp.items()):
+            for d in docs:
+                days = d.get('days_until_expiry', 0)
+                color = "#dc2626" if days <= 7 else "#f59e0b" if days <= 14 else "#3b82f6"
+                doc_rows += f"""
+                <tr>
+                    <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{emp_name}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">{d.get('document_name', 'Unknown')}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; color: {color}; font-weight: 600;">{days} days</td>
+                </tr>
+                """
+        doc_section = f"""
+        <h3 style="color: #1f2937; margin: 24px 0 12px 0;">📄 Expiring Documents ({len(expiring_documents)} items)</h3>
+        <table style="width: 100%; border-collapse: collapse; background: #f9fafb; border-radius: 8px; font-size: 14px;">
+            <thead><tr style="background: #f3f4f6;">
+                <th style="padding: 8px; text-align: left;">Employee</th>
+                <th style="padding: 8px; text-align: left;">Document</th>
+                <th style="padding: 8px; text-align: left;">Days Left</th>
+            </tr></thead>
+            <tbody>{doc_rows}</tbody>
+        </table>
+        """
+    
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    
+    email_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"></head>
+    <body style="margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; background-color: #f8fafc;">
+        <div style="max-width: 700px; margin: 0 auto; padding: 40px 20px;">
+            <div style="background: white; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden;">
+                <div style="background: linear-gradient(135deg, #0d9488, #14b8a6); padding: 24px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 22px;">Daily Compliance Expiry Report</h1>
+                    <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0; font-size: 14px;">{datetime.now(timezone.utc).strftime('%A, %d %B %Y')}</p>
+                </div>
+                
+                <div style="padding: 24px;">
+                    <p style="color: #374151; font-size: 15px; margin-bottom: 16px;">
+                        Hi {admin_name}, here's your daily summary of items expiring within the next 30 days:
+                    </p>
+                    
+                    <div style="display: flex; gap: 16px; margin-bottom: 24px;">
+                        <div style="flex: 1; background: #fef2f2; padding: 16px; border-radius: 12px; text-align: center;">
+                            <p style="font-size: 28px; font-weight: bold; color: #dc2626; margin: 0;">{total_items}</p>
+                            <p style="color: #991b1b; margin: 4px 0 0 0; font-size: 13px;">Total Items Expiring</p>
+                        </div>
+                        <div style="flex: 1; background: #fef3c7; padding: 16px; border-radius: 12px; text-align: center;">
+                            <p style="font-size: 28px; font-weight: bold; color: #f59e0b; margin: 0;">{len(set(t.get('employee_id') for t in expiring_trainings + expiring_documents))}</p>
+                            <p style="color: #92400e; margin: 4px 0 0 0; font-size: 13px;">Employees Affected</p>
+                        </div>
+                    </div>
+                    
+                    {training_section}
+                    {doc_section}
+                    
+                    <div style="text-align: center; margin-top: 32px;">
+                        <a href="{frontend_url}/portal/dashboard" 
+                           style="display: inline-block; background: #0d9488; color: white; padding: 12px 28px; 
+                                  border-radius: 8px; text-decoration: none; font-weight: 600;">
+                            View Dashboard
+                        </a>
+                    </div>
+                </div>
+                
+                <div style="background: #f8fafc; padding: 16px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="color: #9ca3af; font-size: 11px; margin: 0;">
+                        Automated daily digest from Osabea Healthcare Compliance Portal
+                    </p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": "Osabea Healthcare <compliance@osabea.care>",
+            "to": [admin_email],
+            "subject": f"📊 Daily Compliance Report: {total_items} items expiring soon",
+            "html": email_html
+        })
+        logger.info(f"Admin expiry digest sent to {admin_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send admin digest to {admin_email}: {e}")
+        return False
+
+
+async def comprehensive_expiry_reminder_job():
+    """
+    Comprehensive scheduled job to send all expiry reminders.
+    Runs daily at 8 AM to check for:
+    - Training expiring within 30 days
+    - Documents (DBS, RTW, Professional Registration) expiring within 30 days
+    
+    Multi-tier reminders: 30 days, 14 days, 7 days, 1 day before expiry
+    """
+    try:
+        logger.info("Running comprehensive expiry reminder check...")
+        
+        now = datetime.now(timezone.utc)
+        stats = {
+            "run_at": now.isoformat(),
+            "training_reminders_sent": 0,
+            "document_reminders_sent": 0,
+            "employees_notified": 0,
+            "admin_digests_sent": 0
+        }
+        
+        # Get all expiring items within 30 days
+        expiring_trainings = await get_expiring_trainings(30)
+        expiring_documents = await get_expiring_documents(30)
+        
+        logger.info(f"Found {len(expiring_trainings)} expiring trainings, {len(expiring_documents)} expiring documents")
+        
+        if not expiring_trainings and not expiring_documents:
+            logger.info("No items expiring within 30 days")
+            return stats
+        
+        # Group by employee
+        employees_items = {}
+        
+        for training in expiring_trainings:
+            emp_id = training.get('employee_id')
+            if emp_id not in employees_items:
+                employees_items[emp_id] = {
+                    "employee_id": emp_id,
+                    "employee_name": training.get('employee_name'),
+                    "employee_email": training.get('employee_email'),
+                    "trainings": [],
+                    "documents": []
+                }
+            employees_items[emp_id]["trainings"].append(training)
+        
+        for doc in expiring_documents:
+            emp_id = doc.get('employee_id')
+            if emp_id not in employees_items:
+                employees_items[emp_id] = {
+                    "employee_id": emp_id,
+                    "employee_name": doc.get('employee_name'),
+                    "employee_email": doc.get('employee_email'),
+                    "trainings": [],
+                    "documents": []
+                }
+            employees_items[emp_id]["documents"].append(doc)
+        
+        # Send reminders to each employee (respecting reminder tiers)
+        for emp_id, emp_data in employees_items.items():
+            emp_email = emp_data.get('employee_email')
+            emp_name = emp_data.get('employee_name')
+            
+            if not emp_email:
+                continue
+            
+            # Determine if we should send based on reminder tiers
+            # Get minimum days until expiry for this employee
+            all_items = emp_data['trainings'] + emp_data['documents']
+            min_days = min(item.get('days_until_expiry', 999) for item in all_items)
+            
+            # Check which tier this falls into
+            reminder_tier = None
+            for tier in REMINDER_TIERS:
+                if min_days <= tier:
+                    reminder_tier = tier
+                    break
+            
+            if reminder_tier is None:
+                continue  # Not in any reminder tier
+            
+            # Check if we already sent a reminder for this tier
+            last_reminder = await db.expiry_reminders.find_one(
+                {"employee_id": emp_id, "reminder_tier": reminder_tier},
+                sort=[("sent_at", -1)]
+            )
+            
+            # Only send if we haven't sent this tier yet, or it's been more than 7 days
+            seven_days_ago = now - timedelta(days=7)
+            if last_reminder:
+                try:
+                    last_sent = datetime.fromisoformat(last_reminder['sent_at'].replace('Z', '+00:00'))
+                    if last_sent > seven_days_ago and last_reminder.get('reminder_tier') == reminder_tier:
+                        logger.debug(f"Skipping {emp_id} - tier {reminder_tier} reminder already sent")
+                        continue
+                except:
+                    pass
+            
+            # Send training reminder if applicable
+            if emp_data['trainings']:
+                success = await send_training_expiry_reminder_email(
+                    emp_email, emp_name, emp_data['trainings']
+                )
+                if success:
+                    stats['training_reminders_sent'] += len(emp_data['trainings'])
+            
+            # Send document reminder if applicable
+            if emp_data['documents']:
+                success = await send_document_expiry_reminder_email(
+                    emp_email, emp_name, emp_data['documents']
+                )
+                if success:
+                    stats['document_reminders_sent'] += len(emp_data['documents'])
+            
+            # Log the reminder
+            await db.expiry_reminders.insert_one({
+                "id": str(uuid.uuid4()),
+                "employee_id": emp_id,
+                "employee_email": emp_email,
+                "reminder_tier": reminder_tier,
+                "min_days_until_expiry": min_days,
+                "training_count": len(emp_data['trainings']),
+                "document_count": len(emp_data['documents']),
+                "sent_at": now.isoformat(),
+                "reminder_type": "auto_scheduled"
+            })
+            
+            stats['employees_notified'] += 1
+        
+        # Send admin digest to all admins
+        admins = await db.users.find(
+            {"role": {"$in": ["admin", "super_admin", "manager"]}},
+            {"_id": 0, "email": 1, "first_name": 1, "last_name": 1}
+        ).to_list(50)
+        
+        for admin in admins:
+            admin_email = admin.get('email')
+            admin_name = f"{admin.get('first_name', '')} {admin.get('last_name', '')}".strip() or "Admin"
+            
+            if admin_email:
+                success = await send_admin_expiry_digest_email(
+                    admin_email, admin_name, expiring_trainings, expiring_documents
+                )
+                if success:
+                    stats['admin_digests_sent'] += 1
+        
+        # Log audit
+        await log_audit_action(
+            "system_scheduler",
+            "comprehensive_expiry_reminders",
+            "system",
+            "scheduled_job",
+            stats
+        )
+        
+        logger.info(f"Comprehensive expiry reminders complete: {stats}")
+        return stats
+        
+    except Exception as e:
+        logger.error(f"Comprehensive expiry reminder job failed: {e}")
+        return {"error": str(e)}
+
+
+@api_router.post("/admin/send-all-expiry-reminders")
+async def trigger_all_expiry_reminders(
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Manually trigger comprehensive expiry reminders for all employees.
+    Sends reminders for both training and documents (DBS, RTW, Professional Registration).
+    """
+    result = await comprehensive_expiry_reminder_job()
+    return {
+        "success": True,
+        "message": f"Sent reminders to {result.get('employees_notified', 0)} employees",
+        **result
+    }
+
+
+@api_router.get("/admin/expiring-documents")
+async def get_expiring_documents_endpoint(
+    days: int = Query(default=30, ge=1, le=365),
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get all documents expiring within specified days.
+    Returns documents grouped by urgency.
+    """
+    expiring_docs = await get_expiring_documents(days)
+    
+    now = datetime.now(timezone.utc)
+    critical = []  # <= 7 days
+    warning = []   # 8-14 days
+    upcoming = []  # 15-30 days
+    
+    for doc in expiring_docs:
+        days_left = doc.get('days_until_expiry', 0)
+        if days_left <= 7:
+            critical.append(doc)
+        elif days_left <= 14:
+            warning.append(doc)
+        else:
+            upcoming.append(doc)
+    
+    return {
+        "critical": critical,
+        "critical_count": len(critical),
+        "warning": warning,
+        "warning_count": len(warning),
+        "upcoming": upcoming,
+        "upcoming_count": len(upcoming),
+        "total_expiring": len(expiring_docs),
         "threshold_days": days
     }
 

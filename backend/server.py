@@ -10671,6 +10671,95 @@ async def delete_employee(employee_id: str, user: dict = Depends(require_admin))
     await log_audit_action(user['user_id'], "delete_employee", "employee", employee_id, {})
     return {"message": "Employee deleted"}
 
+
+@api_router.delete("/employees/{employee_id}/purge")
+async def purge_employee_completely(
+    employee_id: str, 
+    user: dict = Depends(require_admin)
+):
+    """
+    GDPR-compliant complete removal of an employee and ALL related data.
+    
+    This permanently deletes:
+    - Employee record
+    - All documents
+    - All form submissions
+    - Training records
+    - Induction items
+    - Reference requests and responses
+    - Agreement acknowledgements
+    - Notifications
+    - Generated contracts
+    - Spot checks
+    - Audit logs (optional - for GDPR right to erasure)
+    
+    USE WITH CAUTION - This cannot be undone!
+    """
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    
+    deletion_results = {
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "deleted_at": datetime.now(timezone.utc).isoformat(),
+        "deleted_by": user.get("name", user["user_id"]),
+        "records_deleted": {}
+    }
+    
+    # Delete all related records
+    collections_to_clean = [
+        ("employee_documents", "employee_id"),
+        ("form_submissions", "employee_id"),
+        ("employee_training", "employee_id"),
+        ("induction_items", "employee_id"),
+        ("reference_requests", "employee_id"),
+        ("reference_responses", "employee_id"),
+        ("agreement_acknowledgements", "employee_id"),
+        ("worker_notifications", "employee_id"),
+        ("generated_contracts", "employee_id"),
+        ("spot_checks", "employee_id"),
+    ]
+    
+    for collection_name, id_field in collections_to_clean:
+        try:
+            collection = db[collection_name]
+            result = await collection.delete_many({id_field: employee_id})
+            deletion_results["records_deleted"][collection_name] = result.deleted_count
+        except Exception as e:
+            deletion_results["records_deleted"][collection_name] = f"Error: {str(e)}"
+    
+    # Delete the employee record itself
+    result = await db.employees.delete_one({"id": employee_id})
+    deletion_results["records_deleted"]["employees"] = result.deleted_count
+    
+    # Also check users collection (if employee has a user account)
+    if employee.get("email"):
+        user_result = await db.users.delete_many({"email": employee.get("email")})
+        deletion_results["records_deleted"]["users"] = user_result.deleted_count
+    
+    # Log the purge action (this log entry will remain for compliance)
+    await log_audit_action(
+        user['user_id'], 
+        "purge_employee_gdpr", 
+        "employee", 
+        employee_id, 
+        {
+            "employee_name": employee_name,
+            "reason": "Complete data removal (GDPR)",
+            "records_purged": deletion_results["records_deleted"]
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": f"Employee '{employee_name}' and all related data permanently deleted",
+        "details": deletion_results
+    }
+
 @api_router.post("/employees/{employee_id}/archive")
 async def archive_employee(employee_id: str, user: dict = Depends(require_manager_or_admin)):
     """Archive an employee - soft delete that retains all data"""

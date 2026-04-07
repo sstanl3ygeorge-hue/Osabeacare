@@ -4154,6 +4154,7 @@ export default function EmployeeProfilePage() {
                 <InterviewFormPanel 
                   employeeId={employeeId}
                   employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                  employeeRole={employee?.role || 'Healthcare Assistant'}
                   onComplete={() => {
                     fetchCompliance();
                     fetchFormSubmissions();

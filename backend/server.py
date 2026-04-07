@@ -113,7 +113,18 @@ from interview_questions import (
     get_interview_questions_for_role,
     get_role_interview_config,
     get_role_requirements,
-    ROLE_REQUIREMENTS_SUMMARY
+    get_administrative_questions,
+    get_pre_employment_check_notes,
+    calculate_interview_result,
+    ROLE_REQUIREMENTS_SUMMARY,
+    INTERVIEW_SCORING,
+    SUPPORT_WORKER_INTERVIEW_QUESTIONS
+)
+from contract_templates import (
+    ZERO_HOUR_CONTRACT_TEMPLATE,
+    fill_contract_template,
+    get_contract_template_info,
+    validate_contract_data
 )
 from poa_freshness_engine import (
     calculate_document_freshness,
@@ -11163,6 +11174,287 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
             "policies": deleted_policies.deleted_count,
             "training": deleted_training.deleted_count
         }
+    }
+
+
+# ============================================================================
+# CONTRACT TEMPLATE ENDPOINTS
+# Zero Hour Contract with auto-fill from employee profile
+# ============================================================================
+
+@api_router.get("/contract-templates")
+async def list_contract_templates(user: dict = Depends(get_current_user)):
+    """List available contract templates."""
+    return {
+        "templates": [
+            get_contract_template_info()
+        ]
+    }
+
+
+@api_router.get("/contract-templates/{template_id}")
+async def get_contract_template(
+    template_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get a specific contract template with full sections."""
+    if template_id != ZERO_HOUR_CONTRACT_TEMPLATE["id"]:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    return {
+        "template": {
+            **ZERO_HOUR_CONTRACT_TEMPLATE,
+            "sections": [
+                {"id": s["id"], "title": s["title"], "content": s["content"]}
+                for s in ZERO_HOUR_CONTRACT_TEMPLATE["sections"]
+            ]
+        }
+    }
+
+
+@api_router.get("/employees/{employee_id}/contract/preview")
+async def preview_employee_contract(
+    employee_id: str,
+    template_id: str = "zero_hour_contract_v1",
+    user: dict = Depends(get_current_user)
+):
+    """
+    Preview a contract pre-filled with employee data.
+    Used for admin review before sending to worker for signature.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Validate employee data
+    validation = validate_contract_data(employee)
+    
+    # Fill template
+    filled_contract = fill_contract_template(employee)
+    
+    return {
+        "contract": filled_contract,
+        "validation": validation,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "can_send": validation["valid"]
+    }
+
+
+@api_router.post("/employees/{employee_id}/contract/generate")
+async def generate_employee_contract(
+    employee_id: str,
+    request: Request,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Generate a contract for an employee and save it for signature.
+    This creates a pending contract that the worker must sign.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    
+    custom_values = body.get("custom_values", {})
+    send_notification = body.get("send_notification", True)
+    
+    # Validate
+    validation = validate_contract_data(employee)
+    if not validation["valid"]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Missing required fields: {', '.join(validation['missing_required'])}"
+        )
+    
+    # Fill template
+    filled_contract = fill_contract_template(employee, custom_values=custom_values)
+    
+    now = datetime.now(timezone.utc)
+    contract_id = f"contract_{uuid.uuid4().hex[:12]}"
+    
+    # Store generated contract
+    contract_record = {
+        "id": contract_id,
+        "employee_id": employee_id,
+        "template_id": filled_contract["id"],
+        "template_version": filled_contract["version"],
+        "filled_sections": filled_contract["sections"],
+        "status": "pending_signature",  # pending_signature, signed, superseded
+        "generated_at": now.isoformat(),
+        "generated_by": user["user_id"],
+        "generated_by_name": user.get("name", "Admin"),
+        "employee_name": filled_contract["employee_name"],
+        "custom_values": custom_values,
+        "signature_requested_at": now.isoformat() if send_notification else None,
+        "signed_at": None,
+        "signed_by": None
+    }
+    
+    await db.generated_contracts.insert_one(contract_record)
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "generate_contract",
+        "contract",
+        contract_id,
+        {
+            "employee_id": employee_id,
+            "employee_name": filled_contract["employee_name"],
+            "template_id": filled_contract["id"],
+            "send_notification": send_notification
+        }
+    )
+    
+    # Send notification to worker if requested
+    if send_notification:
+        notification_id = str(uuid.uuid4())
+        await db.worker_notifications.insert_one({
+            "id": notification_id,
+            "employee_id": employee_id,
+            "type": "contract_signature_required",
+            "title": "Contract Ready for Signature",
+            "message": "Your employment contract has been generated and is ready for your review and signature.",
+            "priority": "high",
+            "action_url": f"/worker/contracts/{contract_id}",
+            "created_at": now.isoformat(),
+            "read": False
+        })
+    
+    contract_record.pop("_id", None)
+    return {
+        "success": True,
+        "contract": contract_record,
+        "notification_sent": send_notification
+    }
+
+
+@api_router.get("/employees/{employee_id}/contracts")
+async def list_employee_contracts(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """List all contracts for an employee."""
+    contracts = await db.generated_contracts.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).sort("generated_at", -1).to_list(length=100)
+    
+    return {"contracts": contracts}
+
+
+@api_router.post("/employees/{employee_id}/contracts/{contract_id}/sign")
+async def sign_employee_contract(
+    employee_id: str,
+    contract_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Worker signs their contract.
+    CQC Requirement: Worker must sign their own contract.
+    """
+    # Verify user is the employee or an admin
+    is_own_contract = user.get("employee_id") == employee_id
+    is_admin = user.get("role") in ["admin", "super_admin", "manager"]
+    
+    if not is_own_contract and not is_admin:
+        raise HTTPException(status_code=403, detail="You can only sign your own contract")
+    
+    contract = await db.generated_contracts.find_one({
+        "id": contract_id,
+        "employee_id": employee_id,
+        "status": "pending_signature"
+    })
+    
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found or already signed")
+    
+    try:
+        body = await request.json()
+    except:
+        body = {}
+    
+    # Get signature data
+    signature_data = body.get("signature", "")
+    acknowledgement = body.get("acknowledgement", False)
+    
+    if not acknowledgement:
+        raise HTTPException(
+            status_code=400, 
+            detail="You must acknowledge that you have read and understood the contract"
+        )
+    
+    now = datetime.now(timezone.utc)
+    
+    # Update contract
+    await db.generated_contracts.update_one(
+        {"id": contract_id},
+        {
+            "$set": {
+                "status": "signed",
+                "signed_at": now.isoformat(),
+                "signed_by": user["user_id"],
+                "signed_by_name": user.get("name", "Worker"),
+                "signature_ip": body.get("ip_address"),
+                "signature_data": signature_data,
+                "completion_mode": "self_signed" if is_own_contract else "admin_assisted"
+            }
+        }
+    )
+    
+    # Update employee record
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                "contract_signed": True,
+                "contract_signed_at": now.isoformat(),
+                "contract_id": contract_id,
+                "updated_at": now.isoformat()
+            }
+        }
+    )
+    
+    # Create agreement acknowledgement for compatibility
+    ack_id = f"ack_{uuid.uuid4().hex[:12]}"
+    await db.agreement_acknowledgements.insert_one({
+        "id": ack_id,
+        "employee_id": employee_id,
+        "agreement_type": "contract_acceptance",
+        "agreement_id": contract_id,
+        "acknowledgement_text": "I confirm I have read, understood, and agree to the terms of this employment contract.",
+        "acknowledged": True,
+        "completed_at": now.isoformat(),
+        "completed_by": user["user_id"],
+        "completion_mode": "self_signed" if is_own_contract else "admin_assisted",
+        "status": "verified",
+        "verification_status": "verified",
+        "verified_at": now.isoformat() if is_own_contract else None
+    })
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "sign_contract",
+        "contract",
+        contract_id,
+        {
+            "employee_id": employee_id,
+            "completion_mode": "self_signed" if is_own_contract else "admin_assisted",
+            "cqc_compliant": is_own_contract
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": "Contract signed successfully",
+        "signed_at": now.isoformat(),
+        "cqc_compliant": is_own_contract
     }
 
 
@@ -52705,6 +52997,65 @@ async def get_spot_check_options(user: dict = Depends(get_current_user)):
 
 # ========== ADMIN INTERNAL FORMS - INTERVIEW RECORD ==========
 
+# New Interview Record Request model with Osabea 0-3 scoring
+class InterviewRecordRequestV2(BaseModel):
+    """Request model for Osabea Interview Assessment (0-3 scale)"""
+    interview_date: str
+    interview_method: str = "in_person"  # phone, video, in_person
+    interviewer_name: Optional[str] = None
+    candidate_name: Optional[str] = None
+    vacancy_job_title: Optional[str] = "Care Worker"
+    panel_members: Optional[str] = None
+    # Question scores (0-3 scale)
+    question_scores: Optional[dict] = {}  # {question_id: score}
+    question_notes: Optional[dict] = {}   # {question_id: notes}
+    # Part 2 - Admin questions
+    requires_work_permit: Optional[str] = None
+    rtw_proof_taken: Optional[str] = None
+    hours_wanted: Optional[str] = None
+    flexible_working: Optional[str] = None
+    has_driving_licence: Optional[str] = None
+    annual_leave_booked: Optional[str] = None
+    notice_period: Optional[str] = None
+    start_date: Optional[str] = None
+    # Decision
+    decision: Optional[str] = None
+    overall_impression: Optional[str] = None
+    candidate_questions: Optional[str] = None
+    notes: Optional[str] = None
+    # Calculated fields (optional, backend will recalculate)
+    total_score: Optional[int] = None
+    max_score: Optional[int] = None
+    pass_score: Optional[int] = None
+    passed: Optional[bool] = None
+    percentage: Optional[int] = None
+    is_draft: bool = False
+
+
+@api_router.get("/interview-config/{role}")
+async def get_interview_config(
+    role: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Get interview configuration for a role.
+    Returns questions, scoring criteria, and administrative questions.
+    """
+    config = get_role_interview_config(role)
+    
+    return {
+        "role": role,
+        "questions": config.get("questions", []),
+        "administrative_questions": config.get("administrative_questions", []),
+        "pre_employment_checks": config.get("pre_employment_checks", []),
+        "scoring": config.get("scoring", {}),
+        "question_count": config.get("question_count", 8),
+        "max_possible_score": config.get("max_possible_score", 24),
+        "pass_threshold_score": config.get("pass_threshold_score", 11),
+        "scale_description": config.get("scale_description", "0-3 scale"),
+    }
+
+
 class InterviewRecordRequest(BaseModel):
     """Request model for creating/updating interview records"""
     interview_date: str
@@ -52747,35 +53098,90 @@ async def get_interview_records(
 @api_router.post("/employees/{employee_id}/interview-records")
 async def create_interview_record(
     employee_id: str,
-    payload: InterviewRecordRequest,
+    request: Request,
     user: dict = Depends(require_manager_or_admin)
 ):
-    """Create a new interview record (admin only)"""
+    """Create a new interview record (admin only) - supports both V1 and V2 format"""
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    # Parse request body
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    
     now = datetime.now(timezone.utc).isoformat()
     record_id = f"interview_{uuid.uuid4().hex[:12]}"
     
-    # Build form data
-    form_data = {
-        "interview_date": payload.interview_date,
-        "interview_method": payload.interview_method,
-        "interviewer_name": payload.interviewer_name or user.get('name', 'System Admin'),
-        "communication_score": payload.communication_score,
-        "experience_score": payload.experience_score,
-        "values_score": payload.values_score,
-        "availability": payload.availability,
-        "strengths": payload.strengths,
-        "areas_for_development": payload.areas_for_development,
-        "decision": payload.decision,
-        "notes": payload.notes,
-    }
+    # Detect format based on presence of question_scores (V2) or communication_score (V1)
+    is_v2_format = "question_scores" in payload
     
-    # Calculate average score
-    avg_score = round((payload.communication_score + payload.experience_score + payload.values_score) / 3, 1)
-    form_data["average_score"] = avg_score
+    if is_v2_format:
+        # V2 Format: Osabea 0-3 scoring with individual question scores
+        question_scores = payload.get("question_scores", {})
+        question_notes = payload.get("question_notes", {})
+        
+        # Calculate total score
+        total_score = sum(int(s) for s in question_scores.values() if s is not None)
+        max_score = len(question_scores) * 3 if question_scores else 24
+        pass_score = 11
+        percentage = round((total_score / max_score) * 100) if max_score > 0 else 0
+        passed = total_score >= pass_score
+        
+        form_data = {
+            "interview_date": payload.get("interview_date"),
+            "interview_method": payload.get("interview_method", "in_person"),
+            "interviewer_name": payload.get("interviewer_name") or user.get('name', 'System Admin'),
+            "candidate_name": payload.get("candidate_name") or f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "vacancy_job_title": payload.get("vacancy_job_title", "Care Worker"),
+            "panel_members": payload.get("panel_members"),
+            "question_scores": question_scores,
+            "question_notes": question_notes,
+            # Part 2 - Admin questions
+            "requires_work_permit": payload.get("requires_work_permit"),
+            "rtw_proof_taken": payload.get("rtw_proof_taken"),
+            "hours_wanted": payload.get("hours_wanted"),
+            "flexible_working": payload.get("flexible_working"),
+            "has_driving_licence": payload.get("has_driving_licence"),
+            "annual_leave_booked": payload.get("annual_leave_booked"),
+            "notice_period": payload.get("notice_period"),
+            "start_date": payload.get("start_date"),
+            # Decision
+            "decision": payload.get("decision"),
+            "overall_impression": payload.get("overall_impression"),
+            "candidate_questions": payload.get("candidate_questions"),
+            "notes": payload.get("notes"),
+            # Calculated
+            "total_score": total_score,
+            "max_score": max_score,
+            "pass_score": pass_score,
+            "passed": passed,
+            "percentage": percentage,
+            "format_version": "v2_osabea"
+        }
+    else:
+        # V1 Format: Legacy 1-5 star scoring
+        form_data = {
+            "interview_date": payload.get("interview_date"),
+            "interview_method": payload.get("interview_method"),
+            "interviewer_name": payload.get("interviewer_name") or user.get('name', 'System Admin'),
+            "communication_score": payload.get("communication_score", 3),
+            "experience_score": payload.get("experience_score", 3),
+            "values_score": payload.get("values_score", 3),
+            "availability": payload.get("availability"),
+            "strengths": payload.get("strengths"),
+            "areas_for_development": payload.get("areas_for_development"),
+            "decision": payload.get("decision"),
+            "notes": payload.get("notes"),
+            "format_version": "v1_legacy"
+        }
+        # Calculate average score
+        avg_score = round((form_data["communication_score"] + form_data["experience_score"] + form_data["values_score"]) / 3, 1)
+        form_data["average_score"] = avg_score
+    
+    is_draft = payload.get("is_draft", False)
     
     record = {
         "id": record_id,
@@ -52784,13 +53190,13 @@ async def create_interview_record(
         "form_type": "interview_record",
         "form_data": form_data,
         "data": form_data,  # Compatibility
-        "status": "draft" if payload.is_draft else "submitted",
+        "status": "draft" if is_draft else "submitted",
         "created_at": now,
         "created_by": user['user_id'],
         "created_by_name": user.get('name', 'System Admin'),
-        "submitted_at": None if payload.is_draft else now,
-        "submitted_by": None if payload.is_draft else user['user_id'],
-        "submitted_by_name": None if payload.is_draft else user.get('name', 'System Admin'),
+        "submitted_at": None if is_draft else now,
+        "submitted_by": None if is_draft else user['user_id'],
+        "submitted_by_name": None if is_draft else user.get('name', 'System Admin'),
         "admin_only": True  # Never visible to workers
     }
     
@@ -52799,13 +53205,13 @@ async def create_interview_record(
     # Log audit
     await log_audit_action(user['user_id'], "interview_record_created", "form_submissions", record_id, {
         "employee_id": employee_id,
-        "decision": payload.decision,
-        "is_draft": payload.is_draft
+        "decision": payload.get("decision"),
+        "is_draft": is_draft,
+        "format": "v2_osabea" if is_v2_format else "v1_legacy"
     })
     
-    # If decision is Approve and not draft, could trigger next steps here
-    if not payload.is_draft and payload.decision == "Approve":
-        # Update employee status if needed
+    # If decision is Approve and not draft, trigger next steps
+    if not is_draft and payload.get("decision") == "Approve":
         current_status = employee.get('status')
         if current_status in ['new', 'screening', 'interview']:
             await db.employees.update_one(

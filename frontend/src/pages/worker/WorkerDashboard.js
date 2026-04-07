@@ -1793,7 +1793,11 @@ export default function WorkerDashboard() {
                           )}
                           {!agreement.signed && !agreement.verified && (
                             <p className="text-xs text-slate-500 mt-0.5">
-                              Pending your signature
+                              {agreement.id === 'contract_acceptance' 
+                                ? 'Sign contract in the section below' 
+                                : agreement.id === 'handbook_acknowledgement'
+                                  ? 'Acknowledge during contract signing'
+                                  : 'Awaiting completion'}
                             </p>
                           )}
                         </div>
@@ -1804,7 +1808,8 @@ export default function WorkerDashboard() {
                         'bg-slate-100 text-slate-600'
                       }`}>
                         {agreement.verified ? 'Verified' :
-                         agreement.signed ? 'Signed' : 'Pending'}
+                         agreement.signed ? 'Signed' : 
+                         agreement.id === 'contract_acceptance' ? 'See Below ↓' : 'Pending'}
                       </Badge>
                     </div>
                   </div>

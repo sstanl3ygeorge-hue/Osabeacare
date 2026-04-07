@@ -165,6 +165,25 @@ export default function UploadRequirementCard({
   const checkVerified = authoritativeCheck?.status === 'verified';
   const hasPendingRequest = requestState === 'requested' || requestState === 'viewed';
 
+  // Document upload limits per requirement type (NHS CQC compliance)
+  const DOCUMENT_LIMITS = {
+    right_to_work: 2,
+    right_to_work_evidence: 2,
+    dbs: 1,
+    dbs_certificate: 1,
+    dbs_certificate_evidence: 1,
+    identity: 2,
+    identity_evidence: 2,
+    proof_of_address: 3,
+    proof_of_address_evidence: 3
+  };
+  
+  const documentLimit = DOCUMENT_LIMITS[key] || null; // null = unlimited
+  const isAtLimit = documentLimit && counters.active >= documentLimit;
+  const limitMessage = isAtLimit 
+    ? `Maximum ${documentLimit} document${documentLimit > 1 ? 's' : ''} allowed` 
+    : null;
+
   // Get check data details
   const checkData = authoritativeCheck || {};
   const hasVerificationProof = checkData.evidence_document_id && checkData.evidence_document;
@@ -576,40 +595,51 @@ export default function UploadRequirementCard({
 
               {/* Evidence Upload/Request Actions */}
               {!isAuditor && (
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onUpload}
-                    className="h-8 text-xs rounded-lg"
-                    data-testid={`${key}-evidence-upload-btn`}
-                  >
-                    <UploadIcon className="h-3.5 w-3.5 mr-1" />
-                    Upload
-                  </Button>
-                  {/* Send Reminder - replaces Request/Resend buttons */}
-                  {!hasFiles && (
+                <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+                  {/* Show limit warning if at max */}
+                  {isAtLimit && (
+                    <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {limitMessage}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={onResend || onRequest}
-                      className="h-8 text-xs rounded-lg text-amber-600 border-amber-200 hover:bg-amber-50"
-                      data-testid={`${key}-send-reminder-btn`}
+                      onClick={onUpload}
+                      disabled={isAtLimit}
+                      className={`h-8 text-xs rounded-lg ${isAtLimit ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      data-testid={`${key}-evidence-upload-btn`}
+                      title={isAtLimit ? limitMessage : 'Upload document'}
                     >
-                      <Send className="h-3.5 w-3.5 mr-1" />
-                      Send Reminder
+                      <UploadIcon className="h-3.5 w-3.5 mr-1" />
+                      Upload
                     </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={onOpenDrawer}
-                    className="h-8 text-xs rounded-lg"
-                    data-testid={`${key}-evidence-manage-btn`}
-                  >
-                    <Eye className="h-3.5 w-3.5 mr-1" />
-                    Manage
-                  </Button>
+                    {/* Send Reminder - replaces Request/Resend buttons */}
+                    {!hasFiles && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={onResend || onRequest}
+                        className="h-8 text-xs rounded-lg text-amber-600 border-amber-200 hover:bg-amber-50"
+                        data-testid={`${key}-send-reminder-btn`}
+                      >
+                        <Send className="h-3.5 w-3.5 mr-1" />
+                        Send Reminder
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={onOpenDrawer}
+                      className="h-8 text-xs rounded-lg"
+                      data-testid={`${key}-evidence-manage-btn`}
+                    >
+                      <Eye className="h-3.5 w-3.5 mr-1" />
+                      Manage
+                    </Button>
+                  </div>
                 </div>
               )}
 

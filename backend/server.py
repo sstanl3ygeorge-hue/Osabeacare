@@ -2903,6 +2903,155 @@ def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, 
         return input_image_bytes  # Return original if can't process
 
 
+def convert_document_to_pdf(input_bytes: bytes, content_type: str, filename: str = "") -> bytes:
+    """
+    Convert various document formats to PDF for stamping.
+    
+    Supported formats:
+    - DOCX (Word documents)
+    - DOC (Legacy Word - limited support)
+    - TXT (Plain text)
+    - RTF (Rich text)
+    - HEIC/HEIF (Apple images)
+    
+    Args:
+        input_bytes: Original document bytes
+        content_type: MIME type of the document
+        filename: Original filename (used to detect format)
+    
+    Returns:
+        PDF bytes, or None if conversion fails
+    """
+    from io import BytesIO
+    import tempfile
+    import subprocess
+    import os
+    
+    content_type = content_type.lower() if content_type else ""
+    filename = filename.lower() if filename else ""
+    
+    try:
+        # DOCX files - Use python-docx + reportlab
+        if "word" in content_type or "docx" in content_type or filename.endswith(".docx"):
+            try:
+                from docx import Document
+                from reportlab.lib.pagesizes import letter
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+                from reportlab.lib.styles import getSampleStyleSheet
+                
+                # Read DOCX
+                doc = Document(BytesIO(input_bytes))
+                
+                # Convert to PDF using reportlab
+                output = BytesIO()
+                pdf_doc = SimpleDocTemplate(output, pagesize=letter)
+                styles = getSampleStyleSheet()
+                story = []
+                
+                for para in doc.paragraphs:
+                    if para.text.strip():
+                        story.append(Paragraph(para.text, styles['Normal']))
+                        story.append(Spacer(1, 6))
+                
+                if story:
+                    pdf_doc.build(story)
+                    return output.getvalue()
+                    
+            except ImportError:
+                logging.warning("python-docx not available for DOCX conversion")
+            except Exception as e:
+                logging.warning(f"DOCX conversion failed: {e}")
+        
+        # TXT files - Simple text to PDF
+        if "text/plain" in content_type or filename.endswith(".txt"):
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+                from reportlab.lib.styles import getSampleStyleSheet
+                
+                text = input_bytes.decode('utf-8', errors='replace')
+                
+                output = BytesIO()
+                pdf_doc = SimpleDocTemplate(output, pagesize=letter)
+                styles = getSampleStyleSheet()
+                story = []
+                
+                for line in text.split('\n'):
+                    if line.strip():
+                        story.append(Paragraph(line, styles['Normal']))
+                    story.append(Spacer(1, 4))
+                
+                if story:
+                    pdf_doc.build(story)
+                    return output.getvalue()
+                    
+            except Exception as e:
+                logging.warning(f"TXT to PDF conversion failed: {e}")
+        
+        # HEIC/HEIF images - Convert to JPEG first, then to PDF
+        if "heic" in content_type or "heif" in content_type or filename.endswith((".heic", ".heif")):
+            try:
+                # Try pillow-heif for HEIC support
+                from pillow_heif import register_heif_opener
+                register_heif_opener()
+                
+                img = PILImage.open(BytesIO(input_bytes))
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                
+                # Convert to PDF
+                output = BytesIO()
+                img.save(output, format='PDF')
+                return output.getvalue()
+                
+            except ImportError:
+                logging.warning("pillow-heif not available for HEIC conversion")
+            except Exception as e:
+                logging.warning(f"HEIC conversion failed: {e}")
+        
+        # Fallback: Try using LibreOffice if available (works for DOC, RTF, etc.)
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.tmp', delete=False) as tmp_in:
+                tmp_in.write(input_bytes)
+                tmp_in_path = tmp_in.name
+            
+            tmp_out_dir = tempfile.mkdtemp()
+            
+            # Try LibreOffice conversion
+            result = subprocess.run([
+                'libreoffice', '--headless', '--convert-to', 'pdf',
+                '--outdir', tmp_out_dir, tmp_in_path
+            ], capture_output=True, timeout=30)
+            
+            if result.returncode == 0:
+                # Find the output PDF
+                for f in os.listdir(tmp_out_dir):
+                    if f.endswith('.pdf'):
+                        with open(os.path.join(tmp_out_dir, f), 'rb') as pdf_file:
+                            pdf_bytes = pdf_file.read()
+                        # Cleanup
+                        os.unlink(tmp_in_path)
+                        import shutil
+                        shutil.rmtree(tmp_out_dir)
+                        return pdf_bytes
+            
+            # Cleanup on failure
+            os.unlink(tmp_in_path)
+            import shutil
+            shutil.rmtree(tmp_out_dir)
+            
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logging.warning(f"LibreOffice conversion not available: {e}")
+        except Exception as e:
+            logging.warning(f"LibreOffice conversion failed: {e}")
+        
+        return None
+        
+    except Exception as e:
+        logging.error(f"Document conversion failed: {e}")
+        return None
+
+
 # ============================================================================
 # REFERENCE INTEGRITY SYSTEM
 # Ensures references match CV OR require documented justification
@@ -23419,6 +23568,18 @@ async def apply_verification_stamp(
                         original_format = "PNG"
                         file_ext = "png"
                     stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+                else:
+                    # UNSUPPORTED FORMAT - Convert to PDF first, then stamp
+                    # Supports: DOCX, DOC, TXT, and other text-based formats
+                    logger.info(f"Attempting to convert unsupported format for stamping: {content_type}")
+                    try:
+                        converted_pdf = convert_document_to_pdf(original_bytes, content_type, file_url)
+                        if converted_pdf:
+                            stamped_bytes = add_verification_stamp_to_pdf(converted_pdf, stamp_data)
+                            file_ext = "pdf"
+                            logger.info(f"Successfully converted and stamped unsupported document")
+                    except Exception as convert_err:
+                        logger.warning(f"Could not convert document for stamping: {convert_err}")
                 
                 if stamped_bytes:
                     # Upload stamped file to storage

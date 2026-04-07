@@ -188,6 +188,93 @@ export default function UploadRequirementCard({
   const checkData = authoritativeCheck || {};
   const hasVerificationProof = checkData.evidence_document_id && checkData.evidence_document;
 
+  // ================================================================
+  // GATED WORKFLOW - 5 E's of Usability Compliant
+  // For RTW and DBS: Evidence → Accept → Check → Proof → Stamp
+  // ================================================================
+  const isRTWOrDBS = key === 'right_to_work' || key === 'dbs';
+  
+  // Count accepted/verified evidence files
+  const acceptedEvidenceCount = activeFiles.filter(f => 
+    f.status === 'accepted' || f.status === 'verified' || f.verified
+  ).length;
+  const hasAcceptedEvidence = acceptedEvidenceCount > 0;
+  
+  // Count stamped evidence files
+  const stampedEvidenceCount = activeFiles.filter(f => f.verification_stamp).length;
+  const allEvidenceStamped = hasFiles && stampedEvidenceCount === activeFiles.length;
+  
+  // Determine current workflow step for RTW/DBS
+  const getWorkflowStep = () => {
+    if (!isRTWOrDBS) return null;
+    
+    // Step 1: Need evidence upload
+    if (!hasFiles) {
+      return { 
+        step: 1, 
+        label: 'Upload Evidence', 
+        description: 'Employee or admin uploads evidence documents',
+        total: 5 
+      };
+    }
+    
+    // Step 2: Need to accept/review evidence
+    if (!hasAcceptedEvidence) {
+      return { 
+        step: 2, 
+        label: 'Review Evidence', 
+        description: 'Accept or reject uploaded evidence',
+        total: 5 
+      };
+    }
+    
+    // Step 3: Need to record check
+    if (!hasCheck) {
+      return { 
+        step: 3, 
+        label: 'Record Check', 
+        description: key === 'right_to_work' 
+          ? 'Perform Home Office right to work check'
+          : 'Record DBS certificate details',
+        total: 5 
+      };
+    }
+    
+    // Step 4: Need verification proof (optional but recommended)
+    if (!hasVerificationProof) {
+      return { 
+        step: 4, 
+        label: 'Upload Proof', 
+        description: key === 'right_to_work'
+          ? 'Upload Home Office check screenshot'
+          : 'Upload DBS Update Service screenshot (if applicable)',
+        total: 5,
+        optional: true
+      };
+    }
+    
+    // Step 5: Need to stamp
+    if (!allEvidenceStamped) {
+      return { 
+        step: 5, 
+        label: 'Confirm & Stamp', 
+        description: 'Apply verification stamps to seal documents',
+        total: 5 
+      };
+    }
+    
+    // Complete!
+    return { 
+      step: 5, 
+      label: 'Complete', 
+      description: 'All verification steps completed',
+      total: 5,
+      complete: true 
+    };
+  };
+  
+  const workflowStep = getWorkflowStep();
+
   // Handle viewing verification proof
   const handleViewProof = () => {
     if (hasVerificationProof && onPreviewFile) {
@@ -296,6 +383,64 @@ export default function UploadRequirementCard({
       /* Actions were duplicated between header and Evidence row. Each row now has its own actions. */
     >
       <div className="space-y-4">
+        {/* ============================================== */}
+        {/* WORKFLOW PROGRESS INDICATOR (RTW & DBS only)  */}
+        {/* Shows current step and gates actions          */}
+        {/* ============================================== */}
+        {isRTWOrDBS && workflowStep && !workflowStep.complete && (
+          <div className="bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200 rounded-xl p-4" data-testid={`${key}-workflow-progress`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-primary text-white flex items-center justify-center text-sm font-bold">
+                  {workflowStep.step}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{workflowStep.label}</p>
+                  <p className="text-xs text-slate-500">{workflowStep.description}</p>
+                </div>
+              </div>
+              <span className="text-xs text-slate-400">Step {workflowStep.step} of {workflowStep.total}</span>
+            </div>
+            
+            {/* Progress Bar */}
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map((step) => (
+                <div
+                  key={step}
+                  className={`h-1.5 flex-1 rounded-full transition-colors ${
+                    step < workflowStep.step ? 'bg-green-500' :
+                    step === workflowStep.step ? 'bg-primary' :
+                    'bg-slate-200'
+                  }`}
+                />
+              ))}
+            </div>
+            
+            {/* Step Labels */}
+            <div className="flex justify-between mt-2 text-[10px] text-slate-400">
+              <span className={workflowStep.step >= 1 ? 'text-slate-600' : ''}>Evidence</span>
+              <span className={workflowStep.step >= 2 ? 'text-slate-600' : ''}>Review</span>
+              <span className={workflowStep.step >= 3 ? 'text-slate-600' : ''}>Check</span>
+              <span className={workflowStep.step >= 4 ? 'text-slate-600' : ''}>Proof</span>
+              <span className={workflowStep.step >= 5 ? 'text-slate-600' : ''}>Stamp</span>
+            </div>
+          </div>
+        )}
+        
+        {/* Complete Badge for RTW/DBS */}
+        {isRTWOrDBS && workflowStep?.complete && (
+          <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 flex items-center gap-3" data-testid={`${key}-workflow-complete`}>
+            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-green-800">Verification Complete</p>
+              <p className="text-xs text-green-600">All documents verified and stamped with Osabea seal</p>
+            </div>
+            <img src="/osabea_logo.png" alt="" className="h-8 w-auto ml-auto opacity-60" />
+          </div>
+        )}
+        
         {/* ============================================== */}
         {/* ROW A: EVIDENCE SECTION                        */}
         {/* ============================================== */}
@@ -1583,89 +1728,120 @@ export default function UploadRequirementCard({
                 </div>
               )}
 
-              {/* Verification Actions */}
+              {/* Verification Actions - GATED BY WORKFLOW STEP */}
               {!isAuditor && (
-                <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
-                  {/* Record Check / Update Check Button - Primary action that includes proof upload */}
-                  {!hasCheck ? (
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => onRecordCheck && onRecordCheck(key)}
-                      className="h-8 text-xs bg-primary hover:bg-primary-hover text-white rounded-lg"
-                      data-testid={`${key}-verification-record-check-btn`}
-                    >
-                      <Shield className="h-3.5 w-3.5 mr-1" />
-                      Record Check
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => onUpdateCheck && onUpdateCheck(key)}
-                      className="h-8 text-xs rounded-lg"
-                      data-testid={`${key}-verification-update-check-btn`}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                      Update Check
-                    </Button>
+                <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
+                  {/* Show workflow gate message if trying to act out of order */}
+                  {isRTWOrDBS && workflowStep && workflowStep.step < 3 && (
+                    <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                      <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span>
+                        {workflowStep.step === 1 
+                          ? 'Upload evidence before recording check'
+                          : 'Accept at least one evidence file first'}
+                      </span>
+                    </div>
                   )}
                   
-                  {/* Manage/View Verification - always available */}
-                  {hasCheck && (
+                  <div className="flex items-center gap-2">
+                    {/* Record Check / Update Check Button */}
+                    {!hasCheck ? (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => onRecordCheck && onRecordCheck(key)}
+                        disabled={isRTWOrDBS && (!hasAcceptedEvidence)}
+                        className={`h-8 text-xs rounded-lg ${
+                          isRTWOrDBS && !hasAcceptedEvidence 
+                            ? 'bg-gray-300 cursor-not-allowed' 
+                            : 'bg-primary hover:bg-primary-hover text-white'
+                        }`}
+                        title={isRTWOrDBS && !hasAcceptedEvidence ? 'Accept evidence first' : 'Record verification check'}
+                        data-testid={`${key}-verification-record-check-btn`}
+                      >
+                        <Shield className="h-3.5 w-3.5 mr-1" />
+                        Record Check
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onUpdateCheck && onUpdateCheck(key)}
+                        className="h-8 text-xs rounded-lg"
+                        data-testid={`${key}-verification-update-check-btn`}
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 mr-1" />
+                        Update Check
+                      </Button>
+                    )}
+                    
+                    {/* Upload Proof Button - Separate from Record Check */}
+                    {hasCheck && !hasVerificationProof && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onUpdateCheck && onUpdateCheck(key)}
+                        className="h-8 text-xs rounded-lg border-blue-200 text-blue-600 hover:bg-blue-50"
+                        data-testid={`${key}-verification-upload-proof-btn`}
+                      >
+                        <UploadIcon className="h-3.5 w-3.5 mr-1" />
+                        Upload Proof
+                      </Button>
+                    )}
+                    
+                    {/* Manage Documents - Combined button for all document management */}
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={onOpenDrawer}
                       className="h-8 text-xs rounded-lg"
-                      data-testid={`${key}-verification-manage-btn`}
+                      data-testid={`${key}-manage-all-btn`}
                     >
                       <Eye className="h-3.5 w-3.5 mr-1" />
-                      View Details
+                      Manage
                     </Button>
-                  )}
-                  
-                  {/* CONFIRM & STAMP ALL - Only shows when:
-                      1. Check is recorded (hasCheck)
-                      2. Check is verified (checkVerified)
-                      3. Evidence files exist but NOT yet stamped
-                      This is the FINAL step that stamps both evidence AND verification proof */}
-                  {hasCheck && checkVerified && hasFiles && !activeFiles.every(f => f.verification_stamp) && (
-                    <Button
-                      size="sm"
-                      variant="default"
-                      disabled={stampingAll}
-                      onClick={() => {
-                        // Open confirmation dialog for stamping all documents
-                        if (window.confirm(
-                          `This will apply verification stamps to:\n\n` +
-                          `• ${activeFiles.filter(f => !f.verification_stamp).length} evidence document(s) → "Original/Copy Verified"\n` +
-                          `• Verification proof → "Online Check Completed"\n\n` +
-                          `Stamps are permanent and cannot be removed.\n\n` +
-                          `Continue?`
-                        )) {
-                          handleStampAll(key, activeFiles.filter(f => !f.verification_stamp));
-                        }
-                      }}
-                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
-                      data-testid={`${key}-confirm-stamp-all-btn`}
-                    >
-                      {stampingAll ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <Stamp className="h-3.5 w-3.5 mr-1" />
-                      )}
-                      {stampingAll ? 'Stamping...' : 'Confirm & Stamp All'}
-                    </Button>
-                  )}
-                  
-                  {/* Show "All Stamped" badge when everything is complete */}
-                  {hasCheck && checkVerified && hasFiles && activeFiles.every(f => f.verification_stamp) && (
-                    <Badge className="bg-emerald-100 text-emerald-700 text-xs flex items-center gap-1 px-2 py-1">
-                      <CheckCircle className="h-3 w-3" />
-                      All Documents Stamped
-                    </Badge>
-                  )}
+                    
+                    {/* CONFIRM & STAMP ALL - Only shows at Step 5 */}
+                    {hasCheck && hasFiles && hasAcceptedEvidence && !activeFiles.every(f => f.verification_stamp) && (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        disabled={stampingAll}
+                        onClick={() => {
+                          // Check if proof is uploaded - warn if not
+                          const confirmMsg = hasVerificationProof
+                            ? `This will apply Osabea verification stamps to:\n\n` +
+                              `• ${activeFiles.filter(f => !f.verification_stamp).length} evidence document(s)\n` +
+                              `• Verification proof\n\n` +
+                              `Stamps are permanent.\n\nContinue?`
+                            : `⚠️ No proof file uploaded!\n\n` +
+                              `It's recommended to upload proof (e.g., Home Office screenshot) before stamping.\n\n` +
+                              `Continue anyway?`;
+                          
+                          if (window.confirm(confirmMsg)) {
+                            handleStampAll(key, activeFiles.filter(f => !f.verification_stamp));
+                          }
+                        }}
+                        className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
+                        data-testid={`${key}-confirm-stamp-all-btn`}
+                      >
+                        {stampingAll ? (
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                        ) : (
+                          <Stamp className="h-3.5 w-3.5 mr-1" />
+                        )}
+                        {stampingAll ? 'Stamping...' : 'Confirm & Stamp'}
+                      </Button>
+                    )}
+                    
+                    {/* Show "Complete" badge when everything is done */}
+                    {hasCheck && hasFiles && activeFiles.every(f => f.verification_stamp) && (
+                      <Badge className="bg-emerald-100 text-emerald-700 text-xs flex items-center gap-1 px-2 py-1">
+                        <CheckCircle className="h-3 w-3" />
+                        Complete
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

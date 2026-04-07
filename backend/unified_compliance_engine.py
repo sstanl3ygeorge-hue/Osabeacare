@@ -183,6 +183,18 @@ def is_document_verified_with_stamp(doc: dict) -> bool:
     verified_flag = doc.get("verified", False)
     stamped_file_url = doc.get("stamped_file_url")
     
+    # Ensure stamp is a string (could be a dict in some cases)
+    if isinstance(stamp, dict):
+        stamp = stamp.get("type", "") or stamp.get("stamp_type", "") or ""
+    if not isinstance(stamp, str):
+        stamp = str(stamp) if stamp else ""
+    
+    # Ensure status is a string
+    if isinstance(status, dict):
+        status = status.get("status", "") or ""
+    if not isinstance(status, str):
+        status = str(status) if status else ""
+    
     # Must have a valid stamp
     valid_stamps = ["original_seen", "copy_verified", "certified_copy", "online_check", "verified"]
     has_valid_stamp = stamp and stamp.lower() not in ["", "not_verified", "pending", "none"]

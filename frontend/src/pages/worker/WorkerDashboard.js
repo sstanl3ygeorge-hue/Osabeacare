@@ -196,6 +196,8 @@ export default function WorkerDashboard() {
   const [uploading, setUploading] = useState(null);
   const [showSignaturePad, setShowSignaturePad] = useState(false);
   const [contractEligibility, setContractEligibility] = useState(null);
+  // Organization settings for dynamic branding
+  const [orgSettings, setOrgSettings] = useState({ organisation_name: 'Osabea Healthcare Solutions' });
   // Document viewer modal state
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerDocument, setViewerDocument] = useState(null);
@@ -232,6 +234,16 @@ export default function WorkerDashboard() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setDashboard(response.data);
+      
+      // Fetch org settings for dynamic branding
+      try {
+        const orgRes = await axios.get(`${API}/org-settings`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setOrgSettings(orgRes.data);
+      } catch (err) {
+        console.warn('Could not fetch org settings:', err);
+      }
       
       // Also check contract eligibility
       const employeeId = response.data?.employee?.id;
@@ -627,7 +639,7 @@ export default function WorkerDashboard() {
       <div className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Osabea Healthcare</h1>
+            <h1 className="text-xl font-bold text-slate-800">{orgSettings.organisation_name || 'Healthcare Portal'}</h1>
             <p className="text-sm text-slate-500">Welcome, {employee.name}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -2004,7 +2016,7 @@ export default function WorkerDashboard() {
 
         {/* Footer */}
         <div className="text-center py-6 text-xs text-slate-400">
-          <p>Osabea Healthcare Solutions - Compliance Portal</p>
+          <p>{orgSettings.organisation_name || 'Healthcare Portal'} - Compliance Portal</p>
           <p>Employee Code: {employee.code}</p>
         </div>
       </div>

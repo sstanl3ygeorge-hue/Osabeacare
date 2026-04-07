@@ -49,6 +49,7 @@ import AdminUsersPage from "./pages/portal/AdminUsersPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
+import { OrgProvider } from "./context/OrgContext";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 
 // Session Timeout Warning (P0: 5 E's Error Tolerant)
@@ -134,10 +135,12 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppRouter />
-        <Toaster position="top-right" richColors />
-        {/* P0 FIX: Session timeout warning for 5 E's Error Tolerance */}
-        <SessionTimeoutWarning />
+        <OrgProvider>
+          <AppRouter />
+          <Toaster position="top-right" richColors />
+          {/* P0 FIX: Session timeout warning for 5 E's Error Tolerance */}
+          <SessionTimeoutWarning />
+        </OrgProvider>
       </AuthProvider>
     </BrowserRouter>
   );

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../../context/AuthContext';
+import { useOrg } from '../../context/OrgContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Progress } from '../../components/ui/progress';
@@ -28,6 +29,7 @@ export default function DashboardPage() {
   const [recurringCompliance, setRecurringCompliance] = useState(null);
   const [trainingSummary, setTrainingSummary] = useState(null);
   const { token } = useAuth();
+  const { orgName } = useOrg();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -71,13 +73,14 @@ export default function DashboardPage() {
 
   // ========== EMPTY STATE: Only show if NO employees AND NO applicants ==========
   const totalPeople = employees.length + applicants.length;
+  
   if (totalPeople === 0) {
     return (
       <div className="space-y-8" data-testid="dashboard-page-empty">
         {/* Header */}
         <div>
           <h1 className="font-heading text-2xl sm:text-3xl font-bold text-text-primary">
-            Welcome to Osabea Healthcare Compliance Portal
+            Welcome to {orgName} Compliance Portal
           </h1>
           <p className="text-text-muted mt-1">
             Get started by adding your first employee or inviting applicants.

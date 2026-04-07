@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useOrg } from '../../context/OrgContext';
 import { InspectionModeProvider, useInspectionMode } from '../../context/InspectionModeContext';
 import { InspectionBanner } from '../ui/inspection-banner';
 import { Button } from '../ui/button';
@@ -81,6 +82,10 @@ export default function PortalLayout() {
   // Inner component that uses inspection mode context
   const PortalContent = () => {
     const { isInspectionMode, enableInspectionMode } = useInspectionMode();
+    const { orgName } = useOrg();
+    
+    // Get first letter for logo
+    const orgInitial = orgName?.charAt(0)?.toUpperCase() || 'O';
     
     return (
     <div className="min-h-screen bg-[#F8FAFA]">
@@ -93,10 +98,10 @@ export default function PortalLayout() {
           {/* Logo */}
           <div className="flex items-center gap-3 px-6 py-5 border-b border-[#E4E8EB]">
             <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-              <span className="text-white font-heading font-bold text-xl">O</span>
+              <span className="text-white font-heading font-bold text-xl">{orgInitial}</span>
             </div>
             <div>
-              <span className="font-heading font-semibold text-text-primary">Osabea Healthcare</span>
+              <span className="font-heading font-semibold text-text-primary">{orgName}</span>
               <p className="text-xs text-text-muted">Compliance Portal</p>
             </div>
           </div>
@@ -134,9 +139,9 @@ export default function PortalLayout() {
               <SheetContent side="left" className="w-64 p-0 bg-white">
                 <div className="flex items-center gap-3 px-6 py-5 border-b border-[#E4E8EB]">
                   <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
-                    <span className="text-white font-heading font-bold text-xl">O</span>
+                    <span className="text-white font-heading font-bold text-xl">{orgInitial}</span>
                   </div>
-                  <span className="font-heading font-semibold text-text-primary">Osabea Healthcare</span>
+                  <span className="font-heading font-semibold text-text-primary">{orgName}</span>
                 </div>
                 <NavLinks onClick={() => setSidebarOpen(false)} />
               </SheetContent>

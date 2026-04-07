@@ -30,6 +30,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
 
+### UI/UX Cleanup & Dynamic Data (2026-04-07) ✅ VERIFIED
+- **Problem Solved**: Hardcoded organization names across the portal, inaccurate compliance progress percentages
+- **Fixes**:
+  - Created `OrgContext.js` for dynamic organization name from `/api/org-settings`
+  - Updated `PortalLayout.js`, `DashboardPage.js`, `WorkerDashboard.js` to use dynamic org name
+  - Fixed `unified_compliance_engine.py` - `verification_stamp` dict type bug causing 0% progress
+- **Result**: Organization name is now configurable, compliance progress shows accurate percentages
+- **Testing**: Build successful, API verification confirmed correct percentages
+
 ### Comprehensive Automated Expiry Reminder System (2026-04-07) ✅ VERIFIED
 - **Backend**: `server.py` - `comprehensive_expiry_reminder_job()`, `send_document_expiry_reminder_email()`, `get_expiring_documents()`
 - **Frontend**: `DocumentExpiryAlerts.js` (NEW), `TrainingExpiryAlerts.js` (existing)

@@ -9080,6 +9080,106 @@ async def worker_upload_document(
             logger.warning(f"AI training extraction failed for worker upload: {e}")
             # Continue without extraction - admin can manually process
     
+    # SPECIAL HANDLING: If this is a CV upload, trigger AI extraction for employment history
+    if requirement_id in ["cv", "resume", "curriculum_vitae"] or "cv" in requirement_id.lower():
+        try:
+            logger.info(f"Processing CV upload for employee {employee_id}")
+            
+            # Extract employment history from CV
+            cv_extraction = await extract_employment_history_from_cv(contents, file.filename, employee_id)
+            
+            if cv_extraction.get("status") == "success":
+                employment_history = cv_extraction.get("employment_history", [])
+                gaps = cv_extraction.get("gaps_detected", [])
+                education = cv_extraction.get("education", [])
+                skills = cv_extraction.get("skills", [])
+                
+                logger.info(f"CV extraction found {len(employment_history)} jobs, {len(gaps)} gaps")
+                
+                # Store extracted data in employee profile
+                await db.employees.update_one(
+                    {"id": employee_id},
+                    {"$set": {
+                        "cv_extracted_employment_history": employment_history,
+                        "cv_extracted_education": education,
+                        "cv_extracted_skills": skills,
+                        "cv_gaps_detected": [
+                            {
+                                "gap_id": f"gap_{i}",
+                                "start_date": g.get("start_date"),
+                                "end_date": g.get("end_date"),
+                                "duration_days": g.get("duration_days"),
+                                "message": g.get("message"),
+                                "explanation": None,
+                                "verified": False
+                            }
+                            for i, g in enumerate(gaps) if g.get("needs_explanation")
+                        ],
+                        "cv_gaps_all_explained": len([g for g in gaps if g.get("needs_explanation")]) == 0,
+                        "cv_document_id": doc_id,
+                        "cv_extracted_at": now,
+                        "updated_at": now
+                    }}
+                )
+                
+                # Pre-populate the 10-Year Employment History form if not already submitted
+                existing_form = await db.form_submissions.find_one({
+                    "employee_id": employee_id,
+                    "form_type": "employment_history_10yr",
+                    "status": {"$in": ["submitted", "verified"]}
+                })
+                
+                if not existing_form and employment_history:
+                    # Save as form progress so worker can review and complete gaps
+                    await db.form_progress.update_one(
+                        {"employee_id": employee_id, "form_id": "employment_history_10yr"},
+                        {"$set": {
+                            "employee_id": employee_id,
+                            "form_id": "employment_history_10yr",
+                            "data": {
+                                "employment_entries": employment_history,
+                                "gap_explanations": [],  # Worker needs to fill these
+                                "auto_populated_from_cv": True,
+                                "cv_document_id": doc_id
+                            },
+                            "last_saved": now,
+                            "auto_populated": True
+                        }},
+                        upsert=True
+                    )
+                    logger.info(f"Pre-populated 10-Year Employment History form with {len(employment_history)} jobs")
+                
+                # Update document record with extraction info
+                await db.employee_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "extraction_status": "completed",
+                        "extraction_type": "cv_employment",
+                        "jobs_extracted": len(employment_history),
+                        "gaps_detected": len(gaps),
+                        "extraction_date": now
+                    }}
+                )
+                
+                return {
+                    "success": True,
+                    "document_id": doc_id,
+                    "requirement_id": requirement_id,
+                    "file_name": file.filename,
+                    "cv_extraction": {
+                        "extracted": True,
+                        "jobs_found": len(employment_history),
+                        "education_found": len(education),
+                        "skills_found": len(skills),
+                        "gaps_detected": len([g for g in gaps if g.get("needs_explanation")]),
+                        "form_pre_populated": not existing_form and len(employment_history) > 0
+                    },
+                    "message": f"CV uploaded. AI extracted {len(employment_history)} jobs. {'Found ' + str(len([g for g in gaps if g.get('needs_explanation')])) + ' gaps that need explanation.' if gaps else 'No gaps detected.'}"
+                }
+        except Exception as e:
+            logger.warning(f"CV extraction failed for worker upload: {e}")
+            # Continue without extraction - admin can manually review
+    
     return {
         "success": True,
         "document_id": doc_id,
@@ -9671,19 +9771,149 @@ async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
 
 
 # ============================================================================
+# CV EXTRACTION SERVICE - Auto-populate Employment History
+# ============================================================================
+
+async def extract_employment_history_from_cv(file_content: bytes, filename: str, employee_id: str) -> dict:
+    """
+    Extract employment history from a CV/resume using AI.
+    Returns structured employment history that can populate the 10-Year Employment History form.
+    """
+    import base64
+    
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContent
+        
+        # Prepare file for AI
+        file_base64 = base64.b64encode(file_content).decode('utf-8')
+        file_ext = filename.split('.')[-1].lower() if '.' in filename else 'pdf'
+        
+        if file_ext == 'pdf':
+            content_type = 'application/pdf'
+        elif file_ext in ['doc', 'docx']:
+            content_type = 'application/msword'
+        elif file_ext in ['png', 'jpg', 'jpeg']:
+            content_type = f'image/{file_ext.replace("jpg", "jpeg")}'
+        else:
+            content_type = 'application/octet-stream'
+        
+        prompt = """Analyze this CV/resume and extract the COMPLETE employment history.
+
+For EACH job/position found, extract:
+1. employer_name: Company/organization name
+2. job_title: Position/role title
+3. start_date: Start date (YYYY-MM-DD format, use YYYY-01-01 if only year known)
+4. end_date: End date (YYYY-MM-DD format, null if current job)
+5. is_current: true if this is their current job
+6. location: City/location if mentioned
+7. duties: Key responsibilities (brief summary)
+8. reason_for_leaving: If mentioned
+
+Also extract:
+- education: List of qualifications with institution, qualification name, year
+- skills: List of skills mentioned
+- full_name: The person's name from the CV
+
+Return JSON format:
+{
+    "full_name": "Person's Name",
+    "employment_history": [
+        {
+            "employer_name": "Company Name",
+            "job_title": "Position",
+            "start_date": "YYYY-MM-DD",
+            "end_date": "YYYY-MM-DD or null",
+            "is_current": false,
+            "location": "City",
+            "duties": "Key responsibilities...",
+            "reason_for_leaving": "If mentioned"
+        }
+    ],
+    "education": [
+        {
+            "institution": "School/University",
+            "qualification": "Degree/Certificate",
+            "year_completed": "YYYY"
+        }
+    ],
+    "skills": ["skill1", "skill2"],
+    "total_jobs_found": 5
+}
+
+IMPORTANT: 
+- Extract ALL jobs, even part-time or short-term
+- Use approximate dates if exact dates not shown
+- List jobs in chronological order (oldest first)
+"""
+        
+        chat = LlmChat(
+            api_key=EMERGENT_KEY,
+            session_id=str(uuid.uuid4()),
+            system_message="You are a CV parser. Extract employment history accurately and completely."
+        )
+        
+        user_msg = UserMessage(
+            text=prompt,
+            file_contents=[FileContent(content_type=content_type, file_content_base64=file_base64)]
+        )
+        
+        response = await chat.send_message(user_msg)
+        
+        # Parse JSON from response
+        import json
+        import re
+        
+        json_match = re.search(r'\{[\s\S]*\}', response)
+        if not json_match:
+            return {"status": "error", "message": "Could not parse CV extraction response"}
+        
+        extraction_data = json.loads(json_match.group())
+        
+        # Calculate 10-year boundary for gap detection
+        ten_years_ago = (datetime.now(timezone.utc) - timedelta(days=365*10)).strftime('%Y-%m-%d')
+        
+        # Detect gaps in employment history
+        employment_history = extraction_data.get("employment_history", [])
+        gaps = _detect_10yr_employment_gaps(employment_history, ten_years_ago)
+        
+        return {
+            "status": "success",
+            "full_name": extraction_data.get("full_name"),
+            "employment_history": employment_history,
+            "education": extraction_data.get("education", []),
+            "skills": extraction_data.get("skills", []),
+            "total_jobs_found": extraction_data.get("total_jobs_found", len(employment_history)),
+            "gaps_detected": gaps,
+            "ten_year_start": ten_years_ago
+        }
+        
+    except Exception as e:
+        logger.error(f"CV extraction failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================================
 # 10-YEAR EMPLOYMENT HISTORY FORM (CQC/NHS Requirement)
 # ============================================================================
 
 async def get_employment_history_form_data(employee_id: str, worker: dict):
     """
     Get employment history form with 10-year requirement and gap detection.
-    Pre-populates with any existing employment history from profile.
+    Pre-populates with any existing employment history from profile OR CV extraction.
     """
     from datetime import datetime, timedelta
     
     # Get employee profile
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    
+    # Priority: 1) CV-extracted history 2) Profile history 3) Empty
+    cv_extracted_history = employee.get("cv_extracted_employment_history", []) if employee else []
     existing_history = employee.get("employment_history", []) if employee else []
+    cv_gaps = employee.get("cv_gaps_detected", []) if employee else []
+    
+    # Use CV-extracted if available, otherwise use existing profile history
+    employment_history_source = cv_extracted_history if cv_extracted_history else existing_history
+    data_source = "cv" if cv_extracted_history else ("profile" if existing_history else "none")
     
     # Check if already submitted
     submission = await db.form_submissions.find_one({
@@ -9709,8 +9939,11 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
     # Calculate 10-year boundary
     ten_years_ago = (datetime.now() - timedelta(days=365*10)).strftime('%Y-%m-%d')
     
-    # Detect gaps in existing history
-    gaps = _detect_10yr_employment_gaps(existing_history, ten_years_ago)
+    # Detect gaps - use CV gaps if available, otherwise calculate
+    if cv_gaps:
+        gaps = cv_gaps
+    else:
+        gaps = _detect_10yr_employment_gaps(employment_history_source, ten_years_ago)
     
     form_definition = {
         "id": "employment_history_10yr",
@@ -9784,8 +10017,8 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
     
     # Merge existing history with saved progress
     merged_data = {}
-    if existing_history:
-        merged_data["employment_entries"] = existing_history
+    if employment_history_source:
+        merged_data["employment_entries"] = employment_history_source
     if progress:
         merged_data.update(progress.get("data", {}))
     
@@ -9797,7 +10030,11 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
         "last_saved": progress.get("last_saved") if progress else None,
         "can_edit": True,
         "detected_gaps": gaps,
-        "ten_year_start": ten_years_ago
+        "gaps_needing_explanation": len([g for g in gaps if g.get("needs_explanation")]),
+        "ten_year_start": ten_years_ago,
+        "data_source": data_source,
+        "auto_populated_from_cv": data_source == "cv",
+        "cv_document_id": employee.get("cv_document_id") if employee else None
     }
 
 
@@ -9880,6 +10117,147 @@ def _detect_10yr_employment_gaps(employment_history: list, ten_year_start: str) 
     
     return gaps
 
+
+# ============================================================================
+# CV EXTRACTION STATUS & GAPS ENDPOINT
+# ============================================================================
+
+@api_router.get("/worker/cv-extraction-status")
+async def get_worker_cv_extraction_status(worker: dict = Depends(get_current_worker)):
+    """
+    Get status of CV extraction including employment history and detected gaps.
+    Shows worker what was extracted and what gaps need explanation.
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        return {
+            "has_cv": False,
+            "extraction_status": "no_cv_uploaded"
+        }
+    
+    cv_document_id = employee.get("cv_document_id")
+    cv_extracted_history = employee.get("cv_extracted_employment_history", [])
+    cv_gaps = employee.get("cv_gaps_detected", [])
+    cv_education = employee.get("cv_extracted_education", [])
+    cv_skills = employee.get("cv_extracted_skills", [])
+    cv_extracted_at = employee.get("cv_extracted_at")
+    
+    if not cv_document_id:
+        return {
+            "has_cv": False,
+            "extraction_status": "no_cv_uploaded"
+        }
+    
+    # Get CV document info
+    cv_doc = await db.employee_documents.find_one({"id": cv_document_id}, {"_id": 0})
+    
+    # Count gaps needing explanation
+    unexplained_gaps = [g for g in cv_gaps if not g.get("explanation") and g.get("needs_explanation", True)]
+    
+    return {
+        "has_cv": True,
+        "extraction_status": "completed" if cv_extracted_history else "pending",
+        "cv_document": {
+            "id": cv_document_id,
+            "file_name": cv_doc.get("file_name") if cv_doc else None,
+            "file_url": cv_doc.get("file_url") if cv_doc else None,
+            "uploaded_at": cv_doc.get("uploaded_at") if cv_doc else None
+        },
+        "extracted_at": cv_extracted_at,
+        "employment_history": {
+            "jobs_found": len(cv_extracted_history),
+            "entries": cv_extracted_history
+        },
+        "education": cv_education,
+        "skills": cv_skills,
+        "gaps": {
+            "total": len(cv_gaps),
+            "unexplained": len(unexplained_gaps),
+            "all_explained": len(unexplained_gaps) == 0,
+            "entries": cv_gaps
+        },
+        "ten_year_form_status": await get_10yr_form_status(employee_id)
+    }
+
+
+async def get_10yr_form_status(employee_id: str) -> dict:
+    """Check status of 10-Year Employment History form"""
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    if submission:
+        return {
+            "status": submission.get("status"),
+            "submitted_at": submission.get("submitted_at"),
+            "verified": submission.get("status") == "verified"
+        }
+    
+    progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    return {
+        "status": "in_progress" if progress else "not_started",
+        "auto_populated": progress.get("auto_populated") if progress else False,
+        "submitted_at": None,
+        "verified": False
+    }
+
+
+@api_router.post("/worker/cv-gaps/{gap_id}/explain")
+async def explain_cv_gap(
+    gap_id: str,
+    explanation_data: dict,
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Worker provides explanation for a detected employment gap.
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    cv_gaps = employee.get("cv_gaps_detected", [])
+    
+    # Find and update the gap
+    gap_found = False
+    for gap in cv_gaps:
+        if gap.get("gap_id") == gap_id:
+            gap["explanation"] = explanation_data.get("explanation")
+            gap["gap_type"] = explanation_data.get("gap_type")  # education, travel, caring, etc.
+            gap["verified"] = False  # Admin needs to verify
+            gap["explained_at"] = datetime.now(timezone.utc).isoformat()
+            gap_found = True
+            break
+    
+    if not gap_found:
+        raise HTTPException(status_code=404, detail="Gap not found")
+    
+    # Update employee record
+    unexplained = [g for g in cv_gaps if not g.get("explanation")]
+    
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "cv_gaps_detected": cv_gaps,
+            "cv_gaps_all_explained": len(unexplained) == 0,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    return {
+        "success": True,
+        "gap_id": gap_id,
+        "all_gaps_explained": len(unexplained) == 0,
+        "remaining_unexplained": len(unexplained)
+    }
 
 
 @api_router.get("/worker/forms/{form_id}")

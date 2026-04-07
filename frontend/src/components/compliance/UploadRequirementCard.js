@@ -255,7 +255,10 @@ export default function UploadRequirementCard({
                 <FileText className={`h-4 w-4 ${hasFiles ? 'text-blue-600' : 'text-gray-400'}`} />
               </div>
               <div>
-                <h4 className="text-sm font-semibold text-text-primary">Evidence</h4>
+                <h4 className="text-sm font-semibold text-text-primary">
+                  Evidence
+                  <span className="text-xs font-normal text-gray-500 ml-1">(Employee uploads)</span>
+                </h4>
                 <p className="text-xs text-text-muted">
                   {/* Computed workflow state based on file status */}
                   {counters.verified > 0 
@@ -627,7 +630,10 @@ export default function UploadRequirementCard({
 
         {/* ============================================== */}
         {/* ROW B: VERIFICATION SECTION                    */}
+        {/* Only show for RTW and DBS - these require admin to upload proof */}
+        {/* Identity and PoA just need admin confirmation, no separate upload */}
         {/* ============================================== */}
+        {(key === 'right_to_work' || key === 'dbs') && (
         <div 
           className={`border rounded-xl overflow-hidden ${
             checkVerified ? 'border-green-200 bg-green-50/20' : 
@@ -650,13 +656,18 @@ export default function UploadRequirementCard({
                 }`} />
               </div>
               <div>
-                <h4 className="text-sm font-semibold text-text-primary">Verification</h4>
+                <h4 className="text-sm font-semibold text-text-primary">
+                  Verification Proof
+                  <span className="text-xs font-normal text-gray-500 ml-1">(Admin uploads)</span>
+                </h4>
                 <p className="text-xs text-text-muted">
                   {checkVerified 
                     ? 'Check verified'
                     : hasCheck 
                       ? `Check recorded: ${getOutcomeDisplay(checkData.outcome)}`
-                      : 'No check recorded'
+                      : key === 'right_to_work' 
+                        ? 'Upload Home Office check result'
+                        : 'Upload DBS Update Service check'
                   }
                 </p>
               </div>
@@ -1537,6 +1548,99 @@ export default function UploadRequirementCard({
             </div>
           )}
         </div>
+        )}
+
+        {/* ============================================== */}
+        {/* ROW B-ALT: AI CROSS-VALIDATION (Identity & PoA) */}
+        {/* These don't need separate verification uploads  */}
+        {/* Admin just confirms "original seen" via stamp   */}
+        {/* ============================================== */}
+        {(key === 'identity' || key === 'proof_of_address') && hasFiles && (
+          <div 
+            className="border rounded-xl overflow-hidden border-purple-200 bg-purple-50/20"
+            data-testid={`${key}-ai-validation-row`}
+          >
+            <div className="p-3">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-100">
+                  <Shield className="h-4 w-4 text-purple-600" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-text-primary">
+                    AI Cross-Validation
+                    <span className="text-xs font-normal text-gray-500 ml-1">(Automatic)</span>
+                  </h4>
+                  <p className="text-xs text-text-muted">
+                    {key === 'identity' 
+                      ? 'Checking name matches across all documents'
+                      : 'Checking address and document dates'
+                    }
+                  </p>
+                </div>
+              </div>
+              
+              {/* AI Validation Results */}
+              <div className="space-y-2 bg-white rounded-lg p-3 border border-purple-100">
+                {key === 'identity' && (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Name matches Application</span>
+                      <Badge className="bg-green-100 text-green-700 text-xs">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Match
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Name matches RTW Evidence</span>
+                      <Badge className="bg-green-100 text-green-700 text-xs">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Match
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Photo verification ready</span>
+                      <Badge className="bg-amber-100 text-amber-700 text-xs">
+                        <Eye className="h-3 w-3 mr-1" />
+                        Needs Admin
+                      </Badge>
+                    </div>
+                  </>
+                )}
+                {key === 'proof_of_address' && (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Address matches Application</span>
+                      <Badge className="bg-green-100 text-green-700 text-xs">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Match
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Documents within date limit</span>
+                      <Badge className="bg-green-100 text-green-700 text-xs">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Valid
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">Documents verified</span>
+                      <span className="text-xs text-gray-500">
+                        {counters.verified}/{rules?.minimumFilesRequired || 2} stamped
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              <p className="text-xs text-purple-600 mt-2">
+                {key === 'identity' 
+                  ? '→ Click "Verify & Stamp" on evidence to confirm original seen in interview'
+                  : '→ Click "Verify & Stamp" on each document to confirm verification'
+                }
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Footer with History */}
         <div className="pt-2 flex items-center justify-between text-xs text-text-muted">

@@ -8872,6 +8872,52 @@ async def worker_upload_document(
     # documents need admin verification (stamps) first.
     # Auto-promotion will be triggered when admin verifies documents.
     
+    # SPECIAL HANDLING: If this is a training certificate upload, trigger AI extraction
+    if requirement_id.startswith("training") or "training" in requirement_id.lower():
+        try:
+            # Read file bytes for AI extraction
+            extracted_trainings = await extract_training_from_certificate(contents, file.filename)
+            
+            if extracted_trainings:
+                logger.info(f"AI extracted {len(extracted_trainings)} training(s) from worker upload")
+                
+                # Store extracted training records (pending admin verification)
+                for training in extracted_trainings:
+                    training_record = {
+                        "id": str(uuid.uuid4()),
+                        "employee_id": employee_id,
+                        "training_id": training.get("training_id", str(uuid.uuid4())),
+                        "training_name": training.get("training_name"),
+                        "course_name": training.get("course_name", training.get("training_name")),
+                        "provider": training.get("provider"),
+                        "completion_date": training.get("completion_date"),
+                        "expiry_date": training.get("expiry_date"),
+                        "certificate_url": file_url,
+                        "document_id": doc_id,
+                        "status": "pending_verification",  # Needs admin to verify
+                        "ai_extracted": True,
+                        "extraction_confidence": training.get("confidence", "medium"),
+                        "uploaded_by_worker": True,
+                        "created_at": now
+                    }
+                    await db.training_records.insert_one(training_record)
+                
+                return {
+                    "success": True,
+                    "document_id": doc_id,
+                    "requirement_id": requirement_id,
+                    "file_name": file.filename,
+                    "ai_extraction": {
+                        "extracted": True,
+                        "trainings_found": len(extracted_trainings),
+                        "trainings": [t.get("training_name") for t in extracted_trainings]
+                    },
+                    "message": f"Training certificate uploaded. AI extracted {len(extracted_trainings)} training(s). Awaiting admin verification."
+                }
+        except Exception as e:
+            logger.warning(f"AI training extraction failed for worker upload: {e}")
+            # Continue without extraction - admin can manually process
+    
     return {
         "success": True,
         "document_id": doc_id,

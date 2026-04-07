@@ -1610,7 +1610,7 @@ export default function UploadRequirementCard({
                       2. Check is verified (checkVerified)
                       3. Evidence files exist but NOT yet stamped
                       This is the FINAL step that stamps both evidence AND verification proof */}
-                  {hasCheck && checkVerified && hasFiles && !files.every(f => f.verification_stamp) && (
+                  {hasCheck && checkVerified && hasFiles && !activeFiles.every(f => f.verification_stamp) && (
                     <Button
                       size="sm"
                       variant="default"
@@ -1619,12 +1619,12 @@ export default function UploadRequirementCard({
                         // Open confirmation dialog for stamping all documents
                         if (window.confirm(
                           `This will apply verification stamps to:\n\n` +
-                          `• ${files.filter(f => !f.verification_stamp).length} evidence document(s) → "Original/Copy Verified"\n` +
+                          `• ${activeFiles.filter(f => !f.verification_stamp).length} evidence document(s) → "Original/Copy Verified"\n` +
                           `• Verification proof → "Online Check Completed"\n\n` +
                           `Stamps are permanent and cannot be removed.\n\n` +
                           `Continue?`
                         )) {
-                          handleStampAll(key, files.filter(f => !f.verification_stamp));
+                          handleStampAll(key, activeFiles.filter(f => !f.verification_stamp));
                         }
                       }}
                       className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
@@ -1640,7 +1640,7 @@ export default function UploadRequirementCard({
                   )}
                   
                   {/* Show "All Stamped" badge when everything is complete */}
-                  {hasCheck && checkVerified && hasFiles && files.every(f => f.verification_stamp) && (
+                  {hasCheck && checkVerified && hasFiles && activeFiles.every(f => f.verification_stamp) && (
                     <Badge className="bg-emerald-100 text-emerald-700 text-xs flex items-center gap-1 px-2 py-1">
                       <CheckCircle className="h-3 w-3" />
                       All Documents Stamped

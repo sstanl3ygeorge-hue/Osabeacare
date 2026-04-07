@@ -10134,7 +10134,8 @@ async def get_worker_cv_extraction_status(worker: dict = Depends(get_current_wor
     if not employee:
         return {
             "has_cv": False,
-            "extraction_status": "no_cv_uploaded"
+            "extraction_status": "no_cv_uploaded",
+            "needs_verification": False
         }
     
     cv_document_id = employee.get("cv_document_id")
@@ -10143,22 +10144,32 @@ async def get_worker_cv_extraction_status(worker: dict = Depends(get_current_wor
     cv_education = employee.get("cv_extracted_education", [])
     cv_skills = employee.get("cv_extracted_skills", [])
     cv_extracted_at = employee.get("cv_extracted_at")
+    cv_verified = employee.get("cv_extraction_verified", False)
+    cv_overlaps = employee.get("cv_overlaps_detected", [])
     
     if not cv_document_id:
         return {
             "has_cv": False,
-            "extraction_status": "no_cv_uploaded"
+            "extraction_status": "no_cv_uploaded",
+            "needs_verification": False
         }
     
     # Get CV document info
     cv_doc = await db.employee_documents.find_one({"id": cv_document_id}, {"_id": 0})
+    
+    # Check if extraction is pending verification
+    cv_extraction = cv_doc.get("cv_extraction") if cv_doc else None
+    needs_verification = cv_extraction is not None and not cv_verified
     
     # Count gaps needing explanation
     unexplained_gaps = [g for g in cv_gaps if not g.get("explanation") and g.get("needs_explanation", True)]
     
     return {
         "has_cv": True,
-        "extraction_status": "completed" if cv_extracted_history else "pending",
+        "extraction_status": "verified" if cv_verified else ("pending_verification" if cv_extraction else "pending"),
+        "needs_verification": needs_verification,
+        "verified": cv_verified,
+        "verified_at": employee.get("cv_extraction_verified_at"),
         "cv_document": {
             "id": cv_document_id,
             "file_name": cv_doc.get("file_name") if cv_doc else None,
@@ -10177,6 +10188,10 @@ async def get_worker_cv_extraction_status(worker: dict = Depends(get_current_wor
             "unexplained": len(unexplained_gaps),
             "all_explained": len(unexplained_gaps) == 0,
             "entries": cv_gaps
+        },
+        "overlaps": {
+            "total": len(cv_overlaps),
+            "entries": cv_overlaps
         },
         "ten_year_form_status": await get_10yr_form_status(employee_id)
     }
@@ -10257,6 +10272,237 @@ async def explain_cv_gap(
         "gap_id": gap_id,
         "all_gaps_explained": len(unexplained) == 0,
         "remaining_unexplained": len(unexplained)
+    }
+
+
+# ============================================================================
+# CV EXTRACTION VERIFICATION - Worker confirms AI extraction is accurate
+# ============================================================================
+
+def detect_employment_date_overlaps(employment_history: list) -> list:
+    """
+    Detect if any employment dates overlap (working 2 jobs at same time).
+    Returns list of overlapping entries that need explanation.
+    """
+    from datetime import datetime
+    
+    overlaps = []
+    
+    if not employment_history or len(employment_history) < 2:
+        return overlaps
+    
+    # Parse dates for each entry
+    entries_with_dates = []
+    for i, entry in enumerate(employment_history):
+        try:
+            start_str = entry.get("start_date", "")
+            end_str = entry.get("end_date", "")
+            is_current = entry.get("is_current", False)
+            
+            if start_str:
+                start = datetime.strptime(start_str[:10], "%Y-%m-%d")
+                end = datetime.now() if is_current or not end_str else datetime.strptime(end_str[:10], "%Y-%m-%d")
+                entries_with_dates.append({
+                    "index": i,
+                    "employer": entry.get("employer_name", "Unknown"),
+                    "position": entry.get("job_title", ""),
+                    "start": start,
+                    "end": end,
+                    "is_current": is_current
+                })
+        except:
+            continue
+    
+    # Compare all pairs
+    for i, entry1 in enumerate(entries_with_dates):
+        for entry2 in entries_with_dates[i+1:]:
+            # Check for overlap
+            if entry1["start"] <= entry2["end"] and entry2["start"] <= entry1["end"]:
+                overlap_start = max(entry1["start"], entry2["start"])
+                overlap_end = min(entry1["end"], entry2["end"])
+                overlap_days = (overlap_end - overlap_start).days
+                
+                if overlap_days > 7:  # More than a week overlap
+                    overlaps.append({
+                        "job1": {
+                            "employer": entry1["employer"],
+                            "position": entry1["position"],
+                            "dates": f"{entry1['start'].strftime('%Y-%m-%d')} to {entry1['end'].strftime('%Y-%m-%d')}"
+                        },
+                        "job2": {
+                            "employer": entry2["employer"],
+                            "position": entry2["position"],
+                            "dates": f"{entry2['start'].strftime('%Y-%m-%d')} to {entry2['end'].strftime('%Y-%m-%d')}"
+                        },
+                        "overlap_days": overlap_days,
+                        "overlap_period": f"{overlap_start.strftime('%Y-%m-%d')} to {overlap_end.strftime('%Y-%m-%d')}",
+                        "needs_explanation": True,
+                        "message": f"Overlap of {overlap_days} days between {entry1['employer']} and {entry2['employer']}"
+                    })
+    
+    return overlaps
+
+
+@api_router.get("/worker/cv-extraction-preview")
+async def get_cv_extraction_preview(worker: dict = Depends(get_current_worker)):
+    """
+    Get CV extraction preview for worker verification.
+    Worker must confirm this data before it's saved to their profile.
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Check if extraction is pending verification
+    cv_document_id = employee.get("cv_document_id")
+    if not cv_document_id:
+        return {"has_pending_verification": False, "message": "No CV uploaded"}
+    
+    cv_doc = await db.employee_documents.find_one({"id": cv_document_id}, {"_id": 0})
+    if not cv_doc:
+        return {"has_pending_verification": False, "message": "CV document not found"}
+    
+    extraction = cv_doc.get("cv_extraction") or {}
+    
+    # Check if already verified
+    if employee.get("cv_extraction_verified"):
+        return {
+            "has_pending_verification": False,
+            "already_verified": True,
+            "verified_at": employee.get("cv_extraction_verified_at")
+        }
+    
+    employment_history = extraction.get("employment_history", [])
+    
+    # Detect gaps and overlaps
+    ten_years_ago = (datetime.now(timezone.utc) - timedelta(days=365*10)).strftime('%Y-%m-%d')
+    gaps = _detect_10yr_employment_gaps(employment_history, ten_years_ago)
+    overlaps = detect_employment_date_overlaps(employment_history)
+    
+    return {
+        "has_pending_verification": True,
+        "cv_document": {
+            "id": cv_document_id,
+            "file_name": cv_doc.get("file_name"),
+            "file_url": cv_doc.get("file_url"),
+            "uploaded_at": cv_doc.get("uploaded_at")
+        },
+        "extraction_preview": {
+            "full_name": extraction.get("full_name"),
+            "employment_history": employment_history,
+            "education": extraction.get("education", []),
+            "skills": extraction.get("skills", []),
+            "jobs_found": len(employment_history),
+            "extracted_at": extraction.get("extracted_at")
+        },
+        "validation": {
+            "gaps_detected": len([g for g in gaps if g.get("needs_explanation")]),
+            "gaps": gaps,
+            "overlaps_detected": len(overlaps),
+            "overlaps": overlaps,
+            "has_issues": len(gaps) > 0 or len(overlaps) > 0
+        },
+        "instructions": "Please review this information extracted from your CV. You can edit any incorrect data before confirming."
+    }
+
+
+class CVExtractionVerification(BaseModel):
+    employment_history: list
+    education: Optional[list] = []
+    skills: Optional[list] = []
+    confirm_accurate: bool
+
+
+@api_router.post("/worker/cv-extraction-verify")
+async def verify_cv_extraction(
+    verification: CVExtractionVerification,
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Worker confirms (and optionally edits) the CV extraction data.
+    This is required before the data is used in the 10-Year Employment History form.
+    """
+    employee_id = worker.get("employee_id")
+    
+    if not verification.confirm_accurate:
+        raise HTTPException(status_code=400, detail="You must confirm the information is accurate")
+    
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Detect gaps and overlaps on the verified data
+    ten_years_ago = (datetime.now(timezone.utc) - timedelta(days=365*10)).strftime('%Y-%m-%d')
+    gaps = _detect_10yr_employment_gaps(verification.employment_history, ten_years_ago)
+    overlaps = detect_employment_date_overlaps(verification.employment_history)
+    
+    # Store verified extraction data
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "cv_extracted_employment_history": verification.employment_history,
+            "cv_extracted_education": verification.education,
+            "cv_extracted_skills": verification.skills,
+            "cv_extraction_verified": True,
+            "cv_extraction_verified_at": now,
+            "cv_gaps_detected": [
+                {
+                    "gap_id": f"gap_{i}",
+                    "start_date": g.get("start_date"),
+                    "end_date": g.get("end_date"),
+                    "duration_days": g.get("duration_days"),
+                    "message": g.get("message"),
+                    "explanation": None,
+                    "verified": False
+                }
+                for i, g in enumerate(gaps) if g.get("needs_explanation")
+            ],
+            "cv_overlaps_detected": overlaps,
+            "cv_gaps_all_explained": len([g for g in gaps if g.get("needs_explanation")]) == 0,
+            "updated_at": now
+        }}
+    )
+    
+    # Pre-populate the 10-Year Employment History form
+    existing_form = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "employment_history_10yr",
+        "status": {"$in": ["submitted", "verified"]}
+    })
+    
+    if not existing_form and verification.employment_history:
+        await db.form_progress.update_one(
+            {"employee_id": employee_id, "form_id": "employment_history_10yr"},
+            {"$set": {
+                "employee_id": employee_id,
+                "form_id": "employment_history_10yr",
+                "data": {
+                    "employment_entries": verification.employment_history,
+                    "gap_explanations": [],
+                    "auto_populated_from_cv": True,
+                    "cv_verified_by_worker": True
+                },
+                "last_saved": now,
+                "auto_populated": True
+            }},
+            upsert=True
+        )
+    
+    unexplained_gaps = [g for g in gaps if g.get("needs_explanation")]
+    
+    return {
+        "success": True,
+        "verified_at": now,
+        "employment_entries": len(verification.employment_history),
+        "gaps_to_explain": len(unexplained_gaps),
+        "overlaps_detected": len(overlaps),
+        "form_pre_populated": not existing_form and len(verification.employment_history) > 0,
+        "next_step": "explain_gaps" if unexplained_gaps else "submit_form",
+        "message": f"CV data verified. {'You have ' + str(len(unexplained_gaps)) + ' employment gaps to explain.' if unexplained_gaps else 'No gaps to explain - you can submit your 10-Year Employment History form.'}"
     }
 
 

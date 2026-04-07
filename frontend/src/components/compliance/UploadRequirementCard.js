@@ -62,7 +62,9 @@ export default function UploadRequirementCard({
   onRefresh,
   isAuditor = false,
   // RTW Status - additive, non-breaking prop
-  rtwStatus = null
+  rtwStatus = null,
+  // NEW: Stamp All handler for RTW/DBS
+  onStampAll
 }) {
   // eslint-disable-next-line no-unused-vars
   const { token } = useAuth();
@@ -99,6 +101,43 @@ export default function UploadRequirementCard({
     file: null,
     aiValidation: null
   });
+  
+  // NEW: Stamp All state for RTW/DBS
+  const [stampingAll, setStampingAll] = useState(false);
+  
+  // Handle Stamp All for RTW/DBS - stamps both evidence and verification proof
+  const handleStampAll = async (requirementKey, filesToStamp) => {
+    if (!employeeId || !filesToStamp.length) return;
+    
+    setStampingAll(true);
+    try {
+      const response = await axios.post(
+        `${API}/employees/${employeeId}/${requirementKey}/stamp-all`,
+        {
+          evidence_file_ids: filesToStamp.map(f => f.file_id || f.id),
+          stamp_verification_proof: true
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+      
+      if (response.data.success) {
+        toast.success(
+          <div className="flex items-center gap-2">
+            <Stamp className="h-4 w-4 text-emerald-600" />
+            <span>{response.data.message || 'All documents stamped successfully'}</span>
+          </div>
+        );
+        if (onRefresh) onRefresh();
+      }
+    } catch (err) {
+      console.error('Stamp all failed:', err);
+      toast.error(err.response?.data?.detail || 'Failed to stamp documents');
+    } finally {
+      setStampingAll(false);
+    }
+  };
 
   if (!surface) return null;
 
@@ -371,7 +410,7 @@ export default function UploadRequirementCard({
                           </Badge>
                         )}
                         
-                        {/* View Stamped Document button - ONLY when stamp exists (replaces Edit Stamp) */}
+                        {/* View Stamped Document button - ONLY when stamp exists */}
                         {file.verification_stamp && file.stamped_file_url && (
                           <Button
                             size="sm"
@@ -386,20 +425,9 @@ export default function UploadRequirementCard({
                           </Button>
                         )}
                         
-                        {/* Apply Stamp button - ONLY for RTW/DBS when verified but NOT YET STAMPED */}
-                        {!isAuditor && file.verified && !file.verification_stamp && (key === 'right_to_work' || key === 'dbs') && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
-                            onClick={() => setStampDialog({ isOpen: true, file })}
-                            title="Apply verification stamp"
-                            data-testid={`${key}-stamp-btn-${file.file_id || file.id}`}
-                          >
-                            <Stamp className="h-3 w-3 mr-1" />
-                            Apply Stamp
-                          </Button>
-                        )}
+                        {/* NOTE: For RTW/DBS - Stamp button REMOVED from here */}
+                        {/* Stamping now happens from Verification row via "Confirm & Stamp All" */}
+                        {/* This ensures stamp is only applied AFTER verification proof is uploaded */}
                         
                         {/* UNIFIED Verify & Stamp button - For Identity and PoA (simple checks) */}
                         {!isAuditor && !file.verification_stamp && (key === 'identity' || key === 'proof_of_address') && file.status !== 'rejected' && (
@@ -1542,6 +1570,48 @@ export default function UploadRequirementCard({
                       <Eye className="h-3.5 w-3.5 mr-1" />
                       View Details
                     </Button>
+                  )}
+                  
+                  {/* CONFIRM & STAMP ALL - Only shows when:
+                      1. Check is recorded (hasCheck)
+                      2. Check is verified (checkVerified)
+                      3. Evidence files exist but NOT yet stamped
+                      This is the FINAL step that stamps both evidence AND verification proof */}
+                  {hasCheck && checkVerified && hasFiles && !files.every(f => f.verification_stamp) && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      disabled={stampingAll}
+                      onClick={() => {
+                        // Open confirmation dialog for stamping all documents
+                        if (window.confirm(
+                          `This will apply verification stamps to:\n\n` +
+                          `• ${files.filter(f => !f.verification_stamp).length} evidence document(s) → "Original/Copy Verified"\n` +
+                          `• Verification proof → "Online Check Completed"\n\n` +
+                          `Stamps are permanent and cannot be removed.\n\n` +
+                          `Continue?`
+                        )) {
+                          handleStampAll(key, files.filter(f => !f.verification_stamp));
+                        }
+                      }}
+                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
+                      data-testid={`${key}-confirm-stamp-all-btn`}
+                    >
+                      {stampingAll ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <Stamp className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      {stampingAll ? 'Stamping...' : 'Confirm & Stamp All'}
+                    </Button>
+                  )}
+                  
+                  {/* Show "All Stamped" badge when everything is complete */}
+                  {hasCheck && checkVerified && hasFiles && files.every(f => f.verification_stamp) && (
+                    <Badge className="bg-emerald-100 text-emerald-700 text-xs flex items-center gap-1 px-2 py-1">
+                      <CheckCircle className="h-3 w-3" />
+                      All Documents Stamped
+                    </Badge>
                   )}
                 </div>
               )}

@@ -7637,6 +7637,7 @@ async def worker_verify_login(request: WorkerVerifyRequest):
     """
     Verify magic link and return JWT for worker session.
     Token is single-use and expires after 24 hours.
+    Works for both employees AND pending applicants.
     """
     try:
         # Verify JWT token
@@ -7663,35 +7664,53 @@ async def worker_verify_login(request: WorkerVerifyRequest):
             {"$set": {"used": True, "used_at": datetime.now(timezone.utc).isoformat()}}
         )
         
-        # Get employee
+        # Try to get employee first
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+        
+        # If not found as employee, check applications (for new applicants)
+        is_applicant = False
         if not employee:
-            raise HTTPException(status_code=404, detail="Employee not found")
+            employee = await db.applications.find_one({"id": employee_id}, {"_id": 0})
+            is_applicant = True
+            
+        if not employee:
+            # Also try by email if ID lookup fails
+            employee = await db.employees.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}}, {"_id": 0})
+            if not employee:
+                employee = await db.applications.find_one({"email": {"$regex": f"^{email}$", "$options": "i"}}, {"_id": 0})
+                is_applicant = True
+        
+        if not employee:
+            raise HTTPException(status_code=404, detail="Account not found. Your application may still be under review.")
         
         # Create worker JWT session (7 day expiry)
         access_token = jwt.encode({
             "sub": email,
-            "user_id": f"worker_{employee_id}",
-            "employee_id": employee_id,
+            "user_id": f"worker_{employee.get('id', employee_id)}",
+            "employee_id": employee.get('id', employee_id),
             "role": "worker",
+            "is_applicant": is_applicant,
             "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
             "exp": datetime.now(timezone.utc) + timedelta(days=7)
         }, JWT_SECRET, algorithm=JWT_ALGORITHM)
         
         # Log the login
-        await log_audit_action(f"worker_{employee_id}", "worker_login", "employee", employee_id, {
-            "login_method": "magic_link"
+        await log_audit_action(f"worker_{employee.get('id', employee_id)}", "worker_login", "employee" if not is_applicant else "application", employee.get('id', employee_id), {
+            "login_method": "magic_link",
+            "is_applicant": is_applicant
         })
         
         return {
             "success": True,
             "access_token": access_token,
             "token_type": "bearer",
+            "is_applicant": is_applicant,
             "employee": {
-                "id": employee_id,
+                "id": employee.get('id', employee_id),
                 "name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
                 "email": employee.get("email"),
-                "employee_code": employee.get("employee_code")
+                "employee_code": employee.get("employee_code"),
+                "status": employee.get("status", "pending_review" if is_applicant else "unknown")
             }
         }
         

@@ -8897,23 +8897,48 @@ async def worker_upload_document(
                     }}
                 )
                 
-                # Store extracted training records as proposed items (pending admin review)
+                # Mandatory training codes for matching
+                mandatory_codes = {
+                    "safeguarding": ["safeguarding", "safeguard", "protection of adults"],
+                    "manual_handling": ["manual handling", "moving and handling", "people handling"],
+                    "fire_safety": ["fire safety", "fire awareness", "fire marshal", "fire warden"],
+                    "health_safety": ["health and safety", "health & safety", "h&s awareness"],
+                    "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation", "cpr"],
+                    "infection_control": ["infection control", "infection prevention", "ipc"],
+                    "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
+                    "prevent": ["prevent", "counter terrorism", "radicalisation", "prevent duty"]
+                }
+                
+                # Fetch existing training records and proposed items for this employee
+                existing_training_records = await db.training_records.find(
+                    {"employee_id": employee_id, "record_status": {"$ne": "superseded"}}
+                ).to_list(200)
+                existing_proposed = await db.proposed_training_items.find(
+                    {"employee_id": employee_id}
+                ).to_list(200)
+                
+                # Build lookup of existing training names (normalized)
+                def normalize_name(name):
+                    return (name or "").lower().strip().replace("-", " ").replace("_", " ")
+                
+                existing_names = set()
+                for rec in existing_training_records:
+                    existing_names.add(normalize_name(rec.get("training_name")))
+                    existing_names.add(normalize_name(rec.get("course_name")))
+                for prop in existing_proposed:
+                    existing_names.add(normalize_name(prop.get("training_name")))
+                    existing_names.add(normalize_name(prop.get("course_name")))
+                
+                # Process each extracted training
                 proposed_items = []
+                updated_items = []
+                new_items = []
+                
                 for training in extracted_trainings:
                     training_name = training.get("training_name", "Unknown Training")
+                    training_name_normalized = normalize_name(training_name)
                     
                     # Check if this matches a mandatory training
-                    mandatory_codes = {
-                        "safeguarding": ["safeguarding", "safeguard", "protection"],
-                        "manual_handling": ["manual handling", "moving and handling", "people handling"],
-                        "fire_safety": ["fire safety", "fire awareness", "fire marshal"],
-                        "health_safety": ["health and safety", "health & safety", "h&s"],
-                        "basic_life_support": ["basic life support", "bls", "first aid", "resuscitation"],
-                        "infection_control": ["infection control", "infection prevention", "ipc"],
-                        "information_governance": ["information governance", "data protection", "gdpr", "confidentiality"],
-                        "prevent": ["prevent", "counter terrorism", "radicalisation"]
-                    }
-                    
                     matched_code = None
                     training_lower = training_name.lower()
                     for code, keywords in mandatory_codes.items():
@@ -8921,31 +8946,121 @@ async def worker_upload_document(
                             matched_code = code
                             break
                     
-                    proposed_item = {
-                        "id": str(uuid.uuid4()),
-                        "employee_id": employee_id,
-                        "source_document_id": doc_id,
-                        "source_document_url": file_url,
-                        "source_document_name": file.filename,
-                        "training_name": training_name,
-                        "course_name": training.get("course_name", training_name),
-                        "provider": training.get("provider"),
-                        "completion_date": training.get("completion_date"),
-                        "expiry_date": training.get("expiry_date"),
-                        "mapped_training_code": matched_code,
-                        "is_mandatory": matched_code is not None,
-                        "ai_extracted": True,
-                        "extraction_confidence": training.get("confidence", "medium"),
-                        "status": "proposed",  # Needs admin review
-                        "uploaded_by_worker": True,
-                        "created_at": now
-                    }
-                    proposed_items.append(proposed_item)
+                    # Check for duplicates
+                    is_duplicate = training_name_normalized in existing_names
+                    
+                    # Also check by mandatory code match
+                    if matched_code and not is_duplicate:
+                        for rec in existing_training_records:
+                            rec_name = normalize_name(rec.get("training_name"))
+                            for kw in mandatory_codes.get(matched_code, []):
+                                if kw in rec_name:
+                                    is_duplicate = True
+                                    break
+                            if is_duplicate:
+                                break
+                    
+                    if is_duplicate:
+                        # UPDATE existing record - add new certificate link
+                        logger.info(f"Training '{training_name}' already exists - will update with new certificate")
+                        
+                        # Find and update the existing training record
+                        update_query = {"employee_id": employee_id, "record_status": {"$ne": "superseded"}}
+                        if matched_code:
+                            # For mandatory, match by code
+                            update_query["$or"] = [
+                                {"training_name": {"$regex": training_name, "$options": "i"}},
+                                {"mapped_training_code": matched_code}
+                            ]
+                        else:
+                            update_query["training_name"] = {"$regex": training_name, "$options": "i"}
+                        
+                        existing_record = await db.training_records.find_one(update_query, {"_id": 0})
+                        
+                        if existing_record:
+                            # Add new certificate to the list of certificates
+                            certificates = existing_record.get("certificate_urls", [])
+                            if existing_record.get("certificate_url"):
+                                certificates.append(existing_record["certificate_url"])
+                            certificates.append(file_url)
+                            certificates = list(set(certificates))  # Remove duplicates
+                            
+                            # Update with newer dates if provided
+                            update_fields = {
+                                "certificate_urls": certificates,
+                                "updated_at": now,
+                                "additional_documents": existing_record.get("additional_documents", []) + [{
+                                    "document_id": doc_id,
+                                    "file_url": file_url,
+                                    "file_name": file.filename,
+                                    "uploaded_at": now,
+                                    "uploaded_by_worker": True
+                                }]
+                            }
+                            
+                            # Update expiry if new one is later
+                            new_expiry = training.get("expiry_date")
+                            if new_expiry:
+                                old_expiry = existing_record.get("expiry_date")
+                                if not old_expiry or new_expiry > old_expiry:
+                                    update_fields["expiry_date"] = new_expiry
+                            
+                            await db.training_records.update_one(
+                                {"id": existing_record["id"]},
+                                {"$set": update_fields}
+                            )
+                            updated_items.append(training_name)
+                        else:
+                            # Existing in proposed, not yet approved - add to updates
+                            existing_proposed_item = await db.proposed_training_items.find_one({
+                                "employee_id": employee_id,
+                                "training_name": {"$regex": training_name, "$options": "i"}
+                            })
+                            if existing_proposed_item:
+                                await db.proposed_training_items.update_one(
+                                    {"id": existing_proposed_item["id"]},
+                                    {"$set": {
+                                        "additional_certificates": existing_proposed_item.get("additional_certificates", []) + [{
+                                            "document_id": doc_id,
+                                            "file_url": file_url,
+                                            "file_name": file.filename
+                                        }],
+                                        "updated_at": now
+                                    }}
+                                )
+                                updated_items.append(training_name)
+                    else:
+                        # NEW training - create proposed item
+                        proposed_item = {
+                            "id": str(uuid.uuid4()),
+                            "employee_id": employee_id,
+                            "source_document_id": doc_id,
+                            "source_document_url": file_url,
+                            "source_document_name": file.filename,
+                            "training_name": training_name,
+                            "course_name": training.get("course_name", training_name),
+                            "provider": training.get("provider"),
+                            "completion_date": training.get("completion_date"),
+                            "expiry_date": training.get("expiry_date"),
+                            "mapped_training_code": matched_code,
+                            "is_mandatory": matched_code is not None,
+                            "ai_extracted": True,
+                            "extraction_confidence": training.get("confidence", "medium"),
+                            "status": "proposed",  # Needs admin review
+                            "uploaded_by_worker": True,
+                            "created_at": now
+                        }
+                        proposed_items.append(proposed_item)
+                        new_items.append(training_name)
+                        existing_names.add(training_name_normalized)  # Add to set to prevent duplicates within same upload
                 
-                # Store proposed items for admin review
+                # Store NEW proposed items for admin review
                 if proposed_items:
                     await db.proposed_training_items.insert_many(proposed_items)
-                    logger.info(f"Created {len(proposed_items)} proposed training items for admin review")
+                    logger.info(f"Created {len(proposed_items)} NEW proposed training items for admin review")
+                
+                if updated_items:
+                    logger.info(f"Updated {len(updated_items)} existing training records with new certificate")
                 
                 return {
                     "success": True,
@@ -8955,10 +9070,11 @@ async def worker_upload_document(
                     "ai_extraction": {
                         "extracted": True,
                         "trainings_found": len(extracted_trainings),
-                        "trainings": [t.get("training_name") for t in extracted_trainings],
+                        "new_trainings": new_items,
+                        "updated_trainings": updated_items,
                         "mandatory_matched": sum(1 for p in proposed_items if p.get("is_mandatory"))
                     },
-                    "message": f"Training certificate uploaded. AI extracted {len(extracted_trainings)} training(s). Awaiting admin verification."
+                    "message": f"Certificate uploaded. AI extracted {len(extracted_trainings)} training(s): {len(new_items)} new, {len(updated_items)} updated."
                 }
         except Exception as e:
             logger.warning(f"AI training extraction failed for worker upload: {e}")
@@ -55884,15 +56000,160 @@ Important:
             
             proposed_items.append(proposed_item)
         
-        # Store proposed items
+        # SMART DUPLICATE DETECTION - Check for existing trainings before creating proposed items
         if proposed_items:
-            await db.proposed_training_items.insert_many(proposed_items)
+            # Fetch existing training records and proposed items for this employee
+            existing_training_records = await db.training_records.find(
+                {"employee_id": employee_id, "record_status": {"$ne": "superseded"}}
+            ).to_list(200)
+            existing_proposed = await db.proposed_training_items.find(
+                {"employee_id": employee_id}
+            ).to_list(200)
+            
+            # Build lookup of existing training names (normalized)
+            def normalize_name(name):
+                return (name or "").lower().strip().replace("-", " ").replace("_", " ")
+            
+            existing_codes = set()
+            existing_names = set()
+            for rec in existing_training_records:
+                if rec.get("mapped_training_code"):
+                    existing_codes.add(rec.get("mapped_training_code"))
+                existing_names.add(normalize_name(rec.get("training_name")))
+                existing_names.add(normalize_name(rec.get("course_name")))
+            for prop in existing_proposed:
+                if prop.get("mapped_training_code"):
+                    existing_codes.add(prop.get("mapped_training_code"))
+                existing_names.add(normalize_name(prop.get("raw_course_title")))
+                existing_names.add(normalize_name(prop.get("mapped_training_title")))
+            
+            # Filter out duplicates
+            new_items = []
+            updated_items = []
+            
+            for item in proposed_items:
+                item_code = item.get("mapped_training_code")
+                item_name = normalize_name(item.get("raw_course_title"))
+                mapped_name = normalize_name(item.get("mapped_training_title"))
+                
+                is_duplicate = False
+                
+                # Check by training code first (more accurate)
+                if item_code and item_code in existing_codes:
+                    is_duplicate = True
+                # Then check by name
+                elif item_name in existing_names or mapped_name in existing_names:
+                    is_duplicate = True
+                
+                if is_duplicate:
+                    # Update existing record with new certificate link
+                    logger.info(f"Training '{item.get('raw_course_title')}' already exists - updating with new certificate")
+                    
+                    # Find existing record and update
+                    update_query = {"employee_id": employee_id, "record_status": {"$ne": "superseded"}}
+                    if item_code:
+                        update_query["mapped_training_code"] = item_code
+                    else:
+                        update_query["$or"] = [
+                            {"training_name": {"$regex": item.get("raw_course_title"), "$options": "i"}},
+                            {"course_name": {"$regex": item.get("raw_course_title"), "$options": "i"}}
+                        ]
+                    
+                    existing_record = await db.training_records.find_one(update_query, {"_id": 0})
+                    if existing_record:
+                        # Add new certificate to the list
+                        certificates = existing_record.get("certificate_urls", [])
+                        if existing_record.get("certificate_url"):
+                            certificates.append(existing_record["certificate_url"])
+                        file_url = document.get("file_url")
+                        if file_url:
+                            certificates.append(file_url)
+                        certificates = list(set(certificates))
+                        
+                        update_fields = {
+                            "certificate_urls": certificates,
+                            "updated_at": now,
+                            "additional_documents": existing_record.get("additional_documents", []) + [{
+                                "document_id": document_id,
+                                "file_url": file_url,
+                                "uploaded_at": now
+                            }]
+                        }
+                        
+                        # Update expiry if new one is later
+                        new_expiry = item.get("expires_at")
+                        if new_expiry:
+                            old_expiry = existing_record.get("expiry_date") or existing_record.get("expires_at")
+                            if not old_expiry or new_expiry > old_expiry:
+                                update_fields["expiry_date"] = new_expiry
+                                update_fields["expires_at"] = new_expiry
+                        
+                        await db.training_records.update_one(
+                            {"id": existing_record["id"]},
+                            {"$set": update_fields}
+                        )
+                        updated_items.append(item.get("raw_course_title"))
+                    else:
+                        # Check if it's in proposed items - update that instead
+                        existing_prop_query = {"employee_id": employee_id}
+                        if item_code:
+                            existing_prop_query["mapped_training_code"] = item_code
+                        else:
+                            existing_prop_query["raw_course_title"] = {"$regex": item.get("raw_course_title"), "$options": "i"}
+                        
+                        existing_prop = await db.proposed_training_items.find_one(existing_prop_query)
+                        if existing_prop:
+                            await db.proposed_training_items.update_one(
+                                {"id": existing_prop["id"]},
+                                {"$set": {
+                                    "additional_certificates": existing_prop.get("additional_certificates", []) + [{
+                                        "document_id": document_id,
+                                        "file_url": document.get("file_url")
+                                    }],
+                                    "updated_at": now
+                                }}
+                            )
+                            updated_items.append(item.get("raw_course_title"))
+                else:
+                    # Not a duplicate - add to new items
+                    new_items.append(item)
+                    if item_code:
+                        existing_codes.add(item_code)
+                    existing_names.add(item_name)
+                    if mapped_name:
+                        existing_names.add(mapped_name)
+            
+            # Store only NEW proposed items
+            if new_items:
+                await db.proposed_training_items.insert_many(new_items)
+                logger.info(f"Created {len(new_items)} new proposed items, updated {len(updated_items)} existing")
+            
+            # Update document with extraction counts
+            await db.employee_documents.update_one(
+                {"id": document_id},
+                {"$set": {
+                    "extraction_count": len(courses),
+                    "new_items_count": len(new_items),
+                    "updated_items_count": len(updated_items),
+                    "extraction_status": "completed"
+                }}
+            )
+            
+            return {
+                "status": "success",
+                "is_multi_training": extraction_data.get("is_multi_training", len(courses) > 1),
+                "total_courses": len(courses),
+                "new_items": len(new_items),
+                "updated_items": len(updated_items),
+                "proposed_items": new_items,
+                "raw_extraction": extraction_data
+            }
         
         return {
             "status": "success",
             "is_multi_training": extraction_data.get("is_multi_training", len(courses) > 1),
             "total_courses": len(courses),
-            "proposed_items": proposed_items,
+            "proposed_items": [],
             "raw_extraction": extraction_data
         }
     

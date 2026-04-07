@@ -29,6 +29,20 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
 
+### 0. Worker Dashboard CV Section UI (2026-04-07)
+- **Component**: `WorkerDashboard.js` - CV & Employment History card
+- **Features**:
+  - Shows "Upload Your CV" prompt when no CV is uploaded
+  - After CV upload, shows "Review & Verify" button with AI extraction preview stats (jobs found, gaps detected, overlaps)
+  - CV Verification Modal with editable employment history, education display, and confirmation checkbox
+  - After verification, shows "CV Verified" status with green badge
+  - Links to 10-Year Employment History form status
+- **API Endpoints Used**:
+  - `GET /api/worker/cv-extraction-status` - Check CV verification status
+  - `GET /api/worker/cv-extraction-preview` - Get AI extraction for user review
+  - `POST /api/worker/cv-extraction-verify` - Worker confirms extraction
+- **Testing**: All frontend tests passed (iteration_177)
+
 ### 1. 10-Year Employment History Form (CQC/NHS Legal Requirement)
 - **Endpoint**: `GET /api/worker/forms/employment_history_10yr`
 - **Features**:

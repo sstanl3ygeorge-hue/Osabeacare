@@ -21515,13 +21515,41 @@ async def apply_verification_stamp(
                     import uuid as uuid_module
                     stamped_filename = f"stamped_{doc_id}_{uuid_module.uuid4().hex[:8]}.{file_ext}"
                     
-                    # Use Supabase storage if available, otherwise store locally
-                    from supabase_storage import upload_file_to_supabase
-                    stamped_file_url = await upload_file_to_supabase(
-                        stamped_bytes, 
-                        stamped_filename, 
-                        f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
-                    )
+                    # Try emergent CloudStorage first, then Supabase, then local
+                    try:
+                        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig
+                        CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
+                        
+                        if CLOUD_STORAGE_URL:
+                            storage = CloudStorage(StorageConfig(storage_url=CLOUD_STORAGE_URL))
+                            emp_code = doc.get('employee_id', 'unknown')[:20]
+                            stamped_file_url = await storage.upload_file_async(
+                                file_data=stamped_bytes,
+                                file_name=stamped_filename,
+                                folder=f"employees/{emp_code}/stamped",
+                                content_type=f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+                            )
+                            logger.info(f"Stamped file uploaded to CloudStorage: {stamped_file_url}")
+                        else:
+                            raise Exception("CLOUD_STORAGE_URL not configured")
+                    except Exception as cloud_err:
+                        logger.warning(f"CloudStorage upload failed, trying Supabase: {cloud_err}")
+                        try:
+                            from supabase_storage import upload_file_to_supabase
+                            stamped_file_url = await upload_file_to_supabase(
+                                stamped_bytes, 
+                                stamped_filename, 
+                                f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+                            )
+                        except Exception as supabase_err:
+                            logger.warning(f"Supabase upload failed, storing locally: {supabase_err}")
+                            # Store locally as fallback
+                            local_path = f"/app/uploads/stamped/{stamped_filename}"
+                            os.makedirs("/app/uploads/stamped", exist_ok=True)
+                            with open(local_path, "wb") as f:
+                                f.write(stamped_bytes)
+                            stamped_file_url = f"/api/uploads/stamped/{stamped_filename}"
+                            logger.info(f"Stamped file stored locally: {stamped_file_url}")
                     
                     if stamped_file_url:
                         update_data["stamped_file_url"] = stamped_file_url

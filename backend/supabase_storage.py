@@ -14,8 +14,8 @@ logger = logging.getLogger("supabase_storage")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
-# Default bucket for application documents
-DEFAULT_BUCKET = "documents"
+# Default bucket for application documents - can be overridden via env
+DEFAULT_BUCKET = os.environ.get("SUPABASE_STORAGE_BUCKET", "documents")
 
 
 def is_supabase_storage_configured() -> bool:
@@ -135,3 +135,14 @@ async def delete_from_supabase(
 def get_supabase_public_url(path: str, bucket: str = DEFAULT_BUCKET) -> str:
     """Get the public URL for a stored file."""
     return f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{path}"
+
+
+
+# Alias for backwards compatibility
+async def upload_file_to_supabase(file_content: bytes, filename: str, content_type: str = None) -> str:
+    """
+    Backwards-compatible wrapper for upload_to_supabase.
+    Returns just the URL string.
+    """
+    result = await upload_to_supabase(file_content, filename, folder="stamped")
+    return result.get("url")

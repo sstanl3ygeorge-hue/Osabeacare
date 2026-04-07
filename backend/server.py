@@ -2730,6 +2730,11 @@ def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, 
     Add verification stamp to image files (JPG, PNG).
     The stamp is permanently embedded and cannot be removed.
     
+    Osabea Healthcare Solutions Compliant:
+    - Company logo embedded
+    - Shows verifier name
+    - Includes date and reference ID
+    
     Args:
         input_image_bytes: Original image as bytes
         stamp_data: Same as add_verification_stamp_to_pdf
@@ -2739,6 +2744,8 @@ def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, 
         Stamped image as bytes
     """
     from io import BytesIO
+    import os
+    import hashlib
     
     try:
         # Open image
@@ -2748,21 +2755,47 @@ def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, 
         if img.mode != 'RGBA':
             img = img.convert('RGBA')
         
-        # Stamp configuration
+        # Osabea stamp configuration - matching PDF stamps
         stamp_config = {
-            "original_seen": {"text": "ORIGINAL DOCUMENT SEEN", "color": (0, 128, 0)},
-            "copy_verified": {"text": "COPY VERIFIED WITH ORIGINAL", "color": (0, 102, 204)},
-            "online_check": {"text": "ONLINE CHECK COMPLETED", "color": (128, 64, 178)}
+            "document_verified": {
+                "text": "DOCUMENT VERIFIED",
+                "border_color": (14, 165, 233),  # Sky blue #0ea5e9
+                "text_color": (5, 150, 105),     # Green #059669
+                "bg_color": (240, 249, 255, 245) # Light blue
+            },
+            "original_seen": {
+                "text": "ORIGINAL DOCUMENT SEEN",
+                "border_color": (139, 92, 246),  # Purple #8b5cf6
+                "text_color": (124, 58, 237),    # Purple #7c3aed
+                "bg_color": (250, 245, 255, 245) # Light purple
+            },
+            "copy_verified": {
+                "text": "COPY VERIFIED",
+                "border_color": (245, 158, 11),  # Amber #f59e0b
+                "text_color": (217, 119, 6),     # Amber #d97706
+                "bg_color": (255, 251, 235, 245) # Light amber
+            },
+            # Legacy mappings
+            "online_check": {
+                "text": "DOCUMENT VERIFIED",
+                "border_color": (14, 165, 233),
+                "text_color": (5, 150, 105),
+                "bg_color": (240, 249, 255, 245)
+            }
         }
         
-        config = stamp_config.get(stamp_data.get("stamp_type", "copy_verified"), stamp_config["copy_verified"])
+        stamp_type = stamp_data.get("stamp_type", "document_verified")
+        config = stamp_config.get(stamp_type, stamp_config["document_verified"])
+        
+        # Calculate document hash
+        doc_hash = hashlib.sha256(input_image_bytes).hexdigest()[:12].upper()
         
         # Image dimensions
         img_width, img_height = img.size
         
         # Calculate stamp size based on image size
-        box_width = min(280, int(img_width * 0.4))
-        box_height = 90
+        box_width = min(320, int(img_width * 0.45))
+        box_height = 100
         box_x = img_width - box_width - 15
         box_y = img_height - box_height - 15
         
@@ -2770,40 +2803,65 @@ def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, 
         overlay = PILImage.new('RGBA', img.size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(overlay)
         
-        # Draw semi-transparent background
+        # Draw semi-transparent background with rounded corners
         draw.rounded_rectangle(
             [(box_x, box_y), (box_x + box_width, box_y + box_height)],
             radius=8,
-            fill=(255, 255, 255, 230),
-            outline=config["color"],
+            fill=config["bg_color"],
+            outline=config["border_color"],
             width=3
         )
         
+        # Try to load Osabea logo
+        logo_path = os.path.join(os.path.dirname(__file__), 'osabea_logo.png')
+        logo_width = 55
+        logo_x = box_x + 12
+        logo_y = box_y + 12
+        
+        if os.path.exists(logo_path):
+            try:
+                logo = PILImage.open(logo_path)
+                # Resize logo proportionally
+                logo_height = int(logo.height * (logo_width / logo.width))
+                logo = logo.resize((logo_width, logo_height), PILImage.Resampling.LANCZOS)
+                if logo.mode != 'RGBA':
+                    logo = logo.convert('RGBA')
+                # Paste logo onto overlay
+                overlay.paste(logo, (logo_x, logo_y), logo)
+                text_x = logo_x + logo_width + 10
+            except Exception as e:
+                logging.warning(f"Failed to add logo to image stamp: {e}")
+                text_x = box_x + 15
+        else:
+            text_x = box_x + 15
+        
         # Try to load fonts
         try:
-            font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 13)
-            font_normal = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
-            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 9)
+            font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 12)
+            font_normal = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 10)
+            font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 8)
+            font_tiny = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 6)
         except:
             font_bold = ImageFont.load_default()
             font_normal = ImageFont.load_default()
             font_small = ImageFont.load_default()
+            font_tiny = ImageFont.load_default()
         
-        # Draw checkmark
-        draw.ellipse([(box_x + 10, box_y + 10), (box_x + 28, box_y + 28)], fill=config["color"])
-        draw.text((box_x + 14, box_y + 8), "✓", fill=(255, 255, 255), font=font_bold)
+        # Draw stamp header text
+        draw.text((text_x, box_y + 12), config["text"], fill=config["text_color"], font=font_bold)
         
-        # Draw header text
-        draw.text((box_x + 35, box_y + 10), config["text"], fill=config["color"], font=font_bold)
+        # Draw verifier info
+        y_pos = box_y + 28
+        verifier = stamp_data.get('verified_by_name', 'Admin')
         
-        # Draw details
-        y_pos = box_y + 32
-        doc_type = stamp_data.get('document_type', 'Document')[:25]
-        draw.text((box_x + 12, y_pos), f"Document: {doc_type}", fill=(0, 0, 0), font=font_normal)
+        if stamp_type == "original_seen":
+            draw.text((text_x, y_pos), f"Seen by: {verifier[:25]}", fill=(30, 41, 59), font=font_normal)
+        else:
+            draw.text((text_x, y_pos), f"Verified by: {verifier[:25]}", fill=(30, 41, 59), font=font_normal)
         y_pos += 14
         
-        verifier = stamp_data.get('verified_by_name', 'N/A')[:25]
-        draw.text((box_x + 12, y_pos), f"Verified by: {verifier}", fill=(0, 0, 0), font=font_normal)
+        # Company name
+        draw.text((text_x, y_pos), "Osabea Healthcare Solutions LTD", fill=config["border_color"], font=font_normal)
         y_pos += 14
         
         # Format date
@@ -2814,17 +2872,17 @@ def add_verification_stamp_to_image(input_image_bytes: bytes, stamp_data: dict, 
                     verified_dt = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
                 else:
                     verified_dt = verified_at
-                date_str = verified_dt.strftime('%d %b %Y %H:%M')
+                date_str = verified_dt.strftime('%d %b %Y')
             else:
-                date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')
+                date_str = datetime.now(timezone.utc).strftime('%d %b %Y')
         except:
-            date_str = datetime.now(timezone.utc).strftime('%d %b %Y %H:%M')
+            date_str = datetime.now(timezone.utc).strftime('%d %b %Y')
         
-        draw.text((box_x + 12, y_pos), f"Date: {date_str}", fill=(0, 0, 0), font=font_normal)
+        verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8].upper())
+        draw.text((text_x, y_pos), f"Date: {date_str} | Ref: {verification_id}", fill=(100, 116, 139), font=font_small)
         
-        # Verification ID
-        verification_id = stamp_data.get('verification_id', str(uuid.uuid4())[:8])
-        draw.text((box_x + 12, box_y + box_height - 15), f"ID: {verification_id}", fill=(128, 128, 128), font=font_small)
+        # Document hash at bottom
+        draw.text((box_x + 12, box_y + box_height - 12), f"Hash: {doc_hash}", fill=(150, 150, 150), font=font_tiny)
         
         # Composite overlay onto original
         img = PILImage.alpha_composite(img, overlay)

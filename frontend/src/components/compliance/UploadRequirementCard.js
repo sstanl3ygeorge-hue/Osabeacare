@@ -360,22 +360,41 @@ export default function UploadRequirementCard({
                           </Badge>
                         )}
                         
-                        {/* Apply Verification Stamp button - For RTW and DBS only (complex checks) */}
-                        {!isAuditor && file.verified && (key === 'right_to_work' || key === 'dbs') && (
+                        {/* Show VERIFIED & STAMPED badge for fully verified RTW/DBS */}
+                        {(key === 'right_to_work' || key === 'dbs') && file.verification_stamp && (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-700 border border-emerald-200">
+                            <Stamp className="h-2.5 w-2.5 mr-0.5" />
+                            Stamped
+                          </Badge>
+                        )}
+                        
+                        {/* View Stamped Document button - ONLY when stamp exists (replaces Edit Stamp) */}
+                        {file.verification_stamp && file.stamped_file_url && (
                           <Button
                             size="sm"
-                            variant={file.verification_stamp ? "ghost" : "outline"}
-                            className={`h-7 px-2 text-xs ${
-                              file.verification_stamp 
-                                ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-100' 
-                                : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'
-                            }`}
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                            onClick={() => window.open(file.stamped_file_url, '_blank')}
+                            title="View stamped document"
+                            data-testid={`${key}-view-stamped-${file.file_id || file.id}`}
+                          >
+                            <FileCheck className="h-3 w-3 mr-1" />
+                            View Stamped
+                          </Button>
+                        )}
+                        
+                        {/* Apply Stamp button - ONLY for RTW/DBS when verified but NOT YET STAMPED */}
+                        {!isAuditor && file.verified && !file.verification_stamp && (key === 'right_to_work' || key === 'dbs') && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 px-2 text-xs text-indigo-600 border-indigo-200 hover:bg-indigo-50"
                             onClick={() => setStampDialog({ isOpen: true, file })}
-                            title={file.verification_stamp ? "Edit verification stamp" : "Apply verification stamp"}
+                            title="Apply verification stamp"
                             data-testid={`${key}-stamp-btn-${file.file_id || file.id}`}
                           >
                             <Stamp className="h-3 w-3 mr-1" />
-                            {file.verification_stamp ? 'Edit Stamp' : 'Stamp'}
+                            Apply Stamp
                           </Button>
                         )}
                         
@@ -436,8 +455,8 @@ export default function UploadRequirementCard({
                           </Button>
                         )}
                         
-                        {/* NEW: Request Amendment button */}
-                        {!isAuditor && file.status !== 'rejected' && (
+                        {/* NEW: Request Amendment button - HIDE when fully verified & stamped */}
+                        {!isAuditor && file.status !== 'rejected' && !file.verification_stamp && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -836,18 +855,23 @@ export default function UploadRequirementCard({
                           </div>
                         )}
                         
-                        {/* Restrictions - Full width */}
+                        {/* Restrictions - Collapsible to reduce visual noise */}
                         {checkData.restrictions && (
-                          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                            <div className="flex items-center gap-2 mb-1">
+                          <details className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                            <summary className="flex items-center gap-2 cursor-pointer list-none">
                               <AlertTriangle className="h-4 w-4 text-amber-600" />
                               <span className="text-xs font-semibold text-amber-800">Work Restrictions Apply</span>
+                              {checkData.hours_limit && (
+                                <Badge className="text-[10px] bg-amber-100 text-amber-700 border-amber-300">
+                                  {checkData.hours_limit}hrs/week
+                                </Badge>
+                              )}
+                              <span className="text-xs text-amber-600 ml-auto">Click to expand</span>
+                            </summary>
+                            <div className="mt-2 pt-2 border-t border-amber-200">
+                              <p className="text-sm text-amber-700">{checkData.restrictions}</p>
                             </div>
-                            <p className="text-sm text-amber-700">{checkData.restrictions}</p>
-                            {checkData.hours_limit && (
-                              <p className="text-xs text-amber-600 mt-1 font-medium">Hours limit: {checkData.hours_limit} per week</p>
-                            )}
-                          </div>
+                          </details>
                         )}
                         
                         {/* Status flags */}

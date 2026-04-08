@@ -111,6 +111,7 @@ from routes.auth import router as auth_router
 from routes.workers import router as workers_router
 from routes.admin import router as admin_router
 from routes.training import router as training_router
+from routes.documents import router as documents_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -18859,37 +18860,10 @@ async def export_compliance_pdf(employee_id: str, user: dict = Depends(get_curre
 
 # ==================== DOCUMENT TYPE ROUTES ====================
 
-@api_router.post("/document-types", response_model=DocumentTypeResponse)
-async def create_document_type(doc_type: DocumentTypeCreate, user: dict = Depends(require_admin)):
-    doc_id = str(uuid.uuid4())
-    doc = {"id": doc_id, **doc_type.model_dump()}
-    await db.document_types.insert_one(doc)
-    return DocumentTypeResponse(**doc)
-
-@api_router.get("/document-types", response_model=List[DocumentTypeResponse])
-async def get_document_types(category: Optional[str] = None):
-    query = {}
-    if category:
-        query["category"] = category
-    docs = await db.document_types.find(query, {"_id": 0}).sort("sort_order", 1).to_list(100)
-    return [DocumentTypeResponse(**d) for d in docs]
-
-@api_router.put("/document-types/{doc_type_id}", response_model=DocumentTypeResponse)
-async def update_document_type(doc_type_id: str, update: DocumentTypeCreate, user: dict = Depends(require_admin)):
-    result = await db.document_types.update_one({"id": doc_type_id}, {"$set": update.model_dump()})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Document type not found")
-    doc = await db.document_types.find_one({"id": doc_type_id}, {"_id": 0})
-    return DocumentTypeResponse(**doc)
-
-@api_router.delete("/document-types/{doc_type_id}")
-async def delete_document_type(doc_type_id: str, user: dict = Depends(require_admin)):
-    result = await db.document_types.delete_one({"id": doc_type_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Document type not found")
-    return {"message": "Document type deleted"}
-
-
+# MOVED TO routes/documents.py: /document-types
+# MOVED TO routes/documents.py: /document-types
+# MOVED TO routes/documents.py: /document-types/{doc_type_id}
+# MOVED TO routes/documents.py: /document-types/{doc_type_id}
 # ==================== UNIFIED EVIDENCE MANAGEMENT ====================
 # Evidence-based compliance system - all evidence flows through these endpoints
 
@@ -58478,6 +58452,9 @@ api_router.include_router(admin_router)
 
 # Include training routes (refactored from server.py)
 api_router.include_router(training_router)
+
+# Include document routes (refactored from server.py)
+api_router.include_router(documents_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

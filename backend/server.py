@@ -70,7 +70,7 @@ from security import (
 )
 from google import genai
 import pytesseract
-from PIL import Image as PILImage
+# PIL Image already imported above as PILImage
 from pdf2image import convert_from_bytes
 import pdfplumber  # Primary method for typed PDF extraction
 from role_normalization import normalize_role
@@ -84,10 +84,11 @@ from stage_identity import (
     APPLICANT_STATUSES as STAGE_APPLICANT_STATUSES,
     EMPLOYEE_STATUSES as STAGE_EMPLOYEE_STATUSES
 )
+# Note: agreement_templates.get_template is imported locally in functions to avoid
+# conflict with email_service.get_template
 from agreement_templates import (
-    get_template,
-    get_all_templates,
-    get_template_summary,
+    get_all_templates as get_all_agreement_templates,
+    get_template_summary as get_agreement_template_summary,
     AGREEMENT_TEMPLATES
 )
 from approval_engine import (
@@ -3183,7 +3184,7 @@ def check_all_references_integrity(employee_data: dict) -> dict:
 # Detects and requires explanation of employment gaps
 # ============================================================================
 
-MIN_GAP_DAYS = 30  # Gaps less than 30 days are not flagged
+# MIN_GAP_DAYS is already imported from cv_processing
 
 def detect_cv_gaps(employment_history: List[dict]) -> List[dict]:
     """
@@ -9381,7 +9382,7 @@ async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
 # CV EXTRACTION SERVICE - Auto-populate Employment History
 # ============================================================================
 
-async def extract_employment_history_from_cv(file_content: bytes, filename: str, employee_id: str) -> dict:
+async def _extract_cv_employment_history_helper(file_content: bytes, filename: str, employee_id: str) -> dict:
     """
     Extract employment history from a CV/resume using AI.
     Returns structured employment history that can populate the 10-Year Employment History form.
@@ -9891,7 +9892,7 @@ async def admin_review_cv(
     
     # Extract employment history using AI
     try:
-        cv_extraction = await extract_employment_history_from_cv(contents, cv_doc.get("file_name", "cv.pdf"), employee_id)
+        cv_extraction = await _extract_cv_employment_history_helper(contents, cv_doc.get("file_name", "cv.pdf"), employee_id)
         
         if cv_extraction.get("status") != "success":
             raise HTTPException(status_code=500, detail="AI extraction failed. Please try again.")
@@ -11926,63 +11927,8 @@ async def update_personal_details(
     }
 
 
-class EmploymentHistoryUpdate(BaseModel):
-    """Employment history update with required reason"""
-    employment_history: List[dict]
-    edit_reason: str  # Required
-
-@api_router.post("/employees/{employee_id}/employment-history")
-async def update_employment_history(
-    employee_id: str,
-    data: EmploymentHistoryUpdate,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Update employee employment history with reason logging.
-    
-    - Auto-detects CV gaps
-    - Logs all changes for CQC audit
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    old_history = employee.get('employment_history', [])
-    
-    # Detect gaps in new history
-    gaps = detect_cv_gaps(data.employment_history)
-    
-    # Update employee
-    update_data = {
-        'employment_history': data.employment_history,
-        'cv_gaps_detected': gaps,
-        'cv_gaps_all_explained': len([g for g in gaps if not g.get('explanation')]) == 0,
-        'updated_at': datetime.now(timezone.utc).isoformat()
-    }
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
-    # Log audit with reason
-    await log_audit_action(
-        user['user_id'],
-        "edit_employment_history",
-        "employee",
-        employee_id,
-        {
-            "old_history_count": len(old_history),
-            "new_history_count": len(data.employment_history),
-            "gaps_detected": len(gaps),
-            "reason": data.edit_reason,
-            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}"
-        }
-    )
-    
-    return {
-        "success": True,
-        "message": "Employment history updated",
-        "gaps_detected": len(gaps),
-        "edit_logged": True
-    }
+# NOTE: EmploymentHistoryUpdate and update_employment_history endpoint
+# are defined below at line ~15096 to avoid duplicate definition
 
 
 class ReferenceUpdate(BaseModel):
@@ -29879,7 +29825,7 @@ async def upload_application_cv(file: UploadFile = File(...)):
     # AI EXTRACTION: Extract employment history from CV immediately
     extraction_result = None
     try:
-        extraction_result = await extract_employment_history_from_cv(content, file.filename, None)
+        extraction_result = await _extract_cv_employment_history_helper(content, file.filename, None)
         
         if extraction_result.get("status") == "success":
             # Store extraction in the document record for later use

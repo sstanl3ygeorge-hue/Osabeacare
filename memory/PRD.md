@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (29 Modules)
+### Modular Routes Structure (30 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -44,7 +44,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── verifications.py             - 12 endpoints
 ├── migrations.py                - 3 endpoints
 ├── readiness.py                 - 7 endpoints
-├── cv_extractions.py            - 11 endpoints [NEW]
+├── cv_extractions.py            - 11 endpoints
+├── profile_photos.py            - 3 endpoints [NEW]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -60,20 +61,21 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 28: Verification routes (12 endpoints), removed ~1,007 lines
 - Phase 29: Migration routes (3 endpoints), removed ~201 lines
 - Phase 30: Readiness routes (7 endpoints), removed ~565 lines
-- **Phase 31: CV Extractions routes (11 endpoints), removed ~1,151 lines** [DONE]
+- Phase 31: CV Extractions routes (11 endpoints), removed ~1,151 lines
+- **Phase 32: Profile Photos routes (3 endpoints), removed ~100 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~48,683 lines (down from ~60,500 originally - **19.5% reduction**)
-- **Route modules**: 29 modules with ~273 endpoints extracted
-- **F811 errors**: 4 (intentional local `get_template` imports)
-- **Testing**: All phases passing (Phase 31 refactored CVExtractionService call)
+- **server.py**: ~48,585 lines (down from ~60,500 originally - **19.7% reduction**)
+- **Route modules**: 30 modules with ~276 endpoints extracted
+- **Remaining inline endpoints**: ~286 endpoints
+- **Testing**: All phases passing
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract profile photo routes (~3 endpoints)
-- [ ] Extract remaining inline routes
-- [ ] Extract more helper functions/services
+- [ ] Extract worker dashboard routes (~5 endpoints)
+- [ ] Extract more remaining inline routes
+- [ ] Extract helper functions/services to separate modules
 
 ### P3: Future Enhancements
 - [ ] Supabase Auth integration with RLS policies
@@ -81,10 +83,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_204.json` - Phase 28 (verifications)
 - `/app/test_reports/iteration_205.json` - Phase 29 (migrations)
 - `/app/test_reports/iteration_206.json` - Phase 30 (readiness)
-- `/app/test_reports/iteration_207.json` - Phase 31 (cv_extractions) [NEW]
+- `/app/test_reports/iteration_207.json` - Phase 31 (cv_extractions)
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

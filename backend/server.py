@@ -142,6 +142,7 @@ from routes.verifications import router as verifications_router
 from routes.migrations import router as migrations_router
 from routes.readiness import router as readiness_router
 from routes.cv_extractions import router as cv_extractions_router
+from routes.profile_photos import router as profile_photos_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -7540,6 +7541,9 @@ api_router.include_router(readiness_router)
 # Include CV extractions routes (refactored from server.py)
 api_router.include_router(cv_extractions_router)
 
+# Include profile photos routes (refactored from server.py)
+api_router.include_router(profile_photos_router)
+
 
 @api_router.get("/worker/dashboard")
 async def worker_dashboard(worker: dict = Depends(get_current_worker)):
@@ -14624,108 +14628,6 @@ Return ONLY the JSON object, no additional text."""
         if 'tmp_path' in locals() and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-
-# MOVED TO routes/recruitment.py: /employees/{employee_id}/recruitment-status
-@api_router.post("/employees/{employee_id}/profile-photo")
-async def upload_profile_photo(
-    employee_id: str, 
-    file: UploadFile = File(...),
-    user: dict = Depends(require_manager_or_admin)
-):
-    """Upload profile photo for an employee"""
-    # Validate employee exists
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Validate file type
-    allowed_types = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
-    if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail="Only JPG, PNG, and WEBP images are allowed")
-    
-    # Check file size (5MB max)
-    content = await file.read()
-    if len(content) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image must be less than 5MB")
-    
-    # Upload to storage
-    file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
-    storage_path = f"{APP_NAME}/profile-photos/{employee_id}/photo.{file_ext}"
-    
-    try:
-        result = put_object(storage_path, content, file.content_type)
-        file_url = result.get("url", storage_path)
-        
-        # Update employee record
-        await db.employees.update_one(
-            {"id": employee_id},
-            {"$set": {
-                "profile_photo_url": file_url,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-        
-        await log_audit_action(
-            user['user_id'],
-            "upload_profile_photo",
-            "employee",
-            employee_id,
-            {"photo_url": file_url[:50] + "..." if len(file_url) > 50 else file_url}
-        )
-        
-        return {"message": "Profile photo uploaded", "photo_url": file_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload photo: {str(e)}")
-
-@api_router.delete("/employees/{employee_id}/profile-photo")
-async def remove_profile_photo(employee_id: str, user: dict = Depends(require_manager_or_admin)):
-    """Remove profile photo for an employee"""
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": {
-            "profile_photo_url": None,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "remove_profile_photo",
-        "employee",
-        employee_id,
-        {}
-    )
-    
-    return {"message": "Profile photo removed"}
-
-@api_router.get("/employees/{employee_id}/profile-photo/view")
-async def view_profile_photo(employee_id: str, user: dict = Depends(get_current_user)):
-    """View/stream profile photo for an employee"""
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "profile_photo_url": 1})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    photo_url = employee.get("profile_photo_url")
-    if not photo_url:
-        raise HTTPException(status_code=404, detail="No profile photo")
-    
-    try:
-        file_bytes, stored_content_type = get_object(photo_url)
-        # Determine content type from extension if not provided
-        ext = photo_url.split('.')[-1].lower() if '.' in photo_url else 'jpg'
-        content_types = {
-            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-            'png': 'image/png', 'webp': 'image/webp'
-        }
-        content_type = stored_content_type or content_types.get(ext, 'image/jpeg')
-        return Response(content=file_bytes, media_type=content_type)
-    except Exception as e:
-        logger.error(f"Failed to retrieve profile photo: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve photo")
 
 
 # ==================== APPLICATION FORM EXTRACTION ====================

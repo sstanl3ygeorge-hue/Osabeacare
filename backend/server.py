@@ -127,6 +127,7 @@ from routes.compliance import router as compliance_router
 from routes.templates import router as templates_router
 from routes.service_users import router as service_users_router
 from routes.forms import router as forms_router
+from routes.interviews import router as interviews_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -55155,6 +55156,9 @@ api_router.include_router(service_users_router)
 
 # Include forms routes (refactored from server.py)
 api_router.include_router(forms_router)
+
+# Include interviews routes (refactored from server.py)
+api_router.include_router(interviews_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

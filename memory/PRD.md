@@ -10,6 +10,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Email Reminders (APScheduler)
 - Magic Link Authentication
 - Offline PDF Application Form Intake
+- **Smart Merge for PDF Applications** (NEW - April 8, 2026)
+  - Auto-detects existing employees by email, phone, or name+DOB
+  - Analyzes which fields can be merged vs conflicts
+  - Merges missing data (address, emergency contacts, references) without duplicating profiles
 
 ## Architecture
 
@@ -79,6 +83,14 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Testing**: All phases passing (100% success rate)
 
 ## Pending/In Progress
+
+### P0: Smart Merge Feature (COMPLETED - April 8, 2026)
+- [x] Extract-from-PDF endpoint enhanced with duplicate detection
+- [x] Merge-from-PDF endpoint created for applying merges
+- [x] Match by email OR phone OR (first_name + last_name + DOB)
+- [x] Field-level merge analysis (mergeable vs conflicts)
+- [x] Reference auto-fill to empty slots
+- [x] Audit logging for merge operations
 
 ### P1: Continue Server.py Modularization
 - [ ] Extract more remaining inline routes (~246 left)

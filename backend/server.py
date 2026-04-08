@@ -12531,6 +12531,9 @@ async def extract_employee_from_pdf(
     - References
     - Declarations
     
+    SMART MERGE: If an existing employee is found (by email, phone, or name+DOB),
+    returns merge suggestions showing which fields can be filled from the PDF.
+    
     Returns structured data for review before import.
     """
     import tempfile
@@ -12577,7 +12580,12 @@ Extract the following information from the PDF and return it as valid JSON only 
             "city": "string",
             "postcode": "string"
         },
-        "national_insurance": "string or null"
+        "national_insurance": "string or null",
+        "emergency_contact": {
+            "name": "string or null",
+            "phone": "string or null",
+            "relationship": "string or null"
+        }
     },
     "role": "Healthcare Assistant | Nurse (Registered) | Senior Healthcare Assistant | Support Worker | Care Assistant",
     "employment_history": [
@@ -12652,6 +12660,59 @@ Return ONLY the JSON object, no additional text."""
                 logger.error(f"Response was: {response_text[:500]}")
                 raise HTTPException(status_code=500, detail=f"AI returned invalid JSON: {str(e)}")
             
+            # ========== SMART MERGE: Check for existing employee ==========
+            personal = extracted_data.get("personal_details", {})
+            extracted_email = personal.get("email", "").lower().strip() if personal.get("email") else None
+            extracted_phone = personal.get("phone", "").strip() if personal.get("phone") else None
+            extracted_first = personal.get("first_name", "").strip().lower() if personal.get("first_name") else None
+            extracted_last = personal.get("last_name", "").strip().lower() if personal.get("last_name") else None
+            extracted_dob = personal.get("date_of_birth")
+            
+            # Build query to find existing employee
+            match_conditions = []
+            if extracted_email:
+                match_conditions.append({"email": {"$regex": f"^{re.escape(extracted_email)}$", "$options": "i"}})
+            if extracted_phone:
+                # Normalize phone for comparison (remove spaces, dashes)
+                normalized_phone = re.sub(r'[\s\-\(\)]', '', extracted_phone)
+                match_conditions.append({"phone": {"$regex": normalized_phone}})
+            if extracted_first and extracted_last:
+                name_match = {
+                    "first_name": {"$regex": f"^{re.escape(extracted_first)}$", "$options": "i"},
+                    "last_name": {"$regex": f"^{re.escape(extracted_last)}$", "$options": "i"}
+                }
+                if extracted_dob:
+                    name_match["date_of_birth"] = extracted_dob
+                match_conditions.append(name_match)
+            
+            existing_employee = None
+            match_type = None
+            
+            if match_conditions:
+                existing_employee = await db.employees.find_one(
+                    {"$or": match_conditions},
+                    {"_id": 0}
+                )
+                
+                if existing_employee:
+                    # Determine match type for transparency
+                    emp_email = (existing_employee.get("email") or "").lower()
+                    emp_phone = re.sub(r'[\s\-\(\)]', '', existing_employee.get("phone") or "")
+                    emp_first = (existing_employee.get("first_name") or "").lower()
+                    emp_last = (existing_employee.get("last_name") or "").lower()
+                    
+                    if extracted_email and emp_email == extracted_email:
+                        match_type = "email"
+                    elif extracted_phone and normalized_phone in emp_phone:
+                        match_type = "phone"
+                    elif extracted_first == emp_first and extracted_last == emp_last:
+                        match_type = "name_dob" if extracted_dob else "name"
+            
+            # Build merge analysis if existing employee found
+            merge_info = None
+            if existing_employee:
+                merge_info = await _analyze_merge_fields(existing_employee, extracted_data)
+            
             # Log audit
             await log_audit_action(
                 user["user_id"],
@@ -12660,15 +12721,37 @@ Return ONLY the JSON object, no additional text."""
                 file.filename,
                 {
                     "filename": file.filename,
-                    "confidence": extracted_data.get("extraction_confidence", "unknown")
+                    "confidence": extracted_data.get("extraction_confidence", "unknown"),
+                    "existing_match_found": existing_employee is not None,
+                    "match_type": match_type
                 }
             )
             
-            return {
+            response_data = {
                 "success": True,
                 "filename": file.filename,
                 "extracted_data": extracted_data
             }
+            
+            if existing_employee:
+                response_data["existing_employee"] = {
+                    "id": existing_employee.get("id"),
+                    "applicant_reference": existing_employee.get("applicant_reference"),
+                    "name": f"{existing_employee.get('first_name', '')} {existing_employee.get('last_name', '')}".strip(),
+                    "email": existing_employee.get("email"),
+                    "phone": existing_employee.get("phone"),
+                    "status": existing_employee.get("status"),
+                    "match_type": match_type
+                }
+                response_data["merge_available"] = True
+                response_data["merge_info"] = merge_info
+                response_data["message"] = f"Existing profile found (matched by {match_type}). You can merge missing fields or create a new record."
+            else:
+                response_data["existing_employee"] = None
+                response_data["merge_available"] = False
+                response_data["message"] = "No existing profile found. Ready to create new employee."
+            
+            return response_data
             
         except ImportError as e:
             logger.error(f"emergentintegrations not installed: {e}")
@@ -12682,6 +12765,286 @@ Return ONLY the JSON object, no additional text."""
         if 'tmp_path' in locals() and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+
+async def _analyze_merge_fields(existing: dict, extracted: dict) -> dict:
+    """
+    Analyze which fields from extracted PDF can fill gaps in existing employee profile.
+    Returns a structured analysis of mergeable fields.
+    """
+    personal = extracted.get("personal_details", {})
+    address = personal.get("address", {})
+    emergency = personal.get("emergency_contact", {})
+    references = extracted.get("references", [])
+    
+    # Fields that can be merged (PDF has value, DB is missing/empty)
+    mergeable_fields = []
+    # Fields that would be overwritten (both have values)
+    conflict_fields = []
+    # Fields already filled in DB
+    existing_fields = []
+    
+    # Define field mappings: (extracted_path, db_field, display_name)
+    field_checks = [
+        # Address fields
+        (address.get("line1"), "address_line_1", "Address Line 1"),
+        (address.get("line2"), "address_line_2", "Address Line 2"),
+        (address.get("city"), "city", "City"),
+        (address.get("postcode"), "postcode", "Postcode"),
+        # Personal details
+        (personal.get("national_insurance"), "ni_number", "National Insurance Number"),
+        (personal.get("date_of_birth"), "date_of_birth", "Date of Birth"),
+        (personal.get("phone"), "phone", "Phone Number"),
+        # Emergency contact
+        (emergency.get("name"), "emergency_contact_name", "Emergency Contact Name"),
+        (emergency.get("phone"), "emergency_contact_phone", "Emergency Contact Phone"),
+        (emergency.get("relationship"), "emergency_contact_relationship", "Emergency Contact Relationship"),
+        # Also populate next of kin fields (commonly used in UK care sector)
+        (emergency.get("name"), "next_of_kin_name", "Next of Kin Name"),
+        (emergency.get("phone"), "next_of_kin_phone", "Next of Kin Phone"),
+        (emergency.get("relationship"), "next_of_kin_relationship", "Next of Kin Relationship"),
+    ]
+    
+    for extracted_value, db_field, display_name in field_checks:
+        db_value = existing.get(db_field)
+        
+        # Skip if extracted value is empty
+        if not extracted_value or (isinstance(extracted_value, str) and not extracted_value.strip()):
+            continue
+            
+        if not db_value or (isinstance(db_value, str) and not db_value.strip()):
+            # DB field is empty, PDF can fill it
+            mergeable_fields.append({
+                "field": db_field,
+                "display_name": display_name,
+                "pdf_value": extracted_value,
+                "db_value": None,
+                "action": "add"
+            })
+        else:
+            # Both have values - check if they're the same
+            if str(extracted_value).strip().lower() != str(db_value).strip().lower():
+                conflict_fields.append({
+                    "field": db_field,
+                    "display_name": display_name,
+                    "pdf_value": extracted_value,
+                    "db_value": db_value,
+                    "action": "conflict"
+                })
+            else:
+                existing_fields.append({
+                    "field": db_field,
+                    "display_name": display_name,
+                    "value": db_value
+                })
+    
+    # Check references
+    ref_analysis = []
+    existing_refs = []
+    if existing.get("reference_1_name"):
+        existing_refs.append(1)
+    if existing.get("reference_2_name"):
+        existing_refs.append(2)
+    
+    for i, ref in enumerate(references[:2], start=1):
+        ref_name = ref.get("name")
+        if ref_name and i not in existing_refs:
+            ref_analysis.append({
+                "reference_number": i,
+                "name": ref_name,
+                "email": ref.get("email"),
+                "phone": ref.get("phone"),
+                "organisation": ref.get("organisation"),
+                "action": "add"
+            })
+    
+    return {
+        "summary": {
+            "total_mergeable": len(mergeable_fields),
+            "total_conflicts": len(conflict_fields),
+            "total_references_to_add": len(ref_analysis)
+        },
+        "mergeable_fields": mergeable_fields,
+        "conflict_fields": conflict_fields,
+        "existing_fields": existing_fields,
+        "references_to_add": ref_analysis,
+        "recommendation": "merge" if mergeable_fields or ref_analysis else "skip"
+    }
+
+
+class MergeFromPDFRequest(BaseModel):
+    """Request to merge extracted PDF data into existing employee"""
+    employee_id: str
+    fields_to_merge: List[str]  # List of field names to update from PDF
+    extracted_data: dict  # The extracted_data from extract-from-pdf endpoint
+    include_references: bool = True  # Whether to add missing references
+    resolve_conflicts: Optional[dict] = None  # For conflicts: {field: "pdf"|"keep"} to resolve
+
+
+@api_router.post("/admin/employees/merge-from-pdf")
+async def merge_employee_from_pdf(
+    request: MergeFromPDFRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Merge extracted PDF data into an existing employee profile.
+    
+    This endpoint is called after extract-from-pdf when an existing match is found.
+    It updates only the specified fields and optionally adds missing references.
+    
+    Args:
+        employee_id: The existing employee to update
+        fields_to_merge: List of DB field names to update from PDF
+        extracted_data: The full extracted_data object from extract-from-pdf
+        include_references: Whether to add references from PDF
+        resolve_conflicts: How to resolve conflicting fields
+    
+    Returns:
+        Updated employee data and summary of changes made
+    """
+    # Verify employee exists
+    existing = await db.employees.find_one({"id": request.employee_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    personal = request.extracted_data.get("personal_details", {})
+    address = personal.get("address", {})
+    emergency = personal.get("emergency_contact", {})
+    references = request.extracted_data.get("references", [])
+    
+    # Build update dict for requested fields
+    update_fields = {}
+    changes_made = []
+    
+    # Map extracted data to DB fields
+    field_source_map = {
+        "address_line_1": address.get("line1"),
+        "address_line_2": address.get("line2"),
+        "city": address.get("city"),
+        "postcode": address.get("postcode"),
+        "ni_number": personal.get("national_insurance"),
+        "date_of_birth": personal.get("date_of_birth"),
+        "phone": personal.get("phone"),
+        "emergency_contact_name": emergency.get("name"),
+        "emergency_contact_phone": emergency.get("phone"),
+        "emergency_contact_relationship": emergency.get("relationship"),
+        "next_of_kin_name": emergency.get("name"),
+        "next_of_kin_phone": emergency.get("phone"),
+        "next_of_kin_relationship": emergency.get("relationship"),
+    }
+    
+    for field in request.fields_to_merge:
+        if field in field_source_map:
+            new_value = field_source_map.get(field)
+            if new_value:
+                old_value = existing.get(field)
+                
+                # Check if this is a conflict that needs resolution
+                if old_value and str(old_value).strip():
+                    # Has existing value - check resolve_conflicts
+                    resolution = (request.resolve_conflicts or {}).get(field, "skip")
+                    if resolution == "pdf":
+                        update_fields[field] = new_value
+                        changes_made.append({
+                            "field": field,
+                            "action": "overwritten",
+                            "old_value": old_value,
+                            "new_value": new_value
+                        })
+                    # else skip - keep existing value
+                else:
+                    # No existing value - safe to add
+                    update_fields[field] = new_value
+                    changes_made.append({
+                        "field": field,
+                        "action": "added",
+                        "old_value": None,
+                        "new_value": new_value
+                    })
+    
+    # Handle references if requested
+    references_added = []
+    if request.include_references and references:
+        existing_ref_1 = existing.get("reference_1_name")
+        existing_ref_2 = existing.get("reference_2_name")
+        
+        for i, ref in enumerate(references[:2], start=1):
+            ref_name = ref.get("name")
+            if not ref_name:
+                continue
+                
+            # Check which reference slot to fill
+            if i == 1 and not existing_ref_1:
+                update_fields["reference_1_name"] = ref_name
+                update_fields["reference_1_email"] = ref.get("email")
+                update_fields["reference_1_phone"] = ref.get("phone")
+                update_fields["reference_1_company"] = ref.get("organisation")
+                update_fields["reference_1_relationship"] = ref.get("relationship")
+                references_added.append({"slot": 1, "name": ref_name})
+            elif i == 2 and not existing_ref_2:
+                update_fields["reference_2_name"] = ref_name
+                update_fields["reference_2_email"] = ref.get("email")
+                update_fields["reference_2_phone"] = ref.get("phone")
+                update_fields["reference_2_company"] = ref.get("organisation")
+                update_fields["reference_2_relationship"] = ref.get("relationship")
+                references_added.append({"slot": 2, "name": ref_name})
+            elif not existing_ref_1:
+                # Fill empty slot 1 with any remaining reference
+                update_fields["reference_1_name"] = ref_name
+                update_fields["reference_1_email"] = ref.get("email")
+                update_fields["reference_1_phone"] = ref.get("phone")
+                update_fields["reference_1_company"] = ref.get("organisation")
+                update_fields["reference_1_relationship"] = ref.get("relationship")
+                references_added.append({"slot": 1, "name": ref_name})
+                existing_ref_1 = ref_name  # Mark as filled
+            elif not existing_ref_2:
+                update_fields["reference_2_name"] = ref_name
+                update_fields["reference_2_email"] = ref.get("email")
+                update_fields["reference_2_phone"] = ref.get("phone")
+                update_fields["reference_2_company"] = ref.get("organisation")
+                update_fields["reference_2_relationship"] = ref.get("relationship")
+                references_added.append({"slot": 2, "name": ref_name})
+                existing_ref_2 = ref_name
+    
+    # Apply updates if any
+    if update_fields:
+        update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_fields["pdf_merge_at"] = datetime.now(timezone.utc).isoformat()
+        update_fields["pdf_merge_by"] = user["user_id"]
+        
+        await db.employees.update_one(
+            {"id": request.employee_id},
+            {"$set": update_fields}
+        )
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "pdf_merge",
+        "employee",
+        request.employee_id,
+        {
+            "fields_updated": list(update_fields.keys()),
+            "changes_count": len(changes_made),
+            "references_added": len(references_added)
+        }
+    )
+    
+    # Fetch updated employee
+    updated_employee = await db.employees.find_one({"id": request.employee_id}, {"_id": 0})
+    
+    return {
+        "success": True,
+        "employee_id": request.employee_id,
+        "message": f"Merged {len(changes_made)} fields and {len(references_added)} references from PDF",
+        "changes_made": changes_made,
+        "references_added": references_added,
+        "updated_employee": {
+            "id": updated_employee.get("id"),
+            "name": f"{updated_employee.get('first_name', '')} {updated_employee.get('last_name', '')}".strip(),
+            "email": updated_employee.get("email"),
+            "status": updated_employee.get("status")
+        }
+    }
 
 
 # ==================== APPLICATION FORM EXTRACTION ====================

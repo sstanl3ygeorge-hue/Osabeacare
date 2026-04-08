@@ -134,6 +134,7 @@ from routes.professional_registration import router as professional_registration
 from routes.promotion import router as promotion_router
 from routes.roles import router as roles_router
 from routes.policy_assignments import router as policy_assignments_router
+from routes.bulk_schedules import router as bulk_schedules_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -44731,256 +44732,9 @@ class ScheduledBulkRequestService:
 
 
 # ==================== SCHEDULED BULK REQUEST ENDPOINTS ====================
-
-@api_router.post("/bulk/schedules")
-async def create_bulk_schedule(
-    schedule: ScheduledBulkRequestInput,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Create a new scheduled bulk request definition.
-    
-    Schedules automatically generate document/training renewal requests
-    based on expiry dates, using the existing email request lifecycle.
-    """
-    result = await ScheduledBulkRequestService.create_schedule(
-        data=schedule.model_dump(),
-        created_by=user['user_id']
-    )
-    return result
-
-
-@api_router.get("/bulk/schedules")
-async def list_bulk_schedules(
-    include_disabled: bool = False,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """List all scheduled bulk request definitions."""
-    schedules = await ScheduledBulkRequestService.list_schedules(include_disabled)
-    return {"schedules": schedules, "total": len(schedules)}
-
-
-@api_router.get("/bulk/schedules/{schedule_id}")
-async def get_bulk_schedule(
-    schedule_id: str,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """Get a specific schedule definition."""
-    schedule = await ScheduledBulkRequestService.get_schedule(schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return schedule
-
-
-@api_router.put("/bulk/schedules/{schedule_id}")
-async def update_bulk_schedule(
-    schedule_id: str,
-    data: dict = Body(...),
-    user: dict = Depends(require_manager_or_admin)
-):
-    """Update a schedule definition."""
-    result = await ScheduledBulkRequestService.update_schedule(
-        schedule_id=schedule_id,
-        data=data,
-        updated_by=user['user_id']
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return result
-
-
-@api_router.post("/bulk/schedules/{schedule_id}/enable")
-async def enable_bulk_schedule(
-    schedule_id: str,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """Enable a schedule for automatic execution."""
-    success = await ScheduledBulkRequestService.enable_schedule(schedule_id, user['user_id'])
-    if not success:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return {"status": "enabled", "schedule_id": schedule_id}
-
-
-@api_router.post("/bulk/schedules/{schedule_id}/disable")
-async def disable_bulk_schedule(
-    schedule_id: str,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Disable a schedule. Stops future runs but does NOT delete history
-    or cancel already-created pending requests.
-    """
-    success = await ScheduledBulkRequestService.disable_schedule(schedule_id, user['user_id'])
-    if not success:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    return {"status": "disabled", "schedule_id": schedule_id}
-
-
-@api_router.post("/bulk/schedules/{schedule_id}/run-now")
-async def run_bulk_schedule_now(
-    schedule_id: str,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Manually trigger a schedule run immediately.
-    Useful for testing or catch-up after maintenance.
-    """
-    result = await ScheduledBulkRequestService.run_schedule(
-        schedule_id=schedule_id,
-        triggered_by="manual",
-        actor_id=user['user_id']
-    )
-    
-    if result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=result.get("reason"))
-    
-    return result
-
-
-@api_router.get("/bulk/schedules/{schedule_id}/history")
-async def get_schedule_run_history(
-    schedule_id: str,
-    limit: int = 20,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """Get execution history for a schedule."""
-    # Verify schedule exists
-    schedule = await ScheduledBulkRequestService.get_schedule(schedule_id)
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-    
-    runs = await ScheduledBulkRequestService.get_run_history(schedule_id, limit)
-    return {
-        "schedule_id": schedule_id,
-        "schedule_name": schedule.get("name"),
-        "runs": runs,
-        "total": len(runs)
-    }
-
-
-@api_router.post("/bulk/schedules/run-all-due")
-async def run_all_due_schedules(
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Manually trigger execution of all due schedules.
-    Primarily for admin testing or catch-up scenarios.
-    """
-    result = await ScheduledBulkRequestService.run_due_schedules()
-    
-    await log_audit_action(user['user_id'], "run_all_due_schedules", "system", "bulk", {
-        "schedules_executed": result.get("schedules_executed"),
-        "total_requests_created": result.get("total_requests_created")
-    })
-    
-    return result
-
-
-@api_router.post("/bulk/schedules/quick-setup-training-reminders")
-async def quick_setup_training_reminders(
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Quick setup: Creates 3 training renewal reminder schedules at 60, 30, and 7 days.
-    
-    This creates a complete multi-threshold reminder system for training certificates:
-    - 60 days before expiry: Early warning
-    - 30 days before expiry: Standard reminder  
-    - 7 days before expiry: Urgent final notice
-    
-    Each schedule runs hourly and prevents duplicate reminders within the same expiry cycle.
-    """
-    # Check if training schedules already exist
-    existing = await db.scheduled_bulk_requests.find({
-        "target_type": "training",
-        "name": {"$regex": "Training Renewal"}
-    }, {"_id": 0}).to_list(10)
-    
-    if len(existing) >= 3:
-        return {
-            "status": "already_configured",
-            "message": "Training renewal reminders are already set up",
-            "existing_schedules": [{"id": s["id"], "name": s["name"], "is_enabled": s.get("is_enabled", True)} for s in existing]
-        }
-    
-    # Define the 3 reminder thresholds
-    reminder_configs = [
-        {
-            "name": "Training Renewal - 60 Day Early Warning",
-            "description": "Sends early reminders 60 days before training expires. Gives employees ample time to renew.",
-            "days_before_expiry": 60,
-            "custom_message": "Your training certification is due to expire in approximately 60 days. Please start planning your renewal now to ensure continuous compliance."
-        },
-        {
-            "name": "Training Renewal - 30 Day Reminder",
-            "description": "Standard reminder 30 days before expiry. Main renewal notice.",
-            "days_before_expiry": 30,
-            "custom_message": "Your training certification will expire in 30 days. Please upload your renewed certificate or complete the training as soon as possible."
-        },
-        {
-            "name": "Training Renewal - 7 Day Urgent Notice",
-            "description": "Urgent final notice 7 days before expiry. Critical deadline warning.",
-            "days_before_expiry": 7,
-            "custom_message": "URGENT: Your training certification expires in 7 days. Immediate action required to maintain compliance and work readiness."
-        }
-    ]
-    
-    created_schedules = []
-    
-    for config in reminder_configs:
-        # Skip if a similar schedule already exists
-        existing_similar = await db.scheduled_bulk_requests.find_one({
-            "target_type": "training",
-            "days_before_expiry": config["days_before_expiry"]
-        })
-        if existing_similar:
-            created_schedules.append({
-                "id": existing_similar["id"],
-                "name": existing_similar["name"],
-                "status": "already_exists"
-            })
-            continue
-        
-        schedule_data = {
-            "name": config["name"],
-            "description": config["description"],
-            "is_enabled": True,
-            "target_type": "training",
-            "trigger_type": "days_before_expiry",
-            "days_before_expiry": config["days_before_expiry"],
-            "target_rules": {
-                "employee_statuses": ["onboarding", "active"],
-                "training_codes": [],  # All training types
-                "only_expiring": True
-            },
-            "request_payload": {
-                "due_days": 14,
-                "custom_message": config["custom_message"]
-            }
-        }
-        
-        schedule = await ScheduledBulkRequestService.create_schedule(
-            data=schedule_data,
-            created_by=user['user_id']
-        )
-        
-        created_schedules.append({
-            "id": schedule["id"],
-            "name": schedule["name"],
-            "days_before_expiry": config["days_before_expiry"],
-            "status": "created"
-        })
-    
-    await log_audit_action(user['user_id'], "quick_setup_training_reminders", "system", "bulk", {
-        "schedules_created": len([s for s in created_schedules if s.get("status") == "created"])
-    })
-    
-    return {
-        "status": "success",
-        "message": f"Training renewal reminders configured successfully",
-        "schedules": created_schedules
-    }
-
+# NOTE: Most bulk schedule endpoints moved to routes/bulk_schedules.py
+# Includes: /bulk/schedules (CRUD), enable, disable, run-now, history
+# /bulk/schedules/run-all-due, /bulk/schedules/quick-setup-training-reminders
 
 # MOVED TO routes/training.py: /training/expiring-summary
 @api_router.get("/bulk/requests/attributed")
@@ -53674,6 +53428,9 @@ api_router.include_router(roles_router)
 
 # Include policy assignments routes (refactored from server.py)
 api_router.include_router(policy_assignments_router)
+
+# Include bulk schedules routes (refactored from server.py)
+api_router.include_router(bulk_schedules_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

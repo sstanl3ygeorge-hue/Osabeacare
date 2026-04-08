@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (18 Modules)
+### Modular Routes Structure (19 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -33,7 +33,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── interviews.py                - 6 endpoints
 ├── contracts.py                 - 11 endpoints
 ├── professional_registration.py - 4 endpoints
-├── promotion.py                 - 3 endpoints [NEW]
+├── promotion.py                 - 3 endpoints
+├── roles.py                     - 3 endpoints [NEW]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -51,19 +52,20 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 15: Extracted interviews routes (6 endpoints), removed duplicates (~462 lines)
 - Phase 16: Extracted contracts routes (11 endpoints), removed duplicates (~293 lines)
 - Phase 17: Extracted professional registration routes (4 endpoints), removed ~164 lines
-- **Phase 18: Extracted promotion routes (3 endpoints), removed ~173 lines** [DONE]
+- Phase 18: Extracted promotion routes (3 endpoints), removed ~173 lines
+- **Phase 19: Extracted roles routes (3 endpoints), removed ~51 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~54,198 lines (down from ~60,500 originally - **10.4% reduction**)
-- **Route modules**: 18 modules with ~185 endpoints extracted
-- **Testing**: 100% pass rate (22/22 tests in Phase 18)
+- **server.py**: ~54,147 lines (down from ~60,500 originally - **10.5% reduction**)
+- **Route modules**: 19 modules with ~188 endpoints extracted
+- **Testing**: 100% pass rate (18/18 tests in Phase 19)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
 - [ ] Extract DBS routes (~5 endpoints - complex service dependencies)
+- [ ] Extract RTW (Right to Work) routes (~3 endpoints)
 - [ ] Extract employee readiness routes (`/employees/{id}/readiness*`)
-- [ ] Extract RTW (Right to Work) routes
 - [ ] Extract audit/audit-trail routes
 - [ ] Clean up remaining F811 duplicate function definitions
 
@@ -73,9 +75,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_192.json` - Phase 16 (contracts extraction)
 - `/app/test_reports/iteration_193.json` - Phase 17 (professional registration)
-- `/app/test_reports/iteration_194.json` - Phase 18 (promotion routes) [NEW]
+- `/app/test_reports/iteration_194.json` - Phase 18 (promotion routes)
+- `/app/test_reports/iteration_195.json` - Phase 19 (roles routes) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

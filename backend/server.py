@@ -113,6 +113,7 @@ from routes.admin import router as admin_router
 from routes.training import router as training_router
 from routes.documents import router as documents_router
 from routes.recruitment import router as recruitment_router
+from routes.employees import router as employees_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -57987,6 +57988,9 @@ api_router.include_router(documents_router)
 
 # Include recruitment routes (refactored from server.py)
 api_router.include_router(recruitment_router)
+
+# Include employee routes (refactored from server.py)
+api_router.include_router(employees_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

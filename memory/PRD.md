@@ -79,7 +79,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
   - AI extraction using Gemini
   - "Send Welcome Emails" option
   - ProfileCompletionWizard for workers
-- [x] **Server.py Refactoring - Phases 1-6** (April 8, 2026)
+- [x] **Server.py Refactoring - Phases 1-7** (April 8, 2026)
   - Created `/app/backend/routes/` module structure
   - Extracted auth routes to `routes/auth.py` (~765 lines, 15 endpoints)
   - Extracted worker portal routes to `routes/workers.py` (~647 lines, 9 endpoints)
@@ -87,9 +87,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
   - Extracted training management to `routes/training.py` (~482 lines, 11 endpoints)
   - Extracted document management to `routes/documents.py` (~388 lines, 10 endpoints)
   - Extracted recruitment pipeline to `routes/recruitment.py` (~564 lines, 10 endpoints)
+  - Extracted employee management to `routes/employees.py` (~670 lines, 12 endpoints)
   - Created `routes/dependencies.py` for shared utilities (~224 lines)
-  - **Reduced server.py from 60,499 to 58,122 lines** (-2,377 lines, ~3.9%)
-  - Total code in routes module: ~3,416 lines, 61 endpoints
+  - **Reduced server.py from 60,499 to 58,126 lines** (-2,373 lines, ~3.9%)
+  - Total code in routes module: ~4,086 lines, 73 endpoints
   - Fixed JWT_SECRET loading order bug (load_dotenv moved to top of server.py)
 
 ### Pending/In Progress

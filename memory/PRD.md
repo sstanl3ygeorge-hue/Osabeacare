@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (14 Modules)
+### Modular Routes Structure (16 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py      - Shared auth utilities
@@ -30,7 +30,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── templates.py        - 5 endpoints
 ├── service_users.py    - 10 endpoints
 ├── forms.py            - 17 endpoints
-├── interviews.py       - 6 endpoints [NEW]
+├── interviews.py       - 6 endpoints
+├── contracts.py        - 11 endpoints [NEW]
 └── verification_routes.py - 7 endpoints
 ```
 
@@ -45,18 +46,20 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 12: Extracted service_users routes (10 endpoints)
 - Phase 13: Extracted forms routes (17 endpoints)
 - Phase 14: Removed duplicate form routes (~652 lines)
-- **Phase 15: Extracted interviews routes (6 endpoints), removed duplicates (~462 lines)** [NEW]
+- Phase 15: Extracted interviews routes (6 endpoints), removed duplicates (~462 lines)
+- **Phase 16: Extracted contracts routes (11 endpoints), removed duplicates (~293 lines)** [DONE]
 
 ### Current Status
-- **server.py**: ~54,828 lines (down from ~60,500 originally - **9.4% reduction**)
-- **Route modules**: 14 modules with ~167 endpoints extracted
-- **Testing**: 100% pass rate across all phases
+- **server.py**: ~54,535 lines (down from ~60,500 originally - **9.9% reduction**)
+- **Route modules**: 16 modules with ~178 endpoints extracted
+- **Testing**: 100% pass rate (27/27 tests in Phase 16)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
 - [ ] Extract DBS routes (~5 endpoints - complex dependencies)
 - [ ] Extract employee compliance routes (`/employees/{id}/compliance*`)
+- [ ] Extract advanced compliance routes (professional registration, etc.)
 - [ ] Clean up remaining F811 duplicate function definitions
 
 ### P3: Future Enhancements
@@ -67,6 +70,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ## Test Reports
 - `/app/test_reports/iteration_190.json` - Phase 14 (form cleanup)
 - `/app/test_reports/iteration_191.json` - Phase 15 (interviews extraction)
+- `/app/test_reports/iteration_192.json` - Phase 16 (contracts extraction) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

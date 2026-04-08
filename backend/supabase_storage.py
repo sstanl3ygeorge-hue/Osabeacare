@@ -146,3 +146,67 @@ async def upload_file_to_supabase(file_content: bytes, filename: str, content_ty
     """
     result = await upload_to_supabase(file_content, filename, folder="stamped")
     return result.get("url")
+
+
+async def download_file_from_storage(file_url: str) -> Optional[bytes]:
+    """
+    Download a file from a URL (supports both Supabase and regular URLs).
+    
+    Args:
+        file_url: The URL to download from
+    
+    Returns:
+        File bytes or None if download fails
+    """
+    if not file_url:
+        return None
+    
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # If it's a Supabase URL, add auth header
+            headers = {}
+            if SUPABASE_URL and file_url.startswith(SUPABASE_URL) and SUPABASE_SERVICE_KEY:
+                headers["Authorization"] = f"Bearer {SUPABASE_SERVICE_KEY}"
+            
+            response = await client.get(file_url, headers=headers, follow_redirects=True)
+            
+            if response.status_code == 200:
+                return response.content
+            else:
+                logger.warning(f"Download failed with status {response.status_code}: {file_url}")
+                return None
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        return None
+
+
+async def upload_file_to_storage(
+    file_content: bytes,
+    filename: str,
+    folder: str = "uploads"
+) -> Optional[str]:
+    """
+    Upload a file to storage (Supabase if configured, returns URL).
+    
+    Args:
+        file_content: The file bytes
+        filename: Desired filename  
+        folder: Storage folder path
+    
+    Returns:
+        URL string of uploaded file or None if upload fails
+    """
+    if not file_content:
+        return None
+    
+    try:
+        if is_supabase_storage_configured():
+            result = await upload_to_supabase(file_content, filename, folder=folder)
+            return result.get("url")
+        else:
+            # Fallback: log warning that storage not configured
+            logger.warning("Storage not configured - file not persisted remotely")
+            return None
+    except Exception as e:
+        logger.error(f"Upload error: {e}")
+        return None

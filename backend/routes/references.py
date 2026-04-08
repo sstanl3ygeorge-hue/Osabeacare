@@ -3,25 +3,25 @@ References Management Routes Module
 
 This module handles employee reference-related endpoints including:
 - Reference CRUD operations
-- Reference request sending
-- Reference verification and integrity checks
-- Mismatch handling and explanations
+- Reference verification (simple verification - see server.py for ReferenceIntegrityService)
+- Reference status tracking
+
+Note: Advanced integrity checks and mismatch handling are in server.py using ReferenceIntegrityService.
+Those will be migrated here in a future refactoring phase.
 
 Extracted from server.py for modularity.
 """
 
-import os
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, Body
 from pydantic import BaseModel, EmailStr
 
 from .dependencies import (
     get_db,
     get_current_user,
-    require_admin,
     require_manager_or_admin,
     log_audit_action,
 )
@@ -51,11 +51,6 @@ class ReferenceUpdate(BaseModel):
     referee_organisation: Optional[str] = None
     referee_job_title: Optional[str] = None
     referee_relationship: Optional[str] = None
-
-
-class MismatchOverride(BaseModel):
-    reason: str
-    override_type: str  # 'accept', 'minor_discrepancy', 'explained'
 
 
 # ==================== REFERENCE CRUD ====================
@@ -99,12 +94,12 @@ async def get_references_for_employee(
         
         # From references collection
         if refs:
-            coll_ref = refs.get(f"ref{ref_num}", {})
+            coll_ref = refs.get(f"ref{ref_num}") or {}
             if coll_ref:
                 ref_data.update({
-                    "declared": coll_ref.get("declared", {}),
-                    "request": coll_ref.get("request", {}),
-                    "response": coll_ref.get("response", {}),
+                    "declared": coll_ref.get("declared") or {},
+                    "request": coll_ref.get("request") or {},
+                    "response": coll_ref.get("response") or {},
                     "verification_status": coll_ref.get("verification_status", "pending"),
                     "verified": coll_ref.get("verification_status") == "verified"
                 })
@@ -304,7 +299,7 @@ async def update_reference(
     return {"success": True, "message": f"Reference {ref_num} updated"}
 
 
-# ==================== REFERENCE VERIFICATION ====================
+# ==================== REFERENCE VERIFICATION (Simple) ====================
 
 @router.post("/references/{employee_id}/{ref_num}/verify")
 async def verify_reference(
@@ -313,7 +308,12 @@ async def verify_reference(
     notes: Optional[str] = Body(None, embed=True),
     user: dict = Depends(require_manager_or_admin)
 ):
-    """Verify a reference."""
+    """
+    Simple reference verification.
+    
+    Note: For integrity-based verification with mismatch handling,
+    use the endpoints in server.py that leverage ReferenceIntegrityService.
+    """
     db = get_db()
     
     if ref_num not in [1, 2]:
@@ -379,193 +379,6 @@ async def verify_reference(
     return {"success": True, "message": f"Reference {ref_num} verified"}
 
 
-@router.post("/references/{employee_id}/{ref_num}/reject")
-async def reject_reference(
-    employee_id: str,
-    ref_num: int,
-    reason: str = Body(..., embed=True),
-    user: dict = Depends(require_manager_or_admin)
-):
-    """Reject a reference."""
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Update employee record
-    await db.employees.update_one(
-        {"id": employee_id},
-        {
-            "$set": {
-                f"reference_{ref_num}_verified": False,
-                f"reference_{ref_num}_rejected": True,
-                f"reference_{ref_num}_rejected_by": user.get("user_id"),
-                f"reference_{ref_num}_rejected_at": now,
-                f"reference_{ref_num}_rejection_reason": reason,
-                "updated_at": now
-            }
-        }
-    )
-    
-    # Update references collection
-    ref_key = f"ref{ref_num}"
-    await db.references.update_one(
-        {"employee_id": employee_id},
-        {
-            "$set": {
-                f"{ref_key}.verification_status": "rejected",
-                f"{ref_key}.rejected_by": user.get("user_id"),
-                f"{ref_key}.rejected_at": now,
-                f"{ref_key}.rejection_reason": reason,
-                "updated_at": now
-            }
-        }
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "reject_reference",
-        "reference",
-        f"{employee_id}_ref_{ref_num}",
-        {"reason": reason}
-    )
-    
-    return {"success": True, "message": f"Reference {ref_num} rejected"}
-
-
-# ==================== REFERENCE INTEGRITY ====================
-
-@router.get("/references/{employee_id}/{ref_num}/integrity")
-async def get_reference_integrity(
-    employee_id: str,
-    ref_num: int,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Check integrity between declared reference info and response data.
-    Identifies mismatches that need attention.
-    """
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    refs = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
-    ref_key = f"ref{ref_num}"
-    ref_data = refs.get(ref_key, {}) if refs else {}
-    
-    declared = ref_data.get("declared", {})
-    response = ref_data.get("response", {})
-    
-    # Fallback to employee fields
-    if not declared.get("name"):
-        declared = {
-            "name": employee.get(f"reference_{ref_num}_name"),
-            "email": employee.get(f"reference_{ref_num}_email"),
-            "organisation": employee.get(f"reference_{ref_num}_company"),
-            "job_title": employee.get(f"reference_{ref_num}_job_title")
-        }
-    
-    # Check for mismatches
-    mismatches = []
-    
-    # Name mismatch
-    if declared.get("name") and response.get("referee_name"):
-        if declared["name"].lower().strip() != response["referee_name"].lower().strip():
-            mismatches.append({
-                "field": "name",
-                "declared": declared["name"],
-                "response": response["referee_name"],
-                "severity": "high"
-            })
-    
-    # Organisation mismatch
-    if declared.get("organisation") and response.get("organisation"):
-        if declared["organisation"].lower().strip() != response["organisation"].lower().strip():
-            mismatches.append({
-                "field": "organisation",
-                "declared": declared["organisation"],
-                "response": response["organisation"],
-                "severity": "medium"
-            })
-    
-    # Job title mismatch
-    if declared.get("job_title") and response.get("applicant_job_title"):
-        if declared["job_title"].lower().strip() != response["applicant_job_title"].lower().strip():
-            mismatches.append({
-                "field": "job_title",
-                "declared": declared["job_title"],
-                "response": response["applicant_job_title"],
-                "severity": "low"
-            })
-    
-    return {
-        "employee_id": employee_id,
-        "reference_number": ref_num,
-        "has_mismatches": len(mismatches) > 0,
-        "mismatches": mismatches,
-        "declared": declared,
-        "response": response,
-        "verification_status": ref_data.get("verification_status", "pending"),
-        "mismatch_explained": ref_data.get("mismatch_explained", False)
-    }
-
-
-@router.post("/references/{employee_id}/{ref_num}/override-mismatch")
-async def override_reference_mismatch(
-    employee_id: str,
-    ref_num: int,
-    override: MismatchOverride,
-    user: dict = Depends(require_admin)
-):
-    """Admin override for reference mismatches."""
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    ref_key = f"ref{ref_num}"
-    await db.references.update_one(
-        {"employee_id": employee_id},
-        {
-            "$set": {
-                f"{ref_key}.mismatch_overridden": True,
-                f"{ref_key}.mismatch_override_reason": override.reason,
-                f"{ref_key}.mismatch_override_type": override.override_type,
-                f"{ref_key}.mismatch_overridden_by": user.get("user_id"),
-                f"{ref_key}.mismatch_overridden_at": now,
-                "updated_at": now
-            }
-        }
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "override_reference_mismatch",
-        "reference",
-        f"{employee_id}_ref_{ref_num}",
-        {"reason": override.reason, "override_type": override.override_type}
-    )
-    
-    return {"success": True, "message": "Mismatch override recorded"}
-
-
 # ==================== REFERENCE STATUS ====================
 
 @router.get("/references/{employee_id}/status")
@@ -585,10 +398,10 @@ async def get_references_status(
     statuses = []
     for ref_num in [1, 2]:
         ref_key = f"ref{ref_num}"
-        ref_data = refs.get(ref_key, {}) if refs else {}
+        ref_data = (refs.get(ref_key) or {}) if refs else {}
         
-        has_declared = bool(ref_data.get("declared", {}).get("name") or employee.get(f"reference_{ref_num}_name"))
-        has_request = bool(ref_data.get("request", {}).get("sent_at") or employee.get(f"reference_{ref_num}_request_status") == "sent")
+        has_declared = bool((ref_data.get("declared") or {}).get("name") or employee.get(f"reference_{ref_num}_name"))
+        has_request = bool((ref_data.get("request") or {}).get("sent_at") or employee.get(f"reference_{ref_num}_request_status") == "sent")
         has_response = bool(ref_data.get("response") or employee.get(f"reference_{ref_num}_response_data"))
         is_verified = ref_data.get("verification_status") == "verified" or employee.get(f"reference_{ref_num}_verified", False)
         is_rejected = ref_data.get("verification_status") == "rejected" or employee.get(f"reference_{ref_num}_rejected", False)
@@ -627,67 +440,3 @@ async def get_references_status(
         "any_rejected": any_rejected,
         "overall_status": "complete" if all_verified else ("rejected" if any_rejected else "incomplete")
     }
-
-
-# ==================== REFERENCE RESET ====================
-
-@router.post("/references/{employee_id}/{ref_num}/reset")
-async def reset_reference(
-    employee_id: str,
-    ref_num: int,
-    user: dict = Depends(require_admin)
-):
-    """Reset a reference to allow re-collection."""
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Reset employee fields
-    reset_fields = {
-        f"reference_{ref_num}_verified": False,
-        f"reference_{ref_num}_rejected": False,
-        f"reference_{ref_num}_request_status": None,
-        f"reference_{ref_num}_response_data": None,
-        "updated_at": now
-    }
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": reset_fields})
-    
-    # Reset references collection
-    ref_key = f"ref{ref_num}"
-    await db.references.update_one(
-        {"employee_id": employee_id},
-        {
-            "$set": {
-                f"{ref_key}.verification_status": "pending",
-                f"{ref_key}.request": {},
-                f"{ref_key}.response": {},
-                f"{ref_key}.reset_at": now,
-                f"{ref_key}.reset_by": user.get("user_id"),
-                "updated_at": now
-            },
-            "$unset": {
-                f"{ref_key}.verified_by": "",
-                f"{ref_key}.verified_at": "",
-                f"{ref_key}.rejected_by": "",
-                f"{ref_key}.rejected_at": ""
-            }
-        }
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "reset_reference",
-        "reference",
-        f"{employee_id}_ref_{ref_num}",
-        {}
-    )
-    
-    return {"success": True, "message": f"Reference {ref_num} reset"}

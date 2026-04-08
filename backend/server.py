@@ -103,6 +103,13 @@ from work_readiness_engine import (
     can_sign_contract,
     can_promote_to_active_legacy as can_promote_to_active
 )
+from supabase_storage import (
+    download_file_from_storage,
+    upload_file_to_storage,
+    is_supabase_storage_configured,
+    upload_to_supabase,
+    upload_file_to_supabase
+)
 
 # ==================== MODULAR ROUTERS ====================
 # Import refactored route modules
@@ -8922,7 +8929,7 @@ async def send_worker_reminder(
     try:
         if resend.api_key:
             resend.Emails.send({
-                "from": EMAIL_FROM,
+                "from": SENDER_EMAIL,
                 "to": [email],
                 "subject": f"Compliance Reminder - {overall_pct}% Complete",
                 "html": email_html
@@ -9130,7 +9137,7 @@ async def request_renewal(
     try:
         if resend.api_key:
             resend.Emails.send({
-                "from": EMAIL_FROM,
+                "from": SENDER_EMAIL,
                 "to": [email],
                 "subject": f"Renewal Required: {item_name}",
                 "html": email_html

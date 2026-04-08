@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (31 Modules)
+### Modular Routes Structure (32 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -46,7 +46,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── readiness.py                 - 7 endpoints
 ├── cv_extractions.py            - 11 endpoints
 ├── profile_photos.py            - 3 endpoints
-├── worker_dashboard.py          - 7 endpoints [NEW - Phase 33]
+├── worker_dashboard.py          - 7 endpoints
+├── pdf_exports.py               - 10 endpoints [NEW - Phase 34]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -64,18 +65,19 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 30: Readiness routes (7 endpoints), removed ~565 lines
 - Phase 31: CV Extractions routes (11 endpoints), removed ~1,151 lines
 - Phase 32: Profile Photos routes (3 endpoints), removed ~100 lines
-- **Phase 33: Worker Dashboard routes (7 endpoints), removed ~1,788 lines** [DONE]
+- Phase 33: Worker Dashboard routes (7 endpoints), removed ~1,788 lines
+- **Phase 34: PDF Templates & Exports routes (10 endpoints), removed ~377 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~46,802 lines (down from ~60,500 originally - **22.6% reduction**)
-- **Route modules**: 31 modules with ~283 endpoints extracted
-- **Remaining inline endpoints**: ~279 endpoints
+- **server.py**: ~46,430 lines (down from ~60,500 originally - **23.3% reduction**)
+- **Route modules**: 32 modules with ~293 endpoints extracted
+- **Remaining inline endpoints**: ~269 endpoints
 - **Testing**: All phases passing (100% success rate)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract more remaining inline routes (~279 left)
+- [ ] Extract more remaining inline routes (~269 left)
 - [ ] Extract helper functions/services to separate modules
 - [ ] Identify next batch of related endpoints
 
@@ -85,10 +87,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_205.json` - Phase 29 (migrations)
-- `/app/test_reports/iteration_206.json` - Phase 30 (readiness)
 - `/app/test_reports/iteration_207.json` - Phase 31 (cv_extractions) + Phase 32 (profile_photos)
-- `/app/test_reports/iteration_208.json` - Phase 33 (worker_dashboard) [NEW]
+- `/app/test_reports/iteration_208.json` - Phase 33 (worker_dashboard)
+- `/app/test_reports/iteration_209.json` - Phase 34 (pdf_exports) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

@@ -107,9 +107,8 @@ from work_readiness_engine import (
 from supabase_storage import (
     download_file_from_storage,
     upload_file_to_storage,
-    is_supabase_storage_configured,
-    upload_to_supabase,
-    upload_file_to_supabase
+    # Note: is_supabase_storage_configured, upload_to_supabase, upload_file_to_supabase
+    # are imported locally in functions to avoid shadowing issues
 )
 
 # ==================== MODULAR ROUTERS ====================
@@ -12228,8 +12227,8 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
 # Two-status model: Recruitment (onboarding) → Active Employee
 # ============================================================================
 
+# NOTE: can_promote_to_active_legacy is imported at the top of the file (line 105)
 from work_readiness_engine import (
-    can_promote_to_active_legacy as can_promote_to_active, 
     check_professional_registration,
     ROLE_REGISTRATION_REQUIREMENTS,
     EMPLOYEE_STATUS_APPLICANT,
@@ -34198,7 +34197,7 @@ class AgreementSubmissionService:
             {"id": document_id},
             {
                 "$set": {
-                    "status": DocumentStatus.UPLOADED_IN_ERROR.value,
+                    "status": EvidenceDocumentStatus.UPLOADED_IN_ERROR.value,
                     "correction_info": correction,
                     "updated_at": now
                 },
@@ -34251,7 +34250,7 @@ class AgreementSubmissionService:
             {"id": document_id},
             {
                 "$set": {
-                    "status": DocumentStatus.SUPERSEDED.value,
+                    "status": EvidenceDocumentStatus.SUPERSEDED.value,
                     "superseded_by": superseded_by_id,
                     "superseded_at": now,
                     "correction_info": correction,
@@ -37167,8 +37166,8 @@ async def request_missing_compliance_items(
 # - Multi-file requirements supported with proper counts
 # - Correction-safe document lifecycle
 
-class DocumentStatus(str, Enum):
-    """Document lifecycle statuses."""
+class EvidenceDocumentStatus(str, Enum):
+    """Document lifecycle statuses for evidence documents."""
     UPLOADED = "uploaded"
     REQUESTED = "requested"
     SUBMITTED = "submitted"
@@ -38024,7 +38023,7 @@ async def mark_document_uploaded_in_error(
             "$set": update,
             "$push": {
                 "status_history": {
-                    "status": DocumentStatus.UPLOADED_IN_ERROR.value,
+                    "status": EvidenceDocumentStatus.UPLOADED_IN_ERROR.value,
                     "changed_at": now,
                     "changed_by": user['user_id'],
                     "reason": reason
@@ -38074,7 +38073,7 @@ async def supersede_document(
             "$set": update,
             "$push": {
                 "status_history": {
-                    "status": DocumentStatus.SUPERSEDED.value,
+                    "status": EvidenceDocumentStatus.SUPERSEDED.value,
                     "changed_at": now,
                     "changed_by": user['user_id'],
                     "reason": reason,

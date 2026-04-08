@@ -36,7 +36,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── promotion.py                 - 3 endpoints
 ├── roles.py                     - 3 endpoints
 ├── policy_assignments.py        - 6 endpoints
-├── bulk_schedules.py            - 10 endpoints [NEW]
+├── bulk_schedules.py            - 10 endpoints
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -44,26 +44,25 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ### Completed Phases
 - Phase 1-7: Extracted auth, workers, admin, training, documents, recruitment, employees
-- Phase 8: Extracted references routes (5 endpoints)
-- Phase 9: Extracted email/notification routes (17 endpoints)
-- Phase 10: Extracted compliance routes (27 endpoints)
-- Phase 11: Extracted templates routes (5 endpoints)
-- Phase 12: Extracted service_users routes (10 endpoints)
-- Phase 13: Extracted forms routes (17 endpoints)
-- Phase 14: Removed duplicate form routes (~652 lines)
-- Phase 15: Extracted interviews routes (6 endpoints), removed duplicates (~462 lines)
-- Phase 16: Extracted contracts routes (11 endpoints), removed duplicates (~293 lines)
+- Phase 8-15: Extracted references, notifications, compliance, templates, service_users, forms, interviews
+- Phase 16: Extracted contracts routes (11 endpoints), removed ~293 lines
 - Phase 17: Extracted professional registration routes (4 endpoints), removed ~164 lines
 - Phase 18: Extracted promotion routes (3 endpoints), removed ~173 lines
 - Phase 19: Extracted roles routes (3 endpoints), removed ~51 lines
 - Phase 20: Extracted policy assignments routes (6 endpoints), removed ~284 lines
 - Phase 21: Fixed F811 duplicate definitions, removed ~54 lines
-- **Phase 22: Extracted bulk schedules routes (10 endpoints), removed ~247 lines** [DONE]
+- Phase 22: Extracted bulk schedules routes (10 endpoints), removed ~247 lines
+- **Phase 23: Fixed more F811 duplicates** [DONE]
+  - Removed duplicate `can_promote_to_active` import (use global alias)
+  - Removed global supabase storage imports (use local in functions)
+  - Renamed `DocumentStatus` Enum to `EvidenceDocumentStatus` to avoid conflict
+  - F811 errors reduced from 9 to 4 (remaining are intentional local imports)
 
 ### Current Status
 - **server.py**: ~53,565 lines (down from ~60,500 originally - **11.5% reduction**)
 - **Route modules**: 21 modules with ~204 endpoints extracted
-- **Testing**: 100% pass rate (27/27 tests in Phase 22)
+- **F811 errors**: Reduced from 14 to 4 (intentional local `get_template` imports)
+- **Testing**: 100% pass rate (23/23 tests in Phase 23)
 
 ## Pending/In Progress
 
@@ -71,8 +70,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] Extract DBS routes (~5 endpoints - complex service dependencies)
 - [ ] Extract RTW (Right to Work) routes (~3 endpoints)
 - [ ] Extract employee readiness routes (`/employees/{id}/readiness*`)
-- [ ] Extract induction checklist routes (~7 endpoints)
-- [ ] Continue fixing remaining F811 duplicate definitions
+- [ ] Extract agreement routes (~16 endpoints)
+- [ ] Extract CV extraction routes (~5 endpoints)
 
 ### P3: Future Enhancements
 - [ ] Supabase Auth integration with RLS policies
@@ -80,9 +79,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_196.json` - Phase 20 (policy assignments)
 - `/app/test_reports/iteration_197.json` - Phase 21 (F811 fixes)
-- `/app/test_reports/iteration_198.json` - Phase 22 (bulk schedules) [NEW]
+- `/app/test_reports/iteration_198.json` - Phase 22 (bulk schedules)
+- `/app/test_reports/iteration_199.json` - Phase 23 (more F811 fixes) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

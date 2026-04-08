@@ -32,7 +32,6 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Admin uploads scanned/digital PDF application forms
 - AI extracts personal details, address, NI number, employment history
 - Creates employee record with pre-filled data
-- Optional: Sends magic link to worker
 
 ## Architecture
 
@@ -43,7 +42,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **APScheduler** for email crons
 - **Gemini AI** (via emergentintegrations) for PDF/CV extraction
 
-### Modular Routes Structure
+### Modular Routes Structure (11 Modules)
 ```
 /app/backend/routes/
 ├── __init__.py
@@ -57,7 +56,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── employees.py       - 11 endpoints (employee CRUD)
 ├── references.py      - 5 endpoints (reference CRUD, status)
 ├── notifications.py   - 17 endpoints (email service, email requests)
-├── compliance.py      - 27 endpoints (policies, insurance, incidents, reports) [NEW]
+├── compliance.py      - 27 endpoints (policies, insurance, incidents, reports)
+├── templates.py       - 5 endpoints (template CRUD) [NEW]
 └── verification_routes.py - 7 endpoints (document verification)
 ```
 
@@ -67,28 +67,20 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] **Phase 1-7**: Extracted auth, workers, admin, training, documents, recruitment, employees
 - [x] **Phase 8**: Extracted references routes (5 endpoints)
 - [x] **Phase 9**: Extracted email/notification routes (17 endpoints)
-- [x] **Phase 10**: Extracted compliance routes (27 endpoints) [NEW]
-  - Policies management (CRUD, upload, review tracking, audit trail)
-  - Insurance/certificates management (CRUD, upload, expiry tracking)
-  - Incident logs management (CRUD, audit trail)
-  - Compliance reports (staff-dbs, training)
+- [x] **Phase 10**: Extracted compliance routes (27 endpoints)
+- [x] **Phase 11**: Extracted templates routes (5 endpoints) [NEW]
 
 **Current Status:**
-- `server.py`: ~56,485 lines (down from ~60,500 originally)
-- Route modules: 10 modules with ~129 endpoints extracted
-- Testing: 100% pass rate (iteration_186: 29/29 tests)
-
-### Routes Still in server.py (Not Duplicated)
-- `/compliance/dashboard` - Compliance overview dashboard
-- `/compliance/centre-summary` - Centre compliance summary
-- `/compliance/cqc-evidence-map` - CQC evidence mapping
-- `/compliance/name-mismatches` - Name mismatch detection
+- `server.py`: ~56,425 lines (down from ~60,500 originally - **6.7% reduction**)
+- Route modules: 11 modules with ~134 endpoints extracted
+- Testing: 100% pass rate (iteration_187: 21/21 tests)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract DBS routes (~12 endpoints)
+- [ ] Extract DBS routes (~5 endpoints)
 - [ ] Extract employee compliance routes (`/employees/{id}/compliance*`)
+- [ ] Extract form-submissions routes (~18 endpoints)
 - [ ] Extract service user routes
 - [ ] Clean up remaining F811 duplicate function definitions
 
@@ -98,8 +90,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_185.json` - Phase 9 verification (100% pass)
 - `/app/test_reports/iteration_186.json` - Phase 10 verification (100% pass)
+- `/app/test_reports/iteration_187.json` - Phase 11 verification (100% pass)
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

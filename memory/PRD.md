@@ -27,13 +27,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Primary auth method for workers
 - Password login as optional secondary method
 
-### 6. Offline PDF Application Form Intake
-- Admin uploads scanned/digital PDF application forms
-- AI extracts personal details via Gemini
-
 ## Architecture
 
-### Modular Routes Structure (12 Modules)
+### Modular Routes Structure (13 Modules)
 ```
 /app/backend/routes/
 ├── __init__.py
@@ -49,7 +45,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── notifications.py    - 17 endpoints (email service, email requests)
 ├── compliance.py       - 27 endpoints (policies, insurance, incidents, reports)
 ├── templates.py        - 5 endpoints (template CRUD)
-├── service_users.py    - 10 endpoints (CQC care records, documents) [NEW]
+├── service_users.py    - 10 endpoints (CQC care records, documents)
+├── forms.py            - 17 endpoints (form templates, submissions, generated forms) [NEW]
 └── verification_routes.py - 7 endpoints (document verification)
 ```
 
@@ -61,19 +58,27 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Phase 9: Extracted email/notification routes (17 endpoints)
 - [x] Phase 10: Extracted compliance routes (27 endpoints)
 - [x] Phase 11: Extracted templates routes (5 endpoints)
-- [x] Phase 12: Extracted service_users routes (10 endpoints) [NEW]
+- [x] Phase 12: Extracted service_users routes (10 endpoints)
+- [x] Phase 13: Extracted forms routes (17 endpoints) [NEW]
 
 ### Current Status
-- **server.py**: ~55,937 lines (down from ~60,500 originally - **7.5% reduction**)
-- **Route modules**: 12 modules with ~144 endpoints extracted
-- **Testing**: 100% pass rate across all phases
+- **server.py**: ~55,942 lines (down from ~60,500 originally - **7.5% reduction**)
+- **Route modules**: 13 modules with ~161 endpoints extracted
+- **Testing**: 100% pass rate across all phases (27/27 tests in Phase 13)
+
+### Architecture Note
+Forms.py routes coexist with server.py routes. Complex routes remain in server.py:
+- `/generated-forms/{form_id}/send` - Email form to worker
+- `/generated-forms/token/{token}` - Public access
+- `/generated-forms/{form_id}/sign` - Employee signature
+- `/generated-forms/import-document` - Document import
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
 - [ ] Extract DBS routes (~5 endpoints - complex dependencies)
-- [ ] Extract form-submissions routes (~18 endpoints)
 - [ ] Extract employee compliance routes (`/employees/{id}/compliance*`)
+- [ ] Remove duplicate routes from server.py after forms extraction
 - [ ] Clean up remaining F811 duplicate function definitions
 
 ### P3: Future Enhancements
@@ -82,8 +87,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_187.json` - Phase 11 (templates) verification
 - `/app/test_reports/iteration_188.json` - Phase 12 (service_users) verification
+- `/app/test_reports/iteration_189.json` - Phase 13 (forms) verification
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

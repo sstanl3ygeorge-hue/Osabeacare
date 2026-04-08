@@ -18,6 +18,7 @@ import { ScrollArea } from '../../components/ui/scroll-area';
 import { Briefcase, GraduationCap, Sparkles, Edit3, Link2, MessageSquare } from 'lucide-react';
 import { Textarea } from '../../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import ProfileCompletionWizard from '../../components/worker/ProfileCompletionWizard';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -229,6 +230,9 @@ export default function WorkerDashboard() {
   const [mismatchExplanationType, setMismatchExplanationType] = useState('');
   const [mismatchExplanationText, setMismatchExplanationText] = useState('');
   const [submittingMismatchExplanation, setSubmittingMismatchExplanation] = useState(false);
+  // Profile completion wizard state
+  const [showProfileWizard, setShowProfileWizard] = useState(false);
+  const [profileCompletionStatus, setProfileCompletionStatus] = useState(null);
   const navigate = useNavigate();
 
   const fetchDashboard = useCallback(async () => {
@@ -304,6 +308,30 @@ export default function WorkerDashboard() {
   useEffect(() => {
     fetchDashboard();
   }, [fetchDashboard]);
+
+  // Check if profile completion is needed (for offline PDF imports)
+  const checkProfileCompletion = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('workerToken');
+      const response = await axios.get(`${API}/worker/profile-completion-status`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setProfileCompletionStatus(response.data);
+      
+      // Auto-show wizard if profile needs completion and not already shown
+      if (response.data.needs_wizard && !showProfileWizard) {
+        setShowProfileWizard(true);
+      }
+    } catch (error) {
+      console.error('Failed to check profile completion:', error);
+    }
+  }, [showProfileWizard]);
+
+  useEffect(() => {
+    if (dashboard) {
+      checkProfileCompletion();
+    }
+  }, [dashboard, checkProfileCompletion]);
 
   // Fetch CV extraction status
   const fetchCvStatus = useCallback(async () => {
@@ -961,6 +989,36 @@ export default function WorkerDashboard() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Profile Completion Banner - for offline PDF imports */}
+        {profileCompletionStatus?.needs_wizard && !isActiveEmployee && (
+          <Card className="border-purple-200 bg-purple-50 shadow-sm" data-testid="profile-completion-banner">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                    <User className="h-5 w-5 text-purple-600" />
+                  </div>
+                  <div>
+                    <h4 className="font-medium text-purple-900">Complete Your Profile</h4>
+                    <p className="text-sm text-purple-700">
+                      {profileCompletionStatus.completed_sections}/{profileCompletionStatus.total_sections} sections complete • 
+                      Please fill in the remaining information
+                    </p>
+                  </div>
+                </div>
+                <Button 
+                  onClick={() => setShowProfileWizard(true)}
+                  className="bg-purple-600 hover:bg-purple-700"
+                  data-testid="complete-profile-btn"
+                >
+                  <Edit3 className="h-4 w-4 mr-2" />
+                  Complete Profile
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {/* Progress Card - Only for onboarding */}
@@ -2826,6 +2884,17 @@ export default function WorkerDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Profile Completion Wizard for Offline PDF Imports */}
+      <ProfileCompletionWizard
+        open={showProfileWizard}
+        onClose={() => setShowProfileWizard(false)}
+        onComplete={() => {
+          setShowProfileWizard(false);
+          fetchDashboard(); // Refresh dashboard after completion
+          toast.success('Profile completed successfully!');
+        }}
+      />
     </div>
   );
 }

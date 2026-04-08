@@ -4881,6 +4881,11 @@ class EmployeeResponse(BaseModel):
     dbs_verification_id: Optional[str] = None
     dbs_stamped_at: Optional[str] = None
     dbs_stamped_by: Optional[str] = None
+    # PDF Import fields
+    import_source: Optional[str] = None
+    imported_by: Optional[str] = None
+    imported_at: Optional[str] = None
+    profile_completion_needed: Optional[bool] = None
 
 # Document Type Models
 class DocumentTypeCreate(BaseModel):
@@ -10994,6 +10999,377 @@ async def mark_notification_read(
     return {"success": result.modified_count > 0}
 
 
+@api_router.get("/worker/notifications/{notification_id}/read")
+async def mark_notification_read_get(
+    notification_id: str,
+    worker: dict = Depends(get_current_worker)
+):
+    """Mark a notification as read (GET method for compatibility)."""
+    return await mark_notification_read(notification_id, worker)
+
+
+
+@api_router.get("/worker/profile-data")
+async def get_worker_profile_data(worker: dict = Depends(get_current_worker)):
+    """
+    Get current worker profile data for pre-populating the ProfileCompletionWizard.
+    
+    Returns existing data that was extracted from offline PDF application forms
+    so the worker can review and complete missing fields.
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Build profile data from employee record
+    profile_data = {
+        "personal": {
+            "date_of_birth": employee.get("date_of_birth", ""),
+            "ni_number": employee.get("ni_number", ""),
+            "phone": employee.get("phone") or employee.get("mobile") or ""
+        },
+        "address": {
+            "line1": "",
+            "line2": "",
+            "city": "",
+            "county": "",
+            "postcode": ""
+        },
+        "reference_1": {
+            "name": "",
+            "email": "",
+            "phone": "",
+            "organization": "",
+            "job_title": "",
+            "relationship": ""
+        },
+        "reference_2": {
+            "name": "",
+            "email": "",
+            "phone": "",
+            "organization": "",
+            "job_title": "",
+            "relationship": ""
+        },
+        "emergency_contact": {
+            "name": "",
+            "phone": "",
+            "relationship": "",
+            "address": ""
+        }
+    }
+    
+    # Address - check multiple possible field names
+    addr = employee.get("address", {})
+    if isinstance(addr, dict):
+        profile_data["address"]["line1"] = addr.get("line1") or addr.get("line_1") or ""
+        profile_data["address"]["line2"] = addr.get("line2") or addr.get("line_2") or ""
+        profile_data["address"]["city"] = addr.get("city") or addr.get("town") or ""
+        profile_data["address"]["county"] = addr.get("county") or ""
+        profile_data["address"]["postcode"] = addr.get("postcode") or ""
+    else:
+        # Address stored as flat fields
+        profile_data["address"]["line1"] = employee.get("address_line_1") or employee.get("address") or ""
+        profile_data["address"]["line2"] = employee.get("address_line_2") or ""
+        profile_data["address"]["city"] = employee.get("city") or employee.get("town") or ""
+        profile_data["address"]["county"] = employee.get("county") or ""
+        profile_data["address"]["postcode"] = employee.get("postcode") or ""
+    
+    # References - check employee record
+    ref_1 = employee.get("reference_1") or {}
+    ref_2 = employee.get("reference_2") or {}
+    
+    if ref_1:
+        profile_data["reference_1"] = {
+            "name": ref_1.get("name") or "",
+            "email": ref_1.get("email") or "",
+            "phone": ref_1.get("phone") or "",
+            "organization": ref_1.get("organization") or ref_1.get("organisation") or "",
+            "job_title": ref_1.get("job_title") or ref_1.get("position") or "",
+            "relationship": ref_1.get("relationship") or ""
+        }
+    
+    if ref_2:
+        profile_data["reference_2"] = {
+            "name": ref_2.get("name") or "",
+            "email": ref_2.get("email") or "",
+            "phone": ref_2.get("phone") or "",
+            "organization": ref_2.get("organization") or ref_2.get("organisation") or "",
+            "job_title": ref_2.get("job_title") or ref_2.get("position") or "",
+            "relationship": ref_2.get("relationship") or ""
+        }
+    
+    # Also check employee_references collection for stored references
+    stored_refs = await db.employee_references.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).sort("reference_number", 1).limit(2).to_list(2)
+    
+    for idx, ref in enumerate(stored_refs):
+        ref_key = f"reference_{idx + 1}"
+        if not profile_data[ref_key]["name"]:
+            profile_data[ref_key] = {
+                "name": ref.get("referee_name") or "",
+                "email": ref.get("referee_email") or "",
+                "phone": ref.get("referee_phone") or "",
+                "organization": ref.get("referee_organisation") or "",
+                "job_title": ref.get("referee_position") or "",
+                "relationship": ref.get("referee_relationship") or ""
+            }
+    
+    # Emergency Contact
+    ec = employee.get("emergency_contact") or employee.get("next_of_kin") or {}
+    if ec:
+        profile_data["emergency_contact"] = {
+            "name": ec.get("name") or employee.get("next_of_kin_name") or "",
+            "phone": ec.get("phone") or ec.get("contact_number") or employee.get("next_of_kin_phone") or "",
+            "relationship": ec.get("relationship") or employee.get("next_of_kin_relationship") or "",
+            "address": ec.get("address") or ""
+        }
+    
+    return {
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+        "profile_data": profile_data,
+        "import_source": employee.get("import_source"),
+        "profile_completion_needed": employee.get("profile_completion_needed", False)
+    }
+
+
+
+@api_router.get("/worker/profile-completion-status")
+async def get_profile_completion_status(worker: dict = Depends(get_current_worker)):
+    """
+    Check if the worker's profile needs completion.
+    
+    Returns which sections are incomplete so the frontend can show
+    a profile completion wizard for manually-created employees.
+    
+    Required sections:
+    - Personal Details (DOB, NI number, phone)
+    - Address (full address)
+    - Employment History (at least 1 entry or CV uploaded)
+    - References (2 referee details)
+    - Emergency Contacts (at least 1)
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    sections = {
+        "personal_details": {
+            "complete": False,
+            "required_fields": ["date_of_birth", "ni_number", "phone"],
+            "missing_fields": []
+        },
+        "address": {
+            "complete": False,
+            "required_fields": ["address_line_1", "city", "postcode"],
+            "missing_fields": []
+        },
+        "employment_history": {
+            "complete": False,
+            "required_fields": ["employment_history"],
+            "missing_fields": []
+        },
+        "references": {
+            "complete": False,
+            "required_fields": ["reference_1", "reference_2"],
+            "missing_fields": []
+        },
+        "emergency_contacts": {
+            "complete": False,
+            "required_fields": ["emergency_contact"],
+            "missing_fields": []
+        }
+    }
+    
+    # Check Personal Details
+    has_dob = bool(employee.get("date_of_birth"))
+    has_ni = bool(employee.get("ni_number"))
+    has_phone = bool(employee.get("phone") or employee.get("mobile"))
+    
+    if not has_dob:
+        sections["personal_details"]["missing_fields"].append("date_of_birth")
+    if not has_ni:
+        sections["personal_details"]["missing_fields"].append("ni_number")
+    if not has_phone:
+        sections["personal_details"]["missing_fields"].append("phone")
+    
+    sections["personal_details"]["complete"] = has_dob and has_ni and has_phone
+    
+    # Check Address - support both flat fields and nested dict
+    addr = employee.get("address", {})
+    if isinstance(addr, dict):
+        has_address = bool(employee.get("address_line_1") or addr.get("line1") or addr.get("line_1"))
+        has_city = bool(employee.get("city") or employee.get("town") or addr.get("city") or addr.get("town"))
+        has_postcode = bool(employee.get("postcode") or addr.get("postcode"))
+    else:
+        has_address = bool(employee.get("address_line_1") or addr)
+        has_city = bool(employee.get("city") or employee.get("town"))
+        has_postcode = bool(employee.get("postcode"))
+    
+    if not has_address:
+        sections["address"]["missing_fields"].append("address_line_1")
+    if not has_city:
+        sections["address"]["missing_fields"].append("city")
+    if not has_postcode:
+        sections["address"]["missing_fields"].append("postcode")
+    
+    sections["address"]["complete"] = has_address and has_city and has_postcode
+    
+    # Check Employment History
+    has_employment = bool(employee.get("employment_history") and len(employee.get("employment_history", [])) > 0)
+    has_cv = bool(employee.get("cv_document_id"))
+    
+    # Also check for CV in documents
+    if not has_cv:
+        cv_doc = await db.employee_documents.find_one({
+            "employee_id": employee_id,
+            "$or": [
+                {"requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]}},
+                {"document_subtype": "cv"}
+            ],
+            "status": {"$nin": ["deleted", "superseded"]}
+        })
+        has_cv = bool(cv_doc)
+    
+    if not has_employment and not has_cv:
+        sections["employment_history"]["missing_fields"].append("employment_history_or_cv")
+    
+    sections["employment_history"]["complete"] = has_employment or has_cv
+    
+    # Check References
+    ref_1 = employee.get("reference_1") or {}
+    ref_2 = employee.get("reference_2") or {}
+    
+    has_ref_1 = bool(ref_1.get("name") and ref_1.get("email"))
+    has_ref_2 = bool(ref_2.get("name") and ref_2.get("email"))
+    
+    if not has_ref_1:
+        sections["references"]["missing_fields"].append("reference_1")
+    if not has_ref_2:
+        sections["references"]["missing_fields"].append("reference_2")
+    
+    sections["references"]["complete"] = has_ref_1 and has_ref_2
+    
+    # Check Emergency Contacts
+    emergency_contact = employee.get("emergency_contact") or employee.get("next_of_kin") or {}
+    has_emergency = bool(emergency_contact.get("name") and (emergency_contact.get("phone") or emergency_contact.get("contact_number")))
+    
+    # Also check form submissions for emergency contacts
+    if not has_emergency:
+        ec_form = await db.form_submissions.find_one({
+            "employee_id": employee_id,
+            "form_type": "emergency_contacts",
+            "status": {"$in": ["submitted", "verified"]}
+        })
+        has_emergency = bool(ec_form)
+    
+    if not has_emergency:
+        sections["emergency_contacts"]["missing_fields"].append("emergency_contact")
+    
+    sections["emergency_contacts"]["complete"] = has_emergency
+    
+    # Calculate overall completion
+    completed_sections = sum(1 for s in sections.values() if s["complete"])
+    total_sections = len(sections)
+    all_complete = completed_sections == total_sections
+    
+    return {
+        "profile_complete": all_complete,
+        "needs_wizard": not all_complete,
+        "completed_sections": completed_sections,
+        "total_sections": total_sections,
+        "completion_percentage": int((completed_sections / total_sections) * 100),
+        "sections": sections,
+        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    }
+
+
+@api_router.post("/worker/profile/update")
+async def update_worker_profile(
+    profile_data: dict,
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Update worker's profile data from the completion wizard.
+    
+    Accepts partial updates for any profile section.
+    """
+    employee_id = worker.get("employee_id")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Build update document
+    update_fields = {"updated_at": now}
+    
+    # Personal Details
+    if "date_of_birth" in profile_data:
+        update_fields["date_of_birth"] = profile_data["date_of_birth"]
+    if "ni_number" in profile_data:
+        update_fields["ni_number"] = profile_data["ni_number"].upper().replace(" ", "")
+    if "phone" in profile_data:
+        update_fields["phone"] = profile_data["phone"]
+        update_fields["mobile"] = profile_data["phone"]
+    
+    # Address
+    if "address_line_1" in profile_data:
+        update_fields["address_line_1"] = profile_data["address_line_1"]
+        update_fields["address"] = profile_data["address_line_1"]
+    if "address_line_2" in profile_data:
+        update_fields["address_line_2"] = profile_data["address_line_2"]
+    if "city" in profile_data:
+        update_fields["city"] = profile_data["city"]
+        update_fields["town"] = profile_data["city"]
+    if "county" in profile_data:
+        update_fields["county"] = profile_data["county"]
+    if "postcode" in profile_data:
+        update_fields["postcode"] = profile_data["postcode"].upper().replace(" ", "")
+    
+    # References
+    if "reference_1" in profile_data:
+        update_fields["reference_1"] = profile_data["reference_1"]
+    if "reference_2" in profile_data:
+        update_fields["reference_2"] = profile_data["reference_2"]
+    
+    # Emergency Contact
+    if "emergency_contact" in profile_data:
+        update_fields["emergency_contact"] = profile_data["emergency_contact"]
+        update_fields["next_of_kin"] = profile_data["emergency_contact"]
+        update_fields["next_of_kin_name"] = profile_data["emergency_contact"].get("name")
+        update_fields["next_of_kin_relationship"] = profile_data["emergency_contact"].get("relationship")
+        update_fields["next_of_kin_phone"] = profile_data["emergency_contact"].get("phone")
+    
+    # Update the employee record
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_fields}
+    )
+    
+    # Log audit
+    await log_audit_action(
+        employee_id,
+        "profile_updated",
+        "employee",
+        employee_id,
+        {"fields_updated": list(update_fields.keys())}
+    )
+    
+    return {
+        "success": True,
+        "message": "Profile updated successfully",
+        "fields_updated": list(update_fields.keys())
+    }
+
+
 @api_router.post("/worker/cv-gaps/{gap_id}/explain")
 async def explain_cv_gap(
     gap_id: str,
@@ -17042,15 +17418,20 @@ async def get_cv_gaps_status(
 # ==================== BULK EMPLOYEE IMPORT ====================
 
 class BulkEmployeeImportRow(BaseModel):
-    """Single employee row for bulk import"""
+    """Single employee row for bulk import - supports PDF extraction data"""
     first_name: str
     last_name: str
     email: str
     phone: Optional[str] = None
     role: str = "Healthcare Assistant"
-    employment_history: Optional[List[dict]] = None  # List of {employer, role, start_date, end_date}
-    references: Optional[List[dict]] = None  # List of {name, email, phone, relationship}
-    send_magic_link: bool = True  # Send login link to employee
+    date_of_birth: Optional[str] = None  # YYYY-MM-DD format
+    national_insurance: Optional[str] = None
+    address: Optional[dict] = None  # {line1, line2, city, county, postcode}
+    employment_history: Optional[List[dict]] = None  # List of {employer, job_title, start_date, end_date, is_current}
+    references: Optional[List[dict]] = None  # List of {name, email, phone, organisation, relationship}
+    declarations: Optional[dict] = None  # {has_criminal_convictions, dbs_consent, etc.}
+    emergency_contact: Optional[dict] = None  # {name, phone, relationship}
+    send_magic_link: bool = False  # Send portal access link to employee (default false for drafts)
 
 class BulkEmployeeImportRequest(BaseModel):
     """Bulk import request"""
@@ -17099,7 +17480,7 @@ async def bulk_import_employees(
             count = await db.employees.count_documents({})
             applicant_ref = f"OCS-{now.year}-{str(count + 1).zfill(4)}"
             
-            # Create employee record
+            # Create employee record with all extracted data
             employee = {
                 "id": employee_id,
                 "applicant_reference": applicant_ref,
@@ -17113,10 +17494,48 @@ async def bulk_import_employees(
                 "recruitment_approved": False,
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat(),
-                "import_source": "bulk_import",
+                "import_source": "offline_pdf_import",
                 "imported_by": user["user_id"],
-                "imported_at": now.isoformat()
+                "imported_at": now.isoformat(),
+                "profile_completion_needed": True  # Flag for ProfileCompletionWizard
             }
+            
+            # Add extracted personal details
+            if row.date_of_birth:
+                employee["date_of_birth"] = row.date_of_birth
+            if row.national_insurance:
+                employee["ni_number"] = row.national_insurance
+            
+            # Add address if provided - store both nested and flat for compatibility
+            if row.address:
+                employee["address"] = {
+                    "line1": row.address.get("line1", ""),
+                    "line2": row.address.get("line2", ""),
+                    "city": row.address.get("city", ""),
+                    "county": row.address.get("county", ""),
+                    "postcode": row.address.get("postcode", "")
+                }
+                # Also store flat fields for EmployeeResponse compatibility
+                employee["address_line_1"] = row.address.get("line1", "")
+                employee["address_line_2"] = row.address.get("line2", "")
+                employee["city"] = row.address.get("city", "")
+                employee["county"] = row.address.get("county", "")
+                employee["postcode"] = row.address.get("postcode", "")
+            
+            # Add emergency contact if provided - store both nested and flat for compatibility
+            if row.emergency_contact:
+                employee["emergency_contact"] = row.emergency_contact
+                # Also store flat fields for EmployeeResponse compatibility
+                employee["emergency_contact_name"] = row.emergency_contact.get("name", "")
+                employee["emergency_contact_phone"] = row.emergency_contact.get("phone", "")
+                employee["emergency_contact_relationship"] = row.emergency_contact.get("relationship", "")
+                employee["next_of_kin_name"] = row.emergency_contact.get("name", "")
+                employee["next_of_kin_phone"] = row.emergency_contact.get("phone", "")
+                employee["next_of_kin_relationship"] = row.emergency_contact.get("relationship", "")
+            
+            # Add declarations if provided
+            if row.declarations:
+                employee["declarations"] = row.declarations
             
             # Add employment history if provided
             if row.employment_history:
@@ -17129,40 +17548,38 @@ async def bulk_import_employees(
             
             # Import references if provided
             if row.references:
-                for ref in row.references:
+                ref_num = 1
+                for ref in row.references[:2]:  # Max 2 references
                     ref_id = str(uuid.uuid4())
                     reference_doc = {
                         "id": ref_id,
                         "employee_id": employee_id,
+                        "reference_number": ref_num,
                         "referee_name": ref.get("name"),
                         "referee_email": ref.get("email"),
                         "referee_phone": ref.get("phone"),
+                        "referee_organisation": ref.get("organisation"),
                         "referee_relationship": ref.get("relationship"),
                         "status": "pending",
                         "created_at": now.isoformat(),
-                        "source": "bulk_import"
+                        "source": "offline_pdf_import"
                     }
                     await db.employee_references.insert_one(reference_doc)
+                    ref_num += 1
             
-            # Send magic link if requested
+            # Send magic link + welcome email if requested
             if row.send_magic_link:
                 try:
-                    # Create worker token
-                    worker_token = str(uuid.uuid4())
-                    await db.worker_tokens.insert_one({
-                        "token": worker_token,
-                        "employee_id": employee_id,
-                        "email": row.email.lower().strip(),
-                        "created_at": now.isoformat(),
-                        "expires_at": (now + timedelta(days=30)).isoformat(),
-                        "is_active": True
-                    })
+                    # Create worker account first
+                    await create_worker_account_on_approval(employee)
                     
-                    # Try to send email (may fail if no Resend API key)
-                    magic_link_url = f"{os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')}/worker/auth?token={worker_token}"
-                    
-                    # Note: Email sending would go here if Resend is configured
-                    results["magic_links_sent"] += 1
+                    # Send welcome email with magic link
+                    email_sent = await send_welcome_email_with_magic_link(employee, applicant_ref)
+                    if email_sent:
+                        results["magic_links_sent"] += 1
+                        logger.info(f"Welcome email sent to {row.email}")
+                    else:
+                        logger.warning(f"Welcome email not sent to {row.email} - check Resend API key")
                 except Exception as e:
                     logger.warning(f"Failed to send magic link for {row.email}: {e}")
             

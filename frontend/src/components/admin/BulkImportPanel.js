@@ -181,6 +181,9 @@ export default function BulkImportPanel() {
     setSelectedRecords(prev => prev.filter(i => i !== index).map(i => i > index ? i - 1 : i));
   };
 
+  // Send magic link option
+  const [sendMagicLinks, setSendMagicLinks] = useState(false);
+
   const importSelectedRecords = async () => {
     const recordsToImport = selectedRecords
       .map(i => extractedRecords[i])
@@ -224,7 +227,8 @@ export default function BulkImportPanel() {
             relationship: ref.relationship
           })),
           declarations: d.declarations,
-          send_magic_link: false // Create as draft - admin sends manually
+          emergency_contact: d.emergency_contact,
+          send_magic_link: sendMagicLinks // Send portal access if checkbox is checked
         };
       });
 
@@ -244,7 +248,10 @@ export default function BulkImportPanel() {
       ));
       setSelectedRecords([]);
 
-      toast.success(`Imported ${response.data.results.created.length} employees as drafts`);
+      const magicLinksMsg = sendMagicLinks && response.data.results.magic_links_sent > 0 
+        ? ` (${response.data.results.magic_links_sent} welcome emails sent)` 
+        : '';
+      toast.success(`Imported ${response.data.results.created.length} employees${magicLinksMsg}`);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Import failed');
     } finally {
@@ -483,36 +490,66 @@ export default function BulkImportPanel() {
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Users className="h-5 w-5 text-primary" />
-              Step 3: Import as Draft Employees
+              Step 3: Import Employees
             </CardTitle>
             <CardDescription>
-              Create employee records in draft status. You can send magic links manually from the Recruitment page.
+              Create employee records from extracted PDF data. Workers can complete their profiles via the portal.
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">
                   <strong>{selectedRecords.length}</strong> records selected for import
                 </p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Employees will be created in "onboarding" status without sending emails
-                </p>
               </div>
+            </div>
+            
+            {/* Magic Link Option */}
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="send-magic-links"
+                  checked={sendMagicLinks}
+                  onCheckedChange={setSendMagicLinks}
+                  className="mt-0.5"
+                  data-testid="send-magic-links-checkbox"
+                />
+                <div>
+                  <Label htmlFor="send-magic-links" className="text-sm font-medium text-purple-900 cursor-pointer">
+                    Send Welcome Emails with Portal Access Links
+                  </Label>
+                  <p className="text-xs text-purple-700 mt-1">
+                    Each worker will receive an email with a magic link to access their portal and complete their profile.
+                    {sendMagicLinks && (
+                      <span className="block mt-1 font-medium">
+                        Workers will be guided through the Profile Completion Wizard to fill in any missing information.
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex justify-end">
               <Button
                 onClick={importSelectedRecords}
                 disabled={importing || selectedRecords.length === 0}
+                className={sendMagicLinks ? "bg-purple-600 hover:bg-purple-700" : ""}
                 data-testid="import-btn"
               >
                 {importing ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Importing...
+                    {sendMagicLinks ? 'Importing & Sending...' : 'Importing...'}
                   </>
                 ) : (
                   <>
-                    <Download className="h-4 w-4 mr-2" />
-                    Import {selectedRecords.length} Records
+                    {sendMagicLinks ? <Send className="h-4 w-4 mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                    {sendMagicLinks 
+                      ? `Import & Send Links (${selectedRecords.length})`
+                      : `Import ${selectedRecords.length} Records`
+                    }
                   </>
                 )}
               </Button>

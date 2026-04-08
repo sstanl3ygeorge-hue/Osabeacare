@@ -1,6 +1,12 @@
+# CRITICAL: Load environment variables FIRST before any imports that use them
+# This ensures JWT_SECRET and other env vars are available to all modules
+from pathlib import Path
+from dotenv import load_dotenv
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, File, UploadFile, Query, Header, Response, Form, Body, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -15,7 +21,6 @@ import base64
 import json
 import csv
 from enum import Enum
-from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
@@ -178,8 +183,8 @@ from compliance_engine import (
     get_health_service
 )
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+# Note: ROOT_DIR and load_dotenv are now at the top of the file
+# to ensure env vars are loaded before any imports that use them
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

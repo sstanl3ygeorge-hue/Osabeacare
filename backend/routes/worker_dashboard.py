@@ -69,8 +69,8 @@ def get_mandatory_items():
 
 
 def get_unified_employee_status_func():
-    """Lazy import of get_unified_employee_status from work_readiness_engine"""
-    from work_readiness_engine import get_unified_employee_status
+    """Lazy import of get_unified_employee_status from unified_compliance_engine"""
+    from unified_compliance_engine import get_unified_employee_status
     return get_unified_employee_status
 
 

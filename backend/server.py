@@ -812,7 +812,7 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
     return requirements
 
 
-class DocumentStatus:
+class DocumentStatus(str, Enum):
     NOT_STARTED = "not_started"
     REQUESTED = "requested"
     UPLOADED = "uploaded"
@@ -821,6 +821,11 @@ class DocumentStatus:
     REJECTED = "rejected"
     EXPIRED = "expired"
     NOT_APPLICABLE = "not_applicable"
+    SUPERSEDED = "superseded"
+    UPLOADED_IN_ERROR = "uploaded_in_error"
+    VERIFIED = "verified"
+    AWAITING_VERIFICATION = "awaiting_verification"
+    MISFILED = "misfiled"
 
 # Onboarding Status values
 class OnboardingStatus:

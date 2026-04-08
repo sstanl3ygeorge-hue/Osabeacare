@@ -9501,105 +9501,28 @@ async def worker_upload_document(
             logger.warning(f"AI training extraction failed for worker upload: {e}")
             # Continue without extraction - admin can manually process
     
-    # SPECIAL HANDLING: If this is a CV upload, trigger AI extraction for employment history
+    # CV uploads: Just save the file, admin will review and trigger AI extraction
+    # This provides better UX - worker doesn't see confusing "Extracting..." state
     if requirement_id in ["cv", "resume", "curriculum_vitae"] or "cv" in requirement_id.lower():
-        try:
-            logger.info(f"Processing CV upload for employee {employee_id}")
-            
-            # Extract employment history from CV
-            cv_extraction = await extract_employment_history_from_cv(contents, file.filename, employee_id)
-            
-            if cv_extraction.get("status") == "success":
-                employment_history = cv_extraction.get("employment_history", [])
-                gaps = cv_extraction.get("gaps_detected", [])
-                education = cv_extraction.get("education", [])
-                skills = cv_extraction.get("skills", [])
-                
-                logger.info(f"CV extraction found {len(employment_history)} jobs, {len(gaps)} gaps")
-                
-                # Store extracted data in employee profile
-                await db.employees.update_one(
-                    {"id": employee_id},
-                    {"$set": {
-                        "cv_extracted_employment_history": employment_history,
-                        "cv_extracted_education": education,
-                        "cv_extracted_skills": skills,
-                        "cv_gaps_detected": [
-                            {
-                                "gap_id": f"gap_{i}",
-                                "start_date": g.get("start_date"),
-                                "end_date": g.get("end_date"),
-                                "duration_days": g.get("duration_days"),
-                                "message": g.get("message"),
-                                "explanation": None,
-                                "verified": False
-                            }
-                            for i, g in enumerate(gaps) if g.get("needs_explanation")
-                        ],
-                        "cv_gaps_all_explained": len([g for g in gaps if g.get("needs_explanation")]) == 0,
-                        "cv_document_id": doc_id,
-                        "cv_extracted_at": now,
-                        "updated_at": now
-                    }}
-                )
-                
-                # Pre-populate the 10-Year Employment History form if not already submitted
-                existing_form = await db.form_submissions.find_one({
-                    "employee_id": employee_id,
-                    "form_type": "employment_history_10yr",
-                    "status": {"$in": ["submitted", "verified"]}
-                })
-                
-                if not existing_form and employment_history:
-                    # Save as form progress so worker can review and complete gaps
-                    await db.form_progress.update_one(
-                        {"employee_id": employee_id, "form_id": "employment_history_10yr"},
-                        {"$set": {
-                            "employee_id": employee_id,
-                            "form_id": "employment_history_10yr",
-                            "data": {
-                                "employment_entries": employment_history,
-                                "gap_explanations": [],  # Worker needs to fill these
-                                "auto_populated_from_cv": True,
-                                "cv_document_id": doc_id
-                            },
-                            "last_saved": now,
-                            "auto_populated": True
-                        }},
-                        upsert=True
-                    )
-                    logger.info(f"Pre-populated 10-Year Employment History form with {len(employment_history)} jobs")
-                
-                # Update document record with extraction info
-                await db.employee_documents.update_one(
-                    {"id": doc_id},
-                    {"$set": {
-                        "extraction_status": "completed",
-                        "extraction_type": "cv_employment",
-                        "jobs_extracted": len(employment_history),
-                        "gaps_detected": len(gaps),
-                        "extraction_date": now
-                    }}
-                )
-                
-                return {
-                    "success": True,
-                    "document_id": doc_id,
-                    "requirement_id": requirement_id,
-                    "file_name": file.filename,
-                    "cv_extraction": {
-                        "extracted": True,
-                        "jobs_found": len(employment_history),
-                        "education_found": len(education),
-                        "skills_found": len(skills),
-                        "gaps_detected": len([g for g in gaps if g.get("needs_explanation")]),
-                        "form_pre_populated": not existing_form and len(employment_history) > 0
-                    },
-                    "message": f"CV uploaded. AI extracted {len(employment_history)} jobs. {'Found ' + str(len([g for g in gaps if g.get('needs_explanation')])) + ' gaps that need explanation.' if gaps else 'No gaps detected.'}"
-                }
-        except Exception as e:
-            logger.warning(f"CV extraction failed for worker upload: {e}")
-            # Continue without extraction - admin can manually review
+        # Mark as pending admin review
+        await db.employee_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "extraction_status": "pending_admin_review",
+                "document_subtype": "cv",
+                "requires_admin_extraction": True
+            }}
+        )
+        
+        logger.info(f"CV uploaded by worker {employee_id} - pending admin review for AI extraction")
+        
+        return {
+            "success": True,
+            "document_id": doc_id,
+            "requirement_id": requirement_id,
+            "file_name": file.filename,
+            "message": "CV uploaded successfully! Our team will review it and extract your employment history."
+        }
     
     return {
         "success": True,
@@ -10643,6 +10566,432 @@ async def get_10yr_form_status(employee_id: str) -> dict:
         "submitted_at": None,
         "verified": False
     }
+
+
+# ==================== ADMIN CV REVIEW & EXTRACTION ====================
+
+class CVRejectRequest(BaseModel):
+    reason: str
+    request_action: Optional[str] = "explain_or_reupload"  # "explain_gap", "reupload", "explain_or_reupload"
+
+
+@api_router.post("/admin/employees/{employee_id}/cv/review")
+async def admin_review_cv(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin triggers AI extraction on a worker's uploaded CV.
+    
+    This is the proper flow:
+    1. Worker uploads CV → Simple upload, no extraction shown
+    2. Admin clicks "Review CV" → AI extracts employment history, flags gaps
+    3. Admin can then approve or reject with reason
+    """
+    # Get employee
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Find the CV document
+    cv_doc = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]}},
+            {"document_subtype": "cv"},
+            {"requirement_id": {"$regex": "cv", "$options": "i"}}
+        ],
+        "status": {"$nin": ["deleted", "superseded"]}
+    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+    
+    if not cv_doc:
+        raise HTTPException(status_code=404, detail="No CV document found for this employee")
+    
+    # Get file content from Supabase
+    file_url = cv_doc.get("file_url")
+    if not file_url:
+        raise HTTPException(status_code=400, detail="CV document has no file URL")
+    
+    try:
+        # Download file content
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.get(file_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=400, detail="Could not download CV file")
+            contents = response.content
+    except Exception as e:
+        logger.error(f"Failed to download CV for extraction: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download CV file for processing")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Extract employment history using AI
+    try:
+        cv_extraction = await extract_employment_history_from_cv(contents, cv_doc.get("file_name", "cv.pdf"), employee_id)
+        
+        if cv_extraction.get("status") != "success":
+            raise HTTPException(status_code=500, detail="AI extraction failed. Please try again.")
+        
+        employment_history = cv_extraction.get("employment_history", [])
+        gaps = cv_extraction.get("gaps_detected", [])
+        education = cv_extraction.get("education", [])
+        skills = cv_extraction.get("skills", [])
+        
+        logger.info(f"Admin CV extraction found {len(employment_history)} jobs, {len(gaps)} gaps for {employee_id}")
+        
+        # Store extracted data in employee profile
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "cv_extracted_employment_history": employment_history,
+                "cv_extracted_education": education,
+                "cv_extracted_skills": skills,
+                "cv_gaps_detected": [
+                    {
+                        "gap_id": f"gap_{i}",
+                        "start_date": g.get("start_date"),
+                        "end_date": g.get("end_date"),
+                        "duration_days": g.get("duration_days"),
+                        "message": g.get("message"),
+                        "explanation": None,
+                        "verified": False,
+                        "needs_explanation": g.get("needs_explanation", True)
+                    }
+                    for i, g in enumerate(gaps) if g.get("needs_explanation")
+                ],
+                "cv_gaps_all_explained": len([g for g in gaps if g.get("needs_explanation")]) == 0,
+                "cv_document_id": cv_doc.get("id"),
+                "cv_extracted_at": now,
+                "cv_reviewed_by": user.get("user_id"),
+                "cv_reviewed_at": now,
+                "cv_extraction_status": "reviewed",
+                "updated_at": now
+            }}
+        )
+        
+        # Update document record
+        await db.employee_documents.update_one(
+            {"id": cv_doc.get("id")},
+            {"$set": {
+                "extraction_status": "completed",
+                "extraction_type": "cv_employment",
+                "jobs_extracted": len(employment_history),
+                "gaps_detected": len([g for g in gaps if g.get("needs_explanation")]),
+                "extraction_date": now,
+                "reviewed_by": user.get("user_id"),
+                "reviewed_at": now
+            }}
+        )
+        
+        # Log audit
+        await log_audit_action(
+            user.get("user_id"),
+            "cv_review_extraction",
+            "employee",
+            employee_id,
+            {
+                "cv_document_id": cv_doc.get("id"),
+                "jobs_extracted": len(employment_history),
+                "gaps_detected": len([g for g in gaps if g.get("needs_explanation")]),
+                "education_found": len(education),
+                "skills_found": len(skills)
+            }
+        )
+        
+        gaps_needing_explanation = [g for g in gaps if g.get("needs_explanation")]
+        
+        return {
+            "success": True,
+            "message": f"CV reviewed. Found {len(employment_history)} jobs.",
+            "extraction": {
+                "jobs_found": len(employment_history),
+                "employment_history": employment_history,
+                "education_found": len(education),
+                "education": education,
+                "skills_found": len(skills),
+                "skills": skills,
+                "gaps_detected": len(gaps_needing_explanation),
+                "gaps": gaps_needing_explanation
+            },
+            "requires_action": len(gaps_needing_explanation) > 0,
+            "action_required": "Worker needs to explain gaps" if gaps_needing_explanation else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"CV extraction failed for admin review: {e}")
+        raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
+
+
+@api_router.post("/admin/employees/{employee_id}/cv/reject")
+async def admin_reject_cv(
+    employee_id: str,
+    request: CVRejectRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin rejects CV and notifies worker with reason.
+    
+    Worker will receive notification to either:
+    - Explain the gaps/issues
+    - Upload a new CV
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Create notification for worker
+    notification = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "type": "cv_rejected",
+        "title": "CV Requires Attention",
+        "message": request.reason,
+        "action_required": request.request_action,
+        "created_at": now,
+        "created_by": user.get("user_id"),
+        "read": False,
+        "resolved": False
+    }
+    
+    await db.worker_notifications.insert_one(notification)
+    
+    # Update CV status
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "cv_status": "rejected",
+            "cv_rejection_reason": request.reason,
+            "cv_rejected_at": now,
+            "cv_rejected_by": user.get("user_id"),
+            "updated_at": now
+        }}
+    )
+    
+    # Update document status
+    cv_doc = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]}},
+            {"document_subtype": "cv"}
+        ],
+        "status": {"$nin": ["deleted", "superseded"]}
+    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+    
+    if cv_doc:
+        await db.employee_documents.update_one(
+            {"id": cv_doc.get("id")},
+            {"$set": {
+                "status": "rejected",
+                "rejection_reason": request.reason,
+                "rejected_at": now,
+                "rejected_by": user.get("user_id")
+            }}
+        )
+    
+    # Send email notification to worker
+    if employee.get("email") and resend.api_key:
+        try:
+            emp_name = employee.get("first_name", "")
+            org_settings = await db.org_settings.find_one({}, {"_id": 0})
+            org_name = org_settings.get("organisation_name", "Osabea Healthcare") if org_settings else "Osabea Healthcare"
+            frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+            
+            email_html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background: linear-gradient(135deg, #ef4444, #f97316); padding: 20px; border-radius: 12px 12px 0 0;">
+                    <h2 style="color: white; margin: 0;">CV Requires Attention</h2>
+                </div>
+                <div style="background: #fff; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+                    <p>Hi {emp_name},</p>
+                    <p>We've reviewed your CV and need some additional information:</p>
+                    <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; margin: 16px 0; border-radius: 0 8px 8px 0;">
+                        <p style="color: #991b1b; margin: 0;">{request.reason}</p>
+                    </div>
+                    <p>Please log into your portal to:</p>
+                    <ul>
+                        <li>Provide explanations for any employment gaps</li>
+                        <li>Or upload an updated CV</li>
+                    </ul>
+                    <div style="text-align: center; margin: 24px 0;">
+                        <a href="{frontend_url}/worker/login" style="background: #7c3aed; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                            Access Your Portal
+                        </a>
+                    </div>
+                </div>
+                <p style="color: #9ca3af; font-size: 12px; text-align: center; margin-top: 16px;">
+                    {org_name} - Compliance Portal
+                </p>
+            </body>
+            </html>
+            """
+            
+            await asyncio.to_thread(resend.Emails.send, {
+                "from": f"{org_name} <compliance@osabea.care>",
+                "to": [employee.get("email")],
+                "subject": "CV Requires Attention - Action Needed",
+                "html": email_html
+            })
+            logger.info(f"CV rejection notification sent to {employee.get('email')}")
+        except Exception as e:
+            logger.warning(f"Failed to send CV rejection email: {e}")
+    
+    # Log audit
+    await log_audit_action(
+        user.get("user_id"),
+        "cv_rejected",
+        "employee",
+        employee_id,
+        {"reason": request.reason, "action_requested": request.request_action}
+    )
+    
+    return {
+        "success": True,
+        "message": "CV rejected and worker notified",
+        "notification_created": True
+    }
+
+
+@api_router.post("/admin/employees/{employee_id}/cv/approve")
+async def admin_approve_cv(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin approves the CV after reviewing extracted data.
+    This marks the CV extraction as verified.
+    """
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update employee record
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "cv_extraction_verified": True,
+            "cv_extraction_verified_at": now,
+            "cv_extraction_verified_by": user.get("user_id"),
+            "cv_status": "approved",
+            "updated_at": now
+        }}
+    )
+    
+    # Update document status
+    cv_doc = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]}},
+            {"document_subtype": "cv"}
+        ],
+        "status": {"$nin": ["deleted", "superseded"]}
+    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+    
+    if cv_doc:
+        await db.employee_documents.update_one(
+            {"id": cv_doc.get("id")},
+            {"$set": {
+                "status": "verified",
+                "verified_at": now,
+                "verified_by": user.get("user_id")
+            }}
+        )
+    
+    # Pre-populate 10-Year Employment History form if not already done
+    existing_form = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "employment_history_10yr",
+        "status": {"$in": ["submitted", "verified"]}
+    })
+    
+    employment_history = employee.get("cv_extracted_employment_history", [])
+    
+    if not existing_form and employment_history:
+        await db.form_progress.update_one(
+            {"employee_id": employee_id, "form_id": "employment_history_10yr"},
+            {"$set": {
+                "employee_id": employee_id,
+                "form_id": "employment_history_10yr",
+                "data": {
+                    "employment_entries": employment_history,
+                    "gap_explanations": [],
+                    "auto_populated_from_cv": True,
+                    "cv_document_id": cv_doc.get("id") if cv_doc else None
+                },
+                "last_saved": now,
+                "auto_populated": True
+            }},
+            upsert=True
+        )
+        logger.info(f"Pre-populated 10-Year Employment History form with {len(employment_history)} jobs")
+    
+    # Log audit
+    await log_audit_action(
+        user.get("user_id"),
+        "cv_approved",
+        "employee",
+        employee_id,
+        {"cv_document_id": cv_doc.get("id") if cv_doc else None}
+    )
+    
+    return {
+        "success": True,
+        "message": "CV approved and employment history verified",
+        "form_pre_populated": not existing_form and len(employment_history) > 0
+    }
+
+
+@api_router.get("/worker/notifications")
+async def get_worker_notifications(
+    worker: dict = Depends(get_current_worker),
+    unread_only: bool = Query(default=False)
+):
+    """
+    Get notifications for the current worker.
+    """
+    employee_id = worker.get("employee_id")
+    
+    query = {"employee_id": employee_id}
+    if unread_only:
+        query["read"] = False
+    
+    notifications = await db.worker_notifications.find(
+        query,
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    
+    unread_count = await db.worker_notifications.count_documents({
+        "employee_id": employee_id,
+        "read": False
+    })
+    
+    return {
+        "notifications": notifications,
+        "unread_count": unread_count
+    }
+
+
+@api_router.post("/worker/notifications/{notification_id}/read")
+async def mark_notification_read(
+    notification_id: str,
+    worker: dict = Depends(get_current_worker)
+):
+    """Mark a notification as read."""
+    employee_id = worker.get("employee_id")
+    
+    result = await db.worker_notifications.update_one(
+        {"id": notification_id, "employee_id": employee_id},
+        {"$set": {"read": True, "read_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    
+    return {"success": result.modified_count > 0}
 
 
 @api_router.post("/worker/cv-gaps/{gap_id}/explain")

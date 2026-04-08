@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (13 Modules)
+### Modular Routes Structure (14 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py      - Shared auth utilities
@@ -29,15 +29,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── compliance.py       - 27 endpoints
 ├── templates.py        - 5 endpoints
 ├── service_users.py    - 10 endpoints
-├── forms.py            - 17 endpoints (form CRUD)
+├── forms.py            - 17 endpoints
+├── interviews.py       - 6 endpoints [NEW]
 └── verification_routes.py - 7 endpoints
 ```
-
-### server.py Remaining Routes
-- PDF generation routes: `/form-submissions/{id}/generate-pdf`, `/download-pdf`, `/view-pdf`
-- Complex form routes: `/generated-forms/{id}/send`, `/regenerate-pdf`, `/save-as-document`
-- Bulk operations: `/generated-forms/bulk`, `/import-application`, `/import-document`
-- DBS routes, employee compliance routes, and core business logic
 
 ## Server.py Refactoring Progress (April 8, 2026)
 
@@ -49,12 +44,13 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 11: Extracted templates routes (5 endpoints)
 - Phase 12: Extracted service_users routes (10 endpoints)
 - Phase 13: Extracted forms routes (17 endpoints)
-- **Phase 14: Removed duplicate form routes from server.py (652 lines)** [NEW]
+- Phase 14: Removed duplicate form routes (~652 lines)
+- **Phase 15: Extracted interviews routes (6 endpoints), removed duplicates (~462 lines)** [NEW]
 
 ### Current Status
-- **server.py**: ~55,290 lines (down from ~60,500 originally - **8.6% reduction**)
-- **Route modules**: 13 modules with ~161 endpoints extracted
-- **Testing**: 100% pass rate (16/16 tests in Phase 14)
+- **server.py**: ~54,828 lines (down from ~60,500 originally - **9.4% reduction**)
+- **Route modules**: 14 modules with ~167 endpoints extracted
+- **Testing**: 100% pass rate across all phases
 
 ## Pending/In Progress
 
@@ -69,8 +65,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_189.json` - Phase 13 (forms extraction)
-- `/app/test_reports/iteration_190.json` - Phase 14 (cleanup) - 16/16 passed
+- `/app/test_reports/iteration_190.json` - Phase 14 (form cleanup)
+- `/app/test_reports/iteration_191.json` - Phase 15 (interviews extraction)
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

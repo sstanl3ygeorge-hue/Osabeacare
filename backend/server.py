@@ -131,6 +131,7 @@ from routes.interviews import router as interviews_router
 from routes.contracts import router as contracts_router
 from routes.professional_registration import router as professional_registration_router
 from routes.promotion import router as promotion_router
+from routes.roles import router as roles_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -43227,18 +43228,7 @@ async def get_assignments():
     assignments = await db.employees.distinct("assignment")
     return [a for a in assignments if a and a != "Unassigned"]
 
-@api_router.get("/roles")
-async def get_roles():
-    return [
-        "Care Assistant",
-        "Senior Care Assistant",
-        "Support Worker",
-        "Healthcare Assistant",
-        "Live-in Carer",
-        "Night Carer",
-        "Team Leader",
-        "Care Coordinator"
-    ]
+# NOTE: /roles endpoint moved to routes/roles.py
 
 # ==================== EMAIL ROUTES ====================
 # Generic send-email endpoint removed - use /email/send from routes/notifications.py
@@ -51633,52 +51623,8 @@ async def download_interview_pdf(
     )
 
 
-
-
-@api_router.get("/roles/{role}/requirements")
-async def get_role_requirements_endpoint(
-    role: str,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get complete requirements for a role.
-    
-    Returns:
-    - Professional registration requirements
-    - Mandatory training items
-    - Document requirements
-    - Interview question count
-    - Total gates for promotion
-    """
-    requirements = get_role_requirements(role)
-    is_nurse = "nurse" in role.lower()
-    
-    return {
-        "role": role,
-        "is_nurse_role": is_nurse,
-        "requirements": requirements,
-        "total_gates": 14 if is_nurse else 12,
-        "gates_breakdown": {
-            "base_gates": 12,
-            "nurse_additional": 2 if is_nurse else 0,
-            "nurse_additions": ["NMC Registration", "Professional Indemnity Insurance"] if is_nurse else []
-        }
-    }
-
-
-@api_router.get("/roles/summary")
-async def get_all_roles_summary(
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get summary of all role requirements.
-    
-    Useful for admin dashboard to show role comparison.
-    """
-    return {
-        "roles": ROLE_REQUIREMENTS_SUMMARY,
-        "note": "Osabea Healthcare Solutions - Adults Only Care Services"
-    }
+# NOTE: Role requirements endpoints moved to routes/roles.py
+# Includes: /roles/{role}/requirements, /roles/summary
 
 
 # ========== ADMIN INTERNAL FORMS - INDUCTION COMPLETION ==========
@@ -54063,6 +54009,9 @@ api_router.include_router(professional_registration_router)
 
 # Include promotion routes (refactored from server.py)
 api_router.include_router(promotion_router)
+
+# Include roles routes (refactored from server.py)
+api_router.include_router(roles_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

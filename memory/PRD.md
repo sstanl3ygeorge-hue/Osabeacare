@@ -30,6 +30,26 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## NEW FEATURES IMPLEMENTED (2026-04-07)
 
+### Worker Authentication Overhaul - Magic Link Primary (2026-04-08) ✅ VERIFIED
+- **Problem Solved**: Removed hardcoded `Welcome123!` password security risk. Implemented proper authentication flow.
+- **New Flow**:
+  1. **On Recruitment Approval**: Auto-creates worker account + sends welcome email with magic link
+  2. **Worker Login Page**: Tab-based UI with "Email Link" (primary) and "Password" (optional)
+  3. **After First Login**: Worker can optionally set their own password for convenience
+  4. **Both Methods Work**: Magic link always available, password only if set
+- **Backend Changes**:
+  - `POST /api/worker/set-password` - Worker sets/changes their own password
+  - `GET /api/worker/account-status` - Check if password is set
+  - `create_worker_account_on_approval()` - Auto-creates account
+  - `send_welcome_email_with_magic_link()` - Beautiful HTML welcome email
+  - Updated `approve_recruitment()` to trigger account creation + email
+  - Removed `WORKER_DEFAULT_PASSWORD` security risk
+- **Frontend Changes**:
+  - `WorkerLoginPage.js` - New tab-based UI (Email Link / Password)
+  - `WorkerDashboard.js` - "Set Password" button + modal
+- **Security**: No more shared passwords, magic links expire in 24 hours, password optional
+- **Testing**: API endpoints verified, frontend build successful
+
 ### UI/UX Cleanup & Dynamic Data (2026-04-07) ✅ VERIFIED
 - **Problem Solved**: Hardcoded organization names across the portal, inaccurate compliance progress percentages
 - **Fixes**:

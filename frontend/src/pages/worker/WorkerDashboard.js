@@ -198,6 +198,11 @@ export default function WorkerDashboard() {
   const [contractEligibility, setContractEligibility] = useState(null);
   // Organization settings for dynamic branding
   const [orgSettings, setOrgSettings] = useState({ organisation_name: 'Osabea Healthcare Solutions' });
+  // Account settings - password setup
+  const [accountStatus, setAccountStatus] = useState({ has_password: false });
+  const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ new_password: '', confirm_password: '', current_password: '' });
+  const [settingPassword, setSettingPassword] = useState(false);
   // Document viewer modal state
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerDocument, setViewerDocument] = useState(null);
@@ -243,6 +248,16 @@ export default function WorkerDashboard() {
         setOrgSettings(orgRes.data);
       } catch (err) {
         console.warn('Could not fetch org settings:', err);
+      }
+      
+      // Fetch account status to check if password is set
+      try {
+        const accountRes = await axios.get(`${API}/worker/account-status`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setAccountStatus(accountRes.data);
+      } catch (err) {
+        console.warn('Could not fetch account status:', err);
       }
       
       // Also check contract eligibility
@@ -521,6 +536,49 @@ export default function WorkerDashboard() {
     navigate('/worker/login');
   };
 
+  const handleSetPassword = async () => {
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      toast.error('Passwords do not match');
+      return;
+    }
+    if (passwordForm.new_password.length < 8) {
+      toast.error('Password must be at least 8 characters');
+      return;
+    }
+    if (!/[A-Z]/.test(passwordForm.new_password)) {
+      toast.error('Password must contain at least one uppercase letter');
+      return;
+    }
+    if (!/[0-9]/.test(passwordForm.new_password)) {
+      toast.error('Password must contain at least one number');
+      return;
+    }
+
+    setSettingPassword(true);
+    const token = localStorage.getItem('workerToken');
+    
+    try {
+      await axios.post(
+        `${API}/worker/set-password`,
+        {
+          new_password: passwordForm.new_password,
+          confirm_password: passwordForm.confirm_password,
+          current_password: accountStatus.has_password ? passwordForm.current_password : null
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('Password set successfully! You can now login with your email and password.');
+      setShowSetPasswordModal(false);
+      setPasswordForm({ new_password: '', confirm_password: '', current_password: '' });
+      setAccountStatus({ ...accountStatus, has_password: true });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to set password');
+    } finally {
+      setSettingPassword(false);
+    }
+  };
+
   const handleFileUpload = async (requirementId, file) => {
     if (!file) return;
     
@@ -646,6 +704,28 @@ export default function WorkerDashboard() {
             <Button variant="ghost" size="sm" onClick={fetchDashboard} className="gap-1">
               <RefreshCw className="h-4 w-4" />
             </Button>
+            {!accountStatus.has_password && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setShowSetPasswordModal(true)} 
+                className="gap-1 text-purple-600 border-purple-200 hover:bg-purple-50"
+                data-testid="set-password-btn"
+              >
+                <Lock className="h-4 w-4" />
+                Set Password
+              </Button>
+            )}
+            {accountStatus.has_password && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowSetPasswordModal(true)} 
+                className="gap-1 text-slate-600"
+              >
+                <Lock className="h-4 w-4" />
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-1 text-slate-600">
               <LogOut className="h-4 w-4" />
               Logout
@@ -653,6 +733,76 @@ export default function WorkerDashboard() {
           </div>
         </div>
       </div>
+
+      {/* Set Password Modal */}
+      <Dialog open={showSetPasswordModal} onOpenChange={setShowSetPasswordModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5 text-purple-600" />
+              {accountStatus.has_password ? 'Change Password' : 'Set Password'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-sm text-slate-600">
+              {accountStatus.has_password 
+                ? 'Update your password for faster login.'
+                : 'Set a password for faster login. You can still use magic links if you prefer.'}
+            </p>
+            
+            {accountStatus.has_password && (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Current Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.current_password}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  placeholder="Enter current password"
+                />
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">New Password</label>
+              <input
+                type="password"
+                value={passwordForm.new_password}
+                onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="Enter new password"
+              />
+              <p className="text-xs text-slate-500">
+                Min 8 characters, 1 uppercase, 1 number
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Confirm Password</label>
+              <input
+                type="password"
+                value={passwordForm.confirm_password}
+                onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="Confirm new password"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSetPasswordModal(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSetPassword} 
+              disabled={settingPassword || !passwordForm.new_password || !passwordForm.confirm_password}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              {settingPassword ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              {accountStatus.has_password ? 'Update Password' : 'Set Password'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
         {/* Status Banner - Enhanced with "Cleared to Work" messaging */}

@@ -7839,16 +7839,19 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
     return {"success": True, "message": "If an account exists, you will receive a login link"}
 
 
-# Default password for all workers/applicants (for testing)
-WORKER_DEFAULT_PASSWORD = "Welcome123!"
+# Worker authentication - Magic Link primary, Password optional
+# Workers can set their own password after first magic link login
 
 @api_router.post("/worker/login")
 async def worker_password_login(request: WorkerPasswordLoginRequest):
     """
     Password-based login for workers/applicants.
     
-    All workers use the same default password: Welcome123!
-    This is for testing purposes - in production, use magic links.
+    Workers can login with:
+    1. Magic link (primary, always available)
+    2. Password (if they have set one via /worker/set-password)
+    
+    Password is optional - workers can use magic links forever if preferred.
     """
     email = request.email.lower().strip()
     
@@ -7861,8 +7864,21 @@ async def worker_password_login(request: WorkerPasswordLoginRequest):
     if not employee:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Check password (all workers use the same default password)
-    if request.password != WORKER_DEFAULT_PASSWORD:
+    # Check if worker has a user account with password set
+    worker_user = await db.worker_accounts.find_one(
+        {"employee_id": employee["id"]},
+        {"_id": 0}
+    )
+    
+    if not worker_user or not worker_user.get("password_hash"):
+        # No password set - tell them to use magic link
+        raise HTTPException(
+            status_code=401, 
+            detail="No password set. Please use 'Send Login Link' to access your account, or set a password after logging in."
+        )
+    
+    # Verify password
+    if not verify_password(request.password, worker_user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     # Generate session token
@@ -7873,6 +7889,12 @@ async def worker_password_login(request: WorkerPasswordLoginRequest):
         "type": "worker_session",
         "exp": datetime.now(timezone.utc) + timedelta(days=7)
     }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    
+    # Update last login
+    await db.worker_accounts.update_one(
+        {"employee_id": employee["id"]},
+        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+    )
     
     # Log the login
     await log_audit_action(
@@ -7984,6 +8006,115 @@ async def worker_verify_login(request: WorkerVerifyRequest):
     except jwt.PyJWTError as e:
         logger.error(f"JWT verification failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid login link")
+
+
+class WorkerSetPasswordRequest(BaseModel):
+    current_password: Optional[str] = None  # Optional - not needed if first time
+    new_password: str
+    confirm_password: str
+
+
+@api_router.post("/worker/set-password")
+async def worker_set_password(
+    request: WorkerSetPasswordRequest,
+    worker: dict = Depends(get_current_worker)
+):
+    """
+    Allow worker to set or change their password.
+    
+    - First time: No current_password needed
+    - Changing: current_password required
+    
+    Password requirements:
+    - Minimum 8 characters
+    - At least one uppercase letter
+    - At least one number
+    """
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to account")
+    
+    # Validate password match
+    if request.new_password != request.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    
+    # Validate password strength
+    if len(request.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    if not any(c.isupper() for c in request.new_password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one uppercase letter")
+    if not any(c.isdigit() for c in request.new_password):
+        raise HTTPException(status_code=400, detail="Password must contain at least one number")
+    
+    # Get existing worker account
+    worker_account = await db.worker_accounts.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    )
+    
+    # If password already set, require current password
+    if worker_account and worker_account.get("password_hash"):
+        if not request.current_password:
+            raise HTTPException(status_code=400, detail="Current password required to change password")
+        if not verify_password(request.current_password, worker_account["password_hash"]):
+            raise HTTPException(status_code=401, detail="Current password is incorrect")
+    
+    # Hash new password
+    new_password_hash = get_password_hash(request.new_password)
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Update or create worker account
+    await db.worker_accounts.update_one(
+        {"employee_id": employee_id},
+        {
+            "$set": {
+                "password_hash": new_password_hash,
+                "has_password": True,
+                "password_set_at": now,
+                "updated_at": now
+            },
+            "$setOnInsert": {
+                "id": str(uuid.uuid4()),
+                "employee_id": employee_id,
+                "email": worker.get("email"),
+                "created_at": now
+            }
+        },
+        upsert=True
+    )
+    
+    # Log the action
+    await log_audit_action(
+        employee_id,
+        "password_set" if not (worker_account and worker_account.get("password_hash")) else "password_changed",
+        "worker_account",
+        employee_id,
+        {"method": "worker_portal"}
+    )
+    
+    return {
+        "success": True,
+        "message": "Password set successfully. You can now login with your email and password."
+    }
+
+
+@api_router.get("/worker/account-status")
+async def worker_account_status(worker: dict = Depends(get_current_worker)):
+    """
+    Get worker's account status including whether password is set.
+    """
+    employee_id = worker.get("employee_id")
+    
+    worker_account = await db.worker_accounts.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0, "has_password": 1, "password_set_at": 1, "last_login": 1}
+    )
+    
+    return {
+        "has_password": bool(worker_account and worker_account.get("has_password")),
+        "password_set_at": worker_account.get("password_set_at") if worker_account else None,
+        "last_login": worker_account.get("last_login") if worker_account else None
+    }
 
 
 @api_router.get("/employees/{employee_id}/can-sign-contract")
@@ -13296,6 +13427,183 @@ async def send_promotion_email(employee: dict):
     except Exception as e:
         logger.warning(f"Failed to send promotion email: {e}")
 
+
+async def send_welcome_email_with_magic_link(employee: dict, employee_code: str):
+    """
+    Send welcome email to newly approved employee with magic link for portal access.
+    Called automatically after recruitment approval.
+    """
+    emp_email = employee.get("email")
+    emp_name = employee.get("first_name", "")
+    
+    if not emp_email:
+        logger.warning(f"Cannot send welcome email - no email for employee {employee.get('id')}")
+        return False
+    
+    if not resend.api_key:
+        logger.warning("Cannot send welcome email - Resend API key not configured")
+        return False
+    
+    try:
+        # Generate magic link token (24 hour expiry)
+        magic_token = jwt.encode({
+            "employee_id": employee.get("id"),
+            "email": emp_email,
+            "type": "worker_login",
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24)
+        }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        
+        # Store token for single-use validation
+        await db.magic_tokens.insert_one({
+            "token": magic_token,
+            "employee_id": employee.get("id"),
+            "email": emp_email,
+            "used": False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+            "purpose": "welcome_email"
+        })
+        
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+        login_url = f"{frontend_url}/worker/verify?token={magic_token}"
+        
+        # Get org settings for branding
+        org_settings = await db.org_settings.find_one({}, {"_id": 0})
+        org_name = org_settings.get("organisation_name", "Osabea Healthcare Solutions") if org_settings else "Osabea Healthcare Solutions"
+        
+        welcome_email_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                <div style="background: white; border-radius: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden;">
+                    <!-- Header -->
+                    <div style="background: linear-gradient(135deg, #7c3aed, #a855f7); padding: 32px; text-align: center;">
+                        <h1 style="color: white; margin: 0; font-size: 26px;">Welcome to {org_name}!</h1>
+                    </div>
+                    
+                    <!-- Content -->
+                    <div style="padding: 32px;">
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                            Hi {emp_name},
+                        </p>
+                        
+                        <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
+                            Great news! Your application has been <strong>approved</strong> and you're now part of our team.
+                        </p>
+                        
+                        <div style="background: #f3e8ff; border-left: 4px solid #7c3aed; padding: 16px; border-radius: 0 8px 8px 0; margin-bottom: 24px;">
+                            <p style="color: #6b21a8; margin: 0; font-weight: 600;">
+                                Your Employee Code: {employee_code}
+                            </p>
+                            <p style="color: #7c3aed; margin: 8px 0 0 0; font-size: 14px;">
+                                Keep this code safe - you'll need it for timesheets and identification.
+                            </p>
+                        </div>
+                        
+                        <h3 style="color: #1f2937; margin: 24px 0 12px 0;">Next Steps</h3>
+                        <p style="color: #374151; font-size: 15px; line-height: 1.6; margin-bottom: 20px;">
+                            Please complete your onboarding by logging into your Worker Portal. You'll need to:
+                        </p>
+                        
+                        <ul style="color: #374151; font-size: 15px; line-height: 1.8; padding-left: 20px; margin-bottom: 24px;">
+                            <li>Upload any remaining documents</li>
+                            <li>Complete your health questionnaire</li>
+                            <li>Review and sign your employment contract</li>
+                            <li>Acknowledge the employee handbook</li>
+                        </ul>
+                        
+                        <div style="text-align: center; margin: 32px 0;">
+                            <a href="{login_url}" 
+                               style="display: inline-block; background: #7c3aed; color: white; padding: 16px 40px; 
+                                      border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;
+                                      box-shadow: 0 4px 6px rgba(124, 58, 237, 0.3);">
+                                Access Your Portal
+                            </a>
+                        </div>
+                        
+                        <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin-top: 24px; text-align: center;">
+                            This login link expires in 24 hours. After your first login, you can set a password for future access.
+                        </p>
+                    </div>
+                    
+                    <!-- Footer -->
+                    <div style="background: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+                        <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                            {org_name} - Compliance Portal
+                        </p>
+                        <p style="color: #9ca3af; font-size: 11px; margin: 8px 0 0 0;">
+                            If you didn't expect this email, please ignore it.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": f"{org_name} <compliance@osabea.care>",
+            "to": [emp_email],
+            "subject": f"Welcome to {org_name} - Your Portal Access",
+            "html": welcome_email_html
+        })
+        
+        logger.info(f"Welcome email with magic link sent to {emp_email}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send welcome email to {emp_email}: {e}")
+        return False
+
+
+async def create_worker_account_on_approval(employee: dict):
+    """
+    Create worker account in worker_accounts collection when recruitment is approved.
+    This enables the worker to access the portal.
+    
+    No password is set initially - worker uses magic link first, then can optionally set password.
+    """
+    employee_id = employee.get("id")
+    email = employee.get("email")
+    
+    if not employee_id or not email:
+        logger.warning(f"Cannot create worker account - missing id or email")
+        return False
+    
+    # Check if account already exists
+    existing = await db.worker_accounts.find_one({"employee_id": employee_id})
+    if existing:
+        logger.info(f"Worker account already exists for {employee_id}")
+        return True
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    account_doc = {
+        "id": str(uuid.uuid4()),
+        "employee_id": employee_id,
+        "email": email.lower(),
+        "password_hash": None,  # No password initially - uses magic link
+        "has_password": False,
+        "account_created_at": now,
+        "created_at": now,
+        "updated_at": now,
+        "last_login": None,
+        "login_count": 0,
+        "account_status": "active"
+    }
+    
+    try:
+        await db.worker_accounts.insert_one(account_doc)
+        logger.info(f"Worker account created for employee {employee_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create worker account for {employee_id}: {e}")
+        return False
 
 
 async def try_auto_promote_worker(employee_id: str):
@@ -43733,6 +44041,8 @@ async def approve_recruitment(
     - Sets recruitment_approved = true
     - Sets status = onboarding
     - Assigns employee_code if missing
+    - Creates worker account for portal access
+    - Sends welcome email with magic link
     - Writes audit log
     """
     # Get employee
@@ -43774,12 +44084,23 @@ async def approve_recruitment(
             }
         )
     
+    # Get updated employee data after approval
+    updated_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    employee_code = result.get("employee_code") or updated_employee.get("employee_code")
+    
+    # Create worker account for portal access
+    await create_worker_account_on_approval(updated_employee)
+    
+    # Send welcome email with magic link
+    email_sent = await send_welcome_email_with_magic_link(updated_employee, employee_code)
+    
     return {
         "status": "success",
         "message": "Recruitment approved successfully",
         "employee": result["employee"],
-        "employee_code": result["employee_code"],
-        "evaluation": result["evaluation"]
+        "employee_code": employee_code,
+        "evaluation": result["evaluation"],
+        "welcome_email_sent": email_sent
     }
 
 

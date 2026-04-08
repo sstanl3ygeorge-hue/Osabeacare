@@ -3,3 +3,4 @@
 
 from .auth import router as auth_router
 from .workers import router as workers_router
+from .admin import router as admin_router

@@ -104,6 +104,7 @@ from work_readiness_engine import (
 from routes.dependencies import set_database as set_routes_db
 from routes.auth import router as auth_router
 from routes.workers import router as workers_router
+from routes.admin import router as admin_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -26566,76 +26567,8 @@ async def withdraw_policy(
 
 # ==================== ORGANISATION SETTINGS ====================
 
-@api_router.get("/org-settings")
-async def get_org_settings(user: dict = Depends(get_current_user)):
-    """Get organisation settings including service type"""
-    settings = await db.org_settings.find_one({}, {"_id": 0})
-    if not settings:
-        # Create default settings
-        now = datetime.now(timezone.utc).isoformat()
-        settings = {
-            "id": str(uuid.uuid4()),
-            "service_type": "adults_only",
-            "organisation_name": "Osabea Healthcare Solutions",
-            "created_at": now,
-            "updated_at": now
-        }
-        await db.org_settings.insert_one(settings)
-    return OrgSettingsResponse(**settings)
-
-
-@api_router.put("/org-settings")
-async def update_org_settings(
-    update_data: OrgSettingsUpdate,
-    user: dict = Depends(require_admin)
-):
-    """Update organisation settings"""
-    settings = await db.org_settings.find_one({}, {"_id": 0})
-    now = datetime.now(timezone.utc).isoformat()
-    
-    if not settings:
-        settings = {
-            "id": str(uuid.uuid4()),
-            "service_type": update_data.service_type or "adults_only",
-            "organisation_name": update_data.organisation_name or "Osabea Healthcare Solutions",
-            "created_at": now,
-            "updated_at": now
-        }
-        await db.org_settings.insert_one(settings)
-    else:
-        changes = {}
-        if update_data.service_type and update_data.service_type != settings.get('service_type'):
-            changes['service_type'] = {
-                'old': settings.get('service_type'),
-                'new': update_data.service_type
-            }
-        if update_data.organisation_name and update_data.organisation_name != settings.get('organisation_name'):
-            changes['organisation_name'] = {
-                'old': settings.get('organisation_name'),
-                'new': update_data.organisation_name
-            }
-        
-        update_fields = {"updated_at": now}
-        if update_data.service_type:
-            update_fields["service_type"] = update_data.service_type
-        if update_data.organisation_name:
-            update_fields["organisation_name"] = update_data.organisation_name
-        
-        await db.org_settings.update_one({}, {"$set": update_fields})
-        
-        if changes:
-            await log_audit_action(
-                user['user_id'],
-                "org_settings_updated",
-                "org_settings",
-                settings['id'],
-                changes
-            )
-    
-    updated = await db.org_settings.find_one({}, {"_id": 0})
-    return OrgSettingsResponse(**updated)
-
-
+# MOVED TO routes/admin.py: /org-settings
+# MOVED TO routes/admin.py: /org-settings
 # ==================== TRAINING ROUTES ====================
 
 @api_router.post("/training-records", response_model=TrainingRecordResponse)
@@ -49930,22 +49863,7 @@ async def comprehensive_expiry_reminder_job():
         return {"error": str(e)}
 
 
-@api_router.post("/admin/send-all-expiry-reminders")
-async def trigger_all_expiry_reminders(
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Manually trigger comprehensive expiry reminders for all employees.
-    Sends reminders for both training and documents (DBS, RTW, Professional Registration).
-    """
-    result = await comprehensive_expiry_reminder_job()
-    return {
-        "success": True,
-        "message": f"Sent reminders to {result.get('employees_notified', 0)} employees",
-        **result
-    }
-
-
+# MOVED TO routes/admin.py: /admin/send-all-expiry-reminders
 @api_router.get("/admin/expiring-documents")
 async def get_expiring_documents_endpoint(
     days: int = Query(default=30, ge=1, le=365),
@@ -59000,6 +58918,9 @@ api_router.include_router(auth_router)
 
 # Include worker portal routes (refactored from server.py)
 api_router.include_router(workers_router)
+
+# Include admin operations routes (refactored from server.py)
+api_router.include_router(admin_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

@@ -112,6 +112,7 @@ from routes.workers import router as workers_router
 from routes.admin import router as admin_router
 from routes.training import router as training_router
 from routes.documents import router as documents_router
+from routes.recruitment import router as recruitment_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -11508,171 +11509,10 @@ async def get_employees(
 
 # ==================== RECRUITMENT PIPELINE ENDPOINTS ====================
 
-@api_router.get("/recruitment/applicants")
-async def get_applicants(
-    status: Optional[str] = None,
-    role: Optional[str] = None,
-    search: Optional[str] = None,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get applicant-stage people only.
-    These are candidates who have NOT been recruited yet.
-    
-    Applicant statuses: new, screening, interview, compliance_review
-    """
-    query = {"status": {"$in": APPLICANT_STATUSES}}
-    
-    if status and status in APPLICANT_STATUSES:
-        query["status"] = status
-    
-    if role:
-        query["role"] = role
-    
-    if search:
-        query["$or"] = [
-            {"first_name": {"$regex": search, "$options": "i"}},
-            {"last_name": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}},
-            {"applicant_reference": {"$regex": search, "$options": "i"}}
-        ]
-    
-    applicants = await db.employees.find(query, {"_id": 0}).to_list(1000)
-    
-    # Enrich with computed fields
-    result = []
-    for app in applicants:
-        app['person_stage'] = PersonStage.APPLICANT
-        app['completion_percentage'] = await calculate_completion_percentage(app['id'])
-        # Don't compute work_readiness for applicants (irrelevant - they can't work yet)
-        result.append({
-            "id": app["id"],
-            "applicant_reference": app.get("applicant_reference"),
-            "first_name": app["first_name"],
-            "last_name": app["last_name"],
-            "email": app["email"],
-            "phone": app.get("phone"),
-            "role": app.get("role"),
-            "status": app["status"],
-            "person_stage": PersonStage.APPLICANT,
-            "recruitment_approved": app.get("recruitment_approved", False),
-            "completion_percentage": app['completion_percentage'],
-            "created_at": app["created_at"],
-            "updated_at": app["updated_at"]
-        })
-    
-    return result
-
-
-@api_router.get("/recruitment/pipeline")
-async def get_recruitment_pipeline(
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get recruitment pipeline summary with counts per status.
-    Shows applicants grouped by their recruitment stage.
-    """
-    pipeline_counts = {}
-    
-    for status in APPLICANT_STATUSES:
-        count = await db.employees.count_documents({"status": status})
-        pipeline_counts[status] = count
-    
-    # Get all applicants for detailed view
-    applicants = await db.employees.find(
-        {"status": {"$in": APPLICANT_STATUSES}},
-        {"_id": 0}
-    ).to_list(1000)
-    
-    # Group by status
-    grouped = {status: [] for status in APPLICANT_STATUSES}
-    for app in applicants:
-        status = app.get("status", EmployeeStatus.NEW)
-        if status in grouped:
-            grouped[status].append({
-                "id": app["id"],
-                "applicant_reference": app.get("applicant_reference"),
-                "name": f"{app['first_name']} {app['last_name']}",
-                "email": app["email"],
-                "role": app.get("role"),
-                "created_at": app["created_at"],
-                "recruitment_approved": app.get("recruitment_approved", False)
-            })
-    
-    return {
-        "summary": {
-            "total_applicants": sum(pipeline_counts.values()),
-            "counts_by_status": pipeline_counts
-        },
-        "stages": [
-            {"status": EmployeeStatus.NEW, "label": "New Applications", "applicants": grouped[EmployeeStatus.NEW]},
-            {"status": EmployeeStatus.SCREENING, "label": "Screening", "applicants": grouped[EmployeeStatus.SCREENING]},
-            {"status": EmployeeStatus.INTERVIEW, "label": "Interview", "applicants": grouped[EmployeeStatus.INTERVIEW]},
-            {"status": EmployeeStatus.COMPLIANCE_REVIEW, "label": "Compliance Review", "applicants": grouped[EmployeeStatus.COMPLIANCE_REVIEW]}
-        ]
-    }
-
-
-@api_router.get("/staff/employees")
-async def get_staff_employees(
-    status: Optional[str] = None,
-    role: Optional[str] = None,
-    search: Optional[str] = None,
-    include_inactive: bool = False,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get employee-stage staff only.
-    These are people who have been recruited and can/have worked.
-    
-    Employee statuses: onboarding, active, inactive
-    
-    By default, excludes inactive employees unless include_inactive=true.
-    """
-    if status and status in EMPLOYEE_STATUSES:
-        query = {"status": status}
-    elif include_inactive:
-        query = {"status": {"$in": EMPLOYEE_STATUSES}}
-    else:
-        # Default: exclude inactive
-        query = {"status": {"$in": [EmployeeStatus.ONBOARDING, EmployeeStatus.ACTIVE]}}
-    
-    if role:
-        query["role"] = role
-    
-    if search:
-        query["$or"] = [
-            {"first_name": {"$regex": search, "$options": "i"}},
-            {"last_name": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}},
-            {"employee_code": {"$regex": search, "$options": "i"}}
-        ]
-    
-    employees = await db.employees.find(query, {"_id": 0}).to_list(1000)
-    
-    # Enrich with computed fields
-    for emp in employees:
-        emp['person_stage'] = PersonStage.EMPLOYEE
-        emp['completion_percentage'] = await calculate_completion_percentage(emp['id'])
-        emp['work_readiness'] = await calculate_work_readiness_quick(emp['id'], emp.get('role', ''))
-        emp['work_readiness_3tier'] = await calculate_work_readiness_3tier_quick(emp['id'], emp, emp.get('role', ''))
-        emp['expiry_alerts'] = await calculate_expiry_alerts_quick(emp['id'])
-    
-    return [EmployeeResponse(**emp) for emp in employees]
-
-@api_router.get("/onboarding-statuses")
-async def get_onboarding_statuses(user: dict = Depends(get_current_user)):
-    """Get list of available onboarding status options"""
-    return [
-        OnboardingStatus.NEW,
-        OnboardingStatus.DOCUMENTS_PENDING,
-        OnboardingStatus.UNDER_REVIEW,
-        OnboardingStatus.READY_FOR_PLACEMENT,
-        OnboardingStatus.ACTIVE,
-        OnboardingStatus.ARCHIVED
-    ]
-
-
+# MOVED TO routes/recruitment.py: /recruitment/applicants
+# MOVED TO routes/recruitment.py: /recruitment/pipeline
+# MOVED TO routes/recruitment.py: /staff/employees
+# MOVED TO routes/recruitment.py: /onboarding-statuses
 @api_router.get("/dbs-register")
 async def get_dbs_register(
     status_filter: Optional[str] = None,
@@ -11812,24 +11652,7 @@ async def get_staff_employee_by_id(employee_id: str, user: dict = Depends(get_cu
     return EmployeeResponse(**employee)
 
 
-@api_router.get("/recruitment/applicants/{applicant_id}")
-async def get_applicant_by_id(applicant_id: str, user: dict = Depends(get_current_user)):
-    """
-    Get applicant by ID - APPLICANT SCOPE ONLY.
-    Returns 404 if the record is an employee (already recruited).
-    
-    Use this endpoint for recruitment-facing pages to ensure employees don't appear in applicant views.
-    """
-    applicant = await employees_repo.get_applicant_by_id(applicant_id)
-    if not applicant:
-        raise HTTPException(status_code=404, detail="Applicant not found")
-    
-    applicant['completion_percentage'] = await calculate_completion_percentage(applicant_id)
-    applicant['person_stage'] = PersonStage.APPLICANT
-    # No work_readiness for applicants - they can't work yet
-    
-    return applicant
-
+# MOVED TO routes/recruitment.py: /recruitment/applicants/{applicant_id}
 @api_router.put("/employees/{employee_id}", response_model=EmployeeResponse)
 async def update_employee(employee_id: str, update: EmployeeUpdate, user: dict = Depends(require_manager_or_admin)):
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
@@ -16454,70 +16277,7 @@ Return ONLY the JSON object, no additional text."""
             os.unlink(tmp_path)
 
 
-@api_router.get("/employees/{employee_id}/recruitment-status")
-async def get_recruitment_status(
-    employee_id: str,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get full recruitment status including reference integrity and CV gaps.
-    
-    Shows all blockers that prevent recruitment from being marked complete.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Get compliance requirements which now includes recruitment status
-    compliance = await get_compliance_requirements(employee_id, user)
-    
-    # Build comprehensive recruitment status
-    reference_integrity = compliance.get("reference_integrity", {})
-    cv_gaps_status = compliance.get("cv_gaps_status", {})
-    recruitment_status = compliance.get("recruitment_status", {})
-    
-    # Check proof of address requirement
-    proof_of_address_req = None
-    for req in compliance.get("requirements", []):
-        if req.get("id") == "proof_of_address":
-            proof_of_address_req = req
-            break
-    
-    proof_of_address_status = {
-        "required_count": 2,
-        "current_count": proof_of_address_req.get("document_count", 0) if proof_of_address_req else 0,
-        "verified_count": len([d for d in (proof_of_address_req or {}).get("documents", []) if d.get("verified")]) if proof_of_address_req else 0,
-        "complete": proof_of_address_req.get("verified", False) if proof_of_address_req else False
-    }
-    
-    # Calculate overall recruitment readiness
-    recruitment_blockers = recruitment_status.get("blockers", [])
-    if not proof_of_address_status["complete"]:
-        if proof_of_address_status["current_count"] < 2:
-            recruitment_blockers.append(f"Proof of Address: {proof_of_address_status['current_count']}/2 documents uploaded")
-        elif proof_of_address_status["verified_count"] < 2:
-            recruitment_blockers.append(f"Proof of Address: {proof_of_address_status['verified_count']}/2 documents verified")
-    
-    return {
-        "employee_id": employee_id,
-        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
-        "recruitment_complete": len(recruitment_blockers) == 0,
-        "blockers": recruitment_blockers,
-        "details": {
-            "reference_integrity": reference_integrity,
-            "cv_gaps": cv_gaps_status,
-            "proof_of_address": proof_of_address_status
-        },
-        "summary": {
-            "references_valid": reference_integrity.get("all_valid", False),
-            "cv_gaps_explained": cv_gaps_status.get("all_gaps_explained", True),
-            "proof_of_address_complete": proof_of_address_status["complete"]
-        }
-    }
-
-
-
-
+# MOVED TO routes/recruitment.py: /employees/{employee_id}/recruitment-status
 @api_router.post("/employees/{employee_id}/profile-photo")
 async def upload_profile_photo(
     employee_id: str, 
@@ -18065,162 +17825,9 @@ async def override_employee_status(
 class RecruitmentApprovalRequest(BaseModel):
     notes: Optional[str] = None
 
-@api_router.post("/employees/{employee_id}/approve-recruitment")
-async def approve_recruitment(
-    employee_id: str,
-    approval: RecruitmentApprovalRequest,
-    user: dict = Depends(require_admin)
-):
-    """
-    Approve an employee for recruitment/activation.
-    
-    This is a SEPARATE gate from compliance verification:
-    - Compliance = operational readiness (documents, training, etc.)
-    - Recruitment Approval = human decision that person should be hired
-    
-    EMPLOYEE CODE ASSIGNMENT:
-    - If person doesn't have employee_code yet (was applicant), assign one now.
-    - This is the ONLY place employee_code gets assigned for applicants.
-    
-    STAGE TRANSITION:
-    - On approval, status transitions from applicant-stage to onboarding (employee-stage)
-    
-    Both must be satisfied for ACTIVE status.
-    Only ADMIN+ can approve recruitment.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    if employee.get("recruitment_approved"):
-        return {
-            "status": "already_approved",
-            "employee_code": employee.get("employee_code"),
-            "recruitment_approved_at": employee.get("recruitment_approved_at"),
-            "recruitment_approved_by": employee.get("recruitment_approved_by")
-        }
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    update_data = {
-        "recruitment_approved": True,
-        "recruitment_approved_by": user['user_id'],
-        "recruitment_approved_at": now,
-        "recruitment_approval_notes": approval.notes,
-        "updated_at": now
-    }
-    
-    # CRITICAL: Assign employee_code if not present (applicant → employee transition)
-    employee_code = employee.get("employee_code")
-    if not employee_code:
-        employee_code = await generate_employee_code()
-        update_data["employee_code"] = employee_code
-        logger.info(f"Assigned employee_code {employee_code} on recruitment approval for {employee_id}")
-    
-    # STAGE TRANSITION: Move from applicant status to onboarding
-    current_status = employee.get("status", EmployeeStatus.NEW)
-    if current_status in APPLICANT_STATUSES:
-        update_data["status"] = EmployeeStatus.ONBOARDING
-        update_data["previous_status"] = current_status
-        logger.info(f"Transitioned {employee_id} from {current_status} to onboarding on recruitment approval")
-    
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": update_data}
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "recruitment_approved",
-        "employee",
-        employee_id,
-        {
-            "notes": approval.notes,
-            "employee_code_assigned": employee_code if not employee.get("employee_code") else None,
-            "status_changed_from": current_status if current_status in APPLICANT_STATUSES else None,
-            "status_changed_to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None
-        }
-    )
-    
-    return {
-        "status": "approved",
-        "employee_id": employee_id,
-        "employee_code": employee_code,
-        "recruitment_approved": True,
-        "recruitment_approved_by": user['user_id'],
-        "recruitment_approved_at": now,
-        "stage_transition": {
-            "from": current_status if current_status in APPLICANT_STATUSES else None,
-            "to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None
-        }
-    }
-
-@api_router.post("/employees/{employee_id}/revoke-recruitment-approval")
-async def revoke_recruitment_approval(
-    employee_id: str,
-    reason: str = Query(..., description="Reason for revoking approval"),
-    user: dict = Depends(require_admin)
-):
-    """
-    Revoke recruitment approval (ADMIN+ only).
-    This will prevent the employee from being activated.
-    """
-    if user.get('role') != UserRole.SUPER_ADMIN:
-        raise HTTPException(status_code=403, detail="Only Super Admin can revoke recruitment approval")
-    
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    if not employee.get("recruitment_approved"):
-        return {"status": "not_approved", "message": "Employee was not approved"}
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": {
-            "recruitment_approved": False,
-            "recruitment_approval_revoked_by": user['user_id'],
-            "recruitment_approval_revoked_at": now,
-            "recruitment_approval_revoked_reason": reason,
-            "updated_at": now
-        }}
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "recruitment_approval_revoked",
-        "employee",
-        employee_id,
-        {"reason": reason, "previous_approved_by": employee.get("recruitment_approved_by")}
-    )
-    
-    return {
-        "status": "revoked",
-        "employee_id": employee_id,
-        "reason": reason
-    }
-
-@api_router.get("/employees/{employee_id}/recruitment-approval-status")
-async def get_recruitment_approval_status(
-    employee_id: str,
-    user: dict = Depends(get_current_user)
-):
-    """Get recruitment approval status for an employee"""
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    return {
-        "employee_id": employee_id,
-        "recruitment_approved": employee.get("recruitment_approved", False),
-        "recruitment_approved_by": employee.get("recruitment_approved_by"),
-        "recruitment_approved_at": employee.get("recruitment_approved_at"),
-        "recruitment_approval_notes": employee.get("recruitment_approval_notes"),
-        "can_be_activated": employee.get("recruitment_approved", False)
-    }
-
+# MOVED TO routes/recruitment.py: /employees/{employee_id}/approve-recruitment
+# MOVED TO routes/recruitment.py: /employees/{employee_id}/revoke-recruitment-approval
+# MOVED TO routes/recruitment.py: /employees/{employee_id}/recruitment-approval-status
 # ==================== EMPLOYEE EXPORT ROUTES ====================
 
 @api_router.get("/employees/{employee_id}/export-file")
@@ -43076,85 +42683,7 @@ async def check_recruitment_approval(
     return evaluation
 
 
-@api_router.post("/employees/{employee_id}/approve-recruitment")
-async def approve_recruitment(
-    employee_id: str,
-    user: dict = Depends(require_admin)
-):
-    """
-    Approve an applicant for recruitment.
-    
-    Requirements:
-    - All role-specific blocking requirements must be verified
-    - Employee must not already be approved
-    
-    On success:
-    - Sets recruitment_approved = true
-    - Sets status = onboarding
-    - Assigns employee_code if missing
-    - Creates worker account for portal access
-    - Sends welcome email with magic link
-    - Writes audit log
-    """
-    # Get employee
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Check if already approved
-    if employee.get("recruitment_approved"):
-        raise HTTPException(status_code=400, detail="Already approved for recruitment")
-    
-    # Get compliance file sections
-    compliance_file = await get_compliance_file_data(employee_id, employee)
-    sections = compliance_file.get("sections", {})
-    
-    # Get approver info
-    approver = await db.users.find_one({"id": user['user_id']})
-    approver_name = approver.get("name", user['user_id']) if approver else user['user_id']
-    
-    # Execute approval
-    result = await execute_recruitment_approval(
-        person=employee,
-        compliance_sections=sections,
-        approver_id=user['user_id'],
-        approver_name=approver_name,
-        db=db,
-        generate_employee_code_func=generate_employee_code
-    )
-    
-    if not result["success"]:
-        # Return 400 with blocker details
-        raise HTTPException(
-            status_code=400, 
-            detail={
-                "message": result["error"],
-                "blockers": result["evaluation"]["blockers"],
-                "verified_count": result["evaluation"]["verified_count"],
-                "required_count": result["evaluation"]["required_count"]
-            }
-        )
-    
-    # Get updated employee data after approval
-    updated_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    employee_code = result.get("employee_code") or updated_employee.get("employee_code")
-    
-    # Create worker account for portal access
-    await create_worker_account_on_approval(updated_employee)
-    
-    # Send welcome email with magic link
-    email_sent = await send_welcome_email_with_magic_link(updated_employee, employee_code)
-    
-    return {
-        "status": "success",
-        "message": "Recruitment approved successfully",
-        "employee": result["employee"],
-        "employee_code": employee_code,
-        "evaluation": result["evaluation"],
-        "welcome_email_sent": email_sent
-    }
-
-
+# MOVED TO routes/recruitment.py: /employees/{employee_id}/approve-recruitment
 # =============================================================================
 # WORK READINESS ENGINE ENDPOINTS (GATE 2)
 # =============================================================================
@@ -58455,6 +57984,9 @@ api_router.include_router(training_router)
 
 # Include document routes (refactored from server.py)
 api_router.include_router(documents_router)
+
+# Include recruitment routes (refactored from server.py)
+api_router.include_router(recruitment_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

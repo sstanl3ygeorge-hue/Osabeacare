@@ -130,6 +130,7 @@ from routes.forms import router as forms_router
 from routes.interviews import router as interviews_router
 from routes.contracts import router as contracts_router
 from routes.professional_registration import router as professional_registration_router
+from routes.promotion import router as promotion_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -12631,186 +12632,9 @@ async def try_auto_promote_worker(employee_id: str):
         logger.error(f"Auto-promotion check failed for {employee_id}: {e}")
 
 
-@api_router.get("/employees/{employee_id}/promotion-status")
-async def get_promotion_status(employee_id: str, user: dict = Depends(get_current_user)):
-    """
-    Check if employee is ready for automatic promotion to active_employee.
-    Returns detailed check status for each requirement.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    can_promote, checks = await can_promote_to_active(employee_id, db)
-    
-    # Get current status
-    current_status = employee.get("status", "applicant")
-    
-    # Count passed vs failed
-    passed = sum(1 for k, v in checks.items() if v is True and not k.endswith("_error"))
-    total = sum(1 for k, v in checks.items() if isinstance(v, bool))
-    
-    # Get missing checks
-    missing = [k for k, v in checks.items() if v is False]
-    
-    return {
-        "employee_id": employee_id,
-        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-        "current_status": current_status,
-        "can_promote": can_promote,
-        "checks": checks,
-        "passed_count": passed,
-        "total_count": total,
-        "missing_checks": missing,
-        "nhs_status": "Unconditional Offer" if can_promote else "Conditional Offer"
-    }
-
-
-@api_router.post("/employees/{employee_id}/auto-promote")
-async def auto_promote_to_active(employee_id: str, user: dict = Depends(require_manager_or_admin)):
-    """
-    Automatically promote employee to active_employee if all checks pass.
-    This endpoint should be called after significant compliance changes.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    current_status = employee.get("status", "applicant")
-    
-    # Already active
-    if current_status == EMPLOYEE_STATUS_ACTIVE:
-        return {
-            "success": True,
-            "message": "Employee is already active",
-            "promoted": False,
-            "status": current_status
-        }
-    
-    # Check if can promote
-    can_promote, checks = await can_promote_to_active(employee_id, db)
-    
-    if not can_promote:
-        missing = [k for k, v in checks.items() if v is False]
-        return {
-            "success": False,
-            "message": "Cannot promote - not all checks passed",
-            "promoted": False,
-            "status": current_status,
-            "missing_checks": missing
-        }
-    
-    # Promote to active
-    now = datetime.now(timezone.utc).isoformat()
-    update_data = {
-        "status": EMPLOYEE_STATUS_ACTIVE,
-        "promoted_at": now,
-        "promoted_via": "auto",
-        "updated_at": now
-    }
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
-    # Audit log
-    await log_audit_action(
-        user['user_id'],
-        "auto_promoted_to_active",
-        "employee",
-        employee_id,
-        {
-            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
-            "previous_status": current_status,
-            "new_status": EMPLOYEE_STATUS_ACTIVE,
-            "checks_passed": [k for k, v in checks.items() if v is True],
-            "triggered_by": "system_auto"
-        }
-    )
-    
-    return {
-        "success": True,
-        "message": "Employee promoted to active status",
-        "promoted": True,
-        "previous_status": current_status,
-        "new_status": EMPLOYEE_STATUS_ACTIVE,
-        "promoted_at": now
-    }
-
-
-@api_router.post("/employees/{employee_id}/force-promote")
-async def force_promote_to_active(
-    employee_id: str,
-    request: ForcePromoteRequest,
-    user: dict = Depends(require_admin)
-):
-    """
-    Admin override to promote someone before all checks complete.
-    RARE - only for emergencies. Full audit trail required.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    current_status = employee.get("status", "applicant")
-    
-    if current_status == EMPLOYEE_STATUS_ACTIVE:
-        raise HTTPException(status_code=400, detail="Employee is already active")
-    
-    if len(request.reason) < 10:
-        raise HTTPException(status_code=400, detail="Reason must be at least 10 characters")
-    
-    # Get missing checks for audit
-    can_promote, checks = await can_promote_to_active(employee_id, db)
-    missing_checks = [k for k, v in checks.items() if v is False]
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Record the override
-    override_record = {
-        "employee_id": employee_id,
-        "promoted_by": user['user_id'],
-        "promoted_by_name": user.get('name', user.get('email', 'Unknown')),
-        "promoted_at": now,
-        "reason": request.reason,
-        "notes": request.notes,
-        "missing_checks": missing_checks
-    }
-    
-    await db.manual_promotions.insert_one(override_record)
-    
-    # Update employee status
-    update_data = {
-        "status": EMPLOYEE_STATUS_ACTIVE,
-        "promoted_at": now,
-        "promoted_via": "manual_override",
-        "promoted_by": user['user_id'],
-        "updated_at": now
-    }
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
-    # Audit log
-    await log_audit_action(
-        user['user_id'],
-        "manual_promotion_to_active",
-        "employee",
-        employee_id,
-        {
-            "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
-            "previous_status": current_status,
-            "new_status": EMPLOYEE_STATUS_ACTIVE,
-            "reason": request.reason,
-            "notes": request.notes,
-            "missing_checks": missing_checks,
-            "override": True
-        }
-    )
-    
-    return {
-        "success": True,
-        "message": "Employee manually promoted to active status",
-        "employee_id": employee_id,
-        "missing_checks_ignored": missing_checks
-    }
+# NOTE: Promotion endpoints moved to routes/promotion.py
+# Includes: /employees/{id}/promotion-status, /employees/{id}/auto-promote, 
+# /employees/{id}/force-promote
 
 
 # NOTE: Professional Registration endpoints moved to routes/professional_registration.py
@@ -54236,6 +54060,9 @@ api_router.include_router(contracts_router)
 
 # Include professional registration routes (refactored from server.py)
 api_router.include_router(professional_registration_router)
+
+# Include promotion routes (refactored from server.py)
+api_router.include_router(promotion_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

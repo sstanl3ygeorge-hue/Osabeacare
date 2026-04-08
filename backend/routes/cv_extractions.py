@@ -62,16 +62,10 @@ def get_current_worker():
     return get_current_worker
 
 
-def get_10yr_form_status_func():
-    """Lazy import of get_10yr_form_status from server.py"""
-    from server import get_10yr_form_status
-    return get_10yr_form_status
-
-
 def get_cv_extraction_service():
-    """Lazy import of CVExtractionService from server.py"""
-    from server import CVExtractionService
-    return CVExtractionService
+    """Lazy import of _extract_cv_employment_history_helper from server.py"""
+    from server import _extract_cv_employment_history_helper
+    return _extract_cv_employment_history_helper
 
 
 def get_validate_file_content():
@@ -98,6 +92,45 @@ def get_detect_cv_gaps():
     return detect_cv_gaps
 
 
+async def get_10yr_form_status(employee_id: str) -> dict:
+    """
+    Get status of the 10-Year Employment History form for an employee.
+    """
+    db = get_db()
+    
+    # Check for existing form submission
+    form_submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    # Check for form progress
+    form_progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    if form_submission:
+        return {
+            "status": form_submission.get("status", "submitted"),
+            "submitted_at": form_submission.get("submitted_at"),
+            "verified_at": form_submission.get("verified_at"),
+            "has_data": True
+        }
+    elif form_progress:
+        return {
+            "status": "in_progress",
+            "last_saved": form_progress.get("last_saved"),
+            "auto_populated": form_progress.get("auto_populated", False),
+            "has_data": True
+        }
+    else:
+        return {
+            "status": "not_started",
+            "has_data": False
+        }
+
+
 # ==================== WORKER CV ENDPOINTS ====================
 
 @router.get("/worker/cv-extraction-status")
@@ -107,7 +140,6 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_user)
     Shows worker what was extracted and what gaps need explanation.
     """
     db = get_db()
-    get_10yr_form_status = get_10yr_form_status_func()
     
     # Get worker's employee_id from user
     employee_id = user.get("employee_id")
@@ -313,8 +345,11 @@ async def admin_review_cv(
     """
     Admin triggers AI extraction on a worker's uploaded CV.
     """
+    import httpx
+    
     db = get_db()
-    CVExtractionService = get_cv_extraction_service()
+    extract_cv_employment_history = get_cv_extraction_service()
+    detect_cv_gaps = get_detect_cv_gaps()
     
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
@@ -337,19 +372,63 @@ async def admin_review_cv(
             "already_extracted": True
         }
     
-    # Trigger extraction
+    # Get file content
+    file_url = cv_doc.get("file_url")
+    if not file_url:
+        raise HTTPException(status_code=400, detail="CV has no file URL")
+    
     try:
-        extraction_result = await CVExtractionService.extract_cv(
-            document_id=cv_document_id,
+        # Download file
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(file_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to download CV file")
+            file_content = response.content
+        
+        filename = cv_doc.get("file_name", "cv.pdf")
+        
+        # Trigger extraction
+        extraction_result = await extract_cv_employment_history(
+            file_content=file_content,
+            filename=filename,
             employee_id=employee_id
+        )
+        
+        # Save extraction to document
+        now = datetime.now(timezone.utc).isoformat()
+        await db.employee_documents.update_one(
+            {"id": cv_document_id},
+            {"$set": {
+                "cv_extraction": extraction_result,
+                "cv_extracted_at": now
+            }}
+        )
+        
+        # Update employee with extracted data
+        employment_history = extraction_result.get("employment_history", [])
+        gaps_detected = detect_cv_gaps(employment_history) if employment_history else []
+        
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "cv_extracted_employment_history": employment_history,
+                "cv_extracted_education": extraction_result.get("education", []),
+                "cv_extracted_skills": extraction_result.get("skills", []),
+                "cv_gaps_detected": gaps_detected,
+                "cv_extracted_at": now,
+                "updated_at": now
+            }}
         )
         
         return {
             "success": True,
             "message": "CV extraction complete",
             "extraction": extraction_result,
+            "gaps_detected": len(gaps_detected),
             "already_extracted": False
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"CV extraction failed for {employee_id}: {e}")
         raise HTTPException(status_code=500, detail=f"CV extraction failed: {str(e)}")

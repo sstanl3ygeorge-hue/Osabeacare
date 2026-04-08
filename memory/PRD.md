@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (28 Modules)
+### Modular Routes Structure (29 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -43,7 +43,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── dbs.py                       - 5 endpoints
 ├── verifications.py             - 12 endpoints
 ├── migrations.py                - 3 endpoints
-├── readiness.py                 - 7 endpoints [NEW]
+├── readiness.py                 - 7 endpoints
+├── cv_extractions.py            - 11 endpoints [NEW]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -58,18 +59,20 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 27: DBS routes (5 endpoints), removed ~436 lines
 - Phase 28: Verification routes (12 endpoints), removed ~1,007 lines
 - Phase 29: Migration routes (3 endpoints), removed ~201 lines
-- **Phase 30: Readiness routes (7 endpoints), removed ~565 lines** [DONE]
+- Phase 30: Readiness routes (7 endpoints), removed ~565 lines
+- **Phase 31: CV Extractions routes (11 endpoints), removed ~1,151 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~49,834 lines (down from ~60,500 originally - **17.6% reduction**)
-- **Route modules**: 28 modules with ~262 endpoints extracted
+- **server.py**: ~48,683 lines (down from ~60,500 originally - **19.5% reduction**)
+- **Route modules**: 29 modules with ~273 endpoints extracted
 - **F811 errors**: 4 (intentional local `get_template` imports)
-- **Testing**: 100% pass rate (28/28 tests in Phase 30)
+- **Testing**: All phases passing (Phase 31 refactored CVExtractionService call)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract remaining small route groups
+- [ ] Extract profile photo routes (~3 endpoints)
+- [ ] Extract remaining inline routes
 - [ ] Extract more helper functions/services
 
 ### P3: Future Enhancements
@@ -78,10 +81,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_203.json` - Phase 27 (DBS)
 - `/app/test_reports/iteration_204.json` - Phase 28 (verifications)
 - `/app/test_reports/iteration_205.json` - Phase 29 (migrations)
-- `/app/test_reports/iteration_206.json` - Phase 30 (readiness) [NEW]
+- `/app/test_reports/iteration_206.json` - Phase 30 (readiness)
+- `/app/test_reports/iteration_207.json` - Phase 31 (cv_extractions) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

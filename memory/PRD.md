@@ -35,7 +35,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── professional_registration.py - 4 endpoints
 ├── promotion.py                 - 3 endpoints
 ├── roles.py                     - 3 endpoints
-├── policy_assignments.py        - 6 endpoints [NEW]
+├── policy_assignments.py        - 6 endpoints
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -55,12 +55,18 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 17: Extracted professional registration routes (4 endpoints), removed ~164 lines
 - Phase 18: Extracted promotion routes (3 endpoints), removed ~173 lines
 - Phase 19: Extracted roles routes (3 endpoints), removed ~51 lines
-- **Phase 20: Extracted policy assignments routes (6 endpoints), removed ~284 lines** [DONE]
+- Phase 20: Extracted policy assignments routes (6 endpoints), removed ~284 lines
+- **Phase 21: Fixed F811 duplicate definitions, removed ~54 lines** [DONE]
+  - Removed duplicate `update_employment_history` function
+  - Renamed `extract_employment_history_from_cv` helper
+  - Removed duplicate PIL import
+  - Removed duplicate `MIN_GAP_DAYS` constant
 
 ### Current Status
-- **server.py**: ~53,863 lines (down from ~60,500 originally - **11.0% reduction**)
+- **server.py**: ~53,809 lines (down from ~60,500 originally - **11.1% reduction**)
 - **Route modules**: 20 modules with ~194 endpoints extracted
-- **Testing**: 100% pass rate (24/24 tests in Phase 20)
+- **Testing**: 100% pass rate (23/23 tests in Phase 21)
+- **F811 errors**: Reduced from 14 to 9
 
 ## Pending/In Progress
 
@@ -69,7 +75,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] Extract RTW (Right to Work) routes (~3 endpoints)
 - [ ] Extract employee readiness routes (`/employees/{id}/readiness*`)
 - [ ] Extract induction checklist routes (~7 endpoints)
-- [ ] Clean up remaining F811 duplicate function definitions
+- [ ] Continue fixing remaining F811 duplicate definitions
 
 ### P3: Future Enhancements
 - [ ] Supabase Auth integration with RLS policies
@@ -77,9 +83,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_194.json` - Phase 18 (promotion routes)
 - `/app/test_reports/iteration_195.json` - Phase 19 (roles routes)
-- `/app/test_reports/iteration_196.json` - Phase 20 (policy assignments) [NEW]
+- `/app/test_reports/iteration_196.json` - Phase 20 (policy assignments)
+- `/app/test_reports/iteration_197.json` - Phase 21 (F811 fixes) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

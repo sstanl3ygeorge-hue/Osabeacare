@@ -625,9 +625,12 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
     ref2_verified = employee.get("reference_2_verified", False)
     ref_doc = await db.references.find_one({"employee_id": emp_id_str})
     if ref_doc:
-        if ref_doc.get("ref1", {}).get("verification_status") == "verified":
+        # Use `or {}` to handle None values (not just missing keys)
+        ref1_data = ref_doc.get("ref1") or {}
+        ref2_data = ref_doc.get("ref2") or {}
+        if ref1_data.get("verification_status") == "verified":
             ref1_verified = True
-        if ref_doc.get("ref2", {}).get("verification_status") == "verified":
+        if ref2_data.get("verification_status") == "verified":
             ref2_verified = True
     checks["references"] = ref1_verified and ref2_verified
     

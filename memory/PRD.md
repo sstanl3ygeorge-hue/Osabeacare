@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (26 Modules)
+### Modular Routes Structure (27 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -41,42 +41,35 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── recurring_compliance.py      - 8 endpoints
 ├── agreements.py                - 16 endpoints
 ├── dbs.py                       - 5 endpoints
-├── verifications.py             - 12 endpoints [NEW]
+├── verifications.py             - 12 endpoints
+├── migrations.py                - 3 endpoints [NEW]
 └── verification_routes.py       - 7 endpoints
 ```
 
 ## Server.py Refactoring Progress (April 8, 2026)
 
 ### Completed Phases
-- Phase 1-7: Extracted auth, workers, admin, training, documents, recruitment, employees
-- Phase 8-15: Extracted references, notifications, compliance, templates, service_users, forms, interviews
-- Phase 16: Extracted contracts routes (11 endpoints), removed ~293 lines
-- Phase 17: Extracted professional registration routes (4 endpoints), removed ~164 lines
-- Phase 18: Extracted promotion routes (3 endpoints), removed ~173 lines
-- Phase 19: Extracted roles routes (3 endpoints), removed ~51 lines
-- Phase 20: Extracted policy assignments routes (6 endpoints), removed ~284 lines
-- Phase 21: Fixed F811 duplicate definitions, removed ~54 lines
-- Phase 22: Extracted bulk schedules routes (10 endpoints), removed ~247 lines
-- Phase 23: Fixed more F811 duplicates (reduced from 9 to 4)
-- Phase 24: Extracted employment gaps routes (7 endpoints), removed ~450 lines
-- Phase 25: Extracted recurring compliance routes (8 endpoints), removed ~627 lines
-- Phase 26: Extracted agreement routes (16 endpoints), removed ~452 lines
-- Phase 27: Extracted DBS routes (5 endpoints), removed ~436 lines
-- **Phase 28: Extracted verification routes (12 endpoints), removed ~1,007 lines** [DONE]
+- Phase 1-15: Initial modularization (auth, workers, admin, training, documents, etc.)
+- Phase 16-23: Contracts, professional registration, promotion, roles, policy assignments, bulk schedules, F811 fixes
+- Phase 24: Employment gaps routes (7 endpoints), removed ~450 lines
+- Phase 25: Recurring compliance routes (8 endpoints), removed ~627 lines
+- Phase 26: Agreement routes (16 endpoints), removed ~452 lines
+- Phase 27: DBS routes (5 endpoints), removed ~436 lines
+- Phase 28: Verification routes (12 endpoints), removed ~1,007 lines
+- **Phase 29: Migration routes (3 endpoints), removed ~201 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~50,600 lines (down from ~60,500 originally - **16.4% reduction**)
-- **Route modules**: 26 modules with ~252 endpoints extracted
+- **server.py**: ~50,399 lines (down from ~60,500 originally - **16.7% reduction**)
+- **Route modules**: 27 modules with ~255 endpoints extracted
 - **F811 errors**: 4 (intentional local `get_template` imports)
-- **Testing**: 100% pass rate (36/36 tests in Phase 28)
+- **Testing**: 100% pass rate (21/21 tests in Phase 29)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract dual-row migration routes (~2 endpoints)
+- [ ] Extract readiness check routes (~2 endpoints)
 - [ ] Extract audit trail routes
-- [ ] Extract CV extraction routes
-- [ ] Extract remaining helper functions and services
+- [ ] Extract remaining small route groups
 
 ### P3: Future Enhancements
 - [ ] Supabase Auth integration with RLS policies
@@ -84,10 +77,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_201.json` - Phase 25 (recurring compliance)
 - `/app/test_reports/iteration_202.json` - Phase 26 (agreements)
 - `/app/test_reports/iteration_203.json` - Phase 27 (DBS)
-- `/app/test_reports/iteration_204.json` - Phase 28 (verifications) [NEW]
+- `/app/test_reports/iteration_204.json` - Phase 28 (verifications)
+- `/app/test_reports/iteration_205.json` - Phase 29 (migrations) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

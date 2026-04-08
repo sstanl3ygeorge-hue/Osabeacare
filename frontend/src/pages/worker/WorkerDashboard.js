@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award
+  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
@@ -203,6 +203,10 @@ export default function WorkerDashboard() {
   const [showSetPasswordModal, setShowSetPasswordModal] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ new_password: '', confirm_password: '', current_password: '' });
   const [settingPassword, setSettingPassword] = useState(false);
+  // Notifications
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
   // Document viewer modal state
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerDocument, setViewerDocument] = useState(null);
@@ -258,6 +262,17 @@ export default function WorkerDashboard() {
         setAccountStatus(accountRes.data);
       } catch (err) {
         console.warn('Could not fetch account status:', err);
+      }
+      
+      // Fetch notifications
+      try {
+        const notifRes = await axios.get(`${API}/worker/notifications`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setNotifications(notifRes.data.notifications || []);
+        setUnreadCount(notifRes.data.unread_count || 0);
+      } catch (err) {
+        console.warn('Could not fetch notifications:', err);
       }
       
       // Also check contract eligibility
@@ -579,6 +594,23 @@ export default function WorkerDashboard() {
     }
   };
 
+  const markNotificationRead = async (notificationId) => {
+    const token = localStorage.getItem('workerToken');
+    try {
+      await axios.post(
+        `${API}/worker/notifications/${notificationId}/read`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setNotifications(prev => prev.map(n => 
+        n.id === notificationId ? { ...n, read: true } : n
+      ));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+    } catch (err) {
+      console.warn('Could not mark notification read:', err);
+    }
+  };
+
   const handleFileUpload = async (requirementId, file) => {
     if (!file) return;
     
@@ -704,6 +736,81 @@ export default function WorkerDashboard() {
             <Button variant="ghost" size="sm" onClick={fetchDashboard} className="gap-1">
               <RefreshCw className="h-4 w-4" />
             </Button>
+            {/* Notifications Bell */}
+            <div className="relative">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => setShowNotificationsPanel(!showNotificationsPanel)}
+                className="relative"
+                data-testid="notifications-btn"
+              >
+                <Bell className="h-4 w-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </Button>
+              
+              {/* Notifications Dropdown */}
+              {showNotificationsPanel && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-slate-200 z-50">
+                  <div className="p-3 border-b border-slate-200 flex items-center justify-between">
+                    <h3 className="font-semibold text-slate-800">Notifications</h3>
+                    {unreadCount > 0 && (
+                      <Badge className="bg-red-100 text-red-700">{unreadCount} unread</Badge>
+                    )}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="p-4 text-center text-slate-500 text-sm">
+                        No notifications
+                      </div>
+                    ) : (
+                      notifications.slice(0, 5).map((notif) => (
+                        <div 
+                          key={notif.id} 
+                          className={`p-3 border-b border-slate-100 hover:bg-slate-50 cursor-pointer ${!notif.read ? 'bg-blue-50' : ''}`}
+                          onClick={() => {
+                            if (!notif.read) markNotificationRead(notif.id);
+                          }}
+                        >
+                          <div className="flex items-start gap-2">
+                            {notif.type === 'cv_rejected' ? (
+                              <AlertTriangle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                            ) : (
+                              <Bell className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-sm ${!notif.read ? 'font-semibold text-slate-800' : 'text-slate-700'}`}>
+                                {notif.title}
+                              </p>
+                              <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                                {notif.message}
+                              </p>
+                              <p className="text-xs text-slate-400 mt-1">
+                                {formatDate(notif.created_at)}
+                              </p>
+                            </div>
+                            {!notif.read && (
+                              <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {notifications.length > 5 && (
+                    <div className="p-2 text-center border-t border-slate-200">
+                      <button className="text-sm text-purple-600 hover:underline">
+                        View all notifications
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             {!accountStatus.has_password && (
               <Button 
                 variant="outline" 
@@ -874,6 +981,62 @@ export default function WorkerDashboard() {
 
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
+
+        {/* ========== CV REJECTION ALERT ========== */}
+        {notifications.some(n => n.type === 'cv_rejected' && !n.resolved) && (
+          <Card className="shadow-md border-0 border-l-4 border-l-red-500 bg-red-50/50" data-testid="cv-rejection-alert">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg text-red-800">
+                    <AlertTriangle className="h-5 w-5" />
+                    CV Requires Attention
+                  </CardTitle>
+                  <p className="text-xs text-red-700 mt-1">
+                    Your CV was reviewed and requires additional information
+                  </p>
+                </div>
+                <Badge className="bg-red-100 text-red-700">
+                  Action Required
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {notifications.filter(n => n.type === 'cv_rejected' && !n.resolved).map((notif) => (
+                <div key={notif.id} className="p-4 bg-white rounded-xl border border-red-200">
+                  <p className="text-red-800 font-medium mb-2">{notif.message}</p>
+                  <p className="text-sm text-red-600 mb-4">
+                    Please either explain any employment gaps or upload an updated CV.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button 
+                      size="sm" 
+                      className="bg-purple-600 hover:bg-purple-700"
+                      onClick={() => {
+                        // Scroll to CV upload section or trigger upload
+                        toast.info('Please scroll down to the Documents section to upload a new CV');
+                      }}
+                    >
+                      <Upload className="h-4 w-4 mr-1" />
+                      Upload New CV
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={() => {
+                        // Scroll to employment history section
+                        toast.info('Please scroll down to Employment History to explain gaps');
+                      }}
+                    >
+                      <MessageSquare className="h-4 w-4 mr-1" />
+                      Explain Gaps
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* ========== REFERENCE-EMPLOYMENT MISMATCH ALERT ========== */}
         {!isActiveEmployee && referenceMismatches?.has_mismatches && (

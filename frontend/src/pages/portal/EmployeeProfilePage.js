@@ -198,6 +198,14 @@ export default function EmployeeProfilePage() {
   const [trainingHistoryDialogOpen, setTrainingHistoryDialogOpen] = useState(false);
   const [trainingHistory, setTrainingHistory] = useState([]);
   
+  // CV Review states (Admin reviews CV, triggers AI extraction)
+  const [cvReviewDialogOpen, setCvReviewDialogOpen] = useState(false);
+  const [cvReviewLoading, setCvReviewLoading] = useState(false);
+  const [cvExtractionResult, setCvExtractionResult] = useState(null);
+  const [cvRejectDialogOpen, setCvRejectDialogOpen] = useState(false);
+  const [cvRejectReason, setCvRejectReason] = useState('');
+  const [cvRejectLoading, setCvRejectLoading] = useState(false);
+  
   // Delete training record states
   const [deleteTrainingDialogOpen, setDeleteTrainingDialogOpen] = useState(false);
   const [deletingTrainingRecord, setDeletingTrainingRecord] = useState(null);
@@ -512,6 +520,95 @@ export default function EmployeeProfilePage() {
       toast.error(err.response?.data?.detail || 'Failed to re-extract from CV');
     } finally {
       setIsReextractingFromCv(false);
+    }
+  };
+  
+  // NEW: Admin reviews CV - triggers AI extraction
+  const handleReviewCv = async () => {
+    setCvReviewLoading(true);
+    try {
+      const response = await axios.post(
+        `${API}/admin/employees/${employeeId}/cv/review`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      setCvExtractionResult(response.data.extraction);
+      setCvReviewDialogOpen(true);
+      
+      if (response.data.requires_action) {
+        toast.warning(`CV reviewed - ${response.data.extraction.gaps_detected} gaps need explanation`);
+      } else {
+        toast.success(`CV reviewed - ${response.data.extraction.jobs_found} jobs found, no issues`);
+      }
+      
+      // Refresh data
+      fetchEmployee();
+      fetchRecruitmentStatus();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      if (detail === "No CV document found for this employee") {
+        toast.error('No CV uploaded yet. Worker needs to upload their CV first.');
+      } else {
+        toast.error(detail || 'Failed to review CV');
+      }
+    } finally {
+      setCvReviewLoading(false);
+    }
+  };
+  
+  // Admin approves CV after review
+  const handleApproveCv = async () => {
+    setCvReviewLoading(true);
+    try {
+      await axios.post(
+        `${API}/admin/employees/${employeeId}/cv/approve`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('CV approved! Employment history has been verified.');
+      setCvReviewDialogOpen(false);
+      setCvExtractionResult(null);
+      
+      // Refresh data
+      fetchEmployee();
+      fetchRecruitmentStatus();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to approve CV');
+    } finally {
+      setCvReviewLoading(false);
+    }
+  };
+  
+  // Admin rejects CV with reason
+  const handleRejectCv = async () => {
+    if (cvRejectReason.length < 10) {
+      toast.error('Please provide a detailed reason (at least 10 characters)');
+      return;
+    }
+    
+    setCvRejectLoading(true);
+    try {
+      await axios.post(
+        `${API}/admin/employees/${employeeId}/cv/reject`,
+        { reason: cvRejectReason },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      
+      toast.success('CV rejected. Worker has been notified and asked to take action.');
+      setCvRejectDialogOpen(false);
+      setCvReviewDialogOpen(false);
+      setCvRejectReason('');
+      setCvExtractionResult(null);
+      
+      // Refresh data
+      fetchEmployee();
+      fetchRecruitmentStatus();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to reject CV');
+    } finally {
+      setCvRejectLoading(false);
     }
   };
   
@@ -4222,17 +4319,83 @@ export default function EmployeeProfilePage() {
                   Work history, gap verification, and employment declarations.
                 </p>
               </div>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={() => setEditEmploymentOpen(true)}
-                data-testid="edit-employment-btn"
-              >
-                <Edit className="h-4 w-4 mr-1" />
-                Edit History
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleReviewCv}
+                  disabled={cvReviewLoading}
+                  className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                  data-testid="review-cv-btn"
+                >
+                  {cvReviewLoading ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <FileSearch className="h-4 w-4 mr-1" />
+                  )}
+                  Review CV
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setEditEmploymentOpen(true)}
+                  data-testid="edit-employment-btn"
+                >
+                  <Edit className="h-4 w-4 mr-1" />
+                  Edit History
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
+              {/* CV Status Banner */}
+              {employee?.cv_status === 'rejected' && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-red-800">CV Rejected - Awaiting Worker Action</p>
+                    <p className="text-sm text-red-600 mt-1">{employee?.cv_rejection_reason}</p>
+                    <p className="text-xs text-red-500 mt-2">
+                      Worker has been notified to explain gaps or upload a new CV.
+                    </p>
+                  </div>
+                </div>
+              )}
+              
+              {employee?.cv_extraction_status === 'reviewed' && employee?.cv_status !== 'approved' && !employee?.cv_status && (
+                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                  <Clock className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-amber-800">CV Reviewed - Pending Approval</p>
+                    <p className="text-sm text-amber-600 mt-1">
+                      Found {employee?.cv_extracted_employment_history?.length || 0} jobs, 
+                      {employee?.cv_gaps_detected?.length || 0} gaps detected.
+                    </p>
+                    <div className="flex gap-2 mt-3">
+                      <Button size="sm" onClick={handleApproveCv} disabled={cvReviewLoading} className="bg-green-600 hover:bg-green-700">
+                        {cvReviewLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
+                        Approve CV
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setCvRejectDialogOpen(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Reject with Reason
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {employee?.cv_status === 'approved' && (
+                <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-green-800">CV Approved</p>
+                    <p className="text-sm text-green-600 mt-1">
+                      Employment history verified with {employee?.cv_extracted_employment_history?.length || 0} jobs extracted.
+                    </p>
+                  </div>
+                </div>
+              )}
+              
               {/* Employment Gap Panel */}
               {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
                 <EmploymentGapPanel
@@ -7363,6 +7526,152 @@ export default function EmployeeProfilePage() {
           handleOpenVerificationModal(doc);
         }}
       />
+      
+      {/* ========== CV REVIEW DIALOG ========== */}
+      <Dialog open={cvReviewDialogOpen} onOpenChange={setCvReviewDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSearch className="h-5 w-5 text-purple-600" />
+              CV Review - AI Extraction Results
+            </DialogTitle>
+            <DialogDescription>
+              Review the extracted employment history from the worker's CV. Approve if accurate, or reject with reason if issues found.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {cvExtractionResult && (
+            <div className="space-y-4 py-4">
+              {/* Summary Stats */}
+              <div className="grid grid-cols-4 gap-4">
+                <div className="p-3 bg-blue-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-blue-700">{cvExtractionResult.jobs_found}</p>
+                  <p className="text-xs text-blue-600">Jobs Found</p>
+                </div>
+                <div className="p-3 bg-purple-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-purple-700">{cvExtractionResult.education_found}</p>
+                  <p className="text-xs text-purple-600">Education</p>
+                </div>
+                <div className="p-3 bg-green-50 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-green-700">{cvExtractionResult.skills_found}</p>
+                  <p className="text-xs text-green-600">Skills</p>
+                </div>
+                <div className={`p-3 rounded-lg text-center ${cvExtractionResult.gaps_detected > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+                  <p className={`text-2xl font-bold ${cvExtractionResult.gaps_detected > 0 ? 'text-red-700' : 'text-gray-700'}`}>
+                    {cvExtractionResult.gaps_detected}
+                  </p>
+                  <p className={`text-xs ${cvExtractionResult.gaps_detected > 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                    Gaps Detected
+                  </p>
+                </div>
+              </div>
+              
+              {/* Employment History */}
+              {cvExtractionResult.employment_history?.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-gray-800 mb-2 flex items-center gap-2">
+                    <Briefcase className="h-4 w-4" />
+                    Employment History
+                  </h4>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {cvExtractionResult.employment_history.map((job, idx) => (
+                      <div key={idx} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                        <div className="flex justify-between">
+                          <div>
+                            <p className="font-medium text-gray-800">{job.employer || job.company}</p>
+                            <p className="text-gray-600">{job.job_title || job.position}</p>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {job.start_date} - {job.end_date || 'Present'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Gaps Detected */}
+              {cvExtractionResult.gaps?.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-red-800 mb-2 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    Gaps Requiring Explanation
+                  </h4>
+                  <div className="space-y-2">
+                    {cvExtractionResult.gaps.map((gap, idx) => (
+                      <div key={idx} className="p-3 bg-red-50 rounded-lg border border-red-200 text-sm">
+                        <p className="text-red-700">{gap.message}</p>
+                        <p className="text-xs text-red-500 mt-1">
+                          {gap.start_date} - {gap.end_date} ({gap.duration_days} days)
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          <DialogFooter className="flex gap-2 sm:justify-between">
+            <Button variant="outline" onClick={() => setCvRejectDialogOpen(true)} className="text-red-600 border-red-200 hover:bg-red-50">
+              <XCircle className="h-4 w-4 mr-1" />
+              Reject with Reason
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setCvReviewDialogOpen(false)}>
+                Close
+              </Button>
+              <Button onClick={handleApproveCv} disabled={cvReviewLoading} className="bg-green-600 hover:bg-green-700">
+                {cvReviewLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
+                Approve CV
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* CV Reject Dialog */}
+      <Dialog open={cvRejectDialogOpen} onOpenChange={setCvRejectDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <XCircle className="h-5 w-5" />
+              Reject CV
+            </DialogTitle>
+            <DialogDescription>
+              Provide a clear reason for rejection. The worker will be notified and asked to either explain gaps or upload a new CV.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <Label>Rejection Reason</Label>
+            <Textarea
+              value={cvRejectReason}
+              onChange={(e) => setCvRejectReason(e.target.value)}
+              placeholder="e.g., Please explain the employment gap between March 2019 and January 2021, or provide documentation for this period."
+              className="mt-2 min-h-[100px]"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Be specific about what the worker needs to do (explain gap, provide documentation, upload new CV)
+            </p>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCvRejectDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleRejectCv} 
+              disabled={cvRejectLoading || cvRejectReason.length < 10}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {cvRejectLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
+              Send Rejection
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

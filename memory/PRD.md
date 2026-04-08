@@ -79,9 +79,19 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
   - AI extraction using Gemini
   - "Send Welcome Emails" option
   - ProfileCompletionWizard for workers
+- [x] **Server.py Refactoring - Phase 1** (NEW - April 8, 2026)
+  - Created `/app/backend/routes/` module structure
+  - Extracted auth routes to `routes/auth.py` (~765 lines)
+  - Created `routes/dependencies.py` for shared utilities (~224 lines)
+  - Reduced server.py from 60,499 to 59,751 lines
 
 ### Pending/In Progress
-- [ ] Refactor `server.py` into modular FastAPI routers (P1 - CRITICAL)
+- [ ] Continue server.py refactoring:
+  - [ ] Extract worker portal routes to `routes/workers.py`
+  - [ ] Extract employee management to `routes/employees.py`
+  - [ ] Extract document handling to `routes/documents.py`
+  - [ ] Extract recruitment pipeline to `routes/recruitment.py`
+  - [ ] Extract training routes to `routes/training.py`
 - [ ] Supabase Auth integration with RLS policies (P3)
 - [ ] MongoDB to PostgreSQL migration (P3)
 - [ ] MFA (TOTP) for Admin accounts (P3)

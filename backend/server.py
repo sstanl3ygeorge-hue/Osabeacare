@@ -7025,6 +7025,12 @@ class StructuredApplicationForm(BaseModel):
     how_heard: Optional[str] = None
     additional_info: Optional[str] = None
     
+    # === SECTION 13: Emergency Contact / Next of Kin ===
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relationship: Optional[str] = None
+    emergency_contact_address: Optional[str] = None
+    
     # === CV Upload Reference (file uploaded separately) ===
     cv_file_id: Optional[str] = None
 
@@ -23480,9 +23486,16 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "phone": form.phone,
         "phone_secondary": form.phone_secondary,
         
-        # Address
+        # Address - store both individual fields AND concatenated
         "address": full_address,
+        "address_line_1": form.address_line_1,
+        "address_line_2": form.address_line_2,
+        "city": form.city,
+        "county": form.county,
         "postcode": form.postcode,
+        
+        # NI Number - store in both fields for compatibility
+        "ni_number": form.national_insurance,
         
         # Role & availability
         "role_applied_raw": form.role_applied,  # Original input
@@ -23565,6 +23578,15 @@ async def submit_structured_application(form: StructuredApplicationForm):
             "consents_to_background_checks": form.declarations.consents_to_background_checks,
             "consents_to_data_processing": form.declarations.consents_to_data_processing,
         },
+        
+        # Emergency Contact / Next of Kin
+        "next_of_kin_name": form.emergency_contact_name,
+        "next_of_kin_phone": form.emergency_contact_phone,
+        "next_of_kin_relationship": form.emergency_contact_relationship,
+        "next_of_kin_address": form.emergency_contact_address,
+        "emergency_contact_name": form.emergency_contact_name,
+        "emergency_contact_phone": form.emergency_contact_phone,
+        "emergency_contact_relationship": form.emergency_contact_relationship,
         
         # Qualifications
         "highest_qualification": form.highest_qualification,

@@ -111,7 +111,7 @@ async def get_worker_profile_data(worker: dict = Depends(get_current_worker)):
     profile_data = {
         "personal": {
             "date_of_birth": employee.get("date_of_birth", ""),
-            "ni_number": employee.get("ni_number", ""),
+            "ni_number": employee.get("ni_number") or employee.get("national_insurance") or "",
             "phone": employee.get("phone") or employee.get("mobile") or ""
         },
         "address": {
@@ -161,11 +161,33 @@ async def get_worker_profile_data(worker: dict = Depends(get_current_worker)):
         profile_data["address"]["county"] = employee.get("county") or ""
         profile_data["address"]["postcode"] = employee.get("postcode") or ""
     
-    # References - check employee record
+    # References - check multiple possible storage formats
+    # Format 1: Nested object (reference_1: {name, email, ...})
     ref_1 = employee.get("reference_1") or {}
     ref_2 = employee.get("reference_2") or {}
     
-    if ref_1:
+    # Format 2: Flat fields (reference_1_name, reference_1_email, ...) - from online application
+    if not ref_1 or not ref_1.get("name"):
+        ref_1 = {
+            "name": employee.get("reference_1_name") or "",
+            "email": employee.get("reference_1_email") or "",
+            "phone": employee.get("reference_1_phone") or "",
+            "organization": employee.get("reference_1_company") or employee.get("reference_1_organisation") or "",
+            "job_title": employee.get("reference_1_job_title") or "",
+            "relationship": employee.get("reference_1_relationship") or ""
+        }
+    
+    if not ref_2 or not ref_2.get("name"):
+        ref_2 = {
+            "name": employee.get("reference_2_name") or "",
+            "email": employee.get("reference_2_email") or "",
+            "phone": employee.get("reference_2_phone") or "",
+            "organization": employee.get("reference_2_company") or employee.get("reference_2_organisation") or "",
+            "job_title": employee.get("reference_2_job_title") or "",
+            "relationship": employee.get("reference_2_relationship") or ""
+        }
+    
+    if ref_1 and ref_1.get("name"):
         profile_data["reference_1"] = {
             "name": ref_1.get("name") or "",
             "email": ref_1.get("email") or "",
@@ -175,7 +197,7 @@ async def get_worker_profile_data(worker: dict = Depends(get_current_worker)):
             "relationship": ref_1.get("relationship") or ""
         }
     
-    if ref_2:
+    if ref_2 and ref_2.get("name"):
         profile_data["reference_2"] = {
             "name": ref_2.get("name") or "",
             "email": ref_2.get("email") or "",
@@ -203,15 +225,21 @@ async def get_worker_profile_data(worker: dict = Depends(get_current_worker)):
                 "relationship": ref.get("referee_relationship") or ""
             }
     
-    # Emergency Contact
+    # Emergency Contact - check multiple storage formats
     ec = employee.get("emergency_contact") or employee.get("next_of_kin") or {}
-    if ec:
-        profile_data["emergency_contact"] = {
-            "name": ec.get("name") or employee.get("next_of_kin_name") or "",
-            "phone": ec.get("phone") or ec.get("contact_number") or employee.get("next_of_kin_phone") or "",
-            "relationship": ec.get("relationship") or employee.get("next_of_kin_relationship") or "",
-            "address": ec.get("address") or ""
-        }
+    
+    # Get from flat fields if nested is empty (from online application form)
+    ec_name = ec.get("name") or employee.get("next_of_kin_name") or employee.get("emergency_contact_name") or ""
+    ec_phone = ec.get("phone") or ec.get("contact_number") or employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone") or ""
+    ec_relationship = ec.get("relationship") or employee.get("next_of_kin_relationship") or employee.get("emergency_contact_relationship") or ""
+    ec_address = ec.get("address") or employee.get("next_of_kin_address") or employee.get("emergency_contact_address") or ""
+    
+    profile_data["emergency_contact"] = {
+        "name": ec_name,
+        "phone": ec_phone,
+        "relationship": ec_relationship,
+        "address": ec_address
+    }
     
     return {
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
@@ -265,7 +293,7 @@ async def get_profile_completion_status(worker: dict = Depends(get_current_worke
     
     # Check Personal Details
     has_dob = bool(employee.get("date_of_birth"))
-    has_ni = bool(employee.get("ni_number"))
+    has_ni = bool(employee.get("ni_number") or employee.get("national_insurance"))
     has_phone = bool(employee.get("phone") or employee.get("mobile"))
     
     if not has_dob:
@@ -311,11 +339,18 @@ async def get_profile_completion_status(worker: dict = Depends(get_current_worke
     refs = await db.employee_references.find({"employee_id": employee_id}, {"_id": 0}).to_list(10)
     ref_count = len([r for r in refs if r.get("referee_name") or r.get("referee_email")])
     
-    # Also check inline references
-    if employee.get("reference_1") and (employee.get("reference_1", {}).get("name") or employee.get("reference_1", {}).get("email")):
+    # Also check inline references (from application form - flat fields)
+    if employee.get("reference_1_name") or employee.get("reference_1_email"):
         ref_count += 1
-    if employee.get("reference_2") and (employee.get("reference_2", {}).get("name") or employee.get("reference_2", {}).get("email")):
+    if employee.get("reference_2_name") or employee.get("reference_2_email"):
         ref_count += 1
+    
+    # Check legacy nested format too
+    if ref_count < 2:
+        if employee.get("reference_1") and (employee.get("reference_1", {}).get("name") or employee.get("reference_1", {}).get("email")):
+            ref_count += 1
+        if employee.get("reference_2") and (employee.get("reference_2", {}).get("name") or employee.get("reference_2", {}).get("email")):
+            ref_count += 1
     
     if ref_count < 1:
         sections["references"]["missing_fields"].append("reference_1")
@@ -326,8 +361,8 @@ async def get_profile_completion_status(worker: dict = Depends(get_current_worke
     
     # Check Emergency Contact
     ec = employee.get("emergency_contact") or employee.get("next_of_kin") or {}
-    has_ec_name = bool(ec.get("name") or employee.get("next_of_kin_name"))
-    has_ec_phone = bool(ec.get("phone") or ec.get("contact_number") or employee.get("next_of_kin_phone"))
+    has_ec_name = bool(ec.get("name") or employee.get("next_of_kin_name") or employee.get("emergency_contact_name"))
+    has_ec_phone = bool(ec.get("phone") or ec.get("contact_number") or employee.get("next_of_kin_phone") or employee.get("emergency_contact_phone"))
     
     if not has_ec_name:
         sections["emergency_contacts"]["missing_fields"].append("emergency_contact_name")

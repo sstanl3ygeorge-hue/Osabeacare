@@ -13,26 +13,27 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (16 Modules)
+### Modular Routes Structure (17 Modules)
 ```
 /app/backend/routes/
-├── dependencies.py      - Shared auth utilities
-├── auth.py             - 15 endpoints
-├── workers.py          - 9 endpoints
-├── admin.py            - 6 endpoints
-├── training.py         - 12 endpoints
-├── documents.py        - 10 endpoints
-├── recruitment.py      - 10 endpoints
-├── employees.py        - 11 endpoints
-├── references.py       - 5 endpoints
-├── notifications.py    - 17 endpoints
-├── compliance.py       - 27 endpoints
-├── templates.py        - 5 endpoints
-├── service_users.py    - 10 endpoints
-├── forms.py            - 17 endpoints
-├── interviews.py       - 6 endpoints
-├── contracts.py        - 11 endpoints [NEW]
-└── verification_routes.py - 7 endpoints
+├── dependencies.py               - Shared auth utilities
+├── auth.py                      - 15 endpoints
+├── workers.py                   - 9 endpoints
+├── admin.py                     - 6 endpoints
+├── training.py                  - 12 endpoints
+├── documents.py                 - 10 endpoints
+├── recruitment.py               - 10 endpoints
+├── employees.py                 - 11 endpoints
+├── references.py                - 5 endpoints
+├── notifications.py             - 17 endpoints
+├── compliance.py                - 27 endpoints
+├── templates.py                 - 5 endpoints
+├── service_users.py             - 10 endpoints
+├── forms.py                     - 17 endpoints
+├── interviews.py                - 6 endpoints
+├── contracts.py                 - 11 endpoints
+├── professional_registration.py - 4 endpoints [NEW]
+└── verification_routes.py       - 7 endpoints
 ```
 
 ## Server.py Refactoring Progress (April 8, 2026)
@@ -47,19 +48,20 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 13: Extracted forms routes (17 endpoints)
 - Phase 14: Removed duplicate form routes (~652 lines)
 - Phase 15: Extracted interviews routes (6 endpoints), removed duplicates (~462 lines)
-- **Phase 16: Extracted contracts routes (11 endpoints), removed duplicates (~293 lines)** [DONE]
+- Phase 16: Extracted contracts routes (11 endpoints), removed duplicates (~293 lines)
+- **Phase 17: Extracted professional registration routes (4 endpoints), removed ~164 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~54,535 lines (down from ~60,500 originally - **9.9% reduction**)
-- **Route modules**: 16 modules with ~178 endpoints extracted
-- **Testing**: 100% pass rate (27/27 tests in Phase 16)
+- **server.py**: ~54,371 lines (down from ~60,500 originally - **10.1% reduction**)
+- **Route modules**: 17 modules with ~182 endpoints extracted
+- **Testing**: 100% pass rate (22/22 tests in Phase 17)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract DBS routes (~5 endpoints - complex dependencies)
-- [ ] Extract employee compliance routes (`/employees/{id}/compliance*`)
-- [ ] Extract advanced compliance routes (professional registration, etc.)
+- [ ] Extract DBS routes (~5 endpoints - complex service dependencies)
+- [ ] Extract employee readiness routes (`/employees/{id}/readiness*`)
+- [ ] Extract RTW (Right to Work) routes
 - [ ] Clean up remaining F811 duplicate function definitions
 
 ### P3: Future Enhancements
@@ -68,9 +70,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_190.json` - Phase 14 (form cleanup)
 - `/app/test_reports/iteration_191.json` - Phase 15 (interviews extraction)
-- `/app/test_reports/iteration_192.json` - Phase 16 (contracts extraction) [NEW]
+- `/app/test_reports/iteration_192.json` - Phase 16 (contracts extraction)
+- `/app/test_reports/iteration_193.json` - Phase 17 (professional registration) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

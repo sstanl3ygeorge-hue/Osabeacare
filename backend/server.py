@@ -7841,6 +7841,7 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
 
 # Worker authentication - Magic Link primary, Password optional
 # Workers can set their own password after first magic link login
+# TEST MODE: Set WORKER_TEST_PASSWORD env var for testing (remove in production)
 
 @api_router.post("/worker/login")
 async def worker_password_login(request: WorkerPasswordLoginRequest):
@@ -7849,7 +7850,8 @@ async def worker_password_login(request: WorkerPasswordLoginRequest):
     
     Workers can login with:
     1. Magic link (primary, always available)
-    2. Password (if they have set one via /worker/set-password)
+    2. Their own password (if they have set one via /worker/set-password)
+    3. Test password from env var (for testing - remove in production)
     
     Password is optional - workers can use magic links forever if preferred.
     """
@@ -7870,16 +7872,29 @@ async def worker_password_login(request: WorkerPasswordLoginRequest):
         {"_id": 0}
     )
     
-    if not worker_user or not worker_user.get("password_hash"):
-        # No password set - tell them to use magic link
-        raise HTTPException(
-            status_code=401, 
-            detail="No password set. Please use 'Send Login Link' to access your account, or set a password after logging in."
-        )
+    password_valid = False
+    login_method = None
     
-    # Verify password
-    if not verify_password(request.password, worker_user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    # Check test password first (from env var, for development/testing)
+    test_password = os.environ.get("WORKER_TEST_PASSWORD")
+    if test_password and request.password == test_password:
+        password_valid = True
+        login_method = "test_password"
+    # Then check if they have their own password set
+    elif worker_user and worker_user.get("password_hash"):
+        if verify_password(request.password, worker_user["password_hash"]):
+            password_valid = True
+            login_method = "own_password"
+    
+    if not password_valid:
+        # Give helpful error message
+        if worker_user and worker_user.get("password_hash"):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        else:
+            raise HTTPException(
+                status_code=401, 
+                detail="Invalid password. You can also use 'Send Login Link' to access your account."
+            )
     
     # Generate session token
     session_token = jwt.encode({
@@ -7890,11 +7905,12 @@ async def worker_password_login(request: WorkerPasswordLoginRequest):
         "exp": datetime.now(timezone.utc) + timedelta(days=7)
     }, JWT_SECRET, algorithm=JWT_ALGORITHM)
     
-    # Update last login
-    await db.worker_accounts.update_one(
-        {"employee_id": employee["id"]},
-        {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
-    )
+    # Update last login if account exists
+    if worker_user:
+        await db.worker_accounts.update_one(
+            {"employee_id": employee["id"]},
+            {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}}
+        )
     
     # Log the login
     await log_audit_action(
@@ -7902,7 +7918,7 @@ async def worker_password_login(request: WorkerPasswordLoginRequest):
         "worker_login",
         "employee",
         employee["id"],
-        {"login_method": "password", "email": email}
+        {"login_method": login_method, "email": email}
     )
     
     return {

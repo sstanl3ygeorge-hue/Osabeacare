@@ -22,7 +22,6 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ### 4. Email Reminders (APScheduler)
 - Automated reminders at 30, 14, 7, 1 days before document/training expiry
-- Manual "Send All Reminders" trigger in admin dashboard
 
 ### 5. Magic Link Authentication
 - Primary auth method for workers
@@ -30,58 +29,51 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ### 6. Offline PDF Application Form Intake
 - Admin uploads scanned/digital PDF application forms
-- AI extracts personal details, address, NI number, employment history
-- Creates employee record with pre-filled data
+- AI extracts personal details via Gemini
 
 ## Architecture
 
-### Backend
-- **FastAPI** on port 8001
-- **MongoDB** for data storage
-- **Supabase Storage** for document hosting
-- **APScheduler** for email crons
-- **Gemini AI** (via emergentintegrations) for PDF/CV extraction
-
-### Modular Routes Structure (11 Modules)
+### Modular Routes Structure (12 Modules)
 ```
 /app/backend/routes/
 ├── __init__.py
-├── dependencies.py     - Shared auth utilities
-├── auth.py            - 15 endpoints (login, logout, password, magic links)
-├── workers.py         - 9 endpoints (worker portal, profile)
-├── admin.py           - 6 endpoints (dashboard, system health, audit logs)
-├── training.py        - 12 endpoints (training records, certificates)
-├── documents.py       - 10 endpoints (document types, categories)
-├── recruitment.py     - 10 endpoints (applicants, pipeline)
-├── employees.py       - 11 endpoints (employee CRUD)
-├── references.py      - 5 endpoints (reference CRUD, status)
-├── notifications.py   - 17 endpoints (email service, email requests)
-├── compliance.py      - 27 endpoints (policies, insurance, incidents, reports)
-├── templates.py       - 5 endpoints (template CRUD) [NEW]
+├── dependencies.py      - Shared auth utilities
+├── auth.py             - 15 endpoints (login, logout, password, magic links)
+├── workers.py          - 9 endpoints (worker portal, profile)
+├── admin.py            - 6 endpoints (dashboard, system health, audit logs)
+├── training.py         - 12 endpoints (training records, certificates)
+├── documents.py        - 10 endpoints (document types, categories)
+├── recruitment.py      - 10 endpoints (applicants, pipeline)
+├── employees.py        - 11 endpoints (employee CRUD)
+├── references.py       - 5 endpoints (reference CRUD, status)
+├── notifications.py    - 17 endpoints (email service, email requests)
+├── compliance.py       - 27 endpoints (policies, insurance, incidents, reports)
+├── templates.py        - 5 endpoints (template CRUD)
+├── service_users.py    - 10 endpoints (CQC care records, documents) [NEW]
 └── verification_routes.py - 7 endpoints (document verification)
 ```
 
-## What's Been Implemented
+## Server.py Refactoring Progress (April 8, 2026)
 
-### Server.py Refactoring Progress (April 8, 2026)
-- [x] **Phase 1-7**: Extracted auth, workers, admin, training, documents, recruitment, employees
-- [x] **Phase 8**: Extracted references routes (5 endpoints)
-- [x] **Phase 9**: Extracted email/notification routes (17 endpoints)
-- [x] **Phase 10**: Extracted compliance routes (27 endpoints)
-- [x] **Phase 11**: Extracted templates routes (5 endpoints) [NEW]
+### Completed Phases
+- [x] Phase 1-7: Extracted auth, workers, admin, training, documents, recruitment, employees
+- [x] Phase 8: Extracted references routes (5 endpoints)
+- [x] Phase 9: Extracted email/notification routes (17 endpoints)
+- [x] Phase 10: Extracted compliance routes (27 endpoints)
+- [x] Phase 11: Extracted templates routes (5 endpoints)
+- [x] Phase 12: Extracted service_users routes (10 endpoints) [NEW]
 
-**Current Status:**
-- `server.py`: ~56,425 lines (down from ~60,500 originally - **6.7% reduction**)
-- Route modules: 11 modules with ~134 endpoints extracted
-- Testing: 100% pass rate (iteration_187: 21/21 tests)
+### Current Status
+- **server.py**: ~55,937 lines (down from ~60,500 originally - **7.5% reduction**)
+- **Route modules**: 12 modules with ~144 endpoints extracted
+- **Testing**: 100% pass rate across all phases
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract DBS routes (~5 endpoints)
-- [ ] Extract employee compliance routes (`/employees/{id}/compliance*`)
+- [ ] Extract DBS routes (~5 endpoints - complex dependencies)
 - [ ] Extract form-submissions routes (~18 endpoints)
-- [ ] Extract service user routes
+- [ ] Extract employee compliance routes (`/employees/{id}/compliance*`)
 - [ ] Clean up remaining F811 duplicate function definitions
 
 ### P3: Future Enhancements
@@ -90,8 +82,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_186.json` - Phase 10 verification (100% pass)
-- `/app/test_reports/iteration_187.json` - Phase 11 verification (100% pass)
+- `/app/test_reports/iteration_187.json` - Phase 11 (templates) verification
+- `/app/test_reports/iteration_188.json` - Phase 12 (service_users) verification
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

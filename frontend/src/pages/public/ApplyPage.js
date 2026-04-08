@@ -9,7 +9,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { toast } from 'sonner';
-import { Loader2, CheckCircle, FileText, User, Briefcase, Clock, Shield, Heart, AlertTriangle, Upload, Plus, Trash2, ChevronRight, ChevronLeft, FileCheck } from 'lucide-react';
+import { Loader2, CheckCircle, FileText, User, Briefcase, Clock, Shield, Heart, AlertTriangle, Upload, Plus, Trash2, ChevronRight, ChevronLeft, FileCheck, Phone } from 'lucide-react';
 import axios from 'axios';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -32,9 +32,10 @@ const steps = [
   { id: 1, icon: User, title: 'Personal Details' },
   { id: 2, icon: Briefcase, title: 'Employment History' },
   { id: 3, icon: FileText, title: 'References' },
-  { id: 4, icon: Shield, title: 'Declarations' },
-  { id: 5, icon: Heart, title: 'Health Screening' },
-  { id: 6, icon: FileCheck, title: 'Review & Submit' }
+  { id: 4, icon: Phone, title: 'Emergency Contact' },
+  { id: 5, icon: Shield, title: 'Declarations' },
+  { id: 6, icon: Heart, title: 'Health Screening' },
+  { id: 7, icon: FileCheck, title: 'Review & Submit' }
 ];
 
 const availabilityOptions = [
@@ -216,7 +217,13 @@ export default function ApplyPage() {
     
     // Additional
     how_heard: '',
-    additional_info: ''
+    additional_info: '',
+    
+    // Emergency Contact / Next of Kin
+    emergency_contact_name: '',
+    emergency_contact_phone: '',
+    emergency_contact_relationship: '',
+    emergency_contact_address: ''
   });
 
   const handleChange = (field, value) => {
@@ -404,7 +411,13 @@ export default function ApplyPage() {
         });
         break;
         
-      case 4: // Declarations
+      case 4: // Emergency Contact
+        if (!formData.emergency_contact_name.trim()) errors.emergency_contact_name = 'Emergency contact name is required';
+        if (!formData.emergency_contact_phone.trim()) errors.emergency_contact_phone = 'Emergency contact phone is required';
+        if (!formData.emergency_contact_relationship.trim()) errors.emergency_contact_relationship = 'Relationship is required';
+        break;
+        
+      case 5: // Declarations
         if (!formData.right_to_work.has_right_to_work_uk) errors.rtw = 'You must confirm right to work';
         if (!formData.right_to_work.citizenship_status) errors.citizenship = 'Citizenship status required';
         if (!formData.criminal_declaration.understands_dbs_required) errors.dbs_understand = 'You must acknowledge DBS requirement';
@@ -414,12 +427,12 @@ export default function ApplyPage() {
         if (!formData.declarations.consents_to_data_processing) errors.data_consent = 'Data processing consent required (GDPR)';
         break;
         
-      case 5: // Health
+      case 6: // Health
         if (!formData.health_declaration.can_perform_physical_tasks) errors.physical = 'You must confirm physical capability';
         if (!formData.health_declaration.health_declaration_accurate) errors.health_accurate = 'You must confirm health declaration accuracy';
         break;
         
-      case 6: // Review
+      case 7: // Review
         if (!formData.declarations.information_accurate) errors.info_accurate = 'You must confirm information accuracy';
         if (!formData.declarations.understands_false_info_consequences) errors.false_info = 'You must acknowledge consequences of false information';
         break;
@@ -431,7 +444,7 @@ export default function ApplyPage() {
 
   const nextStep = () => {
     if (validateStep(currentStep)) {
-      if (currentStep < 6) setCurrentStep(currentStep + 1);
+      if (currentStep < 7) setCurrentStep(currentStep + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       toast.error('Please complete all required fields');
@@ -1023,6 +1036,106 @@ export default function ApplyPage() {
           </CardContent>
         </Card>
       ))}
+    </div>
+  );
+
+  const renderEmergencyContact = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="font-heading text-xl font-semibold text-text-primary mb-2">Emergency Contact / Next of Kin</h2>
+        <p className="text-sm text-text-muted mb-6">
+          Please provide details of someone we can contact in case of an emergency. This person should be a relative or close friend who can be reached quickly.
+        </p>
+      </div>
+      
+      <Card className="border-border-default">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Phone className="h-5 w-5 text-primary" /> Emergency Contact Details
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="emergency_contact_name" className="text-text-secondary">
+                Full Name <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="emergency_contact_name"
+                value={formData.emergency_contact_name}
+                onChange={(e) => handleChange('emergency_contact_name', e.target.value)}
+                placeholder="e.g., John Smith"
+                className={validationErrors.emergency_contact_name ? 'border-red-500' : ''}
+              />
+              {validationErrors.emergency_contact_name && (
+                <p className="text-sm text-red-500 mt-1">{validationErrors.emergency_contact_name}</p>
+              )}
+            </div>
+            
+            <div>
+              <Label htmlFor="emergency_contact_relationship" className="text-text-secondary">
+                Relationship <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={formData.emergency_contact_relationship}
+                onValueChange={(v) => handleChange('emergency_contact_relationship', v)}
+              >
+                <SelectTrigger className={validationErrors.emergency_contact_relationship ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Select relationship" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="spouse">Spouse/Partner</SelectItem>
+                  <SelectItem value="parent">Parent</SelectItem>
+                  <SelectItem value="sibling">Sibling</SelectItem>
+                  <SelectItem value="child">Adult Child</SelectItem>
+                  <SelectItem value="other_relative">Other Relative</SelectItem>
+                  <SelectItem value="friend">Friend</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+              {validationErrors.emergency_contact_relationship && (
+                <p className="text-sm text-red-500 mt-1">{validationErrors.emergency_contact_relationship}</p>
+              )}
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="emergency_contact_phone" className="text-text-secondary">
+                Contact Phone Number <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="emergency_contact_phone"
+                value={formData.emergency_contact_phone}
+                onChange={(e) => handleChange('emergency_contact_phone', e.target.value)}
+                placeholder="e.g., 07123 456789"
+                className={validationErrors.emergency_contact_phone ? 'border-red-500' : ''}
+              />
+              {validationErrors.emergency_contact_phone && (
+                <p className="text-sm text-red-500 mt-1">{validationErrors.emergency_contact_phone}</p>
+              )}
+            </div>
+            
+            <div>
+              <Label htmlFor="emergency_contact_address" className="text-text-secondary">
+                Address (optional)
+              </Label>
+              <Input
+                id="emergency_contact_address"
+                value={formData.emergency_contact_address}
+                onChange={(e) => handleChange('emergency_contact_address', e.target.value)}
+                placeholder="e.g., 123 High Street, London, SW1A 1AA"
+              />
+            </div>
+          </div>
+          
+          <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <p className="text-sm text-blue-800">
+              <strong>Why do we need this?</strong> In case of an emergency during your work, we need to be able to contact someone on your behalf. This information is kept confidential and only used in emergency situations.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 
@@ -1618,9 +1731,10 @@ export default function ApplyPage() {
                   {currentStep === 1 && renderPersonalDetails()}
                   {currentStep === 2 && renderEmploymentHistory()}
                   {currentStep === 3 && renderReferences()}
-                  {currentStep === 4 && renderDeclarations()}
-                  {currentStep === 5 && renderHealthScreening()}
-                  {currentStep === 6 && renderReview()}
+                  {currentStep === 4 && renderEmergencyContact()}
+                  {currentStep === 5 && renderDeclarations()}
+                  {currentStep === 6 && renderHealthScreening()}
+                  {currentStep === 7 && renderReview()}
 
                   {/* Navigation */}
                   <div className="flex justify-between mt-8 pt-6 border-t border-[#E4E8EB]">

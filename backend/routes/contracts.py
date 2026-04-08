@@ -91,7 +91,7 @@ async def check_can_sign_contract(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    result = await can_sign_contract(employee_id, employee.get("role", ""))
+    result = await can_sign_contract(db, employee_id)
     
     return {
         "employee_id": employee_id,
@@ -245,7 +245,7 @@ async def get_contract_status(
     }, {"_id": 0})
     
     # Check eligibility
-    can_sign_result = await can_sign_contract(employee_id, employee.get("role", ""))
+    can_sign_result = await can_sign_contract(db, employee_id)
     
     return {
         "employee_id": employee_id,

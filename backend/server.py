@@ -128,6 +128,7 @@ from routes.templates import router as templates_router
 from routes.service_users import router as service_users_router
 from routes.forms import router as forms_router
 from routes.interviews import router as interviews_router
+from routes.contracts import router as contracts_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -7412,29 +7413,7 @@ async def get_current_user_or_worker(authorization: str = Header(None)) -> dict:
 #   - POST /worker/verify-login
 #   - POST /worker/set-password
 #   - GET /worker/account-status
-
-@api_router.get("/employees/{employee_id}/can-sign-contract")
-async def check_can_sign_contract(
-    employee_id: str,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Check if an employee is eligible to sign their contract.
-    Contract signing is the FINAL step before promotion.
-    
-    All pre-employment checks must be complete:
-    - DBS verified
-    - Right to Work verified
-    - Identity verified
-    - 2 Proof of Address verified
-    - Both references verified
-    - Interview completed
-    - Induction complete (15 items)
-    - Mandatory training complete (6 items)
-    """
-    result = await can_sign_contract(db, employee_id)
-    return result
-
+# NOTE: /employees/{employee_id}/can-sign-contract moved to routes/contracts.py
 
 
 async def compute_unified_progress_internal(employee_id: str, employee: dict = None) -> dict:
@@ -12287,285 +12266,10 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
     }
 
 
-# ============================================================================
-# CONTRACT TEMPLATE ENDPOINTS
-# Zero Hour Contract with auto-fill from employee profile
-# ============================================================================
-
-@api_router.get("/contract-templates")
-async def list_contract_templates(user: dict = Depends(get_current_user)):
-    """List available contract templates."""
-    return {
-        "templates": [
-            get_contract_template_info()
-        ]
-    }
-
-
-@api_router.get("/contract-templates/{template_id}")
-async def get_contract_template(
-    template_id: str,
-    user: dict = Depends(get_current_user)
-):
-    """Get a specific contract template with full sections."""
-    if template_id != ZERO_HOUR_CONTRACT_TEMPLATE["id"]:
-        raise HTTPException(status_code=404, detail="Template not found")
-    
-    return {
-        "template": {
-            **ZERO_HOUR_CONTRACT_TEMPLATE,
-            "sections": [
-                {"id": s["id"], "title": s["title"], "content": s["content"]}
-                for s in ZERO_HOUR_CONTRACT_TEMPLATE["sections"]
-            ]
-        }
-    }
-
-
-@api_router.get("/employees/{employee_id}/contract/preview")
-async def preview_employee_contract(
-    employee_id: str,
-    template_id: str = "zero_hour_contract_v1",
-    user: dict = Depends(get_current_user)
-):
-    """
-    Preview a contract pre-filled with employee data.
-    Used for admin review before sending to worker for signature.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Validate employee data
-    validation = validate_contract_data(employee)
-    
-    # Fill template
-    filled_contract = fill_contract_template(employee)
-    
-    return {
-        "contract": filled_contract,
-        "validation": validation,
-        "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
-        "can_send": validation["valid"]
-    }
-
-
-@api_router.post("/employees/{employee_id}/contract/generate")
-async def generate_employee_contract(
-    employee_id: str,
-    request: Request,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Generate a contract for an employee and save it for signature.
-    This creates a pending contract that the worker must sign.
-    """
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    try:
-        body = await request.json()
-    except:
-        body = {}
-    
-    custom_values = body.get("custom_values", {})
-    send_notification = body.get("send_notification", True)
-    
-    # Validate
-    validation = validate_contract_data(employee)
-    if not validation["valid"]:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Missing required fields: {', '.join(validation['missing_required'])}"
-        )
-    
-    # Fill template
-    filled_contract = fill_contract_template(employee, custom_values=custom_values)
-    
-    now = datetime.now(timezone.utc)
-    contract_id = f"contract_{uuid.uuid4().hex[:12]}"
-    
-    # Store generated contract
-    contract_record = {
-        "id": contract_id,
-        "employee_id": employee_id,
-        "template_id": filled_contract["id"],
-        "template_version": filled_contract["version"],
-        "filled_sections": filled_contract["sections"],
-        "status": "pending_signature",  # pending_signature, signed, superseded
-        "generated_at": now.isoformat(),
-        "generated_by": user["user_id"],
-        "generated_by_name": user.get("name", "Admin"),
-        "employee_name": filled_contract["employee_name"],
-        "custom_values": custom_values,
-        "signature_requested_at": now.isoformat() if send_notification else None,
-        "signed_at": None,
-        "signed_by": None
-    }
-    
-    await db.generated_contracts.insert_one(contract_record)
-    
-    # Log audit
-    await log_audit_action(
-        user["user_id"],
-        "generate_contract",
-        "contract",
-        contract_id,
-        {
-            "employee_id": employee_id,
-            "employee_name": filled_contract["employee_name"],
-            "template_id": filled_contract["id"],
-            "send_notification": send_notification
-        }
-    )
-    
-    # Send notification to worker if requested
-    if send_notification:
-        notification_id = str(uuid.uuid4())
-        await db.worker_notifications.insert_one({
-            "id": notification_id,
-            "employee_id": employee_id,
-            "type": "contract_signature_required",
-            "title": "Contract Ready for Signature",
-            "message": "Your employment contract has been generated and is ready for your review and signature.",
-            "priority": "high",
-            "action_url": f"/worker/contracts/{contract_id}",
-            "created_at": now.isoformat(),
-            "read": False
-        })
-    
-    contract_record.pop("_id", None)
-    return {
-        "success": True,
-        "contract": contract_record,
-        "notification_sent": send_notification
-    }
-
-
-@api_router.get("/employees/{employee_id}/contracts")
-async def list_employee_contracts(
-    employee_id: str,
-    user: dict = Depends(get_current_user)
-):
-    """List all contracts for an employee."""
-    contracts = await db.generated_contracts.find(
-        {"employee_id": employee_id},
-        {"_id": 0}
-    ).sort("generated_at", -1).to_list(length=100)
-    
-    return {"contracts": contracts}
-
-
-@api_router.post("/employees/{employee_id}/contracts/{contract_id}/sign")
-async def sign_employee_contract(
-    employee_id: str,
-    contract_id: str,
-    request: Request,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Worker signs their contract.
-    CQC Requirement: Worker must sign their own contract.
-    """
-    # Verify user is the employee or an admin
-    is_own_contract = user.get("employee_id") == employee_id
-    is_admin = user.get("role") in ["admin", "super_admin", "manager"]
-    
-    if not is_own_contract and not is_admin:
-        raise HTTPException(status_code=403, detail="You can only sign your own contract")
-    
-    contract = await db.generated_contracts.find_one({
-        "id": contract_id,
-        "employee_id": employee_id,
-        "status": "pending_signature"
-    })
-    
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found or already signed")
-    
-    try:
-        body = await request.json()
-    except:
-        body = {}
-    
-    # Get signature data
-    signature_data = body.get("signature", "")
-    acknowledgement = body.get("acknowledgement", False)
-    
-    if not acknowledgement:
-        raise HTTPException(
-            status_code=400, 
-            detail="You must acknowledge that you have read and understood the contract"
-        )
-    
-    now = datetime.now(timezone.utc)
-    
-    # Update contract
-    await db.generated_contracts.update_one(
-        {"id": contract_id},
-        {
-            "$set": {
-                "status": "signed",
-                "signed_at": now.isoformat(),
-                "signed_by": user["user_id"],
-                "signed_by_name": user.get("name", "Worker"),
-                "signature_ip": body.get("ip_address"),
-                "signature_data": signature_data,
-                "completion_mode": "self_signed" if is_own_contract else "admin_assisted"
-            }
-        }
-    )
-    
-    # Update employee record
-    await db.employees.update_one(
-        {"id": employee_id},
-        {
-            "$set": {
-                "contract_signed": True,
-                "contract_signed_at": now.isoformat(),
-                "contract_id": contract_id,
-                "updated_at": now.isoformat()
-            }
-        }
-    )
-    
-    # Create agreement acknowledgement for compatibility
-    ack_id = f"ack_{uuid.uuid4().hex[:12]}"
-    await db.agreement_acknowledgements.insert_one({
-        "id": ack_id,
-        "employee_id": employee_id,
-        "agreement_type": "contract_acceptance",
-        "agreement_id": contract_id,
-        "acknowledgement_text": "I confirm I have read, understood, and agree to the terms of this employment contract.",
-        "acknowledged": True,
-        "completed_at": now.isoformat(),
-        "completed_by": user["user_id"],
-        "completion_mode": "self_signed" if is_own_contract else "admin_assisted",
-        "status": "verified",
-        "verification_status": "verified",
-        "verified_at": now.isoformat() if is_own_contract else None
-    })
-    
-    # Log audit
-    await log_audit_action(
-        user["user_id"],
-        "sign_contract",
-        "contract",
-        contract_id,
-        {
-            "employee_id": employee_id,
-            "completion_mode": "self_signed" if is_own_contract else "admin_assisted",
-            "cqc_compliant": is_own_contract
-        }
-    )
-    
-    return {
-        "success": True,
-        "message": "Contract signed successfully",
-        "signed_at": now.isoformat(),
-        "cqc_compliant": is_own_contract
-    }
+# NOTE: Contract template endpoints moved to routes/contracts.py
+# Includes: /contract-templates, /employees/{id}/contract/preview,
+# /employees/{id}/contract/generate, /employees/{id}/contracts, 
+# /employees/{id}/contracts/{id}/sign
 
 
 # ============================================================================
@@ -54693,6 +54397,9 @@ api_router.include_router(forms_router)
 
 # Include interviews routes (refactored from server.py)
 api_router.include_router(interviews_router)
+
+# Include contracts routes (refactored from server.py)
+api_router.include_router(contracts_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

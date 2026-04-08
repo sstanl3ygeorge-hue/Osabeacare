@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (20 Modules)
+### Modular Routes Structure (21 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -36,6 +36,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── promotion.py                 - 3 endpoints
 ├── roles.py                     - 3 endpoints
 ├── policy_assignments.py        - 6 endpoints
+├── bulk_schedules.py            - 10 endpoints [NEW]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -56,17 +57,13 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 18: Extracted promotion routes (3 endpoints), removed ~173 lines
 - Phase 19: Extracted roles routes (3 endpoints), removed ~51 lines
 - Phase 20: Extracted policy assignments routes (6 endpoints), removed ~284 lines
-- **Phase 21: Fixed F811 duplicate definitions, removed ~54 lines** [DONE]
-  - Removed duplicate `update_employment_history` function
-  - Renamed `extract_employment_history_from_cv` helper
-  - Removed duplicate PIL import
-  - Removed duplicate `MIN_GAP_DAYS` constant
+- Phase 21: Fixed F811 duplicate definitions, removed ~54 lines
+- **Phase 22: Extracted bulk schedules routes (10 endpoints), removed ~247 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~53,809 lines (down from ~60,500 originally - **11.1% reduction**)
-- **Route modules**: 20 modules with ~194 endpoints extracted
-- **Testing**: 100% pass rate (23/23 tests in Phase 21)
-- **F811 errors**: Reduced from 14 to 9
+- **server.py**: ~53,565 lines (down from ~60,500 originally - **11.5% reduction**)
+- **Route modules**: 21 modules with ~204 endpoints extracted
+- **Testing**: 100% pass rate (27/27 tests in Phase 22)
 
 ## Pending/In Progress
 
@@ -83,9 +80,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_195.json` - Phase 19 (roles routes)
 - `/app/test_reports/iteration_196.json` - Phase 20 (policy assignments)
-- `/app/test_reports/iteration_197.json` - Phase 21 (F811 fixes) [NEW]
+- `/app/test_reports/iteration_197.json` - Phase 21 (F811 fixes)
+- `/app/test_reports/iteration_198.json` - Phase 22 (bulk schedules) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

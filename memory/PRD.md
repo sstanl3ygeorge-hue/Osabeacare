@@ -79,14 +79,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
   - AI extraction using Gemini
   - "Send Welcome Emails" option
   - ProfileCompletionWizard for workers
-- [x] **Server.py Refactoring - Phases 1-3** (April 8, 2026)
+- [x] **Server.py Refactoring - Phases 1-4** (April 8, 2026)
   - Created `/app/backend/routes/` module structure
   - Extracted auth routes to `routes/auth.py` (~765 lines, 15 endpoints)
   - Extracted worker portal routes to `routes/workers.py` (~647 lines, 9 endpoints)
   - Extracted admin operations to `routes/admin.py` (~346 lines, 6 endpoints)
+  - Extracted training management to `routes/training.py` (~482 lines, 11 endpoints)
   - Created `routes/dependencies.py` for shared utilities (~224 lines)
-  - **Reduced server.py from 60,499 to 59,056 lines** (-1,443 lines)
-  - Total code extracted to routes module: ~1,982 lines
+  - **Reduced server.py from 60,499 to 58,608 lines** (-1,891 lines, ~3.1%)
+  - Total code extracted to routes module: ~2,464 lines
 
 ### Pending/In Progress
 - [ ] Continue server.py refactoring:

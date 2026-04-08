@@ -105,6 +105,7 @@ from routes.dependencies import set_database as set_routes_db
 from routes.auth import router as auth_router
 from routes.workers import router as workers_router
 from routes.admin import router as admin_router
+from routes.training import router as training_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -26571,71 +26572,8 @@ async def withdraw_policy(
 # MOVED TO routes/admin.py: /org-settings
 # ==================== TRAINING ROUTES ====================
 
-@api_router.post("/training-records", response_model=TrainingRecordResponse)
-async def create_training_record(record: TrainingRecordCreate, user: dict = Depends(require_manager_or_admin)):
-    record_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    record_doc = {
-        "id": record_id,
-        **record.model_dump(),
-        "certificate_url": None,
-        "created_at": now
-    }
-    await db.training_records.insert_one(record_doc)
-    
-    await log_audit_action(user['user_id'], "create_training", "training_record", record_id, {"training_name": record.training_name})
-    
-    # CRITICAL: Enrich with computed status - SINGLE SOURCE OF TRUTH
-    enriched_record = enrich_training_record_with_computed_status(record_doc)
-    return TrainingRecordResponse(**enriched_record)
-
-@api_router.get("/training-records", response_model=List[TrainingRecordResponse])
-async def get_training_records(
-    employee_id: Optional[str] = None,
-    status: Optional[str] = None,
-    mandatory: Optional[bool] = None,
-    include_test: Optional[bool] = False,
-    include_superseded: Optional[bool] = False,
-    include_deleted: Optional[bool] = False,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get training records with COMPUTED status.
-    Status is computed fresh from canonical fields (completion_date, expiry_date).
-    Frontend MUST use the returned computed fields, not compute locally.
-    """
-    query = {}
-    if employee_id:
-        query["employee_id"] = employee_id
-    # NOTE: status filter now applies to COMPUTED status, handled after enrichment
-    if mandatory is not None:
-        query["mandatory"] = mandatory
-    
-    # Exclude TEST records by default (unless explicitly requested)
-    if not include_test:
-        query["training_name"] = {"$not": {"$regex": "^TEST", "$options": "i"}}
-    
-    # Exclude superseded/deleted records by default - SINGLE SOURCE OF TRUTH
-    if not include_superseded and not include_deleted:
-        query["record_status"] = {"$nin": ["superseded", "deleted"]}
-    elif not include_superseded:
-        query["record_status"] = {"$ne": "superseded"}
-    elif not include_deleted:
-        query["record_status"] = {"$ne": "deleted"}
-    
-    records = await db.training_records.find(query, {"_id": 0}).to_list(1000)
-    
-    # CRITICAL: Enrich all records with computed status
-    enriched_records = [enrich_training_record_with_computed_status(r) for r in records]
-    
-    # Apply status filter on computed status if provided
-    if status:
-        enriched_records = [r for r in enriched_records if r.get('computed_status') == status or r.get('status') == status]
-    
-    return [TrainingRecordResponse(**r) for r in enriched_records]
-
-
+# MOVED TO routes/training.py: /training-records
+# MOVED TO routes/training.py: /training-records
 @api_router.delete("/training-records/cleanup-test")
 async def cleanup_test_training_records(user: dict = Depends(require_admin)):
     """Admin-only: Permanently delete all TEST training records.
@@ -26656,69 +26594,7 @@ class DeleteTrainingRequest(BaseModel):
     reason: Optional[str] = None
 
 
-@api_router.delete("/training-records/{record_id}")
-async def delete_training_record(
-    record_id: str,
-    reason: Optional[str] = None,
-    user: dict = Depends(require_manager_or_admin)
-):
-    """
-    Delete a single training record.
-    - Removes from active use
-    - Keeps audit trail
-    - Updates employee compliance
-    """
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    if not record:
-        raise HTTPException(status_code=404, detail="Training record not found")
-    
-    employee_id = record.get('employee_id')
-    training_name = record.get('training_name')
-    
-    # Get user name for audit
-    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0})
-    user_name = user_doc.get('name', user.get('email', 'Unknown')) if user_doc else user.get('email', 'Unknown')
-    
-    # Create audit log entry before deletion
-    now = datetime.now(timezone.utc).isoformat()
-    await log_audit_action(
-        user['user_id'],
-        "training_deleted",
-        "training_record",
-        record_id,
-        {
-            "training_name": training_name,
-            "employee_id": employee_id,
-            "deleted_by": user_name,
-            "deleted_at": now,
-            "reason": reason,
-            "original_status": record.get('status'),
-            "had_evidence": bool(record.get('certificate_url') or record.get('evidence_files'))
-        }
-    )
-    
-    # SOFT DELETE - set record_status to "deleted" instead of hard delete
-    await db.training_records.update_one(
-        {"id": record_id},
-        {"$set": {
-            "record_status": "deleted",
-            "deleted_at": now,
-            "deleted_by": user_name,
-            "updated_at": now
-        }}
-    )
-    
-    # Update employee compliance
-    if employee_id:
-        await update_employee_compliance(employee_id)
-    
-    return {
-        "success": True,
-        "message": f"Training record '{training_name}' deleted",
-        "deleted_record_id": record_id
-    }
-
-
+# MOVED TO routes/training.py: /training-records/{record_id}
 class BulkDeleteTrainingRequest(BaseModel):
     """Request to bulk delete training records"""
     record_ids: List[str]
@@ -26799,18 +26675,7 @@ async def bulk_delete_training_records(
     }
 
 
-@api_router.put("/training-records/{record_id}", response_model=TrainingRecordResponse)
-async def update_training_record(record_id: str, update: TrainingRecordCreate, user: dict = Depends(require_manager_or_admin)):
-    result = await db.training_records.update_one({"id": record_id}, {"$set": update.model_dump()})
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Training record not found")
-    
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    # CRITICAL: Enrich with computed status - SINGLE SOURCE OF TRUTH
-    enriched_record = enrich_training_record_with_computed_status(record)
-    return TrainingRecordResponse(**enriched_record)
-
-
+# MOVED TO routes/training.py: /training-records/{record_id}
 class TrainingRecordUpdateRequest(BaseModel):
     """Request to update a training record - SINGLE SOURCE OF TRUTH"""
     completion_date: Optional[str] = None
@@ -27037,122 +26902,8 @@ async def upload_training_certificate(
     return updated
 
 
-@api_router.post("/training-records/{record_id}/verify")
-async def verify_training_record(record_id: str, user: dict = Depends(require_manager_or_admin)):
-    """
-    Verify a training record. Requires certificate to be uploaded first.
-    Also auto-completes corresponding induction checklist items.
-    """
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    if not record:
-        raise HTTPException(status_code=404, detail="Training record not found")
-    
-    # Check if certificate exists
-    if not record.get('certificate_url'):
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot verify training without uploaded certificate. Please upload a certificate first."
-        )
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # P0 FIX: Get user's full name (not email) for verification stamp
-    user_doc = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
-    if not user_doc:
-        user_doc = await db.users.find_one({"id": user['user_id']}, {"_id": 0, "first_name": 1, "last_name": 1, "name": 1})
-    
-    verified_by_name = "Admin"
-    if user_doc:
-        if user_doc.get('name'):
-            verified_by_name = user_doc['name']
-        elif user_doc.get('first_name'):
-            verified_by_name = f"{user_doc.get('first_name', '')} {user_doc.get('last_name', '')}".strip()
-    
-    # Fallback: format email as name
-    if verified_by_name == "Admin" and user.get('email'):
-        email = user['email']
-        name_part = email.split('@')[0]
-        verified_by_name = ' '.join(word.capitalize() for word in name_part.replace('.', ' ').replace('_', ' ').split())
-    
-    await db.training_records.update_one(
-        {"id": record_id},
-        {"$set": {
-            "verified": True,
-            "verified_by": verified_by_name,
-            "verified_by_id": user['user_id'],
-            "verified_at": now,
-            "updated_at": now
-        }}
-    )
-    
-    # P0: Auto-complete corresponding induction checklist item
-    induction_result = None
-    if record.get('employee_id'):
-        training_id = record.get('requirement_id') or record.get('code') or record.get('training_name', '').lower().replace(' ', '_')
-        induction_result = await auto_complete_induction_from_training(
-            db=db,
-            employee_id=record['employee_id'],
-            training_id=training_id,
-            training_name=record.get('training_name', ''),
-            verified_by=user['user_id'],
-            verified_by_name=verified_by_name
-        )
-    
-    await log_audit_action(
-        user['user_id'], 
-        "verify_training", 
-        "training_record", 
-        record_id, 
-        {
-            "training_name": record['training_name'],
-            "verified_by_name": verified_by_name,
-            "induction_auto_complete": induction_result
-        }
-    )
-    
-    # Update employee compliance
-    await update_employee_compliance(record['employee_id'])
-    
-    updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    return {
-        "success": True, 
-        "message": "Training verified successfully", 
-        "training_record": updated,
-        "induction_auto_complete": induction_result
-    }
-
-
-@api_router.post("/training-records/{record_id}/unverify")
-async def unverify_training_record(record_id: str, user: dict = Depends(require_manager_or_admin)):
-    """Remove verification from a training record."""
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    if not record:
-        raise HTTPException(status_code=404, detail="Training record not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    await db.training_records.update_one(
-        {"id": record_id},
-        {"$set": {
-            "verified": False,
-            "verified_by": None,
-            "verified_at": None,
-            "updated_at": now
-        }}
-    )
-    
-    await log_audit_action(
-        user['user_id'], 
-        "unverify_training", 
-        "training_record", 
-        record_id, 
-        {"training_name": record['training_name']}
-    )
-    
-    updated = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    return {"success": True, "message": "Training verification removed", "training_record": updated}
-
-
+# MOVED TO routes/training.py: /training-records/{record_id}/verify
+# MOVED TO routes/training.py: /training-records/{record_id}/unverify
 @api_router.get("/training-records/{record_id}/certificate/file")
 async def get_training_certificate_file(record_id: str, user: dict = Depends(get_current_user)):
     """Get certificate file for viewing."""
@@ -27707,32 +27458,7 @@ async def correct_training_record(
     }
 
 
-@api_router.get("/training-records/{record_id}/history")
-async def get_training_record_history(
-    record_id: str,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get complete audit history for a training record.
-    Shows all corrections with old/new values and reasons.
-    """
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    if not record:
-        raise HTTPException(status_code=404, detail="Training record not found")
-    
-    # Get all audit entries for this training record
-    history = await db.audit_logs.find(
-        {"entity_id": record_id, "entity_type": "training_record"},
-        {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
-    
-    return {
-        "training_record": record,
-        "history": history,
-        "total_corrections": sum(1 for h in history if h.get('action') == 'training_correction')
-    }
-
-
+# MOVED TO routes/training.py: /training-records/{record_id}/history
 # ==================== DASHBOARD ROUTES ====================
 
 @api_router.get("/dashboard/stats", response_model=DashboardStats)
@@ -48753,95 +48479,7 @@ async def quick_setup_training_reminders(
     }
 
 
-@api_router.get("/training/expiring-summary")
-async def get_expiring_training_summary(
-    days: int = 60,
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get a summary of expiring training across all employees.
-    Used for dashboard widgets and alerts.
-    """
-    now = datetime.now(timezone.utc)
-    expiry_window = now + timedelta(days=days)
-    
-    # Query training records with expiry within window
-    pipeline = [
-        {
-            "$match": {
-                "record_status": {"$nin": ["superseded", "deleted"]},
-                "expiry_date": {"$exists": True, "$ne": None}
-            }
-        },
-        {
-            "$addFields": {
-                "expiry_dt": {"$dateFromString": {"dateString": "$expiry_date"}}
-            }
-        },
-        {
-            "$match": {
-                "expiry_dt": {"$lte": expiry_window, "$gte": now}
-            }
-        },
-        {
-            "$group": {
-                "_id": {
-                    "bucket": {
-                        "$switch": {
-                            "branches": [
-                                {"case": {"$lte": ["$expiry_dt", now + timedelta(days=7)]}, "then": "critical"},
-                                {"case": {"$lte": ["$expiry_dt", now + timedelta(days=30)]}, "then": "warning"},
-                            ],
-                            "default": "upcoming"
-                        }
-                    }
-                },
-                "count": {"$sum": 1},
-                "employee_ids": {"$addToSet": "$employee_id"}
-            }
-        }
-    ]
-    
-    try:
-        results = await db.training_records.aggregate(pipeline).to_list(10)
-        
-        summary = {
-            "critical": {"count": 0, "employee_count": 0},  # 0-7 days
-            "warning": {"count": 0, "employee_count": 0},   # 8-30 days
-            "upcoming": {"count": 0, "employee_count": 0}   # 31-60 days
-        }
-        
-        for result in results:
-            bucket = result["_id"]["bucket"]
-            summary[bucket] = {
-                "count": result["count"],
-                "employee_count": len(result["employee_ids"])
-            }
-        
-        summary["total"] = sum(s["count"] for s in summary.values())
-        summary["total_employees"] = len(set().union(*[set(r.get("employee_ids", [])) for r in results]))
-        
-        return summary
-    except Exception as e:
-        # Fallback for date parsing issues
-        logger.error(f"Error in expiring training summary: {e}")
-        
-        # Simple count fallback
-        expiring_count = await db.training_records.count_documents({
-            "record_status": {"$nin": ["superseded", "deleted"]},
-            "expiry_date": {"$exists": True, "$ne": None}
-        })
-        
-        return {
-            "critical": {"count": 0, "employee_count": 0},
-            "warning": {"count": 0, "employee_count": 0},
-            "upcoming": {"count": expiring_count, "employee_count": 0},
-            "total": expiring_count,
-            "total_employees": 0,
-            "note": "Aggregation simplified due to date format"
-        }
-
-
+# MOVED TO routes/training.py: /training/expiring-summary
 @api_router.get("/bulk/requests/attributed")
 async def get_attributed_requests(
     source: Optional[str] = None,  # 'manual' or 'scheduled'
@@ -49236,51 +48874,7 @@ async def trigger_training_expiry_reminders(
     }
 
 
-@api_router.get("/admin/training-expiry-alerts")
-async def get_training_expiry_alerts(
-    days: int = Query(default=60, ge=1, le=365),
-    user: dict = Depends(get_current_user)
-):
-    """
-    Get all trainings expiring within specified days for admin dashboard.
-    Returns trainings grouped by urgency (critical: <14 days, warning: <30 days, upcoming: <60 days).
-    """
-    expiring_trainings = await get_expiring_trainings(days)
-    
-    now = datetime.now(timezone.utc)
-    critical = []  # < 14 days
-    warning = []   # 14-30 days
-    upcoming = []  # 30-60 days
-    
-    for training in expiring_trainings:
-        expiry_str = training.get('expiry_date')
-        if expiry_str:
-            try:
-                expiry_dt = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                days_left = (expiry_dt - now).days
-                training['days_until_expiry'] = days_left
-                
-                if days_left <= 14:
-                    critical.append(training)
-                elif days_left <= 30:
-                    warning.append(training)
-                else:
-                    upcoming.append(training)
-            except:
-                upcoming.append(training)
-    
-    return {
-        "critical": critical,
-        "critical_count": len(critical),
-        "warning": warning,
-        "warning_count": len(warning),
-        "upcoming": upcoming,
-        "upcoming_count": len(upcoming),
-        "total_expiring": len(expiring_trainings),
-        "threshold_days": days
-    }
-
-
+# MOVED TO routes/training.py: /admin/training-expiry-alerts
 # ==================== COMPREHENSIVE AUTOMATED REMINDER SYSTEM ====================
 # CQC Compliant - Multi-tier reminders for all expiring items
 # Reminder tiers: 30 days, 14 days, 7 days, 1 day before expiry
@@ -54002,25 +53596,7 @@ async def get_read_source_status(user: dict = Depends(require_admin)):
 # PHASE 1: TRAINING CATALOGUE ADMIN ENDPOINTS
 # ============================================================================
 
-@api_router.get("/admin/training-catalogue")
-async def get_training_catalogue_endpoint(user: dict = Depends(require_admin)):
-    """
-    Admin endpoint to view training catalogue.
-    Phase 1: Read-only view of seeded training types.
-    """
-    catalogue = await get_training_catalogue()
-    
-    # Get assignment feature flag status
-    return {
-        "catalogue": catalogue,
-        "total": len(catalogue),
-        "feature_flag": {
-            "ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS": ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS,
-            "status": "DISABLED - Phase 1 foundation only"
-        }
-    }
-
-
+# MOVED TO routes/training.py: /admin/training-catalogue
 @api_router.post("/admin/training-catalogue/seed")
 async def seed_training_catalogue_endpoint(user: dict = Depends(require_admin)):
     """
@@ -54047,34 +53623,7 @@ async def seed_training_catalogue_endpoint(user: dict = Depends(require_admin)):
     }
 
 
-@api_router.get("/admin/training-catalogue/status")
-async def get_training_catalogue_status(user: dict = Depends(require_admin)):
-    """
-    Check status of training catalogue system.
-    """
-    catalogue_count = await db.training_catalogue.count_documents({})
-    assignments_count = await db.employee_training_assignments.count_documents({})
-    
-    return {
-        "phase": "Phase 1 - Foundation",
-        "collections": {
-            "training_catalogue": {
-                "exists": catalogue_count > 0,
-                "count": catalogue_count
-            },
-            "employee_training_assignments": {
-                "exists": True,
-                "count": assignments_count,
-                "note": "Empty until Phase 2"
-            }
-        },
-        "feature_flags": {
-            "ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS": ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS
-        },
-        "behavior": "UNCHANGED - compliance calculation uses MANDATORY_ITEMS only"
-    }
-
-
+# MOVED TO routes/training.py: /admin/training-catalogue/status
 # ==================== SYSTEM ROLE MIGRATION ====================
 
 @api_router.get("/admin/system-role/status")
@@ -58921,6 +58470,9 @@ api_router.include_router(workers_router)
 
 # Include admin operations routes (refactored from server.py)
 api_router.include_router(admin_router)
+
+# Include training routes (refactored from server.py)
+api_router.include_router(training_router)
 
 # Include router AFTER all routes are defined
 app.include_router(api_router)

@@ -13,7 +13,7 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Architecture
 
-### Modular Routes Structure (24 Modules)
+### Modular Routes Structure (25 Modules)
 ```
 /app/backend/routes/
 ├── dependencies.py               - Shared auth utilities
@@ -39,7 +39,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── bulk_schedules.py            - 10 endpoints
 ├── employment_gaps.py           - 7 endpoints
 ├── recurring_compliance.py      - 8 endpoints
-├── agreements.py                - 16 endpoints [NEW]
+├── agreements.py                - 16 endpoints
+├── dbs.py                       - 5 endpoints [NEW]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -58,22 +59,22 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - Phase 23: Fixed more F811 duplicates (reduced from 9 to 4)
 - Phase 24: Extracted employment gaps routes (7 endpoints), removed ~450 lines
 - Phase 25: Extracted recurring compliance routes (8 endpoints), removed ~627 lines
-- **Phase 26: Extracted agreement routes (16 endpoints), removed ~452 lines** [DONE]
+- Phase 26: Extracted agreement routes (16 endpoints), removed ~452 lines
+- **Phase 27: Extracted DBS routes (5 endpoints), removed ~436 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~52,043 lines (down from ~60,500 originally - **14.0% reduction**)
-- **Route modules**: 24 modules with ~235 endpoints extracted
+- **server.py**: ~51,607 lines (down from ~60,500 originally - **14.7% reduction**)
+- **Route modules**: 25 modules with ~240 endpoints extracted
 - **F811 errors**: 4 (intentional local `get_template` imports)
-- **Testing**: 100% pass rate (41/41 tests in Phase 26)
+- **Testing**: 100% pass rate (22/22 tests in Phase 27)
 
 ## Pending/In Progress
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract DBS routes (~5 endpoints - complex service dependencies)
-- [ ] Extract RTW (Right to Work) routes (~3 endpoints)
-- [ ] Extract CV extraction routes (~5 endpoints)
+- [ ] Extract Identity/RTW check routes (~6 endpoints)
+- [ ] Extract CV extraction routes (~3 endpoints)
+- [ ] Extract dual-row migration routes (~2 endpoints)
 - [ ] Extract audit trail routes
-- [ ] Extract dual-row migration routes
 
 ### P3: Future Enhancements
 - [ ] Supabase Auth integration with RLS policies
@@ -81,10 +82,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [ ] MFA (TOTP) for Admin accounts
 
 ## Test Reports
-- `/app/test_reports/iteration_199.json` - Phase 23 (F811 fixes)
 - `/app/test_reports/iteration_200.json` - Phase 24 (employment gaps)
 - `/app/test_reports/iteration_201.json` - Phase 25 (recurring compliance)
-- `/app/test_reports/iteration_202.json` - Phase 26 (agreements) [NEW]
+- `/app/test_reports/iteration_202.json` - Phase 26 (agreements)
+- `/app/test_reports/iteration_203.json` - Phase 27 (DBS) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

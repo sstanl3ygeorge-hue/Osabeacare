@@ -43,21 +43,22 @@ def auth_headers(auth_token):
 
 
 class TestServiceUserSections:
-    """Test GET /api/service-user-sections returns 10 sections"""
+    """Test GET /api/service-users/sections returns 10 sections"""
     
     def test_get_sections_returns_10_sections(self, auth_headers):
         """Verify endpoint returns exactly 10 sections"""
-        response = requests.get(f"{BASE_URL}/api/service-user-sections", headers=auth_headers)
+        response = requests.get(f"{BASE_URL}/api/service-users/sections", headers=auth_headers)
         
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         
-        sections = response.json()
+        data = response.json()
+        sections = data.get("sections", [])
         assert len(sections) == 10, f"Expected 10 sections, got {len(sections)}"
     
     def test_sections_have_correct_structure(self, auth_headers):
         """Verify each section has required fields"""
-        response = requests.get(f"{BASE_URL}/api/service-user-sections", headers=auth_headers)
-        sections = response.json()
+        response = requests.get(f"{BASE_URL}/api/service-users/sections", headers=auth_headers)
+        sections = response.json().get("sections", [])
         
         required_fields = ["id", "section_number", "name", "description", "document_types"]
         
@@ -67,16 +68,16 @@ class TestServiceUserSections:
     
     def test_sections_numbered_1_to_10(self, auth_headers):
         """Verify sections are numbered 1-10"""
-        response = requests.get(f"{BASE_URL}/api/service-user-sections", headers=auth_headers)
-        sections = response.json()
+        response = requests.get(f"{BASE_URL}/api/service-users/sections", headers=auth_headers)
+        sections = response.json().get("sections", [])
         
         section_numbers = sorted([s["section_number"] for s in sections])
         assert section_numbers == list(range(1, 11)), f"Expected sections 1-10, got {section_numbers}"
     
     def test_section_names_match_cqc_structure(self, auth_headers):
         """Verify section names align with CQC expectations"""
-        response = requests.get(f"{BASE_URL}/api/service-user-sections", headers=auth_headers)
-        sections = response.json()
+        response = requests.get(f"{BASE_URL}/api/service-users/sections", headers=auth_headers)
+        sections = response.json().get("sections", [])
         
         expected_names = [
             "Personal Info & Referral",

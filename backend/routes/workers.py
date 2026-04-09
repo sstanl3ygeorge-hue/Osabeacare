@@ -377,7 +377,11 @@ async def get_profile_completion_status(worker: dict = Depends(get_current_worke
     
     # Determine if wizard is needed
     profile_complete = completed_sections == total_sections
-    needs_wizard = employee.get("profile_completion_needed", False) or not profile_complete
+    
+    # ONLY auto-show wizard if profile_completion_needed flag is explicitly True
+    # This flag is set for PDF imports where worker needs to complete their profile
+    # Don't auto-show just because profile isn't 100% - let user click "Complete Profile" manually
+    needs_wizard = employee.get("profile_completion_needed") is True
     
     return {
         "profile_complete": profile_complete,

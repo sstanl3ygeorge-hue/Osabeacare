@@ -271,18 +271,19 @@ export default function RequirementFilesDrawer({
     }
     setIsSubmitting(true);
     try {
+      // Use the correct endpoint with email notification
       await axios.post(
-        `${API}/documents/${fileId}/reject`,
-        { reason: actionReason },
+        `${API}/employee-documents/${fileId}/request-replacement`,
+        { reason: actionReason, notify_employee: true },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('File rejected');
+      toast.success('Replacement requested - employee notified');
       setActionDialog({ open: false, type: null, file: null });
       setActionReason('');
       fetchFiles();
       if (onRefresh) onRefresh();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to reject file');
+      toast.error(err.response?.data?.detail || 'Failed to request replacement');
     } finally {
       setIsSubmitting(false);
     }
@@ -766,7 +767,7 @@ export default function RequirementFilesDrawer({
               {actionDialog.type === 'uploaded_in_error' && 'Mark as Uploaded in Error'}
               {actionDialog.type === 'supersede' && 'Supersede File'}
               {actionDialog.type === 'move_category' && 'Move to Different Category'}
-              {actionDialog.type === 'reject' && 'Reject File'}
+              {actionDialog.type === 'reject' && 'Request Replacement'}
             </DialogTitle>
             <DialogDescription>
               {actionDialog.file?.file_name}
@@ -801,7 +802,7 @@ export default function RequirementFilesDrawer({
                   actionDialog.type === 'uploaded_in_error' ? 'Why was this file uploaded in error?' :
                   actionDialog.type === 'supersede' ? 'Why is this file being superseded?' :
                   actionDialog.type === 'move_category' ? 'Why is this file being moved?' :
-                  actionDialog.type === 'reject' ? 'Why is this file being rejected?' :
+                  actionDialog.type === 'reject' ? 'Why does this file need to be replaced? (Employee will be notified)' :
                   'Enter reason...'
                 }
                 className="min-h-[80px]"
@@ -822,6 +823,15 @@ export default function RequirementFilesDrawer({
                 <p className="text-xs text-amber-700">
                   <AlertTriangle className="h-3 w-3 inline mr-1" />
                   This file will be marked as superseded. You can then upload a replacement.
+                </p>
+              </div>
+            )}
+            
+            {actionDialog.type === 'reject' && (
+              <div className="p-3 bg-blue-50 rounded-lg">
+                <p className="text-xs text-blue-700">
+                  <AlertTriangle className="h-3 w-3 inline mr-1" />
+                  The employee will be notified via email and the upload slot will become available immediately.
                 </p>
               </div>
             )}
@@ -859,7 +869,7 @@ export default function RequirementFilesDrawer({
               {actionDialog.type === 'uploaded_in_error' && 'Mark as Error'}
               {actionDialog.type === 'supersede' && 'Supersede'}
               {actionDialog.type === 'move_category' && 'Move File'}
-              {actionDialog.type === 'reject' && 'Reject File'}
+              {actionDialog.type === 'reject' && 'Request Replacement'}
             </Button>
           </DialogFooter>
         </DialogContent>

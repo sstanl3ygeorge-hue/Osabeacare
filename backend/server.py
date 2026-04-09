@@ -19090,6 +19090,129 @@ async def reject_employee_document(
     return EmployeeDocumentResponse(**updated_doc)
 
 
+class RequestReplacementPayload(BaseModel):
+    """Request replacement document from employee"""
+    reason: str
+    notify_employee: bool = True
+
+
+@api_router.post("/employee-documents/{doc_id}/request-replacement")
+async def request_document_replacement(
+    doc_id: str,
+    payload: RequestReplacementPayload,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Request a replacement document from the employee.
+    
+    This endpoint:
+    1. Marks the current document as 'rejected' with replacement_requested flag
+    2. Sends an email notification to the employee
+    3. The worker dashboard immediately shows the upload slot as available
+    
+    The worker sees the rejection reason and can upload a new document.
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    employee_id = doc.get('employee_id')
+    requirement_id = doc.get('requirement_id')
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # Get reviewer name
+    reviewer = await db.users.find_one(
+        {"$or": [{"user_id": user['user_id']}, {"id": user['user_id']}]},
+        {"_id": 0, "name": 1, "first_name": 1, "last_name": 1, "email": 1}
+    )
+    reviewer_name = reviewer.get('name') if reviewer else None
+    if not reviewer_name and reviewer:
+        reviewer_name = f"{reviewer.get('first_name', '')} {reviewer.get('last_name', '')}".strip() or reviewer.get('email')
+    
+    # Mark document as rejected with replacement_requested flag
+    update_data = {
+        "status": "rejected",
+        "rejected": True,
+        "rejected_by": user['user_id'],
+        "rejected_by_name": reviewer_name,
+        "rejected_at": now,
+        "rejection_reason": payload.reason,
+        "replacement_requested": True,
+        "replacement_requested_at": now,
+        "verified": False,
+        "verification_stamp": None
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    
+    # Log audit
+    await log_audit_action(user['user_id'], "request_document_replacement", "employee_document", doc_id, {
+        "reason": payload.reason,
+        "requirement_id": requirement_id,
+        "employee_id": employee_id
+    })
+    
+    # Get human-readable document type name
+    doc_type_name = requirement_id.replace('_', ' ').title() if requirement_id else "Document"
+    
+    # Send email notification
+    email_sent = False
+    if payload.notify_employee:
+        emp_email = employee.get('email')
+        emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+        
+        if emp_email:
+            try:
+                import resend
+                if resend.api_key:
+                    PORTAL_URL = os.environ.get('PORTAL_URL', 'https://app.osabeacares.co.uk')
+                    
+                    email_html = f"""
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2 style="color: #0d6c6c;">Replacement Document Required</h2>
+                        <p>Dear {emp_name},</p>
+                        <p>We need you to upload a replacement <strong>{doc_type_name}</strong> document.</p>
+                        <div style="background: #fef3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+                            <strong>Reason:</strong> {payload.reason}
+                        </div>
+                        <p>Please log in to your worker portal and upload a new document as soon as possible:</p>
+                        <p style="text-align: center; margin: 30px 0;">
+                            <a href="{PORTAL_URL}/portal/worker" style="background-color: #0d6c6c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                                Upload New Document
+                            </a>
+                        </p>
+                        <p>If you have any questions, please contact the recruitment team.</p>
+                        <p>Kind regards,<br><strong>Osabea Recruitment Team</strong></p>
+                    </div>
+                    """
+                    
+                    resend.Emails.send({
+                        "from": f"Osabea Recruitment <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                        "to": [emp_email],
+                        "subject": f"Action Required: Please Upload New {doc_type_name}",
+                        "html": email_html
+                    })
+                    email_sent = True
+                    logger.info(f"Sent replacement request notification to {emp_email} for {requirement_id}")
+            except Exception as e:
+                logger.warning(f"Failed to send replacement request notification: {e}")
+    
+    return {
+        "success": True,
+        "message": f"Replacement requested for {doc_type_name}",
+        "document_id": doc_id,
+        "employee_id": employee_id,
+        "requirement_id": requirement_id,
+        "email_sent": email_sent,
+        "upload_slot_available": True
+    }
+
+
 @api_router.post("/employee-documents/{doc_id}/mark-uploaded-in-error")
 async def mark_employee_document_uploaded_in_error(
     doc_id: str,

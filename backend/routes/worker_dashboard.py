@@ -1014,12 +1014,22 @@ async def worker_upload_document(
     
     is_training_cert = requirement_id.startswith("training") or "training" in requirement_id.lower()
     
+    # Normalize requirement_id for identity documents to ensure admin can find them
+    # The admin dashboard searches for identity_evidence which maps to these values
+    normalized_requirement_id = requirement_id
+    if requirement_id == "identity":
+        normalized_requirement_id = "identity"  # Keep as-is, backend mapping handles it
+    
+    # Get employee name for audit trail
+    emp_info = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+    emp_name = f"{emp_info.get('first_name', '')} {emp_info.get('last_name', '')}".strip() if emp_info else "Worker"
+    
     doc_record = {
         "id": doc_id,
         "employee_id": employee_id,
-        "requirement_id": requirement_id,
-        "document_type_id": requirement_id,
-        "document_type": "training_certificate" if is_training_cert else requirement_id,
+        "requirement_id": normalized_requirement_id,
+        "document_type_id": normalized_requirement_id,
+        "document_type": "training_certificate" if is_training_cert else normalized_requirement_id,
         "category": "training" if is_training_cert else "document",
         "file_name": file.filename,
         "original_filename": file.filename,
@@ -1027,11 +1037,14 @@ async def worker_upload_document(
         "file_type": detected_type,
         "uploaded_at": now,
         "uploaded_by": f"worker_{employee_id}",
+        "uploaded_by_name": emp_name,
         "uploaded_by_worker": True,
         "status": "uploaded",
-        "verification_stamp": "not_verified",
+        "verified": False,
+        "verification_stamp": None,  # Changed from "not_verified" to None for cleaner display
         "is_active": True,
-        "created_at": now
+        "created_at": now,
+        "source_type": "worker_portal_upload"
     }
     
     await db.employee_documents.insert_one(doc_record)

@@ -1098,6 +1098,29 @@ MANDATORY_ITEMS = {
          "optional": True,
          "description": "Diversity monitoring form (optional - does not affect compliance)",
          "work_ready_hint": "Optional - employee may decline"},
+        
+        # ======== NHS COMPLIANCE ADDITIONS ========
+        
+        # Whistleblowing Policy Acknowledgement (CQC Requirement)
+        {"id": "whistleblowing_policy", "name": "Whistleblowing Policy Acknowledgement", 
+         "category": "5_Agreements", "type": "acknowledgement",
+         "allow_multiple_files": False, "source": "internal",
+         "priority": "secondary", "priority_order": 48,
+         "status_group": "other",
+         "description": "Employee acknowledges understanding of whistleblowing/raising concerns policy",
+         "acknowledgement_text": "I confirm I have read and understood the Whistleblowing (Raising Concerns) Policy. I understand how to raise concerns about malpractice, patient safety, or illegal activities, and that I am protected from victimisation for doing so.",
+         "work_ready_hint": "Complete after employee starts"},
+        
+        # Conflict of Interest Declaration (NHS Standard)
+        {"id": "conflict_of_interest", "name": "Conflict of Interest Declaration", 
+         "category": "5_Agreements", "type": "form-generated",
+         "template_name": "Conflict of Interest Declaration",
+         "form_requirement_id": "conflict_of_interest",
+         "allow_multiple_files": False, "source": "form",
+         "priority": "secondary", "priority_order": 49,
+         "status_group": "other",
+         "description": "Declaration of any conflicts of interest (secondary employment, relationships, financial interests)",
+         "work_ready_hint": "Complete after employee starts"},
     ],
     
     "training": [  # Training items with priority
@@ -1108,7 +1131,31 @@ MANDATORY_ITEMS = {
          "priority": "start_required", "priority_order": 6,
          "status_group": "start_status",
          "description": "Safeguarding certificate and transcript",
-         "work_ready_hint": "Required before employee can start work"},
+         "work_ready_hint": "Required before employee can start work",
+         "safeguarding_level": "L1",  # Default level, can be L1/L2/L3
+         "level_options": ["L1", "L2", "L3"]},
+        
+        # Safeguarding Level 2 (for senior care staff, team leaders)
+        {"id": "safeguarding_l2", "name": "Safeguarding Level 2", "category": "2_Core_Training",
+         "type": "training", "training_name": "Safeguarding Level 2",
+         "allow_multiple_files": True,
+         "priority": "supervised_start", "priority_order": 26,
+         "status_group": "competency_health",
+         "description": "Safeguarding Level 2 for senior care staff and team leaders",
+         "work_ready_hint": "Required for senior care roles",
+         "safeguarding_level": "L2",
+         "role_required": ["senior_healthcare_assistant", "team_leader", "supervisor"]},
+        
+        # Safeguarding Level 3 (for managers, safeguarding leads)
+        {"id": "safeguarding_l3", "name": "Safeguarding Level 3", "category": "2_Core_Training",
+         "type": "training", "training_name": "Safeguarding Level 3",
+         "allow_multiple_files": True,
+         "priority": "supervised_start", "priority_order": 27,
+         "status_group": "competency_health",
+         "description": "Safeguarding Level 3 for managers and designated safeguarding leads",
+         "work_ready_hint": "Required for management and safeguarding lead roles",
+         "safeguarding_level": "L3",
+         "role_required": ["manager", "registered_manager", "safeguarding_lead"]},
         
         {"id": "manual_handling", "name": "Manual Handling Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Manual Handling",
@@ -1188,6 +1235,27 @@ MANDATORY_ITEMS = {
          "description": "Professional indemnity insurance certificate (annual renewal)",
          "work_ready_hint": "Required before nurse can start work"},
         
+        # ======== IMMUNISATION & OCCUPATIONAL HEALTH (NHS Clinical Requirement) ========
+        {"id": "hepatitis_b_status", "name": "Hepatitis B Vaccination Status", 
+         "category": "3_Competency_Health", "type": "document", "source": "employee",
+         "document_types": ["hepatitis_b", "vaccination_record", "immunity_evidence", "blood_test"],
+         "allow_multiple_files": True, "min_files": 1,
+         "priority": "start_required", "priority_order": 11,
+         "status_group": "start_status",
+         "description": "Hepatitis B vaccination record OR immunity evidence (antibody test). Required for patient-facing clinical roles.",
+         "work_ready_hint": "Required for clinical staff before patient contact",
+         "verification_required": True},
+        
+        {"id": "occupational_health_clearance", "name": "Occupational Health Clearance", 
+         "category": "3_Competency_Health", "type": "document", "source": "internal",
+         "document_types": ["oh_clearance", "fit_for_work", "occupational_health"],
+         "allow_multiple_files": True,
+         "priority": "start_required", "priority_order": 12,
+         "status_group": "start_status",
+         "description": "Formal Occupational Health assessment and clearance certificate. Confirms fitness for clinical duties.",
+         "work_ready_hint": "Required for clinical staff - admin uploads OH clearance letter",
+         "verification_required": True},
+        
         # ======== NURSE COMPETENCY & HEALTH ========
         {"id": "clinical_competency", "name": "Clinical Competency Evidence", 
          "category": "3_Competency_Health", "type": "document", "source": "employee",
@@ -1205,7 +1273,32 @@ MANDATORY_ITEMS = {
          "status_group": "competency_health",
          "description": "Medication administration competency certificate",
          "work_ready_hint": "Required for supervised start"},
-    ]
+    ],
+    
+    # ======== MANAGER/DIRECTOR SPECIFIC (CQC Regulation 5) ========
+    "manager_specific": [
+        {"id": "fit_proper_persons", "name": "Fit & Proper Persons Declaration", 
+         "category": "1_Legal_Safety", "type": "form-generated",
+         "template_name": "Fit and Proper Persons Declaration",
+         "form_requirement_id": "fit_proper_persons",
+         "allow_multiple_files": False, "source": "form",
+         "priority": "start_required", "priority_order": 13,
+         "status_group": "start_status",
+         "description": "CQC Regulation 5 - Declaration confirming fitness to be a director/manager of a regulated service",
+         "work_ready_hint": "Required for managers and directors before they can take up post"},
+    ],
+    
+    # ======== CARE CERTIFICATE (HCA Progression) ========
+    "care_certificate": [
+        {"id": "care_certificate_progress", "name": "Care Certificate", 
+         "category": "3_Competency_Health", "type": "progression",
+         "allow_multiple_files": True, "source": "internal",
+         "priority": "supervised_start", "priority_order": 25,
+         "status_group": "competency_health",
+         "description": "Care Certificate - 15 standards progression tracker. Must be completed within 12 weeks of starting.",
+         "work_ready_hint": "Required for HCAs - tracked via separate Care Certificate module",
+         "total_standards": 15},
+    ],
 }
 
 # ============================================================================
@@ -1459,6 +1552,16 @@ def get_mandatory_items_for_role(role: str) -> List[dict]:
     if is_nurse_role(system_role):
         items.extend(MANDATORY_ITEMS["nurse_specific"])
     
+    # Add manager-specific items (Fit & Proper Persons - CQC Regulation 5)
+    manager_roles = ["manager", "registered_manager", "director", "nursing_director", "operations_manager"]
+    if role and role.lower().replace(" ", "_") in manager_roles:
+        items.extend(MANDATORY_ITEMS.get("manager_specific", []))
+    
+    # Add Care Certificate tracking for HCAs
+    hca_roles = ["healthcare_assistant", "hca", "care_assistant", "support_worker"]
+    if role and role.lower().replace(" ", "_") in hca_roles:
+        items.extend(MANDATORY_ITEMS.get("care_certificate", []))
+    
     # Sort by priority_order (mandatory items first, then required_soon, then secondary)
     items.sort(key=lambda x: x.get('priority_order', 99))
     
@@ -1468,10 +1571,17 @@ def get_work_ready_items_for_role(role: str) -> set:
     """Get the set of requirement IDs that are mandatory for work readiness (Start Status)"""
     work_ready = WORK_READY_REQUIREMENTS.copy()
     
-    # Add nurse-specific mandatory item (use system_role for compliance logic)
+    # Add nurse-specific mandatory items (use system_role for compliance logic)
     system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
     if is_nurse_role(system_role):
         work_ready.add("nmc_registration")
+        work_ready.add("hepatitis_b_status")  # Clinical staff need Hep B
+        work_ready.add("occupational_health_clearance")  # Clinical staff need OH clearance
+    
+    # Add manager-specific work-ready items
+    manager_roles = ["manager", "registered_manager", "director", "nursing_director", "operations_manager"]
+    if role and role.lower().replace(" ", "_") in manager_roles:
+        work_ready.add("fit_proper_persons")  # CQC Regulation 5
     
     return work_ready
 
@@ -5725,6 +5835,178 @@ FORM_BASED_REQUIREMENTS = {
             }
         ],
         "fields": []
+    },
+    
+    # ========================================================================
+    # 8. CONFLICT OF INTEREST DECLARATION (NHS Standard)
+    # ========================================================================
+    "conflict_of_interest": {
+        "name": "Conflict of Interest Declaration",
+        "form_type": "conflict_of_interest",
+        "auto_fill_fields": ["full_name", "job_title", "department"],
+        "description": "It is important that all staff declare any interests that may conflict with their duties. This includes secondary employment, relationships with colleagues, financial interests, or any other matter that could influence your work.",
+        "sections": [
+            {
+                "id": "employee_details",
+                "title": "Employee Details",
+                "fields": [
+                    {"id": "full_name", "label": "Full Name", "type": "text", "auto_fill": "full_name", "required": True},
+                    {"id": "job_title", "label": "Job Title/Position", "type": "text", "auto_fill": "role", "required": True},
+                    {"id": "department", "label": "Department/Service", "type": "text"},
+                    {"id": "declaration_date", "label": "Date of Declaration", "type": "date", "required": True},
+                ]
+            },
+            {
+                "id": "secondary_employment",
+                "title": "Secondary Employment",
+                "description": "Do you have any other paid employment or self-employment outside of this organisation?",
+                "fields": [
+                    {"id": "has_secondary_employment", "label": "Do you have any secondary employment?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "secondary_employer", "label": "Name of other employer/business", "type": "text", "conditional_on": "has_secondary_employment", "conditional_value": "Yes"},
+                    {"id": "secondary_role", "label": "Role/Position", "type": "text", "conditional_on": "has_secondary_employment", "conditional_value": "Yes"},
+                    {"id": "secondary_hours", "label": "Hours per week", "type": "number", "conditional_on": "has_secondary_employment", "conditional_value": "Yes"},
+                    {"id": "secondary_details", "label": "Details of how this may impact your role", "type": "textarea", "conditional_on": "has_secondary_employment", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "relationships",
+                "title": "Personal Relationships",
+                "description": "Do you have any personal relationships with colleagues, service users, suppliers, or contractors?",
+                "fields": [
+                    {"id": "has_relationships", "label": "Do you have any relationships to declare?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "relationship_type", "label": "Type of relationship", "type": "select", "options": ["Family member employed here", "Partner/spouse employed here", "Friend employed here", "Relationship with service user/family", "Relationship with supplier/contractor", "Other"], "conditional_on": "has_relationships", "conditional_value": "Yes"},
+                    {"id": "relationship_name", "label": "Name of person", "type": "text", "conditional_on": "has_relationships", "conditional_value": "Yes"},
+                    {"id": "relationship_role", "label": "Their role/position", "type": "text", "conditional_on": "has_relationships", "conditional_value": "Yes"},
+                    {"id": "relationship_details", "label": "Details of relationship and potential conflict", "type": "textarea", "conditional_on": "has_relationships", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "financial_interests",
+                "title": "Financial Interests",
+                "description": "Do you have any financial interests that could conflict with your duties?",
+                "fields": [
+                    {"id": "has_financial_interests", "label": "Do you have any financial interests to declare?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "financial_type", "label": "Type of financial interest", "type": "select", "options": ["Shareholding in supplier/competitor", "Directorship/partnership", "Consultancy arrangements", "Gifts/hospitality received", "Other"], "conditional_on": "has_financial_interests", "conditional_value": "Yes"},
+                    {"id": "financial_details", "label": "Details of financial interest", "type": "textarea", "conditional_on": "has_financial_interests", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "other_interests",
+                "title": "Other Interests",
+                "description": "Any other interests that could be perceived as conflicting with your duties",
+                "fields": [
+                    {"id": "has_other_interests", "label": "Do you have any other interests to declare?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "other_details", "label": "Please provide details", "type": "textarea", "conditional_on": "has_other_interests", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "fields": [
+                    {"id": "declaration_confirm", "label": "I confirm that the information provided above is complete and accurate to the best of my knowledge", "type": "checkbox", "required": True},
+                    {"id": "declaration_update", "label": "I understand that I must update this declaration if my circumstances change", "type": "checkbox", "required": True},
+                    {"id": "declaration_policy", "label": "I have read and understood the organisation's Conflict of Interest Policy", "type": "checkbox", "required": True},
+                    {"id": "signature", "label": "Signature (type full name)", "type": "text", "required": True},
+                    {"id": "sign_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
+    },
+    
+    # ========================================================================
+    # 9. FIT AND PROPER PERSONS DECLARATION (CQC Regulation 5)
+    # ========================================================================
+    "fit_proper_persons": {
+        "name": "Fit and Proper Persons Declaration",
+        "form_type": "fit_proper_persons",
+        "auto_fill_fields": ["full_name", "job_title"],
+        "description": "CQC Regulation 5 requires that directors and managers of regulated services are fit and proper persons. This declaration must be completed by anyone in a director, registered manager, or senior management position.",
+        "roles_required": ["manager", "registered_manager", "director", "nursing_director", "operations_manager"],
+        "sections": [
+            {
+                "id": "personal_details",
+                "title": "Personal Details",
+                "fields": [
+                    {"id": "full_name", "label": "Full Name", "type": "text", "auto_fill": "full_name", "required": True},
+                    {"id": "job_title", "label": "Job Title/Position", "type": "text", "auto_fill": "role", "required": True},
+                    {"id": "date_of_birth", "label": "Date of Birth", "type": "date", "auto_fill": "date_of_birth", "required": True},
+                    {"id": "current_address", "label": "Current Address", "type": "textarea", "auto_fill": "full_address", "required": True},
+                    {"id": "previous_addresses", "label": "Previous addresses in last 5 years (if any)", "type": "textarea"},
+                ]
+            },
+            {
+                "id": "character_fitness",
+                "title": "Character & Fitness",
+                "description": "Please answer the following questions honestly. Any 'Yes' answers will be reviewed but do not automatically disqualify you.",
+                "fields": [
+                    {"id": "criminal_convictions", "label": "Have you ever been convicted of a criminal offence (excluding spent convictions)?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "criminal_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "criminal_convictions", "conditional_value": "Yes"},
+                    {"id": "pending_charges", "label": "Do you have any pending criminal charges or are you currently under investigation?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "pending_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "pending_charges", "conditional_value": "Yes"},
+                    {"id": "barred_list", "label": "Have you ever been included on the DBS barred list (adults or children)?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "safeguarding_concerns", "label": "Have you ever been the subject of a safeguarding investigation?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "safeguarding_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "safeguarding_concerns", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "professional_conduct",
+                "title": "Professional Conduct",
+                "fields": [
+                    {"id": "professional_registration", "label": "Do you hold any professional registrations (NMC, HCPC, etc.)?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "registration_details", "label": "If yes, please list registrations and numbers", "type": "textarea", "conditional_on": "professional_registration", "conditional_value": "Yes"},
+                    {"id": "fitness_practice", "label": "Have you ever had your fitness to practise investigated by a professional body?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "fitness_details", "label": "If yes, please provide details and outcome", "type": "textarea", "conditional_on": "fitness_practice", "conditional_value": "Yes"},
+                    {"id": "conditions_restrictions", "label": "Are there any conditions or restrictions on your practice?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "conditions_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "conditions_restrictions", "conditional_value": "Yes"},
+                    {"id": "struck_off", "label": "Have you ever been struck off or removed from a professional register?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "struck_off_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "struck_off", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "financial_history",
+                "title": "Financial History",
+                "fields": [
+                    {"id": "bankruptcy", "label": "Have you ever been declared bankrupt or entered into an Individual Voluntary Arrangement (IVA)?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "bankruptcy_details", "label": "If yes, please provide details including dates", "type": "textarea", "conditional_on": "bankruptcy", "conditional_value": "Yes"},
+                    {"id": "disqualified_director", "label": "Have you ever been disqualified from acting as a company director?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "disqualified_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "disqualified_director", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "health_capability",
+                "title": "Health & Capability",
+                "fields": [
+                    {"id": "health_conditions", "label": "Do you have any physical or mental health conditions that may affect your ability to perform your role?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "health_details", "label": "If yes, please provide details and any adjustments required", "type": "textarea", "conditional_on": "health_conditions", "conditional_value": "Yes"},
+                    {"id": "capability_concerns", "label": "Are you aware of any concerns about your capability to carry out director/management duties?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "capability_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "capability_concerns", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "previous_roles",
+                "title": "Previous Director/Management Roles",
+                "fields": [
+                    {"id": "previous_cqc_role", "label": "Have you held a director or registered manager position at another CQC-regulated service?", "type": "select", "options": ["No", "Yes"], "required": True},
+                    {"id": "previous_role_details", "label": "If yes, please provide organisation name, role, and dates", "type": "textarea", "conditional_on": "previous_cqc_role", "conditional_value": "Yes"},
+                    {"id": "regulatory_action", "label": "Was any regulatory action taken against that service while you were in post?", "type": "select", "options": ["No", "Yes", "N/A"], "conditional_on": "previous_cqc_role", "conditional_value": "Yes"},
+                    {"id": "regulatory_details", "label": "If yes, please provide details", "type": "textarea", "conditional_on": "regulatory_action", "conditional_value": "Yes"},
+                ]
+            },
+            {
+                "id": "declaration",
+                "title": "Declaration",
+                "fields": [
+                    {"id": "declaration_accurate", "label": "I declare that the information provided in this form is true, complete, and accurate", "type": "checkbox", "required": True},
+                    {"id": "declaration_understand", "label": "I understand that providing false or misleading information may result in disciplinary action and/or criminal prosecution", "type": "checkbox", "required": True},
+                    {"id": "declaration_notify", "label": "I agree to notify the organisation immediately if any of the above circumstances change", "type": "checkbox", "required": True},
+                    {"id": "declaration_checks", "label": "I consent to the organisation carrying out any checks it deems necessary to verify this information", "type": "checkbox", "required": True},
+                    {"id": "signature", "label": "Signature (type full name)", "type": "text", "required": True},
+                    {"id": "sign_date", "label": "Date", "type": "date", "required": True},
+                ]
+            }
+        ],
+        "fields": []
     }
 }
 
@@ -7838,6 +8120,22 @@ WORKER_FORM_DEFINITIONS = {
         "required": True,
         "admin_requirement_id": "interview",
         "role_aware": True  # Questions vary by role
+    },
+    # ======== NHS COMPLIANCE FORMS ========
+    "conflict_of_interest": {
+        "name": "Conflict of Interest Declaration",
+        "description": "Declare any conflicts of interest including secondary employment, relationships with colleagues, or financial interests",
+        "required": True,
+        "admin_requirement_id": "conflict_of_interest",
+        "role_aware": False
+    },
+    "fit_proper_persons": {
+        "name": "Fit and Proper Persons Declaration",
+        "description": "CQC Regulation 5 - Declaration for managers and directors confirming fitness to hold position",
+        "required": True,
+        "admin_requirement_id": "fit_proper_persons",
+        "role_aware": True,  # Only for managers/directors
+        "roles_required": ["manager", "registered_manager", "director", "nursing_director"]
     }
 }
 

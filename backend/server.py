@@ -148,6 +148,7 @@ from routes.pdf_exports import router as pdf_exports_router
 from routes.generated_forms import router as generated_forms_router
 from routes.audit_email import router as audit_email_router
 from routes.feedback_complaints import router as feedback_complaints_router
+from routes.policies import router as policies_router
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -21197,177 +21198,10 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
 
 
 
-# ==================== POLICY ROUTES ====================
-
-@api_router.post("/policies", response_model=PolicyResponse)
-async def create_policy(policy: PolicyCreate, user: dict = Depends(require_admin)):
-    policy_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    policy_doc = {
-        "id": policy_id,
-        **policy.model_dump(),
-        "file_url": None,
-        "active": True,
-        "published_at": now,
-        "assigned_count": 0,
-        "signed_count": 0
-    }
-    await db.policies.insert_one(policy_doc)
-    return PolicyResponse(**policy_doc)
-
-@api_router.get("/policies", response_model=List[PolicyResponse])
-async def get_policies(active: Optional[bool] = None, user: dict = Depends(get_current_user)):
-    query = {}
-    if active is not None:
-        query["active"] = active
-    policies = await db.policies.find(query, {"_id": 0}).to_list(100)
-    
-    # Get counts - now using "acknowledged" status instead of "signed"
-    for policy in policies:
-        assigned_count = await db.policy_assignments.count_documents({"policy_id": policy['id']})
-        acknowledged_count = await db.policy_assignments.count_documents({
-            "policy_id": policy['id'], 
-            "status": {"$in": ["acknowledged", "signed"]}  # Support both old and new status
-        })
-        policy['assigned_count'] = assigned_count
-        policy['signed_count'] = acknowledged_count  # This is acknowledged count for backwards compat
-    
-    return [PolicyResponse(**p) for p in policies]
-
-@api_router.post("/policies/{policy_id}/upload")
-async def upload_policy_file(policy_id: str, file: UploadFile = File(...), user: dict = Depends(require_admin)):
-    policy = await db.policies.find_one({"id": policy_id}, {"_id": 0})
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    
-    ext = file.filename.split(".")[-1] if "." in file.filename else "pdf"
-    path = f"{APP_NAME}/policies/{uuid.uuid4()}.{ext}"
-    
-    data = await file.read()
-    result = put_object(path, data, file.content_type or "application/pdf")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    await db.policies.update_one({"id": policy_id}, {"$set": {
-        "file_url": result["path"],
-        "original_filename": file.filename,
-        "uploaded_at": now
-    }})
-    
-    # Audit log for policy upload
-    await log_audit_action(
-        user['user_id'],
-        "policy_uploaded",
-        "policy",
-        policy_id,
-        {
-            "policy_title": policy['title'],
-            "filename": file.filename,
-            "version": policy.get('version', '1.0')
-        }
-    )
-    
-    updated_policy = await db.policies.find_one({"id": policy_id}, {"_id": 0})
-    return PolicyResponse(**updated_policy)
-
-
-@api_router.get("/policies/{policy_id}/file")
-async def get_policy_file(policy_id: str, user: dict = Depends(get_current_user)):
-    """Get policy file for viewing - used when employee views assigned policy"""
-    policy = await db.policies.find_one({"id": policy_id}, {"_id": 0})
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    
-    if not policy.get('file_url'):
-        raise HTTPException(status_code=404, detail="No file uploaded for this policy")
-    
-    try:
-        data, content_type = get_object(policy['file_url'])
-        filename = policy.get('original_filename', f"policy_{policy_id}.pdf")
-        return StreamingResponse(
-            io.BytesIO(data),
-            media_type=content_type,
-            headers={"Content-Disposition": f"inline; filename=\"{filename}\""}
-        )
-    except Exception as e:
-        logger.error(f"Error retrieving policy file: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve policy file")
-
-@api_router.post("/policies/assign")
-async def assign_policies(assignment: PolicyAssignmentCreate, user: dict = Depends(require_admin)):
-    # Check both policies and org_policies collections (Compliance Centre uses org_policies)
-    policy = await db.policies.find_one({"id": assignment.policy_id}, {"_id": 0})
-    if not policy:
-        # Try org_policies collection (used by Compliance Centre)
-        policy = await db.org_policies.find_one({"id": assignment.policy_id}, {"_id": 0})
-        if policy:
-            # Map org_policies fields to expected format
-            policy = {
-                "id": policy.get("id"),
-                "title": policy.get("name"),  # org_policies uses 'name', policies uses 'title'
-                "version": policy.get("version", "1.0"),
-                "file_url": policy.get("file_url")
-            }
-    
-    if not policy:
-        raise HTTPException(status_code=404, detail="Policy not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    assignments = []
-    
-    for emp_id in assignment.employee_ids:
-        # Check if already assigned (not unassigned or withdrawn)
-        existing = await db.policy_assignments.find_one({
-            "policy_id": assignment.policy_id, 
-            "employee_id": emp_id,
-            "status": {"$nin": ["unassigned", "withdrawn"]}
-        })
-        if existing:
-            continue
-        
-        # Get employee name for audit trail
-        emp = await db.employees.find_one({"id": emp_id}, {"_id": 0})
-        emp_name = f"{emp['first_name']} {emp['last_name']}" if emp else "Unknown"
-        
-        assignment_doc = {
-            "id": str(uuid.uuid4()),
-            "policy_id": assignment.policy_id,
-            "policy_title": policy['title'],
-            "policy_version": policy.get('version', '1.0'),
-            "employee_id": emp_id,
-            "employee_name": emp_name,
-            "assigned_at": now,
-            "assigned_by": user['user_id'],
-            "assigned_by_name": user.get('name', user.get('email', 'Admin')),
-            "status": "assigned",
-            "viewed_at": None,
-            "acknowledged_at": None,
-            "acknowledged_by_employee_name": None,
-            "admin_reviewed": False,
-            "admin_reviewed_at": None,
-            "admin_reviewed_by": None,
-            "admin_reviewed_by_name": None
-        }
-        await db.policy_assignments.insert_one(assignment_doc)
-        assignments.append(assignment_doc)
-        
-        await log_audit_action(
-            user['user_id'], 
-            "policy_assigned", 
-            "policy_assignment", 
-            assignment_doc['id'], 
-            {
-                "policy_id": assignment.policy_id, 
-                "policy_title": policy['title'],
-                "policy_version": policy.get('version', '1.0'),
-                "employee_id": emp_id,
-                "employee_name": emp_name,
-                "assigned_by_name": user.get('name', user.get('email', 'Admin'))
-            }
-        )
-    
-    return {"assigned": len(assignments), "message": f"Policy assigned to {len(assignments)} employees"}
-
+# ==================== POLICY ROUTES MOVED ====================
+# Policy CRUD routes have been moved to routes/policies.py
+# Includes: POST/GET /policies, POST /policies/{id}/upload, 
+# GET /policies/{id}/file, POST /policies/assign
 
 # NOTE: Policy assignment endpoints moved to routes/policy_assignments.py
 # Includes: GET /policy-assignments, PUT /policy-assignments/{id}/view,
@@ -45427,6 +45261,7 @@ api_router.include_router(verifications_router)
 # Include migrations routes (refactored from server.py)
 api_router.include_router(migrations_router)
 api_router.include_router(feedback_complaints_router)
+api_router.include_router(policies_router)
 
 # NOTE: readiness_router is included early in server.py (before inline routes)
 # to ensure /employees/readiness-summary is matched before /employees/{employee_id}

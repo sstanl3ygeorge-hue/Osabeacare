@@ -608,6 +608,7 @@ storage_key = None
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'Osabea Recruitment Team <recruitment@osabeacares.co.uk>')
 REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'info@osabeacaresolutions.co.uk')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')
 
 # Initialize storage
 def init_storage():

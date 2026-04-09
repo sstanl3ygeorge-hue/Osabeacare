@@ -241,6 +241,14 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Email notification sent to employee when replacement requested (if notify_employee=true)
 - [x] All 13 backend tests passed (see `/app/test_reports/iteration_212.json`)
 
+### P0: Document Badge & POA Sync Fixes (COMPLETED - April 9, 2026)
+- [x] Fixed duplicate status badges - documents now show ONLY ONE definitive badge
+- [x] Fixed "not_verified" being treated as valid verification stamp
+- [x] Fixed POA sync mismatch between Worker and Admin dashboards
+- [x] Updated legacy_mapping to include numbered POA variants (proof_of_address_2, etc.)
+- [x] Cleaned up DocumentActionMenu for better 5 E's usability
+- [x] All 6 backend tests passed (see `/app/test_reports/iteration_214.json`)
+
 ### P0: Smart Merge Feature (COMPLETED - April 8, 2026)
 - [x] Extract-from-PDF endpoint enhanced with duplicate detection
 - [x] Merge-from-PDF endpoint created for applying merges
@@ -270,8 +278,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - `/app/test_reports/iteration_210.json` - Phase 35 (generated_forms)
 - `/app/test_reports/iteration_211.json` - Phase 36 (audit_email)
 - `/app/test_reports/iteration_212.json` - Document Sync & Request Replacement (13 tests passed)
-- `/app/test_reports/iteration_213.json` - Comprehensive Compliance E2E (28 tests passed) [NEW]
-- `/app/backend/tests/test_comprehensive_compliance_e2e.py` - Pytest test suite for 100% compliance verification [NEW]
+- `/app/test_reports/iteration_213.json` - Comprehensive Compliance E2E (28 tests passed)
+- `/app/test_reports/iteration_214.json` - Document Badge & POA Sync Fixes (6 tests passed) [NEW]
+- `/app/backend/tests/test_document_badge_poa_sync.py` - Badge exclusivity & POA sync test suite [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

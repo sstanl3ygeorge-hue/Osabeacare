@@ -207,6 +207,14 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Pending/In Progress
 
+### P0: Application Form Submission Bug (FIXED - April 10, 2026)
+- [x] **Bug**: User on Health step (step 6) clicked "Submit Application" but got error "You must confirm the information is accurate"
+- [x] **Root Cause**: Button logic showed "Submit Application" starting from step 6, but `information_accurate` checkbox was on step 7 (Review)
+- [x] **Fix**: Changed navigation from `currentStep < 6` to `currentStep < 7` so step 6 shows "Continue" and only step 7 shows "Submit"
+- [x] **Fix**: Updated `handleSubmit` to validate step 7 instead of step 6
+- [x] **Enhancement**: Added prominent "Check Your Email" notification on success page explaining the magic link portal access
+- [x] Backend already sends welcome email with magic link (7-day expiry) - confirmed working
+
 ### P0: Document Sync & Request Replacement (COMPLETED - April 10, 2026)
 - [x] Fixed frontend rejection endpoint (`/documents/{id}/reject` -> `/api/employee-documents/{id}/request-replacement`)
 - [x] Updated DocumentActionMenu.js: "Reject" -> "Request Replacement" with RotateCcw icon (amber color)

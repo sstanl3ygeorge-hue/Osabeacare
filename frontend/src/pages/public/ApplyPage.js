@@ -9,7 +9,7 @@ import { Checkbox } from '../../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { toast } from 'sonner';
-import { Loader2, CheckCircle, FileText, User, Briefcase, Clock, Shield, Heart, AlertTriangle, Upload, Plus, Trash2, ChevronRight, ChevronLeft, FileCheck, Phone } from 'lucide-react';
+import { Loader2, CheckCircle, FileText, User, Briefcase, Clock, Shield, Heart, AlertTriangle, Upload, Plus, Trash2, ChevronRight, ChevronLeft, FileCheck, Phone, Mail } from 'lucide-react';
 import axios from 'axios';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -459,7 +459,8 @@ export default function ApplyPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!validateStep(6)) {
+    // Validate the Review step (step 7) which includes final declarations
+    if (!validateStep(7)) {
       toast.error('Please complete all required declarations');
       return;
     }
@@ -1625,6 +1626,21 @@ export default function ApplyPage() {
         <p className="text-xs text-text-muted mt-2">Please save this reference for your records</p>
       </div>
       
+      {/* Magic Link Email Notification - Important! */}
+      <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-6 max-w-md mx-auto mb-6">
+        <div className="flex items-center justify-center gap-2 mb-3">
+          <Mail className="h-6 w-6 text-blue-600" />
+          <h3 className="font-semibold text-blue-800">Check Your Email</h3>
+        </div>
+        <p className="text-sm text-blue-700 mb-2">
+          We've sent you an email with a <strong>portal access link</strong> to complete your onboarding.
+        </p>
+        <p className="text-xs text-blue-600">
+          Use this link to upload documents, complete forms, and track your application progress.
+          The link expires in 7 days.
+        </p>
+      </div>
+      
       {submissionResult?.next_steps && (
         <div className="text-left max-w-md mx-auto bg-white rounded-xl border p-4 mb-6">
           <h3 className="font-medium text-text-primary mb-2">What Happens Next</h3>
@@ -1746,7 +1762,7 @@ export default function ApplyPage() {
                       <div />
                     )}
                     
-                    {currentStep < 6 ? (
+                    {currentStep < 7 ? (
                       <Button type="button" onClick={nextStep} className="bg-primary hover:bg-primary-hover text-white rounded-full">
                         Continue <ChevronRight className="h-4 w-4 ml-1" />
                       </Button>

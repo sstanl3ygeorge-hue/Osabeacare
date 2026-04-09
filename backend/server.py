@@ -1232,6 +1232,61 @@ MANDATORY_ITEMS = {
          "status_group": "other",
          "description": "Counter-terrorism awareness certificate",
          "work_ready_hint": "Complete after employee starts"},
+        
+        # ======== CQC STANDARD TRAINING (Added for Matrix Compliance) ========
+        {"id": "induction", "name": "Induction Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Induction",
+         "allow_multiple_files": True,
+         "priority": "start_required", "priority_order": 1,
+         "status_group": "start_status",
+         "description": "Company induction and orientation training",
+         "work_ready_hint": "Must be completed on first day/week",
+         "renewal_period_months": None},  # One-time, no renewal
+        
+        {"id": "medication", "name": "Medication Administration Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Medication",
+         "allow_multiple_files": True,
+         "priority": "supervised_start", "priority_order": 23,
+         "status_group": "competency_health",
+         "description": "Medication administration and management certificate",
+         "work_ready_hint": "Required before administering medication",
+         "renewal_period_months": 12},
+        
+        {"id": "food_hygiene", "name": "Food Hygiene Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Food Hygiene",
+         "allow_multiple_files": True,
+         "priority": "secondary", "priority_order": 48,
+         "status_group": "other",
+         "description": "Food hygiene and safety certificate (Level 2)",
+         "work_ready_hint": "Required for staff handling food",
+         "renewal_period_months": 36},
+        
+        {"id": "mca_dols", "name": "MCA & DoLS Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "MCA and DoLs",
+         "allow_multiple_files": True,
+         "priority": "secondary", "priority_order": 49,
+         "status_group": "other",
+         "description": "Mental Capacity Act and Deprivation of Liberty Safeguards",
+         "work_ready_hint": "Required for all care staff",
+         "renewal_period_months": 12},
+        
+        {"id": "dementia", "name": "Dementia Awareness Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Dementia",
+         "allow_multiple_files": True,
+         "priority": "secondary", "priority_order": 50,
+         "status_group": "other",
+         "description": "Dementia awareness and care certificate",
+         "work_ready_hint": "Required for all care staff",
+         "renewal_period_months": 12},
+        
+        {"id": "autism", "name": "Autism Awareness Training", "category": "2_Core_Training",
+         "type": "training", "training_name": "Autism Awareness",
+         "allow_multiple_files": True,
+         "priority": "secondary", "priority_order": 51,
+         "status_group": "other",
+         "description": "Autism awareness and support certificate",
+         "work_ready_hint": "Required for all care staff",
+         "renewal_period_months": 12},
     ],
     
     "nurse_specific": [  # Additional items for Nurses only
@@ -23667,37 +23722,50 @@ async def export_training_matrix(
     user: dict = Depends(get_current_user)
 ):
     """
-    Export Training Matrix as CSV or PDF.
+    Export Training Matrix as CSV or PDF in CQC-compliant format.
     
-    REUSES:
-    - training_records collection (existing data)
-    - MANDATORY_ITEMS["training"] (training type definitions)
-    - compute_training_record_status() (expiry/status logic)
-    - ReportLab (PDF generation - already imported)
-    
-    NO NEW COLLECTIONS - pure export layer
+    Format matches standard UK Care Home Training Matrix with:
+    - Staff Name, Employee Start Date, Probation Review, Appraisal
+    - Training columns showing completion dates
+    - Color coding: Blue (in date), Yellow (expiring), Red (expired/missing)
+    - Summary rows: Out of date count, % In Date per column, Average
     """
     import csv
     import io
     
     now = datetime.now(timezone.utc)
     
-    # Get all training types from MANDATORY_ITEMS (single source of truth)
-    training_types = MANDATORY_ITEMS.get("training", [])
-    nurse_training = [t for t in MANDATORY_ITEMS.get("nurse_specific", []) if t.get("type") == "training"]
-    all_training_types = training_types + nurse_training
+    # CQC Standard Training Types in order (matching Excel format)
+    # Each training has an initial and optional refresher tracking
+    cqc_training_order = [
+        {"id": "induction", "name": "Induction", "has_refresher": False},
+        {"id": "manual_handling", "name": "Moving & Handling", "has_refresher": True},
+        {"id": "medication", "name": "Medication", "has_refresher": True},
+        {"id": "health_safety", "name": "Health and Safety", "has_refresher": True},
+        {"id": "food_hygiene", "name": "Food Hygiene", "has_refresher": True},
+        {"id": "bls", "name": "First Aid", "has_refresher": True},  # BLS maps to First Aid
+        {"id": "safeguarding", "name": "Safeguarding Adults & Child", "has_refresher": True},
+        {"id": "mca_dols", "name": "MCA and DoLs", "has_refresher": True},
+        {"id": "dementia", "name": "Dementia", "has_refresher": True},
+        {"id": "fire_safety", "name": "Fire", "has_refresher": True},
+        {"id": "autism", "name": "Autism Awareness", "has_refresher": True},
+        # Additional trainings not in standard matrix but required
+        {"id": "infection_control", "name": "Infection Control", "has_refresher": True},
+        {"id": "information_governance", "name": "Info Governance", "has_refresher": True},
+        {"id": "prevent", "name": "Prevent", "has_refresher": True},
+    ]
     
-    # Build column headers from training types
-    training_columns = [{"id": t["id"], "name": t.get("training_name", t["name"])} for t in all_training_types]
-    
-    # Get all active employees
+    # Get all active employees with additional fields
     employees = await db.employees.find(
         {"status": {"$in": ["active", "onboarding"]}},
-        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, "role": 1}
+        {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "employee_code": 1, 
+         "role": 1, "start_date": 1, "probation_end_date": 1, "next_appraisal_date": 1}
     ).to_list(500)
     
     # Build matrix data
     matrix_data = []
+    column_stats = {t["id"]: {"in_date": 0, "out_of_date": 0, "total": 0} for t in cqc_training_order}
+    
     for emp in employees:
         # Get employee's training records
         training_records = await db.training_records.find(
@@ -23709,36 +23777,69 @@ async def export_training_matrix(
         training_lookup = {}
         for record in training_records:
             key = record.get("requirement_id") or record.get("training_name", "").lower().replace(" ", "_")
-            if key not in training_lookup or record.get("completion_date"):
+            # Keep the most recent completed record
+            if key not in training_lookup or (record.get("completion_date") and 
+                (not training_lookup[key].get("completion_date") or 
+                 record.get("completion_date") > training_lookup[key].get("completion_date"))):
                 training_lookup[key] = record
+        
+        # Format dates helper
+        def format_date(date_val):
+            if not date_val:
+                return ""
+            try:
+                if isinstance(date_val, str):
+                    if 'T' in date_val:
+                        dt = datetime.fromisoformat(date_val.replace('Z', '+00:00'))
+                    else:
+                        dt = datetime.fromisoformat(f"{date_val}T00:00:00+00:00")
+                else:
+                    dt = date_val
+                return dt.strftime("%d/%m/%Y")
+            except:
+                return ""
         
         # Build row
         row = {
-            "employee_code": emp.get("employee_code", ""),
             "name": f"{emp['first_name']} {emp['last_name']}",
-            "role": emp.get("role", ""),
+            "employee_code": emp.get("employee_code", ""),
+            "start_date": format_date(emp.get("start_date")),
+            "probation_review": format_date(emp.get("probation_end_date")),
+            "appraisal": format_date(emp.get("next_appraisal_date")),
             "training": {}
         }
         
-        for col in training_columns:
-            training_id = col["id"]
-            training_name = col["name"]
+        for training_type in cqc_training_order:
+            training_id = training_type["id"]
             
-            # Find matching record (by id or name)
+            # Try to find matching record
             record = training_lookup.get(training_id)
             if not record:
-                # Try matching by training name
-                for key, rec in training_lookup.items():
-                    if rec.get("training_name", "").lower() == training_name.lower():
-                        record = rec
+                # Try alternative keys
+                alt_keys = {
+                    "manual_handling": ["moving_handling", "moving_and_handling"],
+                    "bls": ["first_aid", "basic_life_support"],
+                    "safeguarding": ["safeguarding_adults", "safeguarding_children"],
+                    "mca_dols": ["mca", "dols", "mental_capacity"],
+                    "dementia": ["dementia_awareness"],
+                    "autism": ["autism_awareness"],
+                    "food_hygiene": ["food_safety"],
+                }
+                for alt_key in alt_keys.get(training_id, []):
+                    record = training_lookup.get(alt_key)
+                    if record:
                         break
             
+            column_stats[training_id]["total"] += 1
+            
             if record and record.get("status") == "completed":
-                # Use existing compute_training_record_status() logic inline
-                expiry_date = record.get("expiry_date")
                 completion_date = record.get("completion_date")
-                status = "completed"
-                expiry_display = ""
+                expiry_date = record.get("expiry_date")
+                
+                # Determine status
+                status = "in_date"  # Blue
+                completion_display = format_date(completion_date)
+                expiry_display = format_date(expiry_date)
                 
                 if expiry_date:
                     try:
@@ -23751,68 +23852,112 @@ async def export_training_matrix(
                             exp = expiry_date if expiry_date.tzinfo else expiry_date.replace(tzinfo=timezone.utc)
                         
                         days_until = (exp - now).days
-                        expiry_display = exp.strftime("%d/%m/%Y")
                         
                         if days_until < 0:
-                            status = "expired"
+                            status = "expired"  # Red
+                            column_stats[training_id]["out_of_date"] += 1
                         elif days_until <= 30:
-                            status = "expiring"
+                            status = "expiring"  # Yellow/Orange
+                            column_stats[training_id]["in_date"] += 1
+                        else:
+                            column_stats[training_id]["in_date"] += 1
                     except:
-                        pass
+                        column_stats[training_id]["in_date"] += 1
+                else:
+                    # No expiry = always in date
+                    column_stats[training_id]["in_date"] += 1
                 
                 row["training"][training_id] = {
                     "status": status,
-                    "expiry": expiry_display,
+                    "completion_date": completion_display,
+                    "expiry_date": expiry_display,
                     "verified": record.get("verified", False)
                 }
             else:
+                # Missing training
                 row["training"][training_id] = {
                     "status": "missing",
-                    "expiry": "",
+                    "completion_date": "",
+                    "expiry_date": "",
                     "verified": False
                 }
+                column_stats[training_id]["out_of_date"] += 1
         
         matrix_data.append(row)
     
+    # Calculate percentages
+    column_percentages = {}
+    for training_id, stats in column_stats.items():
+        if stats["total"] > 0:
+            column_percentages[training_id] = round((stats["in_date"] / stats["total"]) * 100)
+        else:
+            column_percentages[training_id] = 100
+    
+    average_percentage = round(sum(column_percentages.values()) / len(column_percentages)) if column_percentages else 100
+    
     # Generate export based on format
     if format.lower() == "csv":
-        # CSV Export
+        # CSV Export - Excel compatible
         output = io.StringIO()
         
-        # Headers
-        headers = ["Employee Code", "Name", "Role"]
-        for col in training_columns:
-            headers.append(f"{col['name']} Status")
-            headers.append(f"{col['name']} Expiry")
+        # Build headers
+        headers = ["Staff Name", "Employee Start Date", "Probation Review", "Appraisal", "Add 1 for Current Employee"]
+        for t in cqc_training_order:
+            headers.append(t["name"])
+            if t["has_refresher"]:
+                headers.append(f"{t['name']} Refresher")
         
         writer = csv.writer(output)
         writer.writerow(headers)
         
         # Data rows
-        for row in matrix_data:
-            csv_row = [row["employee_code"], row["name"], row["role"]]
-            for col in training_columns:
-                training_data = row["training"].get(col["id"], {})
-                status = training_data.get("status", "missing")
-                expiry = training_data.get("expiry", "")
-                verified = training_data.get("verified", False)
-                
-                # Status display
-                if status == "completed":
-                    status_display = "✓ Verified" if verified else "✓ Complete"
-                elif status == "expired":
-                    status_display = "✗ Expired"
-                elif status == "expiring":
-                    status_display = "⚠ Expiring"
-                else:
-                    status_display = "— Missing"
-                
-                csv_row.append(status_display)
-                csv_row.append(expiry)
+        for idx, row in enumerate(matrix_data, start=1):
+            csv_row = [
+                row["name"],
+                row["start_date"],
+                row["probation_review"],
+                row["appraisal"],
+                "1"  # Current employee count
+            ]
+            
+            for t in cqc_training_order:
+                training_data = row["training"].get(t["id"], {})
+                # Show completion date in main column
+                csv_row.append(training_data.get("completion_date", ""))
+                # Show expiry/refresher due date in refresher column
+                if t["has_refresher"]:
+                    csv_row.append(training_data.get("expiry_date", ""))
             
             writer.writerow(csv_row)
         
-        # Return CSV
+        # Empty row
+        writer.writerow([])
+        
+        # Out of date row
+        out_of_date_row = ["", "", "", "", "Out of date"]
+        for t in cqc_training_order:
+            out_of_date_row.append(column_stats[t["id"]]["out_of_date"])
+            if t["has_refresher"]:
+                out_of_date_row.append("")
+        writer.writerow(out_of_date_row)
+        
+        # Empty row
+        writer.writerow([])
+        
+        # Training % In Date row
+        percentage_row = ["", "", "", "Training % In Date"]
+        for t in cqc_training_order:
+            percentage_row.append(f"{column_percentages[t['id']]}%")
+            if t["has_refresher"]:
+                percentage_row.append("")
+        writer.writerow(percentage_row)
+        
+        # Empty row
+        writer.writerow([])
+        
+        # Average row
+        writer.writerow(["", "", "Average", f"{average_percentage}%"])
+        
         csv_content = output.getvalue()
         filename = f"training_matrix_{now.strftime('%Y%m%d_%H%M%S')}.csv"
         
@@ -23823,14 +23968,14 @@ async def export_training_matrix(
         )
     
     elif format.lower() == "pdf":
-        # PDF Export using existing ReportLab infrastructure
+        # PDF Export - CQC compliant format
         buffer = io.BytesIO()
         
-        # Create PDF with landscape A4
-        from reportlab.lib.pagesizes import A4, landscape
-        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), 
-                               leftMargin=15*mm, rightMargin=15*mm, 
-                               topMargin=20*mm, bottomMargin=20*mm)
+        # Create PDF with landscape A3 for more columns
+        from reportlab.lib.pagesizes import A3, landscape
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), 
+                               leftMargin=10*mm, rightMargin=10*mm, 
+                               topMargin=15*mm, bottomMargin=15*mm)
         
         elements = []
         styles = getSampleStyleSheet()
@@ -23839,105 +23984,181 @@ async def export_training_matrix(
         title_style = ParagraphStyle(
             'CustomTitle',
             parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=12,
-            alignment=TA_CENTER
+            fontSize=18,
+            spaceAfter=8,
+            alignment=TA_CENTER,
+            textColor=colors.Color(0, 0.3, 0.5)
         )
         elements.append(Paragraph("Training Matrix", title_style))
         elements.append(Paragraph(f"Generated: {now.strftime('%d/%m/%Y %H:%M')}", 
-                                 ParagraphStyle('Date', fontSize=10, alignment=TA_CENTER, spaceAfter=20)))
+                                 ParagraphStyle('Date', fontSize=9, alignment=TA_CENTER, spaceAfter=15)))
         
-        # Build table data
-        # Simplified headers for PDF (just training names, not status/expiry separate columns)
-        pdf_headers = ["Staff Member", "Role"]
-        for col in training_columns:
-            # Shorten long names
-            name = col["name"]
+        # Define colors matching Excel format
+        color_blue = colors.Color(0.2, 0.6, 0.85)  # In date (blue)
+        color_yellow = colors.Color(1, 0.85, 0.4)  # Expiring (yellow/orange)
+        color_red = colors.Color(0.9, 0.3, 0.3)    # Expired/missing (red)
+        color_header = colors.Color(0, 0.55, 0.75) # Header (teal blue like Excel)
+        color_white = colors.white
+        
+        # Build headers
+        pdf_headers = [
+            Paragraph("<b>STAFF NAME</b>", ParagraphStyle('H', fontSize=6, alignment=TA_CENTER, textColor=colors.white)),
+            Paragraph("<b>START<br/>DATE</b>", ParagraphStyle('H', fontSize=5, alignment=TA_CENTER, textColor=colors.white)),
+            Paragraph("<b>PROBATION<br/>REVIEW</b>", ParagraphStyle('H', fontSize=5, alignment=TA_CENTER, textColor=colors.white)),
+            Paragraph("<b>APPRAISAL</b>", ParagraphStyle('H', fontSize=5, alignment=TA_CENTER, textColor=colors.white)),
+        ]
+        
+        for t in cqc_training_order:
+            name = t["name"]
+            # Shorten long names for PDF
             if len(name) > 12:
-                name = name[:10] + "..."
-            pdf_headers.append(name)
+                name = name[:11] + "..."
+            pdf_headers.append(Paragraph(f"<b>{name}</b>", ParagraphStyle('H', fontSize=5, alignment=TA_CENTER, textColor=colors.white)))
+            if t["has_refresher"]:
+                pdf_headers.append(Paragraph(f"<b>{name[:8]}...<br/>Refresher</b>", ParagraphStyle('H', fontSize=4, alignment=TA_CENTER, textColor=colors.white)))
         
         table_data = [pdf_headers]
+        row_training_status = []  # Track status for conditional formatting
         
+        # Data rows
         for row in matrix_data:
             pdf_row = [
-                Paragraph(row["name"], ParagraphStyle('Cell', fontSize=7)),
-                Paragraph(row["role"] or "", ParagraphStyle('Cell', fontSize=7))
+                Paragraph(row["name"], ParagraphStyle('Cell', fontSize=6)),
+                Paragraph(row["start_date"], ParagraphStyle('Cell', fontSize=5, alignment=TA_CENTER)),
+                Paragraph(row["probation_review"], ParagraphStyle('Cell', fontSize=5, alignment=TA_CENTER)),
+                Paragraph(row["appraisal"], ParagraphStyle('Cell', fontSize=5, alignment=TA_CENTER)),
             ]
+            row_status = []
             
-            for col in training_columns:
-                training_data = row["training"].get(col["id"], {})
+            for t in cqc_training_order:
+                training_data = row["training"].get(t["id"], {})
                 status = training_data.get("status", "missing")
-                expiry = training_data.get("expiry", "")
-                verified = training_data.get("verified", False)
+                completion = training_data.get("completion_date", "")
+                expiry = training_data.get("expiry_date", "")
                 
-                # Compact cell content
-                if status == "completed":
-                    cell_text = f"✓ {expiry}" if expiry else "✓"
-                    if verified:
-                        cell_text = f"✓✓ {expiry}" if expiry else "✓✓"
-                elif status == "expired":
-                    cell_text = f"✗ {expiry}" if expiry else "✗"
-                elif status == "expiring":
-                    cell_text = f"⚠ {expiry}" if expiry else "⚠"
-                else:
-                    cell_text = "—"
+                pdf_row.append(Paragraph(completion, ParagraphStyle('Cell', fontSize=5, alignment=TA_CENTER)))
+                row_status.append(status)
                 
-                pdf_row.append(Paragraph(cell_text, ParagraphStyle('Cell', fontSize=6, alignment=TA_CENTER)))
+                if t["has_refresher"]:
+                    pdf_row.append(Paragraph(expiry, ParagraphStyle('Cell', fontSize=5, alignment=TA_CENTER)))
+                    row_status.append(status)  # Same status for refresher column
             
             table_data.append(pdf_row)
+            row_training_status.append(row_status)
+        
+        # Add empty row
+        empty_row = [""] * len(pdf_headers)
+        table_data.append(empty_row)
+        row_training_status.append(["empty"] * (len(pdf_headers) - 4))
+        
+        # Out of date summary row
+        out_of_date_row = [
+            Paragraph("<b>Out of date</b>", ParagraphStyle('Sum', fontSize=6)),
+            "", "", ""
+        ]
+        for t in cqc_training_order:
+            out_of_date_row.append(Paragraph(str(column_stats[t["id"]]["out_of_date"]), 
+                                            ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER, textColor=colors.red)))
+            if t["has_refresher"]:
+                out_of_date_row.append("")
+        table_data.append(out_of_date_row)
+        row_training_status.append(["summary"] * (len(pdf_headers) - 4))
+        
+        # Empty row
+        table_data.append(empty_row)
+        row_training_status.append(["empty"] * (len(pdf_headers) - 4))
+        
+        # Training % In Date row
+        pct_row = [
+            "", "", "",
+            Paragraph("<b>Training % In Date</b>", ParagraphStyle('Sum', fontSize=6))
+        ]
+        for t in cqc_training_order:
+            pct_row.append(Paragraph(f"<b>{column_percentages[t['id']]}%</b>", 
+                                    ParagraphStyle('Sum', fontSize=6, alignment=TA_CENTER)))
+            if t["has_refresher"]:
+                pct_row.append("")
+        table_data.append(pct_row)
+        row_training_status.append(["summary"] * (len(pdf_headers) - 4))
+        
+        # Empty row
+        table_data.append(empty_row)
+        row_training_status.append(["empty"] * (len(pdf_headers) - 4))
+        
+        # Average row
+        avg_row = [
+            "", "",
+            Paragraph("<b>Average</b>", ParagraphStyle('Sum', fontSize=8)),
+            Paragraph(f"<b>{average_percentage}%</b>", ParagraphStyle('Sum', fontSize=8, textColor=colors.Color(0, 0.5, 0)))
+        ] + [""] * (len(pdf_headers) - 4)
+        table_data.append(avg_row)
+        row_training_status.append(["summary"] * (len(pdf_headers) - 4))
         
         # Calculate column widths
-        available_width = landscape(A4)[0] - 30*mm
-        name_width = 70*mm
-        role_width = 50*mm
-        remaining = available_width - name_width - role_width
-        training_col_width = remaining / len(training_columns) if training_columns else 30*mm
+        available_width = landscape(A3)[0] - 20*mm
+        name_width = 45*mm
+        date_col_width = 18*mm
+        fixed_cols_width = name_width + (date_col_width * 3)
+        remaining = available_width - fixed_cols_width
         
-        col_widths = [name_width, role_width] + [training_col_width] * len(training_columns)
+        # Count training columns (including refreshers)
+        num_training_cols = sum(2 if t["has_refresher"] else 1 for t in cqc_training_order)
+        training_col_width = remaining / num_training_cols if num_training_cols > 0 else 15*mm
+        
+        col_widths = [name_width, date_col_width, date_col_width, date_col_width]
+        for t in cqc_training_order:
+            col_widths.append(training_col_width)
+            if t["has_refresher"]:
+                col_widths.append(training_col_width)
         
         # Create table
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         
-        # Style table
+        # Base table style
         table_style = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.18, 0.49, 0.2)),  # Green header
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            # Header row
+            ('BACKGROUND', (0, 0), (-1, 0), color_header),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 7),
-            ('FONTSIZE', (0, 1), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+            ('FONTSIZE', (0, 0), (-1, 0), 6),
+            ('FONTSIZE', (0, 1), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.Color(0.7, 0.7, 0.7)),
+            # Left align staff names
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
         ])
         
-        # Add conditional formatting for status
-        for row_idx, row in enumerate(matrix_data, start=1):
-            for col_idx, col in enumerate(training_columns, start=2):
-                training_data = row["training"].get(col["id"], {})
-                status = training_data.get("status", "missing")
-                
-                if status == "expired":
-                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), colors.Color(1, 0.9, 0.9))
+        # Apply conditional formatting for training status
+        for row_idx, statuses in enumerate(row_training_status, start=1):
+            for col_idx, status in enumerate(statuses, start=4):  # Start after fixed columns
+                if status == "in_date":
+                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), color_blue)
+                    table_style.add('TEXTCOLOR', (col_idx, row_idx), (col_idx, row_idx), colors.white)
                 elif status == "expiring":
-                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), colors.Color(1, 0.95, 0.8))
-                elif status == "missing":
-                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), colors.Color(0.95, 0.95, 0.95))
+                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), color_yellow)
+                elif status == "expired" or status == "missing":
+                    table_style.add('BACKGROUND', (col_idx, row_idx), (col_idx, row_idx), color_red)
+                    table_style.add('TEXTCOLOR', (col_idx, row_idx), (col_idx, row_idx), colors.white)
         
         table.setStyle(table_style)
         elements.append(table)
         
         # Legend
-        elements.append(Spacer(1, 10*mm))
+        elements.append(Spacer(1, 8*mm))
         legend_style = ParagraphStyle('Legend', fontSize=8, spaceAfter=4)
-        elements.append(Paragraph("<b>Legend:</b> ✓✓ = Verified | ✓ = Complete | ⚠ = Expiring Soon | ✗ = Expired | — = Missing", legend_style))
+        elements.append(Paragraph(
+            "<b>Legend:</b> "
+            "<font color='#3399DD'>■</font> In Date | "
+            "<font color='#FFD966'>■</font> Expiring Soon (30 days) | "
+            "<font color='#E64D4D'>■</font> Expired/Missing",
+            legend_style
+        ))
         elements.append(Paragraph(f"<i>Total Staff: {len(matrix_data)}</i>", legend_style))
         
-        # Add verification stamp (reuses existing infrastructure)
+        # Add verification stamp
         verification_stamp = generate_verification_stamp(
             verified_by=user.get('name', user.get('email', 'System')),
             verified_at=now.isoformat(),

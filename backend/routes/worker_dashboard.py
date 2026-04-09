@@ -333,12 +333,21 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     }).to_list(length=100)
     
     mandatory_trainings = {
+        # CQC Standard Trainings (in order of priority)
+        "induction": "Induction",
         "safeguarding": "Safeguarding",
-        "manual_handling": "Manual Handling", 
-        "fire_safety": "Fire Safety",
+        "manual_handling": "Moving & Handling", 
+        "medication": "Medication",
         "health_safety": "Health & Safety",
-        "bls": "Basic Life Support",
-        "infection_control": "Infection Control"
+        "food_hygiene": "Food Hygiene",
+        "bls": "First Aid / Basic Life Support",
+        "mca_dols": "MCA and DoLs",
+        "dementia": "Dementia Awareness",
+        "fire_safety": "Fire Safety",
+        "autism": "Autism Awareness",
+        "infection_control": "Infection Control",
+        "information_governance": "Information Governance",
+        "prevent": "Prevent"
     }
     
     missing_trainings = []
@@ -357,16 +366,35 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             f"cstf {training_id.replace('_', ' ')}",
         ]
         
-        if training_id == "safeguarding":
+        # Add alternative search patterns for each training type
+        if training_id == "induction":
+            search_patterns.extend(["company induction", "orientation", "welcome training"])
+        elif training_id == "safeguarding":
             search_patterns.extend(["safeguarding adults", "safeguarding children", "safeguard"])
         elif training_id == "manual_handling":
             search_patterns.extend(["moving & handling", "moving and handling", "patient handling"])
+        elif training_id == "medication":
+            search_patterns.extend(["medication administration", "medicines management", "safe handling of medicines"])
         elif training_id == "bls":
-            search_patterns.extend(["basic life support", "resuscitation", "cpr"])
+            search_patterns.extend(["basic life support", "resuscitation", "cpr", "first aid"])
         elif training_id == "health_safety":
             search_patterns.extend(["health, safety and welfare", "health and safety", "h&s"])
+        elif training_id == "food_hygiene":
+            search_patterns.extend(["food safety", "food handling", "level 2 food"])
+        elif training_id == "mca_dols":
+            search_patterns.extend(["mental capacity", "deprivation of liberty", "mca", "dols", "best interests"])
+        elif training_id == "dementia":
+            search_patterns.extend(["dementia awareness", "dementia care", "alzheimer"])
+        elif training_id == "autism":
+            search_patterns.extend(["autism awareness", "autism spectrum", "asd"])
+        elif training_id == "fire_safety":
+            search_patterns.extend(["fire awareness", "fire prevention", "fire evacuation"])
         elif training_id == "infection_control":
             search_patterns.extend(["infection prevention", "ipc"])
+        elif training_id == "information_governance":
+            search_patterns.extend(["gdpr", "data protection", "ig training"])
+        elif training_id == "prevent":
+            search_patterns.extend(["counter terrorism", "radicalisation", "prevent duty"])
         
         for t in trainings:
             t_name = (t.get("training_name") or "").lower()

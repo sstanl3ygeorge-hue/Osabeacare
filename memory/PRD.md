@@ -207,6 +207,16 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Pending/In Progress
 
+### P0: CQC Training Matrix Export Format (COMPLETED - April 10, 2026)
+- [x] Added 6 new CQC-standard trainings: Induction, Medication, Food Hygiene, MCA & DoLs, Dementia Awareness, Autism Awareness
+- [x] Updated PDF/CSV export to match UK Care Home Training Matrix format
+- [x] Export now includes: Staff Name, Start Date, Probation Review, Appraisal columns
+- [x] Training columns show completion dates with separate Refresher columns
+- [x] Color coding: Blue (in date), Yellow (expiring 30 days), Red (expired/missing)
+- [x] Summary rows: Out of date count, Training % In Date per column, Average percentage
+- [x] Updated worker dashboard mandatory trainings to include all 14 CQC trainings
+- [x] Added alternative search patterns for training name matching
+
 ### P0: Worker Document Upload 500 Error (FIXED - April 10, 2026)
 - [x] **Bug**: Worker upload endpoint returning 500 Internal Server Error
 - [x] **Root Cause**: `ADMIN_EMAIL` constant was not defined in server.py, but worker_dashboard.py tried to import it

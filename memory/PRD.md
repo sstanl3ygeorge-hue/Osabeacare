@@ -118,6 +118,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── task_queue.py                - 2 endpoints [NEW - Phase 43]
 ├── pre_employment.py            - 2 endpoints [NEW - Phase 44]
 ├── training_intake.py           - 3 endpoints [NEW - Phase 45]
+├── form_email.py                - 3 endpoints [NEW - Phase 46]
+├── verification_sync.py         - 2 endpoints [NEW - Phase 47]
+├── public_upload.py             - 3 endpoints [NEW - Phase 48]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -141,9 +144,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Phase 36: Audit & Email Templates routes (9 endpoints), removed ~369 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~42,500 lines (down from ~60,500 originally - **30% reduction**)
-- **Route modules**: 45 files with ~375+ endpoints extracted
-- **Remaining inline endpoints**: ~198 endpoints
+- **server.py**: ~41,400 lines (down from ~60,500 originally - **32% reduction**)
+- **Route modules**: 49 files with ~400+ endpoints extracted
+- **Remaining inline endpoints**: ~190 endpoints
 - **Testing**: All phases passing (100% success rate)
 
 ### Modularization Progress (April 9-10, 2026)
@@ -156,6 +159,9 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Phase 43: Extracted task_queue routes (2 endpoints)** [DONE - April 10, 2026]
 - **Phase 44: Extracted pre_employment routes (2 endpoints)** [DONE - April 10, 2026]
 - **Phase 45: Extracted training_intake routes (3 endpoints)** [DONE - April 10, 2026]
+- **Phase 46: Extracted form_email routes (3 endpoints)** [DONE - April 10, 2026]
+- **Phase 47: Extracted verification_sync routes (2 endpoints)** [DONE - April 10, 2026]
+- **Phase 48: Extracted public_upload routes (3 endpoints)** [DONE - April 10, 2026]
 
 ### New Route Files (April 10, 2026)
 - `/app/backend/routes/referee_outreach.py` - NHS-level referee outreach system
@@ -219,10 +225,12 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Phase 43: Task Queue (2 endpoints)
 - [x] Phase 44: Pre-Employment Gates (2 endpoints)
 - [x] Phase 45: Training Intake (3 endpoints)
-- [ ] Extract more remaining inline routes (~198 left)
-  - Email Services & Templates
-  - Form Submission Processing
-  - Verification Sync utilities
+- [x] Phase 46: Form Email (3 endpoints)
+- [x] Phase 47: Verification Sync (2 endpoints)
+- [x] Phase 48: Public Upload (3 endpoints)
+- [ ] Extract more remaining inline routes (~190 left)
+  - Email Notification Engine (~10 endpoints)
+  - Seed Data & Cleanup utilities
   - Reference-Employment Comparison
 - [ ] Extract helper functions/services to separate modules
 

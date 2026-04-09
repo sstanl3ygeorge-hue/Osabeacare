@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { 
-  MoreVertical, Eye, Download, CheckCircle, XCircle, 
+  MoreVertical, Eye, Download, CheckCircle, RotateCcw, 
   FileSearch, Trash2, ArrowRight, RefreshCw, History, Stamp
 } from 'lucide-react';
 
@@ -42,7 +42,7 @@ export default function DocumentActionMenu({
   // Determine what actions to show based on file state
   const hasExtraction = file.extraction_status?.status === 'awaiting_review';
   const canVerify = !file.verified && !file.rejected && file.status !== 'superseded';
-  const canReject = !file.verified && !file.rejected && file.status !== 'superseded';
+  const canRequestReplacement = !file.verified && !file.rejected && file.status !== 'superseded';
   const canRemoveStamp = !!file.verification_stamp || !!file.stamped_file_url;
   const canMarkError = file.status !== 'uploaded_in_error' && file.status !== 'superseded';
   const canSupersede = file.status !== 'superseded' && file.status !== 'uploaded_in_error';
@@ -88,7 +88,7 @@ export default function DocumentActionMenu({
         )}
 
         {/* Verification Actions - If not auditor */}
-        {!isAuditor && (canVerify || canReject) && (
+        {!isAuditor && (canVerify || canRequestReplacement) && (
           <>
             <DropdownMenuSeparator />
             {canVerify && onVerify && (
@@ -97,10 +97,10 @@ export default function DocumentActionMenu({
                 <span className="text-green-600">Verify</span>
               </DropdownMenuItem>
             )}
-            {canReject && onReject && (
-              <DropdownMenuItem onClick={onReject} data-testid="action-reject">
-                <XCircle className="h-4 w-4 mr-2 text-red-600" />
-                <span className="text-red-600">Reject</span>
+            {canRequestReplacement && onReject && (
+              <DropdownMenuItem onClick={onReject} data-testid="action-request-replacement">
+                <RotateCcw className="h-4 w-4 mr-2 text-amber-600" />
+                <span className="text-amber-600">Request Replacement</span>
               </DropdownMenuItem>
             )}
           </>

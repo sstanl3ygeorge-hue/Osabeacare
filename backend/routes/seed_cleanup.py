@@ -104,9 +104,12 @@ async def cleanup_duplicate_documents(user: dict = Depends(require_admin)):
     """
     db = get_db()
     
+    # Use global constant for consistency
+    from server import EXCLUDED_DOC_STATUSES
+    
     # Aggregation to find duplicates
     pipeline = [
-        {"$match": {"status": {"$nin": ["superseded", "deleted"]}}},
+        {"$match": {"status": {"$nin": EXCLUDED_DOC_STATUSES}}},
         {"$group": {
             "_id": {"employee_id": "$employee_id", "requirement_id": "$requirement_id"},
             "count": {"$sum": 1},

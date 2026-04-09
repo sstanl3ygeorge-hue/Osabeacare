@@ -55,10 +55,11 @@ async def get_admin_task_queue(
                 "priority": "high"
             })
     
-    # 2. Expiring documents (next 30 days)
+    # 2. Expiring documents (next 30 days) - use global constant for sync
+    from server import EXCLUDED_DOC_STATUSES
     expiring_docs = await db.employee_documents.find({
         "expiry_date": {"$lte": thirty_days_later.isoformat(), "$gte": now.isoformat()},
-        "status": {"$nin": ["superseded", "expired", "rejected"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "id": 1, "employee_id": 1, "requirement_id": 1, "expiry_date": 1}).to_list(50)
     
     expiring_items = []
@@ -206,18 +207,19 @@ async def get_recent_uploads(
     # Last 30 days
     thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
     
-    # Documents
+    # Documents - use global constant for sync
+    from server import EXCLUDED_DOC_STATUSES, EXCLUDED_TRAINING_STATUSES
     docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "uploaded_at": {"$gte": thirty_days_ago},
-        "status": {"$nin": ["superseded", "deleted"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "id": 1, "requirement_id": 1, "document_type": 1, "uploaded_at": 1, "original_filename": 1}).sort("uploaded_at", -1).to_list(20)
     
     # Training records
     trainings = await db.training_records.find({
         "employee_id": employee_id,
         "created_at": {"$gte": thirty_days_ago},
-        "record_status": {"$nin": ["superseded", "deleted"]}
+        "record_status": {"$nin": EXCLUDED_TRAINING_STATUSES}
     }, {"_id": 0, "id": 1, "training_name": 1, "created_at": 1, "status": 1}).sort("created_at", -1).to_list(20)
     
     # Form submissions

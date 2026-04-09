@@ -527,13 +527,14 @@ async def admin_approve_cv(
     )
     
     # Update document status
+    from server import EXCLUDED_DOC_STATUSES
     cv_doc = await db.employee_documents.find_one({
         "employee_id": employee_id,
         "$or": [
             {"requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]}},
             {"document_subtype": "cv"}
         ],
-        "status": {"$nin": ["deleted", "superseded"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0}, sort=[("uploaded_at", -1)])
     
     if cv_doc:

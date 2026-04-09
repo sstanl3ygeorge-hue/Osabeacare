@@ -166,12 +166,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     employee_status = employee.get("status", "onboarding")
     is_active_employee = employee_status == "active_employee"
     
-    # Get documents - IMPORTANT: Exclude ALL non-active statuses at query level for data sync
-    # This must match the filtering in server.py HISTORICAL_STATUSES for consistency
-    EXCLUDED_STATUSES = ["deleted", "superseded", "uploaded_in_error", "rejected", "moved", "archived", "misfiled"]
+    # Get documents - Import the global constant from server.py for single source of truth
+    from server import EXCLUDED_DOC_STATUSES
     documents = await db.employee_documents.find({
         "employee_id": employee_id,
-        "status": {"$nin": EXCLUDED_STATUSES}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }).to_list(length=200)
     
     # Required document types with their acceptable requirement_id patterns

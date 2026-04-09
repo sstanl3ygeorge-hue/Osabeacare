@@ -120,11 +120,12 @@ async def get_document_expiry_alerts(
     now = datetime.now(timezone.utc)
     cutoff = (now + timedelta(days=days)).isoformat()
     
-    # Get expiring documents
+    # Get expiring documents - use global constant for sync
+    from server import EXCLUDED_DOC_STATUSES
     expiring_docs = await db.employee_documents.find(
         {
             "expiry_date": {"$lte": cutoff, "$gt": now.isoformat()},
-            "status": {"$nin": ["superseded", "archived", "deleted"]}
+            "status": {"$nin": EXCLUDED_DOC_STATUSES}
         },
         {"_id": 0}
     ).sort("expiry_date", 1).to_list(100)

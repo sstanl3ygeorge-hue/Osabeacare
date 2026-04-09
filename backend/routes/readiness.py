@@ -505,11 +505,12 @@ async def get_poa_freshness(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Get PoA documents
+    # Get PoA documents - use global constant for sync
+    from server import EXCLUDED_DOC_STATUSES
     poa_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": {"$in": ["proof_of_address", "proof_of_address_evidence", "address_proof", "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5"]},
-        "status": {"$nin": ["superseded", "deleted", "removed"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0}).to_list(50)
     
     # Enrich with extraction data

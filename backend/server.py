@@ -846,6 +846,35 @@ class DocumentStatus(str, Enum):
     AWAITING_VERIFICATION = "awaiting_verification"
     MISFILED = "misfiled"
 
+
+# =============================================================================
+# GLOBAL STATUS EXCLUSION CONSTANTS - SINGLE SOURCE OF TRUTH FOR DATA SYNC
+# =============================================================================
+# These constants ensure Admin and Worker views are ALWAYS in sync.
+# ANY change here automatically propagates to ALL queries.
+# =============================================================================
+
+# Document statuses that should be HIDDEN from active views (both Admin and Worker)
+# A document with any of these statuses is considered "inactive" or "historical"
+EXCLUDED_DOC_STATUSES = [
+    "deleted",           # Permanently removed
+    "superseded",        # Replaced by newer version
+    "uploaded_in_error", # Marked as mistake by admin
+    "rejected",          # Rejected and needs replacement
+    "moved",             # Moved to different category
+    "archived",          # Archived for historical purposes
+    "misfiled",          # Filed under wrong category
+    "replaced",          # Legacy: replaced by newer
+    "removed",           # Legacy: soft-deleted
+]
+
+# Training record statuses that should be HIDDEN from active views
+EXCLUDED_TRAINING_STATUSES = [
+    "superseded",        # Replaced by newer training record
+    "deleted",           # Permanently removed
+]
+
+
 # Onboarding Status values
 class OnboardingStatus:
     NEW = "New"
@@ -2509,7 +2538,7 @@ async def calculate_expiry_alerts_quick(employee_id: str) -> dict:
             {"evidence_files": {"$exists": True, "$ne": []}}
         ],
         # Exclude soft-deleted or replaced
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "expiry_date": 1, "evidence_files": 1}).to_list(100)
     
     for doc in docs:
@@ -3620,7 +3649,7 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
         form_submission = await db.form_submissions.find_one({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
-            "status": {"$nin": ["deleted", "superseded"]}
+            "status": {"$nin": EXCLUDED_DOC_STATUSES}
         }, {"_id": 0, "id": 1, "status": 1, "verified": 1, "submitted_at": 1, "submitted_by_name": 1})
         
         if form_submission:
@@ -3655,7 +3684,7 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
             "employee_id": employee_id,
             "requirement_id": requirement_id,
             "file_url": {"$exists": True, "$ne": None},
-            "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+            "status": {"$nin": EXCLUDED_DOC_STATUSES},
             "$or": [
                 {"active": {"$exists": False}},
                 {"active": True}
@@ -3679,7 +3708,7 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
-            "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+            "status": {"$nin": EXCLUDED_DOC_STATUSES},
             "$or": [
                 {"active": {"$exists": False}},
                 {"active": True}
@@ -3933,7 +3962,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     dbs_cert = await db.employee_documents.find_one({
         "employee_id": employee_id,
         "requirement_id": "dbs_certificate",
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "status": {"$nin": EXCLUDED_DOC_STATUSES},
         "$or": [
             {"active": {"$exists": False}},
             {"active": True}
@@ -3945,7 +3974,7 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     dbs_update = await db.employee_documents.find_one({
         "employee_id": employee_id,
         "requirement_id": "dbs_check",
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "status": {"$nin": EXCLUDED_DOC_STATUSES},
         "$or": [
             {"active": {"$exists": False}},
             {"active": True}
@@ -4188,7 +4217,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
     rtw_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": "right_to_work_documents",
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "status": {"$nin": EXCLUDED_DOC_STATUSES},
         "$or": [{"active": {"$exists": False}}, {"active": True}],
         "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}).to_list(10)
@@ -4197,7 +4226,7 @@ async def get_employee_rtw_summary(employee_id: str) -> dict:
     rtw_check_docs = await db.employee_documents.find({
         "employee_id": employee_id,
         "requirement_id": "right_to_work_check",
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]},
+        "status": {"$nin": EXCLUDED_DOC_STATUSES},
         "$or": [{"active": {"$exists": False}}, {"active": True}],
         "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}).to_list(5)
@@ -9032,7 +9061,7 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
         "requirement_id": {"$in": list(CRITICAL_EXPIRY_DOCS)},
         "expiry_date": {"$exists": True, "$ne": None, "$lt": today_str},
         "verified": True,  # Only verified docs count for work readiness
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "requirement_id": 1, "expiry_date": 1}).to_list(10)
     
     if critical_expired_docs:
@@ -9078,7 +9107,7 @@ async def calculate_work_readiness_quick(employee_id: str, role: str) -> dict:
         "requirement_id": {"$in": list(work_ready_ids)},
         "verified": True,
         # Exclude deleted/replaced/archived records
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "requirement_id": 1}).to_list(100)
     
     # Get verified training for mandatory items
@@ -9172,7 +9201,7 @@ async def calculate_work_readiness_3tier_quick(employee_id: str, employee_data: 
         "employee_id": employee_id,
         "requirement_id": {"$in": hard_block_reqs},
         "verified": True,
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "requirement_id": 1, "expiry_date": 1}).to_list(20)
     
     verified_doc_ids = set()
@@ -9205,7 +9234,7 @@ async def calculate_work_readiness_3tier_quick(employee_id: str, employee_data: 
         "employee_id": employee_id,
         "requirement_id": {"$in": ["reference_1", "reference_2"]},
         "verified": True,
-        "status": {"$nin": ["deleted", "replaced", "removed", "archived", "superseded"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0, "requirement_id": 1}).to_list(10)
     
     ref_ids = {d['requirement_id'] for d in ref_docs}
@@ -15190,7 +15219,7 @@ async def upload_requirement_evidence(
         existing = await db.employee_documents.find_one({
             "employee_id": employee_id,
             "requirement_id": requirement_id,
-            "status": {"$nin": ["superseded", "archived", "deleted"]}
+            "status": {"$nin": EXCLUDED_DOC_STATUSES}
         }, {"_id": 0})
         
         if existing:
@@ -15343,7 +15372,7 @@ async def get_requirement_evidence(
         docs = await db.employee_documents.find({
             "employee_id": employee_id,
             "requirement_id": {"$in": req_ids_to_search},
-            "status": {"$nin": ["superseded", "archived", "deleted"]}
+            "status": {"$nin": EXCLUDED_DOC_STATUSES}
         }, {"_id": 0}).to_list(100)
         
         for doc in docs:
@@ -16629,12 +16658,12 @@ async def get_requirement_files(
     active_files = []
     historical_files = []
     
-    # IMPORTANT: Keep this in sync with build_evidence_row EXCLUDED_STATUSES
-    HISTORICAL_STATUSES = ['superseded', 'rejected', 'uploaded_in_error', 'moved', 'archived', 'deleted', 'misfiled']
+    # Use global constant for consistency across all views
+    # EXCLUDED_DOC_STATUSES is defined at module level for single source of truth
     
     for doc in all_docs:
         file_status = doc.get('status', 'active')
-        is_historical = file_status in HISTORICAL_STATUSES
+        is_historical = file_status in EXCLUDED_DOC_STATUSES
         
         # Get request linkage if exists
         request_linkage = None
@@ -17740,7 +17769,7 @@ async def create_employee_document(doc: EmployeeDocumentCreate, user: dict = Dep
         existing_doc = await db.employee_documents.find_one({
             "employee_id": doc.employee_id,
             "requirement_id": requirement_id,
-            "status": {"$nin": ["superseded", "archived", "deleted"]}
+            "status": {"$nin": EXCLUDED_DOC_STATUSES}
         }, {"_id": 0})
         
         if existing_doc:
@@ -18097,7 +18126,7 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
             form_submission = await db.form_submissions.find_one({
                 "employee_id": employee_id,
                 "requirement_id": req_id,
-                "status": {"$nin": ["deleted", "superseded"]}
+                "status": {"$nin": EXCLUDED_DOC_STATUSES}
             }, {"_id": 0})
             
             if form_submission:
@@ -33154,7 +33183,7 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     
     # Get form submissions (excluding superseded/deleted)
     form_submissions = await db.form_submissions.find(
-        {"employee_id": employee_id, "status": {"$nin": ["superseded", "deleted"]}}
+        {"employee_id": employee_id, "status": {"$nin": EXCLUDED_DOC_STATUSES}}
     ).sort("created_at", -1).to_list(length=100)
     
     # Index form submissions by requirement_id
@@ -34554,7 +34583,7 @@ async def get_compliance_file(
     
     # Get all form submissions for this employee (excluding superseded and deleted)
     all_form_submissions = await db.form_submissions.find(
-        {"employee_id": employee_id, "status": {"$nin": ["superseded", "deleted"]}}
+        {"employee_id": employee_id, "status": {"$nin": EXCLUDED_DOC_STATUSES}}
     ).sort("created_at", -1).to_list(length=100)
     
     # Index by requirement_id (first/newest match wins)
@@ -37371,7 +37400,7 @@ async def get_expiring_documents(days_threshold: int = 30) -> List[dict]:
     # Also check employee_documents collection for stamped documents with expiry
     docs_with_expiry = await db.employee_documents.find({
         "expiry_date": {"$exists": True, "$ne": None},
-        "status": {"$nin": ["deleted", "superseded", "rejected"]}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES}
     }, {"_id": 0}).to_list(500)
     
     for doc in docs_with_expiry:

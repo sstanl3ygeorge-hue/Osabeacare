@@ -8080,7 +8080,7 @@ async def request_renewal(
         upsert=True
     )
     
-    frontend_url = os.environ.get("FRONTEND_URL", "https://caretrust-portal.preview.emergentagent.com")
+    frontend_url = os.environ.get("FRONTEND_URL", "https://app.osabeacares.co.uk")
     portal_link = f"{frontend_url}/worker/verify?token={magic_token}"
     
     # Format expiry date
@@ -10221,7 +10221,7 @@ async def send_welcome_email_with_magic_link(employee: dict, employee_code: str)
             "purpose": "welcome_email"
         })
         
-        frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
         login_url = f"{frontend_url}/worker/verify?token={magic_token}"
         
         # Get org settings for branding
@@ -19103,7 +19103,7 @@ async def reject_employee_document(
                             doc_type_name = item.get("name", doc_type_name)
                             break
                 
-                portal_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+                portal_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
                 
                 email_html = f"""
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -25011,7 +25011,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
     # Send confirmation email with magic link to applicant portal
     try:
         # Generate magic link token for worker portal access
-        frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+        frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
         magic_token_data = {
             "employee_id": app_id,
             "email": form.email.lower(),
@@ -25094,6 +25094,8 @@ async def submit_structured_application(form: StructuredApplicationForm):
                 "html": email_html
             })
             logger.info(f"Welcome email with portal link sent to {form.email} for application {applicant_ref}")
+        else:
+            logger.warning(f"Resend API key not configured - structured application welcome email not sent for {form.email}")
     except Exception as e:
         # Log but don't fail the submission if email fails
         logger.warning(f"Failed to send welcome email to {form.email}: {e}")
@@ -29759,7 +29761,7 @@ class ReferenceIntegrityService:
                 admin_user = await db.users.find_one({"user_id": admin_id}, {"_id": 0, "name": 1})
                 admin_name = admin_user.get('name') if admin_user else 'Admin'
                 
-                portal_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+                portal_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
                 
                 referee_display = referee_name
                 if referee_company:
@@ -35914,7 +35916,7 @@ async def request_documents_batch(
         requirements_text += f"{i}. {req_name}\n   {req_desc or 'Required document'}\n\n"
     
     # Get upload portal URL
-    upload_url = f"{os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')}/public/upload/{employee_id}"
+    upload_url = f"{os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')}/public/upload/{employee_id}"
     
     custom_message_html = ""
     if request.custom_message:
@@ -37097,7 +37099,7 @@ async def send_training_expiry_reminder_email(
         </tr>
         """
     
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
     
     email_html = f"""
     <!DOCTYPE html>
@@ -37474,7 +37476,7 @@ async def send_document_expiry_reminder_email(
         </tr>
         """
     
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
     
     # Determine overall urgency for subject line
     min_days = min(d.get('days_until_expiry', 999) for d in expiring_documents)
@@ -37649,7 +37651,7 @@ async def send_admin_expiry_digest_email(
         </table>
         """
     
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
     
     email_html = f"""
     <!DOCTYPE html>

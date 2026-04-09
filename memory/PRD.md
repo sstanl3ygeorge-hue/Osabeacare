@@ -132,10 +132,17 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Phase 36: Audit & Email Templates routes (9 endpoints), removed ~369 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~45,910 lines (includes new CQC modules)
-- **Route modules**: 34 modules with ~316 endpoints extracted
-- **Remaining inline endpoints**: ~249 endpoints
+- **server.py**: ~45,400 lines (down from ~60,500 originally - **25% reduction**)
+- **Route modules**: 38 files with ~325+ endpoints extracted
+- **Remaining inline endpoints**: ~235 endpoints
 - **Testing**: All phases passing (100% success rate)
+
+### Modularization Progress (April 9, 2026)
+- Phase 37: Extracted feedback_complaints routes (9 endpoints)
+- Phase 38: Extracted policies routes (5 endpoints)
+- Routes now in /app/backend/routes/:
+  - feedback_complaints.py - Service user feedback & complaints handling
+  - policies.py - Organization policy CRUD
 
 ### New Routes Added (April 9, 2026)
 - `/portal/cqc-dashboard` - CQC Inspection Dashboard

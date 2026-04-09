@@ -22824,6 +22824,389 @@ CQC_EVIDENCE_MAPPING = {
 }
 
 
+# ==================== CQC INSPECTION DASHBOARD ====================
+
+@api_router.get("/cqc/inspection-dashboard")
+async def get_cqc_inspection_dashboard(user: dict = Depends(require_manager_or_admin)):
+    """
+    CQC Inspection Dashboard - Audit-ready compliance overview.
+    
+    Returns:
+    - Overall summary stats
+    - CQC 5 Key Questions assessment (Safe, Effective, Caring, Responsive, Well-led)
+    - Staff breakdown by role and compliance status
+    - Expiring documents in next 30 days
+    - Training compliance gaps
+    - Priority risk areas
+    """
+    now = datetime.now(timezone.utc)
+    thirty_days = timedelta(days=30)
+    
+    # ========== SUMMARY STATS ==========
+    total_staff = await db.employees.count_documents({
+        "status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING]}
+    })
+    
+    # Count work-ready staff (those with start_status complete)
+    work_ready_count = 0
+    onboarding_count = 0
+    critical_issues = 0
+    
+    all_employees = await db.employees.find(
+        {"status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING]}},
+        {"_id": 0, "id": 1, "role": 1, "first_name": 1, "last_name": 1, "status": 1}
+    ).to_list(1000)
+    
+    for emp in all_employees:
+        try:
+            compliance = await calculate_employee_compliance(emp["id"], emp.get("role", ""))
+            work_readiness = compliance.get("work_readiness_3tier", {})
+            
+            if work_readiness.get("status") == "READY_TO_WORK":
+                work_ready_count += 1
+            elif work_readiness.get("status") == "SUPERVISED_START":
+                onboarding_count += 1
+            else:
+                onboarding_count += 1
+            
+            # Count critical blockers
+            blockers = work_readiness.get("blockers_for_next_tier", [])
+            critical_blockers = [b for b in blockers if b.get("priority") == "start_required"]
+            if critical_blockers:
+                critical_issues += len(critical_blockers)
+        except Exception:
+            onboarding_count += 1
+    
+    summary = {
+        "total_staff": total_staff,
+        "work_ready": work_ready_count,
+        "work_ready_percentage": round((work_ready_count / total_staff * 100) if total_staff > 0 else 0, 1),
+        "onboarding": onboarding_count,
+        "critical_issues": critical_issues
+    }
+    
+    # ========== CQC 5 KEY QUESTIONS ==========
+    # Calculate scores for each domain based on compliance data
+    
+    # SAFE: DBS, RTW, Safeguarding, Identity verification
+    safe_items = ["dbs_certificate", "right_to_work", "safeguarding", "identity_verification", "proof_of_address"]
+    safe_complete = 0
+    safe_total = 0
+    
+    # EFFECTIVE: Training, References, Competency
+    effective_items = ["manual_handling", "infection_control", "basic_life_support", "reference_1", "reference_2", "cv"]
+    effective_complete = 0
+    effective_total = 0
+    
+    # CARING: Health questionnaire, Induction
+    caring_items = ["staff_health_questionnaire", "induction"]
+    caring_complete = 0
+    caring_total = 0
+    
+    # RESPONSIVE: Employment history, Interview, References
+    responsive_items = ["employment_history", "interview", "reference_1"]
+    responsive_complete = 0
+    responsive_total = 0
+    
+    # WELL-LED: Policies, Agreements, Contract
+    wellled_items = ["contract_acknowledgement", "whistleblowing_policy", "conflict_of_interest"]
+    wellled_complete = 0
+    wellled_total = 0
+    
+    # Sample 50 employees for domain scoring (performance optimization)
+    sample_employees = all_employees[:50]
+    
+    for emp in sample_employees:
+        try:
+            compliance = await calculate_employee_compliance(emp["id"], emp.get("role", ""))
+            requirements = compliance.get("requirements", [])
+            req_map = {r["id"]: r for r in requirements}
+            
+            for item in safe_items:
+                if item in req_map:
+                    safe_total += 1
+                    if req_map[item].get("has_evidence"):
+                        safe_complete += 1
+            
+            for item in effective_items:
+                if item in req_map:
+                    effective_total += 1
+                    if req_map[item].get("has_evidence"):
+                        effective_complete += 1
+            
+            for item in caring_items:
+                if item in req_map:
+                    caring_total += 1
+                    if req_map[item].get("has_evidence"):
+                        caring_complete += 1
+            
+            for item in responsive_items:
+                if item in req_map:
+                    responsive_total += 1
+                    if req_map[item].get("has_evidence"):
+                        responsive_complete += 1
+            
+            for item in wellled_items:
+                if item in req_map:
+                    wellled_total += 1
+                    if req_map[item].get("has_evidence"):
+                        wellled_complete += 1
+        except Exception:
+            pass
+    
+    def calc_score(complete, total):
+        return round((complete / total * 100) if total > 0 else 0, 1)
+    
+    def get_risk_level(score):
+        if score >= 80:
+            return "low"
+        elif score >= 60:
+            return "medium"
+        else:
+            return "high"
+    
+    cqc_domains = [
+        {
+            "name": "Safe",
+            "score": calc_score(safe_complete, safe_total),
+            "risk_level": get_risk_level(calc_score(safe_complete, safe_total)),
+            "summary": f"DBS, RTW, Identity & Safeguarding checks"
+        },
+        {
+            "name": "Effective",
+            "score": calc_score(effective_complete, effective_total),
+            "risk_level": get_risk_level(calc_score(effective_complete, effective_total)),
+            "summary": f"Training, References & Competency evidence"
+        },
+        {
+            "name": "Caring",
+            "score": calc_score(caring_complete, caring_total),
+            "risk_level": get_risk_level(calc_score(caring_complete, caring_total)),
+            "summary": f"Health declarations & Induction records"
+        },
+        {
+            "name": "Responsive",
+            "score": calc_score(responsive_complete, responsive_total),
+            "risk_level": get_risk_level(calc_score(responsive_complete, responsive_total)),
+            "summary": f"Employment history & Interview records"
+        },
+        {
+            "name": "Well-led",
+            "score": calc_score(wellled_complete, wellled_total),
+            "risk_level": get_risk_level(calc_score(wellled_complete, wellled_total)),
+            "summary": f"Contracts, Policies & Declarations"
+        }
+    ]
+    
+    # ========== STAFF BREAKDOWN BY ROLE ==========
+    role_counts = {}
+    role_compliant = {}
+    
+    for emp in all_employees:
+        role = emp.get("role", "Unknown")
+        role_counts[role] = role_counts.get(role, 0) + 1
+        
+        try:
+            compliance = await calculate_employee_compliance(emp["id"], role)
+            work_readiness = compliance.get("work_readiness_3tier", {})
+            if work_readiness.get("status") == "READY_TO_WORK":
+                role_compliant[role] = role_compliant.get(role, 0) + 1
+        except Exception:
+            pass
+    
+    staff_breakdown = [
+        {
+            "role": role,
+            "total": count,
+            "compliant": role_compliant.get(role, 0)
+        }
+        for role, count in sorted(role_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    ]
+    
+    # ========== EXPIRING DOCUMENTS ==========
+    exp_30 = (now + thirty_days).isoformat()
+    expiring_docs = await db.employee_documents.find(
+        {
+            "expiry_date": {"$lte": exp_30, "$gt": now.isoformat()},
+            "status": {"$ne": DocumentStatus.SUPERSEDED.value}
+        },
+        {"_id": 0, "employee_id": 1, "requirement_id": 1, "expiry_date": 1}
+    ).to_list(50)
+    
+    expiring_documents = []
+    for doc in expiring_docs:
+        emp = await db.employees.find_one({"id": doc["employee_id"]}, {"_id": 0, "first_name": 1, "last_name": 1})
+        if emp:
+            try:
+                exp_date = datetime.fromisoformat(doc["expiry_date"].replace('Z', '+00:00'))
+                days_until = (exp_date - now).days
+            except Exception:
+                days_until = 30
+            
+            expiring_documents.append({
+                "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+                "document_type": doc.get("requirement_id", "Document"),
+                "days_until_expiry": max(0, days_until)
+            })
+    
+    expiring_documents.sort(key=lambda x: x["days_until_expiry"])
+    
+    # ========== TRAINING GAPS ==========
+    training_names = ["Safeguarding", "Manual Handling", "Infection Control", "Basic Life Support", "Fire Safety", "PREVENT"]
+    training_gaps = []
+    
+    for training_name in training_names:
+        # Count how many staff have this training
+        records = await db.training_records.find(
+            {"training_name": {"$regex": training_name, "$options": "i"}, "status": "completed"},
+            {"_id": 0, "employee_id": 1}
+        ).to_list(1000)
+        
+        trained_employee_ids = set(r["employee_id"] for r in records)
+        missing_count = total_staff - len(trained_employee_ids)
+        compliance_rate = round((len(trained_employee_ids) / total_staff * 100) if total_staff > 0 else 0, 1)
+        
+        if missing_count > 0:
+            training_gaps.append({
+                "training_name": training_name,
+                "missing_count": missing_count,
+                "compliance_rate": compliance_rate
+            })
+    
+    training_gaps.sort(key=lambda x: x["compliance_rate"])
+    
+    # ========== PRIORITY RISK AREAS ==========
+    risk_areas = []
+    
+    # Check for expired DBS
+    expired_dbs = await db.employee_documents.count_documents({
+        "requirement_id": "dbs_certificate",
+        "expiry_date": {"$lt": now.isoformat()},
+        "status": {"$ne": DocumentStatus.SUPERSEDED.value}
+    })
+    if expired_dbs > 0:
+        risk_areas.append({
+            "title": "Expired DBS Certificates",
+            "description": "Staff with expired DBS checks require immediate renewal",
+            "severity": "high",
+            "affected_count": expired_dbs
+        })
+    
+    # Check for missing Right to Work
+    missing_rtw = await db.employee_documents.count_documents({
+        "requirement_id": "right_to_work",
+        "status": {"$in": [DocumentStatus.REQUESTED.value, "pending"]}
+    })
+    if missing_rtw > 0:
+        risk_areas.append({
+            "title": "Missing Right to Work",
+            "description": "Staff without verified Right to Work documentation",
+            "severity": "high",
+            "affected_count": missing_rtw
+        })
+    
+    # Check for training gaps > 20%
+    for gap in training_gaps:
+        if gap["compliance_rate"] < 80:
+            risk_areas.append({
+                "title": f"Low {gap['training_name']} Compliance",
+                "description": f"Only {gap['compliance_rate']}% of staff have completed this mandatory training",
+                "severity": "medium" if gap["compliance_rate"] >= 60 else "high",
+                "affected_count": gap["missing_count"]
+            })
+    
+    risk_areas.sort(key=lambda x: 0 if x["severity"] == "high" else 1)
+    
+    return {
+        "summary": summary,
+        "cqc_domains": cqc_domains,
+        "staff_breakdown": staff_breakdown,
+        "expiring_documents": expiring_documents[:20],
+        "training_gaps": training_gaps[:6],
+        "risk_areas": risk_areas[:6],
+        "generated_at": now.isoformat()
+    }
+
+
+@api_router.get("/cqc/inspection-report/pdf")
+async def export_cqc_inspection_report_pdf(user: dict = Depends(require_manager_or_admin)):
+    """
+    Export CQC Inspection Dashboard as PDF report.
+    """
+    # Get dashboard data
+    dashboard = await get_cqc_inspection_dashboard(user)
+    
+    # Create PDF
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=30, bottomMargin=30)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Title
+    title_style = ParagraphStyle('Title', parent=styles['Title'], fontSize=24, spaceAfter=20)
+    story.append(Paragraph("CQC Inspection Readiness Report", title_style))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y at %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Summary Section
+    story.append(Paragraph("Executive Summary", styles['Heading2']))
+    summary = dashboard["summary"]
+    summary_data = [
+        ["Total Staff", str(summary["total_staff"])],
+        ["Work Ready", f"{summary['work_ready']} ({summary['work_ready_percentage']}%)"],
+        ["In Onboarding", str(summary["onboarding"])],
+        ["Critical Issues", str(summary["critical_issues"])]
+    ]
+    summary_table = Table(summary_data, colWidths=[200, 200])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('PADDING', (0, 0), (-1, -1), 8),
+    ]))
+    story.append(summary_table)
+    story.append(Spacer(1, 20))
+    
+    # CQC 5 Key Questions
+    story.append(Paragraph("CQC 5 Key Questions Assessment", styles['Heading2']))
+    cqc_data = [["Domain", "Score", "Risk Level", "Summary"]]
+    for domain in dashboard["cqc_domains"]:
+        cqc_data.append([
+            domain["name"],
+            f"{domain['score']}%",
+            domain["risk_level"].upper(),
+            domain["summary"]
+        ])
+    cqc_table = Table(cqc_data, colWidths=[80, 60, 80, 260])
+    cqc_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e40af')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('PADDING', (0, 0), (-1, -1), 6),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+    ]))
+    story.append(cqc_table)
+    story.append(Spacer(1, 20))
+    
+    # Risk Areas
+    if dashboard["risk_areas"]:
+        story.append(Paragraph("Priority Risk Areas", styles['Heading2']))
+        for area in dashboard["risk_areas"]:
+            risk_text = f"<b>{area['title']}</b> ({area['severity'].upper()}) - {area['affected_count']} affected"
+            story.append(Paragraph(risk_text, styles['Normal']))
+            story.append(Paragraph(area['description'], styles['Normal']))
+            story.append(Spacer(1, 10))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=CQC_Inspection_Report_{datetime.now().strftime('%Y%m%d')}.pdf"}
+    )
+
+
 @api_router.get("/compliance/cqc-evidence-map")
 async def get_cqc_evidence_map(user: dict = Depends(get_current_user)):
     """
@@ -39803,6 +40186,358 @@ async def notify_unverified_submissions(user: dict = Depends(require_admin)):
 # Service users routes have been moved to routes/service_users.py
 # Includes: /service-users CRUD, /service-users/{id}/documents, 
 # /service-user-sections, SERVICE_USER_SECTIONS constant
+
+
+# ==================== SERVICE USER FEEDBACK (CQC "Caring" Evidence) ====================
+
+@api_router.get("/service-user-feedback")
+async def get_service_user_feedback(
+    skip: int = 0,
+    limit: int = 50,
+    user: dict = Depends(get_current_user)
+):
+    """Get all service user feedback records"""
+    feedback_records = await db.service_user_feedback.find(
+        {},
+        {"_id": 0}
+    ).sort("date_received", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with employee names
+    for record in feedback_records:
+        if record.get("employee_id"):
+            emp = await db.employees.find_one(
+                {"id": record["employee_id"]},
+                {"_id": 0, "first_name": 1, "last_name": 1}
+            )
+            if emp:
+                record["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+    
+    total = await db.service_user_feedback.count_documents({})
+    
+    return {
+        "feedback": feedback_records,
+        "total": total
+    }
+
+
+@api_router.get("/service-user-feedback/stats")
+async def get_service_user_feedback_stats(user: dict = Depends(get_current_user)):
+    """Get statistics for service user feedback"""
+    total = await db.service_user_feedback.count_documents({})
+    compliments = await db.service_user_feedback.count_documents({"feedback_type": "compliment"})
+    suggestions = await db.service_user_feedback.count_documents({"feedback_type": "suggestion"})
+    concerns = await db.service_user_feedback.count_documents({"feedback_type": "concern"})
+    complaints_count = await db.service_user_feedback.count_documents({"feedback_type": "complaint"})
+    
+    # Calculate average rating
+    pipeline = [
+        {"$match": {"rating": {"$exists": True, "$ne": None}}},
+        {"$group": {"_id": None, "avg_rating": {"$avg": "$rating"}}}
+    ]
+    avg_result = await db.service_user_feedback.aggregate(pipeline).to_list(1)
+    avg_rating = avg_result[0]["avg_rating"] if avg_result else None
+    
+    return {
+        "total": total,
+        "compliments": compliments,
+        "suggestions": suggestions,
+        "concerns": concerns,
+        "complaints": complaints_count,
+        "average_rating": avg_rating
+    }
+
+
+@api_router.post("/service-user-feedback")
+async def create_service_user_feedback(
+    feedback: dict,
+    user: dict = Depends(get_current_user)
+):
+    """Create a new service user feedback record"""
+    feedback_id = str(uuid.uuid4())
+    
+    now = datetime.now(timezone.utc)
+    
+    feedback_record = {
+        "id": feedback_id,
+        "service_user_id": feedback.get("service_user_id"),
+        "service_user_name": feedback.get("service_user_name"),
+        "employee_id": feedback.get("employee_id"),
+        "feedback_type": feedback.get("feedback_type", "compliment"),
+        "rating": feedback.get("rating", 5),
+        "title": feedback.get("title", ""),
+        "description": feedback.get("description", ""),
+        "date_received": feedback.get("date_received", now.isoformat()),
+        "recorded_by": user.get("user_id"),
+        "recorded_by_name": user.get("email"),
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat()
+    }
+    
+    await db.service_user_feedback.insert_one(feedback_record)
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "create_feedback",
+        "service_user_feedback",
+        feedback_id,
+        {"feedback_type": feedback_record["feedback_type"], "rating": feedback_record["rating"]}
+    )
+    
+    return {"success": True, "id": feedback_id, "message": "Feedback recorded successfully"}
+
+
+# ==================== COMPLAINTS HANDLING (CQC Requirement) ====================
+
+@api_router.get("/complaints")
+async def get_complaints(
+    skip: int = 0,
+    limit: int = 50,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get all complaints"""
+    query = {}
+    if status:
+        query["status"] = status
+    
+    complaints_records = await db.complaints.find(
+        query,
+        {"_id": 0}
+    ).sort("date_received", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with employee names
+    for record in complaints_records:
+        if record.get("employee_id") and record["employee_id"] != "unknown":
+            emp = await db.employees.find_one(
+                {"id": record["employee_id"]},
+                {"_id": 0, "first_name": 1, "last_name": 1}
+            )
+            if emp:
+                record["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+    
+    total = await db.complaints.count_documents(query)
+    
+    return {
+        "complaints": complaints_records,
+        "total": total
+    }
+
+
+@api_router.get("/complaints/stats")
+async def get_complaints_stats(user: dict = Depends(get_current_user)):
+    """Get statistics for complaints"""
+    total = await db.complaints.count_documents({})
+    open_count = await db.complaints.count_documents({"status": "received"})
+    investigating = await db.complaints.count_documents({"status": "investigating"})
+    awaiting = await db.complaints.count_documents({"status": "awaiting_response"})
+    resolved = await db.complaints.count_documents({"status": "resolved"})
+    closed = await db.complaints.count_documents({"status": "closed"})
+    
+    # Calculate average resolution time for resolved/closed complaints
+    pipeline = [
+        {"$match": {"status": {"$in": ["resolved", "closed"]}, "resolved_at": {"$exists": True}}},
+        {"$project": {
+            "resolution_days": {
+                "$divide": [
+                    {"$subtract": [
+                        {"$dateFromString": {"dateString": "$resolved_at"}},
+                        {"$dateFromString": {"dateString": "$date_received"}}
+                    ]},
+                    86400000  # milliseconds in a day
+                ]
+            }
+        }},
+        {"$group": {"_id": None, "avg_days": {"$avg": "$resolution_days"}}}
+    ]
+    try:
+        avg_result = await db.complaints.aggregate(pipeline).to_list(1)
+        avg_resolution_days = avg_result[0]["avg_days"] if avg_result else None
+    except Exception:
+        avg_resolution_days = None
+    
+    return {
+        "total": total,
+        "open": open_count,
+        "investigating": investigating,
+        "awaiting_response": awaiting,
+        "resolved": resolved,
+        "closed": closed,
+        "avg_resolution_days": avg_resolution_days
+    }
+
+
+@api_router.get("/complaints/{complaint_id}")
+async def get_complaint_by_id(
+    complaint_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Get a single complaint by ID"""
+    complaint = await db.complaints.find_one({"id": complaint_id}, {"_id": 0})
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    # Enrich with employee name
+    if complaint.get("employee_id") and complaint["employee_id"] != "unknown":
+        emp = await db.employees.find_one(
+            {"id": complaint["employee_id"]},
+            {"_id": 0, "first_name": 1, "last_name": 1}
+        )
+        if emp:
+            complaint["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+    
+    return complaint
+
+
+@api_router.post("/complaints")
+async def create_complaint(
+    complaint: dict,
+    user: dict = Depends(get_current_user)
+):
+    """Create a new complaint record"""
+    complaint_id = str(uuid.uuid4())
+    
+    # Generate reference number
+    count = await db.complaints.count_documents({})
+    reference_number = f"CMP-{datetime.now().strftime('%Y%m')}-{str(count + 1).zfill(4)}"
+    
+    now = datetime.now(timezone.utc)
+    
+    complaint_record = {
+        "id": complaint_id,
+        "reference_number": reference_number,
+        "complainant_name": complaint.get("complainant_name", ""),
+        "complainant_relationship": complaint.get("complainant_relationship", ""),
+        "complainant_contact": complaint.get("complainant_contact", ""),
+        "employee_id": complaint.get("employee_id"),
+        "category": complaint.get("category", ""),
+        "severity": complaint.get("severity", "medium"),
+        "status": "received",
+        "title": complaint.get("title", ""),
+        "description": complaint.get("description", ""),
+        "date_received": complaint.get("date_received", now.isoformat()),
+        "date_of_incident": complaint.get("date_of_incident"),
+        "desired_outcome": complaint.get("desired_outcome", ""),
+        "notes": [],
+        "recorded_by": user.get("user_id"),
+        "recorded_by_name": user.get("email"),
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat()
+    }
+    
+    await db.complaints.insert_one(complaint_record)
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "create_complaint",
+        "complaint",
+        complaint_id,
+        {"reference_number": reference_number, "category": complaint_record["category"], "severity": complaint_record["severity"]}
+    )
+    
+    return {"success": True, "id": complaint_id, "reference_number": reference_number, "message": "Complaint logged successfully"}
+
+
+@api_router.patch("/complaints/{complaint_id}/status")
+async def update_complaint_status(
+    complaint_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """Update complaint status"""
+    new_status = data.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="Status is required")
+    
+    valid_statuses = ["received", "investigating", "awaiting_response", "resolved", "closed"]
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+    
+    now = datetime.now(timezone.utc)
+    
+    update_data = {
+        "status": new_status,
+        "updated_at": now.isoformat()
+    }
+    
+    # Add resolved timestamp if status is resolved or closed
+    if new_status in ["resolved", "closed"]:
+        update_data["resolved_at"] = now.isoformat()
+    
+    result = await db.complaints.update_one(
+        {"id": complaint_id},
+        {"$set": update_data}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    # Add status change note
+    await db.complaints.update_one(
+        {"id": complaint_id},
+        {"$push": {
+            "notes": {
+                "text": f"Status changed to: {new_status}",
+                "created_by": user.get("email"),
+                "created_at": now.isoformat()
+            }
+        }}
+    )
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "update_complaint_status",
+        "complaint",
+        complaint_id,
+        {"new_status": new_status}
+    )
+    
+    return {"success": True, "message": f"Status updated to {new_status}"}
+
+
+@api_router.post("/complaints/{complaint_id}/notes")
+async def add_complaint_note(
+    complaint_id: str,
+    data: dict,
+    user: dict = Depends(get_current_user)
+):
+    """Add a note to a complaint"""
+    note_text = data.get("note")
+    if not note_text:
+        raise HTTPException(status_code=400, detail="Note text is required")
+    
+    now = datetime.now(timezone.utc)
+    
+    note = {
+        "text": note_text,
+        "created_by": user.get("email"),
+        "created_at": now.isoformat()
+    }
+    
+    result = await db.complaints.update_one(
+        {"id": complaint_id},
+        {
+            "$push": {"notes": note},
+            "$set": {"updated_at": now.isoformat()}
+        }
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+    
+    # Log audit
+    await log_audit_action(
+        user["user_id"],
+        "add_complaint_note",
+        "complaint",
+        complaint_id,
+        {}
+    )
+    
+    return {"success": True, "message": "Note added successfully"}
+
 
 # ==================== SEED DATA ====================
 

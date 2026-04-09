@@ -16,7 +16,7 @@ import {
 } from '../ui/dropdown-menu';
 import {
   LayoutDashboard, Users, GraduationCap,
-  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, UserCog, Upload
+  History, Settings, Menu, LogOut, ChevronDown, Bell, Search, UserPlus, ClipboardList, Building2, FileCheck, Shield, Heart, Eye, UserCheck, Calendar, UserCog, Upload, MessageSquare, AlertTriangle
 } from 'lucide-react';
 
 const navigation = [
@@ -28,6 +28,9 @@ const navigation = [
   // Templates hidden for Audit Mode - forms system hidden from UI
   // { name: 'Templates', href: '/portal/templates', icon: ClipboardList },
   { name: 'Compliance Centre', href: '/portal/compliance-centre', icon: Building2 },
+  { name: 'CQC Dashboard', href: '/portal/cqc-dashboard', icon: Shield },
+  { name: 'Feedback', href: '/portal/feedback', icon: MessageSquare },
+  { name: 'Complaints', href: '/portal/complaints', icon: AlertTriangle },
   // Policy Assignments removed - consolidated into Compliance Centre
   { name: 'Training', href: '/portal/training', icon: GraduationCap },
   { name: 'DBS Register', href: '/portal/dbs-register', icon: Shield },

@@ -46,6 +46,9 @@ import ServiceUserProfilePage from "./pages/portal/ServiceUserProfilePage";
 import RecruitmentPipelinePage from "./pages/portal/RecruitmentPage";
 import ScheduledRequestsPage from "./pages/portal/ScheduledRequestsPage";
 import AdminUsersPage from "./pages/portal/AdminUsersPage";
+import CQCInspectionDashboard from "./pages/portal/CQCInspectionDashboard";
+import ServiceUserFeedbackPage from "./pages/portal/ServiceUserFeedbackPage";
+import ComplaintsHandlingPage from "./pages/portal/ComplaintsHandlingPage";
 
 // Auth Context
 import { AuthProvider } from "./context/AuthContext";
@@ -119,6 +122,9 @@ function AppRouter() {
         <Route path="dbs-register" element={<DBSRegisterPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="compliance-centre" element={<ComplianceCentrePage />} />
+        <Route path="cqc-dashboard" element={<CQCInspectionDashboard />} />
+        <Route path="feedback" element={<ServiceUserFeedbackPage />} />
+        <Route path="complaints" element={<ComplaintsHandlingPage />} />
         <Route path="forms/:formId" element={<FormEditorPage />} />
         <Route path="audit" element={<AuditViewPage />} />
         <Route path="service-users" element={<ServiceUsersPage />} />

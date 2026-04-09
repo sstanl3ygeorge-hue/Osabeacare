@@ -125,6 +125,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── seed_cleanup.py              - 5 endpoints [NEW - Phase 50]
 ├── test_cleanup.py              - 2 endpoints [NEW - Phase 51]
 ├── reference_comparison.py      - 1 endpoint [NEW - Phase 52]
+├── cqc_evidence.py              - 1 endpoint [NEW - Phase 53]
+├── inspection_pack.py           - 1 endpoint [NEW - Phase 54]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -148,28 +150,16 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Phase 36: Audit & Email Templates routes (9 endpoints), removed ~369 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~39,300 lines (down from ~60,500 originally - **35% reduction**)
-- **Route modules**: 54 files with ~430+ endpoints extracted
-- **Remaining inline endpoints**: ~170 endpoints
+- **server.py**: ~38,900 lines (down from ~60,500 originally - **36% reduction**)
+- **Route modules**: 56 files with ~440+ endpoints extracted
+- **Remaining inline endpoints**: ~169 endpoints
 - **Testing**: All phases passing (100% success rate)
 
 ### Modularization Progress (April 9-10, 2026)
-- Phase 37: Extracted feedback_complaints routes (9 endpoints)
-- Phase 38: Extracted policies routes (5 endpoints)
-- Phase 39: Extracted referee_outreach routes (8 endpoints)
-- Phase 40: Extracted induction routes (5 endpoints)
-- Phase 41: Extracted competency routes (7 endpoints)
-- Phase 42: Extracted spot_checks routes (8 endpoints)
-- Phase 43: Extracted task_queue routes (2 endpoints)
-- Phase 44: Extracted pre_employment routes (2 endpoints)
-- Phase 45: Extracted training_intake routes (3 endpoints)
-- Phase 46: Extracted form_email routes (3 endpoints)
-- Phase 47: Extracted verification_sync routes (2 endpoints)
-- Phase 48: Extracted public_upload routes (3 endpoints)
-- **Phase 49: Extracted email_notifications routes (5 endpoints)** [DONE - April 10, 2026]
-- **Phase 50: Extracted seed_cleanup routes (5 endpoints)** [DONE - April 10, 2026]
-- **Phase 51: Extracted test_cleanup routes (2 endpoints)** [DONE - April 10, 2026]
-- **Phase 52: Extracted reference_comparison routes (1 endpoint)** [DONE - April 10, 2026]
+- Phase 37-52: All completed (feedback, policies, referee, induction, competency, spot_checks, task_queue, pre_employment, training_intake, form_email, verification_sync, public_upload, email_notifications, seed_cleanup, test_cleanup, reference_comparison)
+- **Phase 53: Extracted cqc_evidence routes (1 endpoint + CQC_EVIDENCE_MAPPING constant)** [DONE - April 10, 2026]
+- **Phase 54: Extracted inspection_pack routes (1 endpoint)** [DONE - April 10, 2026]
+- Note: recurring_compliance was already extracted in previous sessions
 
 ### New Route Files (April 10, 2026)
 - `/app/backend/routes/referee_outreach.py` - NHS-level referee outreach system
@@ -226,15 +216,14 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Audit logging for merge operations
 
 ### P1: Continue Server.py Modularization
-- [x] Phase 39-48: All completed (see above)
-- [x] Phase 49: Email Notifications (5 endpoints)
-- [x] Phase 50: Seed/Cleanup (5 endpoints)
-- [x] Phase 51: Test Cleanup (2 endpoints)
-- [x] Phase 52: Reference Comparison (1 endpoint)
-- [ ] Extract more remaining inline routes (~170 left)
-  - Inspection Pack Generation
-  - CQC Evidence Mapping
-  - Recurring Compliance endpoints
+- [x] Phase 37-52: All completed (see above)
+- [x] Phase 53: CQC Evidence Mapping (1 endpoint + constant)
+- [x] Phase 54: Inspection Pack (1 endpoint)
+- [x] Recurring Compliance (already extracted in previous sessions)
+- [ ] Extract more remaining inline routes (~169 left)
+  - CQC Inspection Dashboard endpoint
+  - Employee CRUD operations
+  - Document management endpoints
 - [ ] Extract helper functions/services to separate modules
 
 ### P3: Future Enhancements

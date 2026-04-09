@@ -461,7 +461,7 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
     })
     
     # Send email
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')
+    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
     login_url = f"{frontend_url}/worker/verify?token={magic_token}"
     
     email_content = f"""
@@ -501,6 +501,8 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
             logger.info(f"Magic link sent to {request.email} for worker login")
         except Exception as e:
             logger.error(f"Failed to send magic link email: {e}")
+    else:
+        logger.warning(f"Resend API key not configured - worker login email not sent for {request.email}")
     
     return {"success": True, "message": "If an account exists, you will receive a login link"}
 

@@ -166,10 +166,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     employee_status = employee.get("status", "onboarding")
     is_active_employee = employee_status == "active_employee"
     
-    # Get documents
+    # Get documents - IMPORTANT: Exclude ALL non-active statuses at query level for data sync
+    # This must match the filtering in server.py HISTORICAL_STATUSES for consistency
+    EXCLUDED_STATUSES = ["deleted", "superseded", "uploaded_in_error", "rejected", "moved", "archived", "misfiled"]
     documents = await db.employee_documents.find({
         "employee_id": employee_id,
-        "status": {"$nin": ["deleted", "superseded"]}
+        "status": {"$nin": EXCLUDED_STATUSES}
     }).to_list(length=200)
     
     # Required document types with their acceptable requirement_id patterns
@@ -216,12 +218,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     for doc_type, doc_config in required_docs.items():
         doc_name = doc_config["name"]
+        # All documents here are already filtered to active statuses only (query level)
         matching = [d for d in documents 
-                   if matches_requirement(d.get("requirement_id", ""), doc_config)
-                   and d.get("status") not in ['superseded', 'uploaded_in_error']]
+                   if matches_requirement(d.get("requirement_id", ""), doc_config)]
         
-        rejected_docs = [d for d in matching if d.get("status") == 'rejected']
-        active_docs = [d for d in matching if d.get("status") != 'rejected']
+        # Active docs are the ones we can work with
+        active_docs = matching  # All are active since we filtered at query level
         
         if active_docs:
             verified_docs = [d for d in matching if (
@@ -272,30 +274,19 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "raw_status": doc.get("status")
             })
         else:
-            rejected_info = None
-            if rejected_docs:
-                rejected_docs.sort(key=lambda x: x.get("rejected_at") or "", reverse=True)
-                rejected_doc = rejected_docs[0]
-                rejected_info = {
-                    "rejected": True,
-                    "rejection_reason": rejected_doc.get("rejection_reason"),
-                    "rejected_at": rejected_doc.get("rejected_at"),
-                    "rejected_by_name": rejected_doc.get("rejected_by_name"),
-                    "previous_file_name": rejected_doc.get("original_filename") or rejected_doc.get("file_name")
-                }
-            
+            # No active documents - check if there was a rejection to show helpful message
+            # Note: rejected docs are already excluded at query level, but we can check historical
             missing_docs.append({
                 "type": doc_type,
                 "name": doc_name,
-                "action": "re_upload" if rejected_info else "upload",
-                "rejection": rejected_info
+                "action": "upload"
             })
     
     # Check POA needs 2 documents - handle all cases for data sync with admin
     poa_config = required_docs["proof_of_address"]
+    # All docs are already filtered to active statuses at query level
     poa_docs = [d for d in documents 
-               if matches_requirement(d.get("requirement_id", ""), poa_config)
-               and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
+               if matches_requirement(d.get("requirement_id", ""), poa_config)]
     
     # Remove the generic POA entry added by the loop above - we'll handle POA specially
     completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]

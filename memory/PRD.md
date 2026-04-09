@@ -109,6 +109,11 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── pdf_exports.py               - 10 endpoints
 ├── generated_forms.py           - 14 endpoints
 ├── audit_email.py               - 9 endpoints [NEW - Phase 36]
+├── feedback_complaints.py       - 9 endpoints [NEW - Phase 37]
+├── policies.py                  - 5 endpoints [NEW - Phase 38]
+├── referee_outreach.py          - 8 endpoints [NEW - Phase 39]
+├── induction.py                 - 5 endpoints [NEW - Phase 40]
+├── competency.py                - 7 endpoints [NEW - Phase 41]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -132,14 +137,34 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Phase 36: Audit & Email Templates routes (9 endpoints), removed ~369 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~45,400 lines (down from ~60,500 originally - **25% reduction**)
-- **Route modules**: 38 files with ~325+ endpoints extracted
-- **Remaining inline endpoints**: ~235 endpoints
+- **server.py**: ~43,700 lines (down from ~60,500 originally - **28% reduction**)
+- **Route modules**: 41 files with ~350+ endpoints extracted
+- **Remaining inline endpoints**: ~216 endpoints
 - **Testing**: All phases passing (100% success rate)
 
 ### Modularization Progress (April 9, 2026)
 - Phase 37: Extracted feedback_complaints routes (9 endpoints)
 - Phase 38: Extracted policies routes (5 endpoints)
+- **Phase 39: Extracted referee_outreach routes (8 endpoints)** [DONE - April 10, 2026]
+- **Phase 40: Extracted induction routes (5 endpoints)** [DONE - April 10, 2026]
+- **Phase 41: Extracted competency routes (7 endpoints)** [DONE - April 10, 2026]
+
+### New Route Files (April 10, 2026)
+- `/app/backend/routes/referee_outreach.py` - NHS-level referee outreach system
+  - Send reference requests to referees via email
+  - Public form completion (no auth required)
+  - 2-step verification (Manager review -> Admin verify)
+  - Mismatch detection and documentation
+- `/app/backend/routes/induction.py` - Induction checklist management
+  - 15 Care Certificate standards tracking
+  - Auto-sync with verified training records
+  - Admin tools for reset/migration
+- `/app/backend/routes/competency.py` - Competency records tracking
+  - Role-based competency requirements
+  - Assessment scheduling
+  - Expiry tracking and reminders
+
+### Routes Added (April 9, 2026)
 - Routes now in /app/backend/routes/:
   - feedback_complaints.py - Service user feedback & complaints handling
   - policies.py - Organization policy CRUD
@@ -163,9 +188,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Audit logging for merge operations
 
 ### P1: Continue Server.py Modularization
-- [ ] Extract more remaining inline routes (~246 left)
+- [x] Phase 39: Referee Outreach (8 endpoints)
+- [x] Phase 40: Induction Checklist (5 endpoints)
+- [x] Phase 41: Competency Records (7 endpoints)
+- [ ] Extract more remaining inline routes (~216 left)
+  - Spot Check endpoints
+  - Pre-Employment Gates endpoints
+  - Training Intake endpoints
+  - Task Queue endpoints
 - [ ] Extract helper functions/services to separate modules
-- [ ] Identify next batch of related endpoints
 
 ### P3: Future Enhancements
 - [ ] Supabase Auth integration with RLS policies

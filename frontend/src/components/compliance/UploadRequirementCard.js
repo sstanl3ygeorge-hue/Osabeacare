@@ -582,19 +582,27 @@ export default function UploadRequirementCard({
                           </Badge>
                         )}
                         
-                        {/* View Stamped Document button - ONLY when stamp exists */}
+                        {/* View Stamped Document button - PROMINENT when stamp exists */}
                         {file.verification_stamp && file.stamped_file_url && (
                           <Button
                             size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                            variant="default"
+                            className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium shadow-sm"
                             onClick={() => window.open(file.stamped_file_url, '_blank')}
-                            title="View stamped document"
+                            title="View the stamped/verified version of this document"
                             data-testid={`${key}-view-stamped-${file.file_id || file.id}`}
                           >
-                            <FileCheck className="h-3 w-3 mr-1" />
-                            View Stamped
+                            <FileCheck className="h-3.5 w-3.5 mr-1" />
+                            View Stamped Version
                           </Button>
+                        )}
+                        
+                        {/* Show indicator if verified but no stamped file URL yet */}
+                        {file.verification_stamp && !file.stamped_file_url && (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
+                            <Clock className="h-2.5 w-2.5 mr-0.5" />
+                            Stamp pending
+                          </Badge>
                         )}
                         
                         {/* NOTE: For RTW/DBS - Stamp button REMOVED from here */}

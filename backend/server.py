@@ -20296,10 +20296,14 @@ async def back_stamp_verified_documents(
     import httpx
     from supabase_storage import upload_file_to_supabase
     
-    # Find verified documents without stamped files
+    # Find verified documents without stamped files (either missing field OR null/empty value)
     query = {
         "verification_stamp": {"$nin": [None, "", "not_verified"]},
-        "stamped_file_url": {"$exists": False},
+        "$or": [
+            {"stamped_file_url": {"$exists": False}},
+            {"stamped_file_url": None},
+            {"stamped_file_url": ""}
+        ],
         "file_url": {"$exists": True, "$ne": None}
     }
     
@@ -20340,54 +20344,117 @@ async def back_stamp_verified_documents(
                 "verification_id": doc_id[:8]
             }
             
-            # Download and stamp
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(file_url)
-                if response.status_code == 200:
-                    original_bytes = response.content
-                    content_type = response.headers.get("content-type", "").lower()
-                    
-                    stamped_bytes = None
-                    file_ext = None
-                    
-                    if "pdf" in content_type or file_url.lower().endswith(".pdf"):
-                        stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
-                        file_ext = "pdf"
-                    elif any(t in content_type for t in ["image/", "png", "jpg", "jpeg"]):
-                        original_format = "PNG" if ("png" in content_type or file_url.lower().endswith(".png")) else "JPEG"
-                        file_ext = "png" if original_format == "PNG" else "jpg"
-                        stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
-                    
-                    if stamped_bytes:
-                        stamped_filename = f"stamped_{doc_id}_{uuid.uuid4().hex[:8]}.{file_ext}"
-                        stamped_url = await upload_file_to_supabase(
-                            stamped_bytes,
-                            stamped_filename,
-                            f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
-                        )
-                        
-                        if stamped_url:
-                            await db.employee_documents.update_one(
-                                {"id": doc_id},
-                                {"$set": {
-                                    "stamped_file_url": stamped_url,
-                                    "stamp_burned_at": datetime.now(timezone.utc).isoformat()
-                                }}
-                            )
-                            results["success"] += 1
+            # Get the file directly from storage (bypass API auth)
+            stored_file_url = doc.get("file_url")
+            doc_id = doc.get("id")
+            
+            original_bytes = None
+            content_type = None
+            
+            # Try to get file using internal storage functions
+            try:
+                # First try if it's already a full URL
+                if stored_file_url and stored_file_url.startswith("http"):
+                    async with httpx.AsyncClient(timeout=30.0) as http_client:
+                        response = await http_client.get(stored_file_url)
+                        if response.status_code == 200:
+                            original_bytes = response.content
+                            content_type = response.headers.get("content-type", "").lower()
+                
+                # If not a full URL, try Supabase storage directly
+                if not original_bytes and stored_file_url:
+                    from supabase_storage import download_file_from_storage, get_supabase_public_url, SUPABASE_URL
+                    try:
+                        # Try to construct full URL and download
+                        if SUPABASE_URL and not stored_file_url.startswith("http"):
+                            # Stored path format: osabea-care/documents/xxx/file.pdf
+                            # Need to convert to: https://xxx.supabase.co/storage/v1/object/public/documents/osabea-care/documents/xxx/file.pdf
+                            # Actually the bucket is 'osabea-care', so just append the rest
+                            full_url = f"{SUPABASE_URL}/storage/v1/object/public/{stored_file_url}"
+                            original_bytes = await download_file_from_storage(full_url)
                         else:
-                            results["failed"] += 1
-                            results["errors"].append(f"{doc_id}: Upload failed")
-                    else:
-                        results["failed"] += 1
-                        results["errors"].append(f"{doc_id}: Could not stamp (unsupported format)")
+                            original_bytes = await download_file_from_storage(stored_file_url)
+                        
+                        if original_bytes:
+                            # Guess content type from filename
+                            if stored_file_url.lower().endswith(".pdf"):
+                                content_type = "application/pdf"
+                            elif stored_file_url.lower().endswith((".png", ".jpg", ".jpeg")):
+                                content_type = f"image/{stored_file_url.lower().split('.')[-1]}"
+                    except Exception as storage_err:
+                        logger.warning(f"Supabase fetch failed for {doc_id}: {storage_err}")
+                
+                # If still no bytes, try emergent cloud storage
+                if not original_bytes and stored_file_url:
+                    try:
+                        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig
+                        CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
+                        if CLOUD_STORAGE_URL:
+                            storage = CloudStorage(StorageConfig(storage_url=CLOUD_STORAGE_URL))
+                            original_bytes = await storage.download_file_async(stored_file_url)
+                            if stored_file_url.lower().endswith(".pdf"):
+                                content_type = "application/pdf"
+                            elif stored_file_url.lower().endswith((".png", ".jpg", ".jpeg")):
+                                content_type = f"image/{stored_file_url.lower().split('.')[-1]}"
+                    except Exception as cloud_err:
+                        logger.warning(f"CloudStorage fetch failed for {doc_id}: {cloud_err}")
+                        
+            except Exception as fetch_err:
+                logger.error(f"All fetch methods failed for {doc_id}: {fetch_err}")
+            
+            if not original_bytes:
+                results["failed"] += 1
+                results["errors"].append(f"{doc_id[:20]}...: Could not fetch file")
+                continue
+            
+            # Now stamp the document
+            stamped_bytes = None
+            file_ext = None
+            
+            if content_type and ("pdf" in content_type or stored_file_url.lower().endswith(".pdf")):
+                stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+                file_ext = "pdf"
+            elif content_type and any(t in content_type for t in ["image/", "png", "jpg", "jpeg"]):
+                original_format = "PNG" if ("png" in content_type or stored_file_url.lower().endswith(".png")) else "JPEG"
+                file_ext = "png" if original_format == "PNG" else "jpg"
+                stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+            elif stored_file_url:
+                # Guess from filename
+                if stored_file_url.lower().endswith(".pdf"):
+                    stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+                    file_ext = "pdf"
+                elif stored_file_url.lower().endswith((".png", ".jpg", ".jpeg")):
+                    original_format = "PNG" if stored_file_url.lower().endswith(".png") else "JPEG"
+                    file_ext = "png" if original_format == "PNG" else "jpg"
+                    stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+            
+            if stamped_bytes:
+                stamped_filename = f"stamped_{doc_id}_{uuid.uuid4().hex[:8]}.{file_ext}"
+                stamped_url = await upload_file_to_supabase(
+                    stamped_bytes,
+                    stamped_filename,
+                    f"application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+                )
+                
+                if stamped_url:
+                    await db.employee_documents.update_one(
+                        {"id": doc_id},
+                        {"$set": {
+                            "stamped_file_url": stamped_url,
+                            "stamp_burned_at": datetime.now(timezone.utc).isoformat()
+                        }}
+                    )
+                    results["success"] += 1
                 else:
                     results["failed"] += 1
-                    results["errors"].append(f"{doc_id}: Download failed ({response.status_code})")
+                    results["errors"].append(f"{doc_id[:20]}...: Upload failed")
+            else:
+                results["failed"] += 1
+                results["errors"].append(f"{doc_id[:20]}...: Could not stamp (unsupported format)")
                     
         except Exception as e:
             results["failed"] += 1
-            results["errors"].append(f"{doc.get('id', 'unknown')}: {str(e)}")
+            results["errors"].append(f"{doc.get('id', 'unknown')[:20]}...: {str(e)[:50]}")
     
     # Get remaining count
     remaining = await db.employee_documents.count_documents(query)

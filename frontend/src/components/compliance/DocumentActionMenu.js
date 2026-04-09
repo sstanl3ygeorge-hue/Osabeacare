@@ -14,15 +14,10 @@ import {
 /**
  * DocumentActionMenu - Per-file action dropdown menu
  * 
- * Actions shown based on backend-allowed actions and file state:
- * - View / Download (always)
- * - Review Extraction (if extraction pending)
- * - Verify / Reject (if awaiting verification)
- * - Remove Stamp (if stamped)
- * - Mark Uploaded in Error
- * - Supersede / Replace
- * - Move Category
- * - View File History
+ * Simplified UX following 5 E's of Usability:
+ * - Primary actions: View, Download (always visible)
+ * - Verification: Verify OR Request Replacement (mutually exclusive states)
+ * - Admin Actions: Grouped under "More Actions" to reduce clutter
  */
 export default function DocumentActionMenu({
   file,
@@ -39,14 +34,18 @@ export default function DocumentActionMenu({
   isAuditor = false,
   isProcessing = false
 }) {
-  // Determine what actions to show based on file state
+  // Simplified state checks
+  // IMPORTANT: Exclude "not_verified" which is a placeholder value, not an actual stamp
+  const hasValidStamp = file.verification_stamp && 
+    file.verification_stamp !== 'not_verified' && 
+    file.verification_stamp !== '';
+  const isVerified = file.verified || hasValidStamp || file.stamped_file_url;
   const hasExtraction = file.extraction_status?.status === 'awaiting_review';
-  const canVerify = !file.verified && !file.rejected && file.status !== 'superseded';
-  const canRequestReplacement = !file.verified && !file.rejected && file.status !== 'superseded';
-  const canRemoveStamp = !!file.verification_stamp || !!file.stamped_file_url;
-  const canMarkError = file.status !== 'uploaded_in_error' && file.status !== 'superseded';
-  const canSupersede = file.status !== 'superseded' && file.status !== 'uploaded_in_error';
-  const canMove = file.status !== 'superseded' && file.status !== 'uploaded_in_error' && file.status !== 'rejected';
+  const isActiveFile = !['superseded', 'uploaded_in_error', 'rejected', 'deleted'].includes(file.status);
+  
+  // Determine primary action based on file state
+  const showVerifyAction = !isVerified && isActiveFile && !isAuditor;
+  const showRemoveStamp = isVerified && !isAuditor;
 
   return (
     <DropdownMenu>
@@ -61,12 +60,12 @@ export default function DocumentActionMenu({
           <MoreVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        {/* View & Download - Always available */}
+      <DropdownMenuContent align="end" className="w-52">
+        {/* Primary Actions - Always visible */}
         {onView && (
           <DropdownMenuItem onClick={onView} data-testid="action-view">
             <Eye className="h-4 w-4 mr-2" />
-            View
+            View File
           </DropdownMenuItem>
         )}
         {onDownload && (
@@ -76,67 +75,71 @@ export default function DocumentActionMenu({
           </DropdownMenuItem>
         )}
 
-        {/* Extraction Review - If extraction pending */}
+        {/* Extraction Review - High priority if pending */}
         {hasExtraction && onExtractReview && !isAuditor && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onExtractReview} data-testid="action-extract-review">
               <FileSearch className="h-4 w-4 mr-2 text-purple-600" />
-              <span className="text-purple-600">Review Extraction</span>
+              <span className="text-purple-600 font-medium">Review Extraction</span>
             </DropdownMenuItem>
           </>
         )}
 
-        {/* Verification Actions - If not auditor */}
-        {!isAuditor && (canVerify || canRequestReplacement) && (
+        {/* Verification Section */}
+        {!isAuditor && (showVerifyAction || showRemoveStamp) && (
           <>
             <DropdownMenuSeparator />
-            {canVerify && onVerify && (
+            {showVerifyAction && onVerify && (
               <DropdownMenuItem onClick={onVerify} data-testid="action-verify">
                 <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                <span className="text-green-600">Verify</span>
+                <span className="text-green-600 font-medium">Verify & Stamp</span>
               </DropdownMenuItem>
             )}
-            {canRequestReplacement && onReject && (
+            {showRemoveStamp && onRemoveStamp && (
+              <DropdownMenuItem onClick={onRemoveStamp} data-testid="action-remove-stamp">
+                <Stamp className="h-4 w-4 mr-2 text-amber-600" />
+                <span className="text-amber-600">Remove Stamp</span>
+              </DropdownMenuItem>
+            )}
+          </>
+        )}
+
+        {/* Document Management - Only for active files, non-auditors */}
+        {!isAuditor && isActiveFile && (
+          <>
+            <DropdownMenuSeparator />
+            {/* Request Replacement is the preferred way to get new document from employee */}
+            {!isVerified && onReject && (
               <DropdownMenuItem onClick={onReject} data-testid="action-request-replacement">
                 <RotateCcw className="h-4 w-4 mr-2 text-amber-600" />
                 <span className="text-amber-600">Request Replacement</span>
               </DropdownMenuItem>
             )}
-          </>
-        )}
-
-        {/* Remove Stamp - If file has a stamp */}
-        {!isAuditor && canRemoveStamp && onRemoveStamp && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onRemoveStamp} data-testid="action-remove-stamp">
-              <Stamp className="h-4 w-4 mr-2 text-amber-600" />
-              <span className="text-amber-600">Remove Stamp</span>
-            </DropdownMenuItem>
-          </>
-        )}
-
-        {/* File Management Actions - If not auditor */}
-        {!isAuditor && (canMarkError || canSupersede || canMove) && (
-          <>
-            <DropdownMenuSeparator />
-            {canSupersede && onSupersede && (
-              <DropdownMenuItem onClick={onSupersede} data-testid="action-supersede">
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Supersede / Replace
-              </DropdownMenuItem>
-            )}
-            {canMove && onMoveCategory && (
-              <DropdownMenuItem onClick={onMoveCategory} data-testid="action-move">
-                <ArrowRight className="h-4 w-4 mr-2" />
-                Move Category
-              </DropdownMenuItem>
-            )}
-            {canMarkError && onMarkUploadedInError && (
+            {/* Mark as error - when file shouldn't be here */}
+            {onMarkUploadedInError && (
               <DropdownMenuItem onClick={onMarkUploadedInError} data-testid="action-mark-error" className="text-red-600">
                 <Trash2 className="h-4 w-4 mr-2" />
-                Mark Uploaded in Error
+                Remove (Uploaded in Error)
+              </DropdownMenuItem>
+            )}
+          </>
+        )}
+
+        {/* Advanced Actions - Hidden in submenu or shown sparingly */}
+        {!isAuditor && isActiveFile && (onSupersede || onMoveCategory) && (
+          <>
+            <DropdownMenuSeparator />
+            {onMoveCategory && (
+              <DropdownMenuItem onClick={onMoveCategory} data-testid="action-move" className="text-gray-600">
+                <ArrowRight className="h-4 w-4 mr-2" />
+                Move to Category
+              </DropdownMenuItem>
+            )}
+            {onSupersede && (
+              <DropdownMenuItem onClick={onSupersede} data-testid="action-supersede" className="text-gray-600">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Archive & Replace
               </DropdownMenuItem>
             )}
           </>
@@ -148,7 +151,7 @@ export default function DocumentActionMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onViewHistory} data-testid="action-history">
               <History className="h-4 w-4 mr-2" />
-              View File History
+              File History
             </DropdownMenuItem>
           </>
         )}

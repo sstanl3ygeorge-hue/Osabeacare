@@ -291,15 +291,54 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "rejection": rejected_info
             })
     
-    # Check POA needs 2 documents
+    # Check POA needs 2 documents - handle all cases for data sync with admin
     poa_config = required_docs["proof_of_address"]
     poa_docs = [d for d in documents 
                if matches_requirement(d.get("requirement_id", ""), poa_config)
                and d.get("status") not in ['superseded', 'rejected', 'uploaded_in_error']]
-    if len(poa_docs) < 2:
-        if len(poa_docs) == 1:
-            completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]
-            poa_doc = poa_docs[0]
+    
+    # Remove the generic POA entry added by the loop above - we'll handle POA specially
+    completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]
+    
+    if len(poa_docs) == 0:
+        # No POA docs - add to missing
+        missing_docs.append({
+            "type": "proof_of_address",
+            "name": "Proof of Address (need 2)",
+            "action": "upload"
+        })
+    elif len(poa_docs) == 1:
+        # Only 1 POA doc - show it with partial status
+        poa_doc = poa_docs[0]
+        is_verified = (
+            poa_doc.get("verification_stamp") not in [None, "", "not_verified"] or
+            poa_doc.get("verified") == True or
+            poa_doc.get("status") == "verified"
+        )
+        file_url = poa_doc.get("stamped_file_url") if is_verified else poa_doc.get("file_url")
+        completed_docs.append({
+            "id": poa_doc.get("id"),
+            "type": "proof_of_address",
+            "name": "Proof of Address (1 of 2)",
+            "verified": is_verified,
+            "uploaded_at": poa_doc.get("uploaded_at"),
+            "file_url": file_url,
+            "file_name": poa_doc.get("file_name") or poa_doc.get("original_filename"),
+            "document_id": poa_doc.get("id"),
+            "partial": True,
+            "status": "verified" if is_verified else "pending_verification",
+            "verified_by_name": poa_doc.get("verification_stamp_by_name") or poa_doc.get("verified_by_name"),
+            "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
+        })
+        missing_docs.append({
+            "type": "proof_of_address_2",
+            "name": "Second Proof of Address (need 1 more)",
+            "action": "upload"
+        })
+    else:
+        # 2+ POA docs - show ALL of them (sync with admin view)
+        poa_docs.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
+        for idx, poa_doc in enumerate(poa_docs[:5]):  # Cap at 5 to match admin max
             is_verified = (
                 poa_doc.get("verification_stamp") not in [None, "", "not_verified"] or
                 poa_doc.get("verified") == True or
@@ -308,23 +347,18 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             file_url = poa_doc.get("stamped_file_url") if is_verified else poa_doc.get("file_url")
             completed_docs.append({
                 "id": poa_doc.get("id"),
-                "type": "proof_of_address",
-                "name": "Proof of Address (1 of 2)",
+                "type": f"proof_of_address_{idx+1}" if idx > 0 else "proof_of_address",
+                "name": f"Proof of Address {idx + 1}",
                 "verified": is_verified,
                 "uploaded_at": poa_doc.get("uploaded_at"),
                 "file_url": file_url,
                 "file_name": poa_doc.get("file_name") or poa_doc.get("original_filename"),
                 "document_id": poa_doc.get("id"),
-                "partial": True,
+                "partial": False,
                 "status": "verified" if is_verified else "pending_verification",
                 "verified_by_name": poa_doc.get("verification_stamp_by_name") or poa_doc.get("verified_by_name"),
                 "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
             })
-        missing_docs.append({
-            "type": "proof_of_address_2",
-            "name": f"Second Proof of Address (need {2 - len(poa_docs)} more)",
-            "action": "upload"
-        })
     
     # Get training
     trainings = await db.training_records.find({

@@ -313,7 +313,13 @@ export default function RequirementFilesDrawer({
   // Render file status badge
   const renderStatusBadge = (file) => {
     // Show Osabea Verified badge prominently if stamped
-    if (file.stamped_file_url || file.verification_stamp) {
+    // IMPORTANT: Exclude "not_verified" which is a placeholder value, not an actual stamp
+    const hasValidStamp = file.stamped_file_url || 
+      (file.verification_stamp && 
+       file.verification_stamp !== 'not_verified' && 
+       file.verification_stamp !== '');
+    
+    if (hasValidStamp) {
       const stampType = typeof file.verification_stamp === 'object' 
         ? file.verification_stamp?.stamp_type 
         : file.verification_stamp;
@@ -517,12 +523,6 @@ export default function RequirementFilesDrawer({
                                    file.source_type}
                                 </p>
                               )}
-                              {file.stamped_file_url && (
-                                <p className="text-purple-600 flex items-center gap-1">
-                                  <CheckCircle className="h-3 w-3" />
-                                  <span className="font-medium">CQC Stamped</span>
-                                </p>
-                              )}
                               {file.expiry_date && (
                                 <p>
                                   <span className="font-medium">Expires:</span>{' '}
@@ -535,7 +535,8 @@ export default function RequirementFilesDrawer({
                                   {formatBackendDate(file.document_date, { format: 'medium' })}
                                 </p>
                               )}
-                              {file.verified && file.verified_by && (
+                              {/* Show verification details only if NOT already shown via stamp badge */}
+                              {file.verified && file.verified_by && !file.stamped_file_url && !file.verification_stamp && (
                                 <p className="text-green-600">
                                   <span className="font-medium">Verified:</span>{' '}
                                   {formatBackendDate(file.verified_at, { format: 'medium' })} by {file.verified_by}

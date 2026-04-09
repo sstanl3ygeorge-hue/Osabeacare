@@ -16582,7 +16582,7 @@ async def get_requirement_files(
     
     # Legacy mapping for requirement keys
     # Maps serializer keys (e.g., "right_to_work_evidence") to document requirement IDs
-    # IMPORTANT: Must include ALL variants including public upload values
+    # IMPORTANT: Must include ALL variants including public upload values and numbered variants
     legacy_mapping = {
         "dbs_certificate": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
         "dbs_evidence": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
@@ -16591,8 +16591,11 @@ async def get_requirement_files(
         "identity_evidence": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document"],
         "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
-        "proof_of_address": ["proof_of_address", "address_proof", "proof_of_address_evidence", "address_evidence"],
-        "proof_of_address_evidence": ["proof_of_address", "address_proof", "proof_of_address_evidence", "address_evidence"],
+        # POA: Include numbered variants (proof_of_address_2, proof_of_address_3, etc.) for multi-file sync
+        "proof_of_address": ["proof_of_address", "address_proof", "proof_of_address_evidence", "address_evidence", 
+                            "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5", "poa"],
+        "proof_of_address_evidence": ["proof_of_address", "address_proof", "proof_of_address_evidence", "address_evidence",
+                                      "proof_of_address_2", "proof_of_address_3", "proof_of_address_4", "proof_of_address_5", "poa"],
     }
     req_ids_to_search = legacy_mapping.get(requirement_key, [requirement_key])
     

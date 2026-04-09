@@ -551,38 +551,65 @@ export default function UploadRequirementCard({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {/* Status badge - check verified field, status field, AND verification_stamp */}
-                        {(file.verified || file.status === 'verified' || file.verification_stamp) ? (
-                          <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border border-green-200">
-                            <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
-                            Accepted
-                          </Badge>
-                        ) : file.status === 'rejected' ? (
-                          <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border border-red-200">
-                            <X className="h-2.5 w-2.5 mr-0.5" />
-                            Rejected
-                          </Badge>
-                        ) : file.extraction_status?.status === 'awaiting_review' ? (
-                          <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-700 border border-purple-200">
-                            <Clock className="h-2.5 w-2.5 mr-0.5" />
-                            Extraction pending
-                          </Badge>
-                        ) : (
-                          <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
-                            <Clock className="h-2.5 w-2.5 mr-0.5" />
-                            Pending Review
-                          </Badge>
-                        )}
+                        {/* SINGLE STATUS BADGE - Mutually exclusive states */}
+                        {(() => {
+                          // Determine the ONE status to show (priority order)
+                          const hasStampedFile = file.verification_stamp && file.stamped_file_url;
+                          const hasStampNoFile = file.verification_stamp && !file.stamped_file_url;
+                          const isVerified = file.verified || file.status === 'verified';
+                          const isRejected = file.status === 'rejected';
+                          const isExtractionPending = file.extraction_status?.status === 'awaiting_review';
+                          
+                          if (hasStampedFile) {
+                            // Fully verified with viewable stamped PDF
+                            return (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                <Stamp className="h-2.5 w-2.5 mr-0.5" />
+                                Verified & Stamped
+                              </Badge>
+                            );
+                          } else if (hasStampNoFile) {
+                            // Has verification stamp but stamped PDF not yet generated
+                            return (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                Generating Stamp...
+                              </Badge>
+                            );
+                          } else if (isVerified) {
+                            // Verified/accepted but not yet stamped
+                            return (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border border-green-200">
+                                <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
+                                Accepted
+                              </Badge>
+                            );
+                          } else if (isRejected) {
+                            return (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-700 border border-red-200">
+                                <X className="h-2.5 w-2.5 mr-0.5" />
+                                Rejected
+                              </Badge>
+                            );
+                          } else if (isExtractionPending) {
+                            return (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-purple-100 text-purple-700 border border-purple-200">
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                Processing...
+                              </Badge>
+                            );
+                          } else {
+                            // Default: needs review
+                            return (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
+                                <Clock className="h-2.5 w-2.5 mr-0.5" />
+                                Pending Review
+                              </Badge>
+                            );
+                          }
+                        })()}
                         
-                        {/* Show VERIFIED & STAMPED badge for fully verified RTW/DBS */}
-                        {(key === 'right_to_work' || key === 'dbs') && file.verification_stamp && (
-                          <Badge className="text-[10px] px-1.5 py-0 bg-emerald-100 text-emerald-700 border border-emerald-200">
-                            <Stamp className="h-2.5 w-2.5 mr-0.5" />
-                            Stamped
-                          </Badge>
-                        )}
-                        
-                        {/* View Stamped Document button - PROMINENT when stamp exists */}
+                        {/* View Stamped Document button - ONLY when stamped file exists */}
                         {file.verification_stamp && file.stamped_file_url && (
                           <Button
                             size="sm"
@@ -593,24 +620,12 @@ export default function UploadRequirementCard({
                             data-testid={`${key}-view-stamped-${file.file_id || file.id}`}
                           >
                             <FileCheck className="h-3.5 w-3.5 mr-1" />
-                            View Stamped Version
+                            View Stamped
                           </Button>
                         )}
                         
-                        {/* Show indicator if verified but no stamped file URL yet */}
-                        {file.verification_stamp && !file.stamped_file_url && (
-                          <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
-                            <Clock className="h-2.5 w-2.5 mr-0.5" />
-                            Stamp pending
-                          </Badge>
-                        )}
-                        
-                        {/* NOTE: For RTW/DBS - Stamp button REMOVED from here */}
-                        {/* Stamping now happens from Verification row via "Confirm & Stamp All" */}
-                        {/* This ensures stamp is only applied AFTER verification proof is uploaded */}
-                        
                         {/* UNIFIED Verify & Stamp button - For Identity and PoA (simple checks) */}
-                        {/* Only show if NOT already verified (check all verification indicators) */}
+                        {/* Only show if NOT already verified/stamped */}
                         {!isAuditor && !file.verification_stamp && !file.verified && file.status !== 'verified' && file.status !== 'rejected' && (key === 'identity' || key === 'proof_of_address') && (
                           <Button
                             size="sm"
@@ -627,14 +642,6 @@ export default function UploadRequirementCard({
                             <CheckCircle className="h-3 w-3 mr-1" />
                             Verify & Stamp
                           </Button>
-                        )}
-                        
-                        {/* Show verified badge for Identity/PoA after stamping */}
-                        {(key === 'identity' || key === 'proof_of_address') && file.verification_stamp && (
-                          <Badge className="bg-green-100 text-green-700 text-xs flex items-center gap-1">
-                            <CheckCircle className="h-3 w-3" />
-                            Verified & Stamped
-                          </Badge>
                         )}
                         
                         {/* Review Evidence button - visible for non-verified files (RTW/DBS only) */}

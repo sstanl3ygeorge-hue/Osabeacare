@@ -114,6 +114,10 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ├── referee_outreach.py          - 8 endpoints [NEW - Phase 39]
 ├── induction.py                 - 5 endpoints [NEW - Phase 40]
 ├── competency.py                - 7 endpoints [NEW - Phase 41]
+├── spot_checks.py               - 8 endpoints [NEW - Phase 42]
+├── task_queue.py                - 2 endpoints [NEW - Phase 43]
+├── pre_employment.py            - 2 endpoints [NEW - Phase 44]
+├── training_intake.py           - 3 endpoints [NEW - Phase 45]
 └── verification_routes.py       - 7 endpoints
 ```
 
@@ -137,17 +141,21 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - **Phase 36: Audit & Email Templates routes (9 endpoints), removed ~369 lines** [DONE]
 
 ### Current Status
-- **server.py**: ~43,700 lines (down from ~60,500 originally - **28% reduction**)
-- **Route modules**: 41 files with ~350+ endpoints extracted
-- **Remaining inline endpoints**: ~216 endpoints
+- **server.py**: ~42,500 lines (down from ~60,500 originally - **30% reduction**)
+- **Route modules**: 45 files with ~375+ endpoints extracted
+- **Remaining inline endpoints**: ~198 endpoints
 - **Testing**: All phases passing (100% success rate)
 
-### Modularization Progress (April 9, 2026)
+### Modularization Progress (April 9-10, 2026)
 - Phase 37: Extracted feedback_complaints routes (9 endpoints)
 - Phase 38: Extracted policies routes (5 endpoints)
 - **Phase 39: Extracted referee_outreach routes (8 endpoints)** [DONE - April 10, 2026]
 - **Phase 40: Extracted induction routes (5 endpoints)** [DONE - April 10, 2026]
 - **Phase 41: Extracted competency routes (7 endpoints)** [DONE - April 10, 2026]
+- **Phase 42: Extracted spot_checks routes (8 endpoints)** [DONE - April 10, 2026]
+- **Phase 43: Extracted task_queue routes (2 endpoints)** [DONE - April 10, 2026]
+- **Phase 44: Extracted pre_employment routes (2 endpoints)** [DONE - April 10, 2026]
+- **Phase 45: Extracted training_intake routes (3 endpoints)** [DONE - April 10, 2026]
 
 ### New Route Files (April 10, 2026)
 - `/app/backend/routes/referee_outreach.py` - NHS-level referee outreach system
@@ -163,6 +171,22 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
   - Role-based competency requirements
   - Assessment scheduling
   - Expiry tracking and reminders
+- `/app/backend/routes/spot_checks.py` - Spot check management
+  - Observation, document review, competency checks
+  - Scheduling and follow-up tracking
+  - PDF report generation
+- `/app/backend/routes/task_queue.py` - Admin task dashboard
+  - Pending verifications
+  - Expiring documents
+  - References awaiting review
+  - Recent uploads
+- `/app/backend/routes/pre_employment.py` - Pre-employment gates
+  - 12-14 gate status (role-dependent)
+  - Manual gate updates
+- `/app/backend/routes/training_intake.py` - Training certificate processing
+  - Proposed training items
+  - Multi-certificate extraction trigger
+  - Email requests for certificates
 
 ### Routes Added (April 9, 2026)
 - Routes now in /app/backend/routes/:
@@ -191,11 +215,15 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 - [x] Phase 39: Referee Outreach (8 endpoints)
 - [x] Phase 40: Induction Checklist (5 endpoints)
 - [x] Phase 41: Competency Records (7 endpoints)
-- [ ] Extract more remaining inline routes (~216 left)
-  - Spot Check endpoints
-  - Pre-Employment Gates endpoints
-  - Training Intake endpoints
-  - Task Queue endpoints
+- [x] Phase 42: Spot Checks (8 endpoints)
+- [x] Phase 43: Task Queue (2 endpoints)
+- [x] Phase 44: Pre-Employment Gates (2 endpoints)
+- [x] Phase 45: Training Intake (3 endpoints)
+- [ ] Extract more remaining inline routes (~198 left)
+  - Email Services & Templates
+  - Form Submission Processing
+  - Verification Sync utilities
+  - Reference-Employment Comparison
 - [ ] Extract helper functions/services to separate modules
 
 ### P3: Future Enhancements

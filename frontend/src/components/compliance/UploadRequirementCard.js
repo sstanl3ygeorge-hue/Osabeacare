@@ -551,7 +551,8 @@ export default function UploadRequirementCard({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {file.verified ? (
+                        {/* Status badge - check verified field, status field, AND verification_stamp */}
+                        {(file.verified || file.status === 'verified' || file.verification_stamp) ? (
                           <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 border border-green-200">
                             <CheckCircle className="h-2.5 w-2.5 mr-0.5" />
                             Accepted
@@ -601,7 +602,8 @@ export default function UploadRequirementCard({
                         {/* This ensures stamp is only applied AFTER verification proof is uploaded */}
                         
                         {/* UNIFIED Verify & Stamp button - For Identity and PoA (simple checks) */}
-                        {!isAuditor && !file.verification_stamp && (key === 'identity' || key === 'proof_of_address') && file.status !== 'rejected' && (
+                        {/* Only show if NOT already verified (check all verification indicators) */}
+                        {!isAuditor && !file.verification_stamp && !file.verified && file.status !== 'verified' && file.status !== 'rejected' && (key === 'identity' || key === 'proof_of_address') && (
                           <Button
                             size="sm"
                             variant="default"

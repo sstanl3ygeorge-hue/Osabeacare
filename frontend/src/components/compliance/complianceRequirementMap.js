@@ -197,15 +197,21 @@ export function normalizeUploadDrawerData(raw, requirementKey) {
       new Date(a.sent_at || a.created_at || 0).getTime()
   );
 
+  // A file is pending review only if NOT verified by any indicator
   const pendingReviewFiles = activeFiles.filter(
     (file) =>
       !file?.verified &&
+      file?.status !== 'verified' &&
+      !file?.verification_stamp &&
       !file?.rejected &&
       !file?.uploaded_in_error_reason &&
       file?.status !== 'uploaded_in_error'
   );
 
-  const verifiedFiles = activeFiles.filter((file) => !!file?.verified);
+  // A file is verified if ANY verification indicator is true
+  const verifiedFiles = activeFiles.filter((file) => 
+    !!file?.verified || file?.status === 'verified' || !!file?.verification_stamp
+  );
 
   // For PoA, calculate valid files (within 9 months)
   const validPoAFiles =

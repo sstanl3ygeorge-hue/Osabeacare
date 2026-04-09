@@ -103,9 +103,12 @@ function deriveUploadRowStatus({ activeFiles, latestRequest, authoritativeCheck,
   
   // Files state
   const activeCount = activeFiles.length;
+  // A file is pending review only if it's NOT verified by any indicator
   const pendingReview = activeFiles.filter(f => 
-    f.extraction_status?.status === 'awaiting_review' || 
-    (!f.verified && f.status === 'active')
+    !f.verified && 
+    f.status !== 'verified' && 
+    !f.verification_stamp &&
+    (f.extraction_status?.status === 'awaiting_review' || f.status === 'active' || f.status === 'uploaded')
   ).length;
   
   if (pendingReview > 0) {
@@ -139,9 +142,13 @@ function buildUploadSummary({ requirementKey, activeFiles, historicalFiles, late
   const requestState = deriveRequestState(latestRequest);
   
   const activeCount = activeFiles.length;
-  const verifiedCount = activeFiles.filter(f => f.verified).length;
+  const verifiedCount = activeFiles.filter(f => f.verified || f.status === 'verified' || f.verification_stamp).length;
+  // A file is pending review only if it's NOT verified by any indicator
   const pendingReview = activeFiles.filter(f => 
-    !f.verified && (f.extraction_status?.status === 'awaiting_review' || f.status === 'active')
+    !f.verified && 
+    f.status !== 'verified' && 
+    !f.verification_stamp &&
+    (f.extraction_status?.status === 'awaiting_review' || f.status === 'active' || f.status === 'uploaded')
   ).length;
   
   // Check status (authoritative)

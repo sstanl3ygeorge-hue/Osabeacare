@@ -19375,7 +19375,13 @@ async def apply_verification_stamp(
         "verification_stamp_notes": payload.notes.strip() if payload.notes else None,
         "verification_stamp_by": user['user_id'],
         "verification_stamp_by_name": reviewer_name,
-        "verification_stamp_at": now
+        "verification_stamp_at": now,
+        # CRITICAL: Also set verified flag and status for consistent state
+        "verified": True,
+        "verified_at": now,
+        "verified_by": user['user_id'],
+        "verified_by_name": reviewer_name,
+        "status": "verified"
     }
     
     # ==========================================================================
@@ -19596,7 +19602,10 @@ async def remove_verification_stamp(
         "verification_stamp_removed_by": user['user_id'],
         "verification_stamp_removed_by_name": remover_name,
         "previous_verification_stamp": previous_stamp,
-        "previous_stamped_file_url": doc.get("stamped_file_url")  # Keep audit of what was removed
+        "previous_stamped_file_url": doc.get("stamped_file_url"),  # Keep audit of what was removed
+        # CRITICAL: Reset verified status when stamp is removed
+        "verified": False,
+        "status": "uploaded"  # Revert to uploaded status for re-review
     }
     
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})

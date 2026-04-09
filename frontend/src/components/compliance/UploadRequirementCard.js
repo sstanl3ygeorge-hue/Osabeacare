@@ -554,8 +554,12 @@ export default function UploadRequirementCard({
                         {/* SINGLE STATUS BADGE - Mutually exclusive states */}
                         {(() => {
                           // Determine the ONE status to show (priority order)
-                          const hasStampedFile = file.verification_stamp && file.stamped_file_url;
-                          const hasStampNoFile = file.verification_stamp && !file.stamped_file_url;
+                          // IMPORTANT: verification_stamp can be "not_verified" or empty - don't count those
+                          const hasValidStamp = file.verification_stamp && 
+                                               file.verification_stamp !== 'not_verified' && 
+                                               file.verification_stamp !== '';
+                          const hasStampedFile = hasValidStamp && file.stamped_file_url;
+                          const hasStampNoFile = hasValidStamp && !file.stamped_file_url;
                           const isVerified = file.verified || file.status === 'verified';
                           const isRejected = file.status === 'rejected';
                           const isExtractionPending = file.extraction_status?.status === 'awaiting_review';

@@ -16616,8 +16616,9 @@ async def get_requirement_files(
         "dbs_certificate": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
         "dbs_evidence": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
         "dbs_certificate_evidence": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
-        "identity_documents": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document"],
-        "identity_evidence": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document"],
+        # Identity: Include "passport" to sync with worker dashboard
+        "identity_documents": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document", "passport"],
+        "identity_evidence": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document", "passport"],
         "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         # POA: Include numbered variants (proof_of_address_2, proof_of_address_3, etc.) for multi-file sync

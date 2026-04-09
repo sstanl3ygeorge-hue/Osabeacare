@@ -207,6 +207,16 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 
 ## Pending/In Progress
 
+### P0: Document Sync & Request Replacement (COMPLETED - April 10, 2026)
+- [x] Fixed frontend rejection endpoint (`/documents/{id}/reject` -> `/api/employee-documents/{id}/request-replacement`)
+- [x] Updated DocumentActionMenu.js: "Reject" -> "Request Replacement" with RotateCcw icon (amber color)
+- [x] RequirementFilesDrawer.js correctly calls the new endpoint
+- [x] Backend endpoint marks document as `rejected` with `replacement_requested=true`
+- [x] Worker dashboard shows rejected docs as "missing" with `action: "re_upload"` and rejection reason
+- [x] Legacy mapping ensures `identity` requirement_id documents appear under `identity_evidence` tab
+- [x] Email notification sent to employee when replacement requested (if notify_employee=true)
+- [x] All 13 backend tests passed (see `/app/test_reports/iteration_212.json`)
+
 ### P0: Smart Merge Feature (COMPLETED - April 8, 2026)
 - [x] Extract-from-PDF endpoint enhanced with duplicate detection
 - [x] Merge-from-PDF endpoint created for applying merges
@@ -234,7 +244,8 @@ Build a Requirement-Based Compliance Engine for a Care Recruitment Agency ensuri
 ## Test Reports
 - `/app/test_reports/iteration_209.json` - Phase 34 (pdf_exports)
 - `/app/test_reports/iteration_210.json` - Phase 35 (generated_forms)
-- `/app/test_reports/iteration_211.json` - Phase 36 (audit_email) [NEW]
+- `/app/test_reports/iteration_211.json` - Phase 36 (audit_email)
+- `/app/test_reports/iteration_212.json` - Document Sync & Request Replacement (13 tests passed) [NEW]
 
 ## Test Credentials
 - **Admin**: admin@osabea.care / admin123

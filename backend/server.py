@@ -14212,6 +14212,7 @@ async def extract_from_application_form(
     }
 
 
+@api_router.get("/employees/{employee_id}/compliance")
 async def get_employee_compliance(employee_id: str, user: dict = Depends(get_current_user)):
     """Get full compliance status for an employee including all mandatory items"""
     start_time = time_module.time()

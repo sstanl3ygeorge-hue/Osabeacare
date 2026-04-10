@@ -436,75 +436,48 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
     # Find employee by email
     employee = await db.employees.find_one({
         "email": {"$regex": f"^{re.escape(request.email)}$", "$options": "i"}
-    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
-    
-    if not employee:
-        return {"success": True, "message": "If an account exists, you will receive a login link"}
-    
-    # Generate magic token
-    token_data = {
-        "employee_id": employee["id"],
-        "email": request.email.lower(),
+    }, {"_id": 1, "id": 1, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
+
+    # 🔥 FORCE SEND DEBUG
+    logger.warning(f"[DEBUG] LOGIN REQUEST FOR EMAIL: {request.email}")
+
+    # Create token anyway (even if employee not found)
+    token_payload = {
+        "employee_id": str(employee.get("_id")) if employee else "debug-no-user",
+        "email": request.email,
         "type": "worker_login",
         "exp": datetime.now(timezone.utc) + timedelta(hours=24)
     }
-    magic_token = jwt.encode(token_data, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    
-    # Store token for tracking
-    await db.magic_tokens.insert_one({
-        "token": magic_token,
-        "employee_id": employee["id"],
-        "email": request.email.lower(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
-        "used": False,
-        "created_at": datetime.now(timezone.utc).isoformat()
-    })
-    
-    # Send email
-    frontend_url = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
-    login_url = f"{frontend_url}/worker/verify?token={magic_token}"
-    
-    email_content = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #0F172A; padding: 20px; text-align: center;">
-            <h1 style="color: white; margin: 0;">Osabea Healthcare</h1>
-        </div>
-        <div style="padding: 30px; background: #f8fafc;">
-            <h2 style="color: #1e293b;">Hi {employee.get('first_name', 'there')},</h2>
-            <p style="color: #475569; line-height: 1.6;">
-                Click the button below to access your compliance dashboard:
-            </p>
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{login_url}" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
-                    Access My Dashboard
-                </a>
-            </div>
-            <p style="color: #64748b; font-size: 14px;">
-                This link expires in 24 hours. If you didn't request this, please ignore this email.
-            </p>
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-            <p style="color: #94a3b8; font-size: 12px; text-align: center;">
-                Osabea Healthcare Solutions | Compliance Portal
-            </p>
-        </div>
-    </div>
-    """
-    
-    if resend.api_key:
-        try:
+
+    magic_token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
+
+    frontend_url = os.environ.get(
+        "FRONTEND_URL",
+        "https://app.osabeacares.co.uk"
+    )
+
+    magic_link = f"{frontend_url}/worker/verify?token={magic_token}"
+
+    logger.warning(f"[DEBUG] MAGIC LINK: {magic_link}")
+
+    # 🔥 FORCE email send attempt
+    try:
+        if resend.api_key:
             await asyncio.to_thread(resend.Emails.send, {
                 "from": SENDER_EMAIL,
-                "to": [request.email],
-                "subject": "Your Osabea Healthcare Login Link",
-                "html": email_content
+                "to": request.email,
+                "subject": "DEBUG Login Link",
+                "html": f"<p>Debug login link:</p><a href='{magic_link}'>{magic_link}</a>"
             })
-            logger.info(f"Magic link sent to {request.email} for worker login")
-        except Exception as e:
-            logger.error(f"Failed to send magic link email: {e}")
-    else:
-        logger.warning(f"Resend API key not configured - worker login email not sent for {request.email}")
-    
-    return {"success": True, "message": "If an account exists, you will receive a login link"}
+            logger.warning("[DEBUG] EMAIL SENT VIA RESEND")
+        else:
+            logger.error("[DEBUG] RESEND API KEY MISSING")
+
+    except Exception as e:
+        logger.error(f"[DEBUG] EMAIL SEND FAILED: {e}")
+
+    # Always return success
+    return {"status": "ok"}
 
 
 @router.post("/worker/login")

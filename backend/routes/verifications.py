@@ -725,6 +725,11 @@ async def verify_and_stamp_identity(
                         "status": "verified",
                         "verified_at": now,
                         "verified_by": user['user_id'],
+                        "review_status": "verified",
+                        "review_reason": None,
+                        "reviewed_at": now,
+                        "reviewed_by": user['user_id'],
+                        "reviewed_by_name": admin_name,
                         "updated_at": now
                     }}
                 )
@@ -851,6 +856,11 @@ async def verify_and_stamp_address(
                         "status": "verified",
                         "verified_at": now,
                         "verified_by": user['user_id'],
+                        "review_status": "verified",
+                        "review_reason": None,
+                        "reviewed_at": now,
+                        "reviewed_by": user['user_id'],
+                        "reviewed_by_name": admin_name,
                         "updated_at": now
                     }}
                 )
@@ -961,6 +971,11 @@ async def stamp_all_rtw_documents(
                     "status": "verified",
                     "verified_at": now,
                     "verified_by": user['user_id'],
+                    "review_status": "verified",
+                    "review_reason": None,
+                    "reviewed_at": now,
+                    "reviewed_by": user['user_id'],
+                    "reviewed_by_name": admin_name,
                     "updated_at": now
                 }}
             )

@@ -577,6 +577,11 @@ async def approve_verification(
             "approved_by": admin_id,
             "approved_by_name": admin_name,
             "approved_at": now,
+            "review_status": "verified",
+            "review_reason": None,
+            "reviewed_at": now,
+            "reviewed_by": admin_id,
+            "reviewed_by_name": admin_name,
             "updated_at": now,
             "verification_pdf_url": verification_pdf_url,
         }
@@ -640,6 +645,11 @@ async def approve_verification(
                 "rejected_by_name": admin_name,
                 "rejected_at": now,
                 "rejection_reason": approval.rejection_reason,
+                "review_status": "rejected",
+                "review_reason": approval.rejection_reason,
+                "reviewed_at": now,
+                "reviewed_by": admin_id,
+                "reviewed_by_name": admin_name,
                 "updated_at": now
             }}
         )
@@ -698,6 +708,11 @@ async def request_amendment(
             "amendment_requested_by_name": admin_name,
             "amendment_reason_code": request.reason_code,
             "amendment_reason": reason_message,
+            "review_status": "amendment_requested",
+            "review_reason": reason_message,
+            "reviewed_at": now,
+            "reviewed_by": admin_id,
+            "reviewed_by_name": admin_name,
             "updated_at": now
         }}
     )
@@ -840,6 +855,12 @@ async def reopen_verification(
             "$set": {
                 "status": "reopened",
                 "verification_approved": False,
+                "verified": False,
+                "review_status": "pending",
+                "review_reason": None,
+                "reviewed_at": now,
+                "reviewed_by": admin_id,
+                "reviewed_by_name": admin_name,
                 "updated_at": now
             },
             "$push": {

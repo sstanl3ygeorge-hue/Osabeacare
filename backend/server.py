@@ -18672,6 +18672,7 @@ async def upload_document_for_requirement(
                 "verified_by": None,
                 "verified_at": None,
                 "verified_by_name": None,
+                "is_active": True,
                 "updated_at": now
             }
             await db.employee_documents.update_one({"id": existing_doc['id']}, {"$set": update_data})
@@ -18720,6 +18721,7 @@ async def upload_document_for_requirement(
                 "version_number": 1,
                 "verified": False,
                 "source_type": "manual",
+                "is_active": True,
                 "created_at": now,
                 "updated_at": now
             }
@@ -18776,7 +18778,8 @@ async def upload_employee_document(
             "status": DocumentStatus.UPLOADED,
             "uploaded_by": user['user_id'],
             "uploaded_at": now,
-            "version_number": doc.get('version_number', 0) + 1
+            "version_number": doc.get('version_number', 0) + 1,
+            "is_active": True
         }}
     )
     

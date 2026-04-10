@@ -81,7 +81,12 @@ async def sync_employee_verification_status(
                         "verification_stamp_by": user['user_id'],
                         "verified": True,
                         "verified_at": now,
-                        "status": "verified"
+                        "status": "verified",
+                        "review_status": "verified",
+                        "review_reason": None,
+                        "reviewed_at": now,
+                        "reviewed_by": user['user_id'],
+                        "reviewed_by_name": user.get('name')
                     }}
                 )
                 synced_documents.append({"id": doc.get("id"), "type": "dbs", "action": "synced_from_dbs_check"})
@@ -104,7 +109,12 @@ async def sync_employee_verification_status(
                 {"$set": {
                     "verified": True,
                     "verified_at": doc.get("verification_stamp_at") or now,
-                    "status": "verified"
+                    "status": "verified",
+                    "review_status": "verified",
+                    "review_reason": None,
+                    "reviewed_at": doc.get("verification_stamp_at") or now,
+                    "reviewed_by": doc.get("verification_stamp_by") or user['user_id'],
+                    "reviewed_by_name": doc.get("verification_stamp_by_name") or user.get('name')
                 }}
             )
             synced_documents.append({"id": doc.get("id"), "type": doc.get("requirement_id"), "action": "set_verified_from_stamp"})
@@ -117,7 +127,12 @@ async def sync_employee_verification_status(
                     "verification_stamp": "original_seen",
                     "verification_stamp_label": "Original Seen",
                     "verification_stamp_at": doc.get("verified_at") or now,
-                    "status": "verified"
+                    "status": "verified",
+                    "review_status": "verified",
+                    "review_reason": None,
+                    "reviewed_at": doc.get("verified_at") or now,
+                    "reviewed_by": doc.get("verified_by") or user['user_id'],
+                    "reviewed_by_name": doc.get("verified_by_name") or user.get('name')
                 }}
             )
             synced_documents.append({"id": doc.get("id"), "type": doc.get("requirement_id"), "action": "set_stamp_from_verified"})
@@ -130,7 +145,12 @@ async def sync_employee_verification_status(
                     "verification_stamp": "original_seen" if not stamp or stamp in ["not_verified", ""] else stamp,
                     "verification_stamp_label": doc.get("verification_stamp_label") or "Original Seen",
                     "verified": True,
-                    "verified_at": doc.get("verified_at") or now
+                    "verified_at": doc.get("verified_at") or now,
+                    "review_status": "verified",
+                    "review_reason": None,
+                    "reviewed_at": doc.get("verified_at") or now,
+                    "reviewed_by": doc.get("verified_by") or user['user_id'],
+                    "reviewed_by_name": doc.get("verified_by_name") or user.get('name')
                 }}
             )
             synced_documents.append({"id": doc.get("id"), "type": doc.get("requirement_id"), "action": "synced_from_status"})

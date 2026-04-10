@@ -68,6 +68,11 @@ class FormSubmissionResponse(BaseModel):
     rejected_by_name: Optional[str] = None
     rejected_at: Optional[str] = None
     rejection_reason: Optional[str] = None
+    review_status: Optional[str] = None
+    review_reason: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_by_name: Optional[str] = None
     status: str = "submitted"
     version: int = 1
     notes: Optional[str] = None
@@ -288,6 +293,11 @@ async def create_form_submission(
         "submitted_by": user.get("user_id"),
         "verified": False,
         "status": "submitted",
+        "review_status": None,
+        "review_reason": None,
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "reviewed_by_name": None,
         "version": version,
         "created_at": now,
         "updated_at": now,
@@ -415,6 +425,11 @@ async def verify_form_submission(
             "verified_by": user.get("user_id"),
             "verified_at": now,
             "status": "verified",
+            "review_status": "verified",
+            "review_reason": None,
+            "reviewed_at": now,
+            "reviewed_by": user.get("user_id"),
+            "reviewed_by_name": user.get("name"),
             "notes": notes,
             "updated_at": now
         }}
@@ -452,6 +467,11 @@ async def unverify_form_submission(
             "verified_by": None,
             "verified_at": None,
             "status": "submitted",
+            "review_status": "pending",
+            "review_reason": None,
+            "reviewed_at": now,
+            "reviewed_by": user.get("user_id"),
+            "reviewed_by_name": user.get("name"),
             "unverified_by": user.get("user_id"),
             "unverified_at": now,
             "unverify_reason": reason,
@@ -481,8 +501,14 @@ async def reject_form_submission(
         {"$set": {
             "status": "rejected",
             "rejected_by": user.get("user_id"),
+            "rejected_by_name": user.get("name"),
             "rejected_at": now,
             "rejection_reason": reason,
+            "review_status": "rejected",
+            "review_reason": reason,
+            "reviewed_at": now,
+            "reviewed_by": user.get("user_id"),
+            "reviewed_by_name": user.get("name"),
             "updated_at": now
         }}
     )

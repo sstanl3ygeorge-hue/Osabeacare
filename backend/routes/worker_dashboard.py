@@ -170,8 +170,28 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     from server import EXCLUDED_DOC_STATUSES
     documents = await db.employee_documents.find({
         "employee_id": employee_id,
-        "status": {"$nin": EXCLUDED_DOC_STATUSES}
+        "status": {"$nin": EXCLUDED_DOC_STATUSES},
+        "$or": [
+            {"is_active": True},
+            {"is_active": {"$exists": False}}
+        ]
     }).to_list(length=200)
+    
+    rejected_documents = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "status": "rejected",
+        "$or": [
+            {"is_active": True},
+            {"is_active": {"$exists": False}}
+        ]
+    }).to_list(length=200)
+
+    def get_rejection_details(doc: dict) -> dict:
+        return {
+            "rejection_reason": doc.get("amendment_reason") or doc.get("rejection_reason") or doc.get("uploaded_in_error_reason") or "Please re-upload this document.",
+            "previous_file_name": doc.get("file_name") or doc.get("original_filename"),
+            "rejected_by_name": doc.get("amendment_requested_by_name") or doc.get("rejected_by_name") or doc.get("verification_stamp_by_name")
+        }
     
     # Required document types with their acceptable requirement_id patterns
     required_docs = {
@@ -220,40 +240,43 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         # All documents here are already filtered to active statuses only (query level)
         matching = [d for d in documents 
                    if matches_requirement(d.get("requirement_id", ""), doc_config)]
+        rejected_matching = [d for d in rejected_documents 
+                             if matches_requirement(d.get("requirement_id", ""), doc_config)]
+        amendment_requested_docs = [d for d in matching if d.get("status") == "amendment_requested"]
         
         # Active docs are the ones we can work with
-        active_docs = matching  # All are active since we filtered at query level
+        active_docs = [d for d in matching if d.get("status") != "amendment_requested"]
         
         if active_docs:
-            verified_docs = [d for d in matching if (
-                d.get("verification_stamp") not in [None, "", "not_verified"] or
-                d.get("verified") == True or
-                d.get("status") == "verified"
-            )]
+            def canonical_status(doc):
+                return doc.get("review_status") or doc.get("status")
+
+            def is_verified_doc(doc):
+                status = canonical_status(doc)
+                return status in ["verified", "approved"] or doc.get("verification_stamp") not in [None, "", "not_verified"] or doc.get("verified") == True
+
+            verified_docs = [d for d in active_docs if is_verified_doc(d)]
             if verified_docs:
-                verified_docs.sort(key=lambda x: x.get("verified_at") or x.get("verification_stamp_at") or x.get("uploaded_at") or "", reverse=True)
+                verified_docs.sort(key=lambda x: x.get("reviewed_at") or x.get("verified_at") or x.get("verification_stamp_at") or x.get("uploaded_at") or "", reverse=True)
                 doc = verified_docs[0]
             else:
-                matching.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
-                doc = matching[0]
+                active_docs.sort(key=lambda x: x.get("uploaded_at") or "", reverse=True)
+                doc = active_docs[0]
             
-            is_verified = (
-                doc.get("verification_stamp") not in [None, "", "not_verified"] or
-                doc.get("verified") == True or
-                doc.get("status") == "verified"
-            )
+            is_verified = is_verified_doc(doc)
             file_url = None
             if is_verified and doc.get("stamped_file_url"):
                 file_url = doc.get("stamped_file_url")
             elif doc.get("file_url"):
                 file_url = doc.get("file_url")
             
+            canonical_status_value = doc.get("review_status") or doc.get("status")
             if is_verified:
                 display_status = "verified"
-            elif doc.get("status") == "pending" or doc.get("status") == "uploaded":
+            elif canonical_status_value in ["pending", "submitted", "uploaded", "pending_review", "pending_approval"]:
                 display_status = "pending_verification"
             else:
-                display_status = doc.get("status", "uploaded")
+                display_status = canonical_status_value or doc.get("status", "uploaded")
             
             completed_docs.append({
                 "id": doc.get("id"),
@@ -270,11 +293,32 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified_by_name": doc.get("verification_stamp_by_name") or doc.get("verified_by_name"),
                 "verified_at": doc.get("verification_stamp_at") or doc.get("verified_at"),
                 "status": display_status,
-                "raw_status": doc.get("status")
+                "raw_status": doc.get("status"),
+                "review_status": doc.get("review_status"),
+                "review_reason": doc.get("review_reason"),
+                "reviewed_at": doc.get("reviewed_at"),
+                "reviewed_by": doc.get("reviewed_by"),
+                "reviewed_by_name": doc.get("reviewed_by_name")
+            })
+        elif amendment_requested_docs:
+            amendment_requested_docs.sort(key=lambda x: x.get("updated_at") or x.get("uploaded_at") or "", reverse=True)
+            rejected_doc = amendment_requested_docs[0]
+            missing_docs.append({
+                "type": doc_type,
+                "name": doc_name,
+                "action": "upload",
+                "rejection": get_rejection_details(rejected_doc)
+            })
+        elif rejected_matching:
+            rejected_matching.sort(key=lambda x: x.get("updated_at") or x.get("uploaded_at") or "", reverse=True)
+            rejected_doc = rejected_matching[0]
+            missing_docs.append({
+                "type": doc_type,
+                "name": doc_name,
+                "action": "upload",
+                "rejection": get_rejection_details(rejected_doc)
             })
         else:
-            # No active documents - check if there was a rejection to show helpful message
-            # Note: rejected docs are already excluded at query level, but we can check historical
             missing_docs.append({
                 "type": doc_type,
                 "name": doc_name,
@@ -286,17 +330,29 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # All docs are already filtered to active statuses at query level
     poa_docs = [d for d in documents 
                if matches_requirement(d.get("requirement_id", ""), poa_config)]
+    rejected_poa_docs = [d for d in rejected_documents 
+                        if matches_requirement(d.get("requirement_id", ""), poa_config)]
     
     # Remove the generic POA entry added by the loop above - we'll handle POA specially
     completed_docs = [d for d in completed_docs if d["type"] != "proof_of_address"]
     
     if len(poa_docs) == 0:
-        # No POA docs - add to missing
-        missing_docs.append({
-            "type": "proof_of_address",
-            "name": "Proof of Address (need 2)",
-            "action": "upload"
-        })
+        if rejected_poa_docs:
+            rejected_poa_docs.sort(key=lambda x: x.get("updated_at") or x.get("uploaded_at") or "", reverse=True)
+            rejected_poa_doc = rejected_poa_docs[0]
+            missing_docs.append({
+                "type": "proof_of_address",
+                "name": "Proof of Address (need 2)",
+                "action": "upload",
+                "rejection": get_rejection_details(rejected_poa_doc)
+            })
+        else:
+            # No POA docs - add to missing
+            missing_docs.append({
+                "type": "proof_of_address",
+                "name": "Proof of Address (need 2)",
+                "action": "upload"
+            })
     elif len(poa_docs) == 1:
         # Only 1 POA doc - show it with partial status
         poa_doc = poa_docs[0]
@@ -1540,7 +1596,7 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
         submission = await db.form_submissions.find_one({
             "employee_id": employee_id,
             "form_type": form_id,
-            "status": {"$in": ["submitted", "verified"]}
+            "status": {"$in": ["submitted", "verified", "rejected", "amendment_requested"]}
         }, {"_id": 0})
         
         status = "not_started"
@@ -1549,7 +1605,7 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
         progress_percentage = 0
         
         if submission:
-            status = "submitted" if submission.get("status") == "submitted" else "verified"
+            status = submission.get("status", "submitted")
             submitted_at = submission.get("submitted_at")
         elif progress:
             status = "in_progress"
@@ -1604,10 +1660,19 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     if submission and submission.get("status") in ["submitted", "verified"]:
         return {
             "form_id": form_id,
-            "status": "submitted",
+            "status": submission.get("status"),
             "data": submission.get("form_data", {}),
             "submitted_at": submission.get("submitted_at"),
             "can_edit": False
+        }
+
+    if submission and submission.get("status") in ["rejected", "amendment_requested"]:
+        return {
+            "form_id": form_id,
+            "status": submission.get("status"),
+            "data": submission.get("form_data", {}),
+            "submitted_at": submission.get("submitted_at"),
+            "can_edit": True
         }
     
     progress = await db.form_progress.find_one({

@@ -493,6 +493,11 @@ async def stamp_all_dbs_documents(
                     "status": "verified",
                     "verified_at": now,
                     "verified_by": user['user_id'],
+                    "review_status": "verified",
+                    "review_reason": None,
+                    "reviewed_at": now,
+                    "reviewed_by": user['user_id'],
+                    "reviewed_by_name": admin_name,
                     "updated_at": now
                 }}
             )

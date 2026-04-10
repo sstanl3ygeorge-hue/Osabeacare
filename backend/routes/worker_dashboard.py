@@ -271,35 +271,181 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 file_url = doc.get("file_url")
             
             canonical_status_value = doc.get("review_status") or doc.get("status")
-            if is_verified:
-                display_status = "verified"
-            elif canonical_status_value in ["pending", "submitted", "uploaded", "pending_review", "pending_approval"]:
-                display_status = "pending_verification"
+            if doc_type == "right_to_work" and rtw_canonical_item:
+                # Canonical item is the sole source for all status/verification fields.
+                # Document row is used only for file display metadata.
+                rtw_is_verified = bool(rtw_canonical_item.get("completed"))
+                rtw_display_status = (
+                    rtw_canonical_item.get("verification_status")
+                    or ("verified" if rtw_is_verified else "pending_verification")
+                )
+                rtw_entry = {
+                    "id": doc.get("id"),
+                    "type": doc_type,
+                    "name": doc_name,
+                    "verified": rtw_is_verified,
+                    "uploaded_at": doc.get("uploaded_at"),
+                    "file_name": doc.get("file_name") or doc.get("original_filename"),
+                    "file_url": doc.get("stamped_file_url") or doc.get("file_url"),
+                    "document_id": doc.get("id"),
+                    "verification_stamp": doc.get("verification_stamp"),
+                    "verification_stamp_label": doc.get("verification_stamp_label"),
+                    "verified_by": None,
+                    "verified_by_name": None,
+                    "verified_at": rtw_canonical_item.get("verified_at"),
+                    "status": rtw_display_status,
+                    "raw_status": doc.get("status"),
+                    "review_status": None,
+                    "review_reason": None,
+                    "reviewed_at": None,
+                    "reviewed_by": None,
+                    "reviewed_by_name": None,
+                }
+                if rtw_canonical_item.get("next_action"):
+                    rtw_entry["next_action"] = rtw_canonical_item["next_action"]
+                if rtw_canonical_item.get("expiry_date"):
+                    rtw_entry["expiry_date"] = rtw_canonical_item["expiry_date"]
+                if rtw_canonical_item.get("follow_up_due_at"):
+                    rtw_entry["follow_up_due_at"] = rtw_canonical_item["follow_up_due_at"]
+                completed_docs.append(rtw_entry)
+            elif doc_type == "dbs" and dbs_canonical_item:
+                # Canonical item is the sole source for DBS status/verification fields.
+                # Document row is used only for file display metadata.
+                dbs_is_verified = bool(dbs_canonical_item.get("completed"))
+                dbs_display_status = (
+                    dbs_canonical_item.get("verification_status")
+                    or ("verified" if dbs_is_verified else "pending_verification")
+                )
+                dbs_entry = {
+                    "id": doc.get("id"),
+                    "type": doc_type,
+                    "name": doc_name,
+                    "verified": dbs_is_verified,
+                    "uploaded_at": doc.get("uploaded_at"),
+                    "file_name": doc.get("file_name") or doc.get("original_filename"),
+                    "file_url": doc.get("stamped_file_url") or doc.get("file_url"),
+                    "document_id": doc.get("id"),
+                    "verification_stamp": doc.get("verification_stamp"),
+                    "verification_stamp_label": doc.get("verification_stamp_label"),
+                    "verified_by": None,
+                    "verified_by_name": None,
+                    "verified_at": dbs_canonical_item.get("verified_at"),
+                    "status": dbs_display_status,
+                    "raw_status": doc.get("status"),
+                    "review_status": None,
+                    "review_reason": None,
+                    "reviewed_at": None,
+                    "reviewed_by": None,
+                    "reviewed_by_name": None,
+                }
+                if dbs_canonical_item.get("next_action"):
+                    dbs_entry["next_action"] = dbs_canonical_item["next_action"]
+                if dbs_canonical_item.get("recheck_date"):
+                    dbs_entry["recheck_date"] = dbs_canonical_item["recheck_date"]
+                completed_docs.append(dbs_entry)
             else:
-                display_status = canonical_status_value or doc.get("status", "uploaded")
-            
-            completed_docs.append({
-                "id": doc.get("id"),
+                if is_verified:
+                    display_status = "verified"
+                elif canonical_status_value in ["pending", "submitted", "uploaded", "pending_review", "pending_approval"]:
+                    display_status = "pending_verification"
+                else:
+                    display_status = canonical_status_value or doc.get("status", "uploaded")
+
+                completed_docs.append({
+                    "id": doc.get("id"),
+                    "type": doc_type,
+                    "name": doc_name,
+                    "verified": is_verified,
+                    "uploaded_at": doc.get("uploaded_at"),
+                    "file_name": doc.get("file_name") or doc.get("original_filename"),
+                    "file_url": file_url,
+                    "document_id": doc.get("id"),
+                    "verification_stamp": doc.get("verification_stamp"),
+                    "verification_stamp_label": doc.get("verification_stamp_label"),
+                    "verified_by": doc.get("verification_stamp_by") or doc.get("verified_by"),
+                    "verified_by_name": doc.get("verification_stamp_by_name") or doc.get("verified_by_name"),
+                    "verified_at": doc.get("verification_stamp_at") or doc.get("verified_at"),
+                    "status": display_status,
+                    "raw_status": doc.get("status"),
+                    "review_status": doc.get("review_status"),
+                    "review_reason": doc.get("review_reason"),
+                    "reviewed_at": doc.get("reviewed_at"),
+                    "reviewed_by": doc.get("reviewed_by"),
+                    "reviewed_by_name": doc.get("reviewed_by_name")
+                })
+        elif doc_type == "right_to_work" and rtw_canonical_item:
+            # No active document row: build entry from canonical item only.
+            # File metadata from first document in canonical list if present.
+            rtw_is_verified = bool(rtw_canonical_item.get("completed"))
+            rtw_display_status = (
+                rtw_canonical_item.get("verification_status")
+                or ("verified" if rtw_is_verified else "pending_verification")
+            )
+            rtw_file_doc = (rtw_canonical_item.get("documents") or [{}])[0]
+            canonical_entry = {
+                "id": rtw_canonical_item.get("id") or "rtw_canonical",
                 "type": doc_type,
                 "name": doc_name,
-                "verified": is_verified,
-                "uploaded_at": doc.get("uploaded_at"),
-                "file_name": doc.get("file_name") or doc.get("original_filename"),
-                "file_url": file_url,
-                "document_id": doc.get("id"),
-                "verification_stamp": doc.get("verification_stamp"),
-                "verification_stamp_label": doc.get("verification_stamp_label"),
-                "verified_by": doc.get("verification_stamp_by") or doc.get("verified_by"),
-                "verified_by_name": doc.get("verification_stamp_by_name") or doc.get("verified_by_name"),
-                "verified_at": doc.get("verification_stamp_at") or doc.get("verified_at"),
-                "status": display_status,
-                "raw_status": doc.get("status"),
-                "review_status": doc.get("review_status"),
-                "review_reason": doc.get("review_reason"),
-                "reviewed_at": doc.get("reviewed_at"),
-                "reviewed_by": doc.get("reviewed_by"),
-                "reviewed_by_name": doc.get("reviewed_by_name")
-            })
+                "verified": rtw_is_verified,
+                "uploaded_at": rtw_file_doc.get("uploaded_at") or rtw_canonical_item.get("updated_at"),
+                "file_name": rtw_file_doc.get("file_name") or rtw_file_doc.get("original_filename") or "Right to Work document",
+                "file_url": rtw_file_doc.get("file_url"),
+                "document_id": rtw_file_doc.get("id"),
+                "verification_stamp": None,
+                "verification_stamp_label": None,
+                "verified_by": None,
+                "verified_by_name": None,
+                "verified_at": rtw_canonical_item.get("verified_at"),
+                "status": rtw_display_status,
+                "raw_status": None,
+                "review_status": None,
+                "review_reason": None,
+                "reviewed_at": None,
+                "reviewed_by": None,
+                "reviewed_by_name": None,
+            }
+            if rtw_canonical_item.get("next_action"):
+                canonical_entry["next_action"] = rtw_canonical_item["next_action"]
+            if rtw_canonical_item.get("expiry_date"):
+                canonical_entry["expiry_date"] = rtw_canonical_item["expiry_date"]
+            if rtw_canonical_item.get("follow_up_due_at"):
+                canonical_entry["follow_up_due_at"] = rtw_canonical_item["follow_up_due_at"]
+            completed_docs.append(canonical_entry)
+        elif doc_type == "dbs" and dbs_canonical_item:
+            # No active DBS document row: build entry purely from canonical item.
+            dbs_is_verified = bool(dbs_canonical_item.get("completed"))
+            dbs_display_status = (
+                dbs_canonical_item.get("verification_status")
+                or ("verified" if dbs_is_verified else "pending_verification")
+            )
+            dbs_file_doc = (dbs_canonical_item.get("documents") or [{}])[0]
+            dbs_canonical_entry = {
+                "id": dbs_canonical_item.get("id") or "dbs_canonical",
+                "type": doc_type,
+                "name": doc_name,
+                "verified": dbs_is_verified,
+                "uploaded_at": dbs_file_doc.get("uploaded_at") or dbs_canonical_item.get("updated_at"),
+                "file_name": dbs_file_doc.get("file_name") or dbs_file_doc.get("original_filename") or "DBS Certificate",
+                "file_url": dbs_file_doc.get("file_url"),
+                "document_id": dbs_file_doc.get("id"),
+                "verification_stamp": None,
+                "verification_stamp_label": None,
+                "verified_by": None,
+                "verified_by_name": None,
+                "verified_at": dbs_canonical_item.get("verified_at"),
+                "status": dbs_display_status,
+                "raw_status": None,
+                "review_status": None,
+                "review_reason": None,
+                "reviewed_at": None,
+                "reviewed_by": None,
+                "reviewed_by_name": None,
+            }
+            if dbs_canonical_item.get("next_action"):
+                dbs_canonical_entry["next_action"] = dbs_canonical_item["next_action"]
+            if dbs_canonical_item.get("recheck_date"):
+                dbs_canonical_entry["recheck_date"] = dbs_canonical_item["recheck_date"]
+            completed_docs.append(dbs_canonical_entry)
         elif amendment_requested_docs:
             amendment_requested_docs.sort(key=lambda x: x.get("updated_at") or x.get("uploaded_at") or "", reverse=True)
             rejected_doc = amendment_requested_docs[0]
@@ -667,6 +813,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # Unified progress
     unified_training_items = []
+    rtw_canonical_item = None
     try:
         unified_status = await get_unified_employee_status(employee_id, db, user_role="worker", include_details=True)
         progress_percentage = unified_status["progress"]["percentage"]
@@ -676,6 +823,20 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         has_blockers = len(unified_blockers) > 0 or not contract_signed
         
         unified_training_items = unified_status.get("category_details", {}).get("training", {}).get("items", [])
+        rtw_canonical_item = next(
+            (
+                item for item in unified_status.get("categories", {}).get("documents", {}).get("items", [])
+                if item.get("id") == "right_to_work"
+            ),
+            None
+        )
+        dbs_canonical_item = next(
+            (
+                item for item in unified_status.get("categories", {}).get("documents", {}).get("items", [])
+                if item.get("id") in ("dbs", "dbs_certificate")
+            ),
+            None
+        )
     except Exception as e:
         logger.error(f"Unified progress failed for {employee_id}: {e}")
         total_required = len(required_docs) + 1 + len(mandatory_trainings)
@@ -685,6 +846,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         progress_percentage = round((total_completed / total_required) * 100) if total_required > 0 else 0
         has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
         unified_blockers = []
+        dbs_canonical_item = None
     
     if unified_training_items:
         all_mandatory_trainings = []

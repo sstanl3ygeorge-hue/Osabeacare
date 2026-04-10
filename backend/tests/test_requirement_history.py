@@ -84,6 +84,18 @@ class TestUnifiedHistoryEndpoint:
         assert isinstance(data["timeline"], list)
         print(f"RTW Documents history: {data['total_events']} events")
     
+    def test_right_to_work_key(self, api_client):
+        """Test canonical right_to_work key returns history"""
+        response = api_client.get(
+            f"{BASE_URL}/api/employees/{TEST_EMPLOYEE_ID}/requirements/right_to_work/unified-history"
+        )
+        assert response.status_code == 200
+        
+        data = response.json()
+        assert data["requirement_key"] == "right_to_work"
+        assert isinstance(data["timeline"], list)
+        print(f"RTW canonical history: {data['total_events']} events")
+    
     def test_right_to_work_check_key(self, api_client):
         """Test right_to_work_check key returns check history"""
         response = api_client.get(

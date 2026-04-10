@@ -799,7 +799,18 @@ async def get_compliance_requirements_for_employee(employee_id: str, role: str =
         }
         
         # Check documents for this requirement
-        matching_docs = [d for d in all_docs if d.get('requirement_id') == req_id or d.get('document_type') == req_id]
+        def matches_requirement(document: dict, requirement_id: str) -> bool:
+            doc_req_id = (document.get('requirement_id') or '').lower()
+            doc_type = (document.get('document_type') or '').lower()
+            if requirement_id == 'right_to_work':
+                if doc_req_id in ['right_to_work', 'right_to_work_documents', 'right_to_work_check', 'right_to_work_evidence', 'identity_rtw']:
+                    return True
+                return any(keyword in doc_type for keyword in ['visa', 'brp', 'share', 'work', 'rtw'])
+            if requirement_id == 'identity_documents' and doc_req_id == 'identity_rtw':
+                return any(keyword in doc_type for keyword in ['passport', 'licence', 'license', 'id'])
+            return doc_req_id == requirement_id or doc_type == requirement_id
+
+        matching_docs = [d for d in all_docs if matches_requirement(d, req_id)]
         
         if matching_docs:
             active_count = sum(1 for d in matching_docs if d.get('file_url') or d.get('evidence_files'))
@@ -915,8 +926,7 @@ class OnboardingStatus:
 # Items that BLOCK work readiness if not completed & verified
 WORK_READY_REQUIREMENTS = {
     # LEGAL (MANDATORY) - Cannot start without these
-    "right_to_work_documents",
-    "right_to_work_check", 
+    "right_to_work",
     "identity_documents",
     
     # SAFETY (MANDATORY) - Cannot start without these
@@ -945,23 +955,16 @@ MANDATORY_ITEMS = {
     "base": [  # Common to all roles - ordered by work readiness priority
         
         # ======== CATEGORY 1: LEGAL & SAFETY (Required to Start Work) ========
-        {"id": "right_to_work_documents", "name": "Right to Work Documents", 
-         "category": "1_Legal_Safety", "type": "document", "source": "employee",
-         "document_types": ["visa", "brp", "share_code", "settled_status"],
+        {"id": "right_to_work", "name": "Right to Work", 
+         "category": "1_Legal_Safety", "type": "document", "source": "hybrid",
+         "document_types": ["visa", "brp", "share_code", "settled_status", "rtw_check", "share_code_check"],
          "allow_multiple_files": True, "min_files": 1,
          "priority": "start_required", "priority_order": 1,
          "status_group": "start_status",
-         "description": "Visa, BRP, share code evidence, settled status proof",
-         "work_ready_hint": "Required before employee can start work"},
-        
-        {"id": "right_to_work_check", "name": "Right to Work Verification", 
-         "category": "1_Legal_Safety", "type": "document", "source": "internal",
-         "document_types": ["rtw_check", "share_code_check"],
-         "allow_multiple_files": True,
-         "priority": "start_required", "priority_order": 2,
-         "status_group": "start_status",
-         "description": "Internal RTW verification - share code check result",
-         "work_ready_hint": "Required before employee can start work"},
+         "description": "Right to Work evidence and internal verification",
+         "work_ready_hint": "Required before employee can start work",
+         "verification_required": True,
+         "expiry_tracked": True},
         
         {"id": "identity_documents", "name": "Identity Documents", 
          "category": "1_Legal_Safety", "type": "document", "source": "employee",
@@ -2067,6 +2070,8 @@ READINESS_REASON_CODES = {
     "health_form_unverified": "Health questionnaire awaiting review",
     "interview_form_missing": "Interview record required",
     "interview_form_unverified": "Interview record awaiting review",
+    "employment_gaps_unexplained": "Employment gaps require explanation before clearance",
+    "health_review_unresolved": "Occupational Health review required",
 }
 
 HARD_BLOCK_REQUIREMENTS = {
@@ -2231,10 +2236,10 @@ async def calculate_work_readiness_3tier(
                 due_date = datetime.fromisoformat(review_due.replace('Z', '+00:00')).date() if isinstance(review_due, str) else review_due
                 days_until = (due_date - today).days
                 if days_until < 0:
-                    conditional_reasons.append({
-                        "type": "conditional",
+                    hard_block_reasons.append({
+                        "type": "hard_block",
                         "code": "dbs_review_overdue",
-                        "message": f"DBS review overdue ({abs(days_until)}d)"
+                        "message": f"DBS review overdue ({abs(days_until)}d) — recheck required before deployment"
                     })
                 elif days_until <= 30:
                     conditional_reasons.append({
@@ -2262,26 +2267,30 @@ async def calculate_work_readiness_3tier(
         })
     
     # =========================================================================
-    # HARD BLOCK C: REFERENCE BLOCKS (unchanged - uses existing reference system)
+    # HARD BLOCK C: REFERENCE BLOCKS — integrity-checked via ReferenceIntegrityService
+    # A reference only counts when: verified, independent response received (not candidate
+    # upload only), and any identity mismatch has been explicitly overridden.
     # =========================================================================
-    
-    ref1 = req_lookup.get('reference_1')
-    ref2 = req_lookup.get('reference_2')
-    
-    ref1_ok = ref1 and ref1.get('has_evidence') and ref1.get('verified')
-    ref2_ok = ref2 and ref2.get('has_evidence') and ref2.get('verified')
-    
+
+    ref1_integrity = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
+    ref2_integrity = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
+
+    ref1_ok = bool(ref1_integrity and ref1_integrity.get("counts_toward_readiness"))
+    ref2_ok = bool(ref2_integrity and ref2_integrity.get("counts_toward_readiness"))
+
     if not ref1_ok:
+        reason = (ref1_integrity.get("blocking_reason") if ref1_integrity else None) or "Reference 1 required"
         hard_block_reasons.append({
-            "type": "hard_block", 
+            "type": "hard_block",
             "code": "reference_1_incomplete",
-            "message": "Reference 1 required"
+            "message": f"Reference 1: {reason}" if ref1_integrity else "Reference 1 required"
         })
     if not ref2_ok:
+        reason = (ref2_integrity.get("blocking_reason") if ref2_integrity else None) or "Reference 2 required"
         hard_block_reasons.append({
-            "type": "hard_block", 
+            "type": "hard_block",
             "code": "reference_2_incomplete",
-            "message": "Reference 2 required"
+            "message": f"Reference 2: {reason}" if ref2_integrity else "Reference 2 required"
         })
     
     # =========================================================================
@@ -2316,14 +2325,47 @@ async def calculate_work_readiness_3tier(
                 "message": "Health questionnaire required"
             })
     
-    # D3. Interview record - for staff
+    # D3. Interview record - for staff: must be a completed form with decision, date, and
+    # interviewer signature.  A placeholder document row without a signed outcome is not enough.
     if person_stage == 'employee':
-        interview_req = req_lookup.get('interview_record')
-        if interview_req and not interview_req.get('has_evidence'):
+        interview_completed = False
+        interview_block_reason = "Interview record required"
+        interview_form = await db.form_submissions.find_one(
+            {
+                "employee_id": employee_id,
+                "form_type": {"$in": ["interview_record", "interview_questions"]},
+                "status": {"$in": ["submitted", "completed", "verified"]}
+            },
+            {"_id": 0, "form_data": 1, "status": 1}
+        )
+        if interview_form:
+            fd = interview_form.get("form_data") or {}
+            has_decision = bool(fd.get("decision"))
+            has_date = bool(fd.get("interview_date") or fd.get("interview_sign_date"))
+            has_signature = bool(fd.get("interviewer_signature") or fd.get("interviewer_name"))
+            if has_decision and has_date and has_signature:
+                interview_completed = True
+            else:
+                missing = [f for f, v in [
+                    ("decision", has_decision),
+                    ("interview date", has_date),
+                    ("interviewer signature", has_signature)
+                ] if not v]
+                interview_block_reason = f"Interview record incomplete: missing {', '.join(missing)}"
+        if not interview_completed:
             hard_block_reasons.append({
                 "type": "hard_block",
                 "code": "interview_record_missing",
-                "message": "Interview record required"
+                "message": interview_block_reason
+            })
+
+    # D4. Employment gaps – all detected gaps must have admin-accepted explanations
+    if employee_data.get('has_employment_gaps') or employee_data.get('employment_gaps'):
+        if not employee_data.get('cv_gaps_all_explained', False):
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "employment_gaps_unexplained",
+                "message": "Employment gaps require explanation before clearance"
             })
     
     # =========================================================================
@@ -2434,7 +2476,7 @@ async def calculate_work_readiness_3tier(
     # =========================================================================
     
     # F1. Verification Stamps - Critical documents MUST have "Original Seen" stamps
-    critical_doc_types = ["right_to_work", "dbs", "identity"]
+    critical_doc_types = ["right_to_work", "dbs", "identity", "proof_of_address"]
     missing_stamps = []
     
     for doc_type in critical_doc_types:
@@ -2493,6 +2535,37 @@ async def calculate_work_readiness_3tier(
             "code": "competency_not_met",
             "message": f"Competency: {comp.get('competency_name', 'Unknown')} - {comp.get('status', 'unknown').replace('_', ' ')}"
         })
+
+    # F4. Occupational Health / health declaration review
+    # When the employee declared a condition affecting work or requiring reasonable adjustments,
+    # an OH/health review must be completed (or the follow-up must be resolved) before clearance.
+    declared_health_condition = (
+        employee_data.get("has_condition_affecting_work")
+        or employee_data.get("requires_reasonable_adjustments")
+        or employee_data.get("health_declaration", {}).get("has_condition_affecting_work")
+        or employee_data.get("health_declaration", {}).get("requires_reasonable_adjustments")
+    )
+    if declared_health_condition:
+        # Look for a completed/resolved health review follow-up record
+        health_followup = await db.follow_up_items.find_one(
+            {
+                "employee_id": employee_id,
+                "$or": [
+                    {"type": "health_review"},
+                    {"requirement_key": "health_review"},
+                ]
+            },
+            {"_id": 0, "status": 1}
+        )
+        followup_resolved = health_followup and health_followup.get("status") in [
+            "completed", "resolved", "cleared", "approved"
+        ]
+        if not followup_resolved:
+            hard_block_reasons.append({
+                "type": "hard_block",
+                "code": "health_review_unresolved",
+                "message": "Occupational Health review required: health condition or adjustment declared"
+            })
     
     # =========================================================================
     # DETERMINE FINAL STATUS
@@ -15361,7 +15434,10 @@ async def get_requirement_evidence(
         legacy_mapping = {
             "dbs_certificate": ["dbs", "dbs_certificate"],
             "identity_documents": ["identity_rtw", "identity_documents"],
-            "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+            "right_to_work": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+            "right_to_work_check": ["right_to_work", "right_to_work_check", "right_to_work_documents", "right_to_work_evidence", "identity_rtw"],
+            "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+            "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         }
         
         req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
@@ -16619,6 +16695,7 @@ async def get_requirement_files(
         # Identity: Include "passport" to sync with worker dashboard
         "identity_documents": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document", "passport"],
         "identity_evidence": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document", "passport"],
+        "right_to_work": ["right_to_work", "right_to_work_documents", "right_to_work_evidence", "right_to_work_check", "identity_rtw"],
         "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         # POA: Include numbered variants (proof_of_address_2, proof_of_address_3, etc.) for multi-file sync
@@ -16805,6 +16882,7 @@ async def get_requirement_unified_history(
     
     # Map _evidence suffix keys to base document keys and vice versa
     evidence_key_mapping = {
+        'right_to_work': 'right_to_work_documents',
         'right_to_work_evidence': 'right_to_work_documents',
         'right_to_work_documents': 'right_to_work_documents',
         'dbs_evidence': 'dbs_certificate',
@@ -16969,6 +17047,7 @@ async def get_requirement_unified_history(
     # 4. Get check/verification records (for check-type requirements)
     # Map both evidence keys and check keys to collections
     check_collections = {
+        'right_to_work': 'rtw_checks',
         'right_to_work_check': 'rtw_checks',
         'right_to_work_documents': 'rtw_checks',
         'right_to_work_evidence': 'rtw_checks',
@@ -17500,6 +17579,7 @@ async def verify_requirement(
     
     # LEGAL DOCUMENT RESTRICTION
     LEGAL_SENSITIVE_REQUIREMENTS = [
+        "right_to_work",
         "right_to_work_documents",
         "right_to_work_check",
         "dbs_certificate",
@@ -17533,6 +17613,7 @@ async def verify_requirement(
     # COMPLIANCE-CRITICAL: For dual-row requirements (RTW, DBS, Identity, PoA),
     # require a check record with proof before allowing verification
     dual_row_requirements = {
+        "right_to_work": "rtw_checks",
         "right_to_work_documents": "rtw_checks",
         "right_to_work_check": "rtw_checks",
         "dbs_certificate": "dbs_checks",
@@ -17555,11 +17636,35 @@ async def verify_requirement(
                 detail=f"Cannot verify without a recorded check. Please record a {requirement['name']} check first."
             )
         
-        # Check if the check record has proof linked
-        if not check_record.get("evidence_document_id"):
+        # Check if the check record has proof linked.
+        # For RTW and DBS Update Service checks, proof_document_id is required explicitly;
+        # other checks (including DBS certificate review) accept either field.
+        _rtw_req_ids_proof = {"right_to_work", "right_to_work_documents", "right_to_work_check"}
+        _dbs_req_ids = {"dbs", "dbs_certificate", "dbs_check", "dbs_status_check"}
+        if requirement_id in _rtw_req_ids_proof:
+            if not check_record.get("proof_document_id"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Right to Work final verification requires an official proof-of-check document "
+                           "(proof_document_id). Please attach the check evidence as a proof document."
+                )
+        elif requirement_id in _dbs_req_ids and check_record.get("method") == "dbs_update_service_check":
+            if not check_record.get("proof_document_id"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="DBS Update Service checks require a proof document (proof_document_id). "
+                           "Please attach the update service check result as a proof document."
+                )
+        elif requirement_id in _dbs_req_ids:
+            if not (check_record.get("evidence_document_id") or check_record.get("proof_document_id")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="The DBS check record has no evidence or proof file attached. Please update the check with proof documentation."
+                )
+        elif not (check_record.get("evidence_document_id") or check_record.get("proof_document_id")):
             raise HTTPException(
                 status_code=400,
-                detail="The check record has no proof file attached. Please update the check with proof documentation."
+                detail="The check record has no evidence or proof file attached. Please update the check with proof documentation."
             )
         
         # Check if the check outcome is verified
@@ -17568,6 +17673,35 @@ async def verify_requirement(
                 status_code=400,
                 detail=f"The check outcome is '{check_record.get('outcome', 'unknown')}'. Only verified checks can be finalized."
             )
+
+        if requirement_id in ["right_to_work", "right_to_work_documents", "right_to_work_check"]:
+            is_indefinite = check_record.get("is_indefinite", False)
+            permission_end_date = check_record.get("permission_end_date")
+            follow_up_required = check_record.get("follow_up_required", False)
+            follow_up_due_at = check_record.get("follow_up_due_at")
+
+            if not is_indefinite and not permission_end_date:
+                if not (follow_up_required and follow_up_due_at):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Right to Work verification must include an expiry date or a follow-up date when permission is not indefinite."
+                    )
+
+            if follow_up_required and not follow_up_due_at:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Right to Work follow-up is required but no follow-up due date has been set."
+                )
+
+        elif requirement_id in {"dbs", "dbs_certificate", "dbs_check", "dbs_status_check"}:
+            recheck_required = check_record.get("recheck_required", False)
+            review_due_at = check_record.get("review_due_at") or check_record.get("next_recheck_date")
+            if recheck_required and not review_due_at:
+                raise HTTPException(
+                    status_code=400,
+                    detail="DBS recheck is flagged as required but no recheck due date has been set. "
+                           "Please update the DBS check record with a review_due_at date."
+                )
     
     if evidence.verified:
         return {"success": True, "message": "Requirement already verified", "verified": True}
@@ -17593,8 +17727,12 @@ async def verify_requirement(
         # Build query with legacy mapping support
         legacy_mapping = {
             "dbs_certificate": ["dbs", "dbs_certificate"],
+            "dbs_check": ["dbs", "dbs_certificate", "dbs_check"],
+            "dbs_status_check": ["dbs", "dbs_certificate", "dbs_check", "dbs_status_check"],
             "identity_documents": ["identity_rtw", "identity_documents"],
-            "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+            "right_to_work": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+            "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+            "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         }
         req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
         
@@ -17729,7 +17867,9 @@ async def unverify_requirement(
     legacy_mapping = {
         "dbs_certificate": ["dbs", "dbs_certificate"],
         "identity_documents": ["identity_rtw", "identity_documents"],
-        "right_to_work_documents": ["identity_rtw", "right_to_work_documents"],
+        "right_to_work": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+        "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+        "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
     }
     req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
     
@@ -18007,13 +18147,15 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
                     auto_req_id = get_requirement_id_from_doctype(doc['document_type_name'])
                     if auto_req_id == req_id:
                         linked_docs.append(doc)
-                # Legacy support: match identity_rtw to new split requirements
-                elif doc_req_id == 'identity_rtw' and req_id in ['identity_documents', 'right_to_work_documents']:
+                # Legacy support: canonical right_to_work should include old RTW doc/check variants
+                elif req_id == 'right_to_work' and doc_req_id in ['right_to_work_documents', 'right_to_work_check', 'right_to_work_evidence', 'identity_rtw']:
+                    linked_docs.append(doc)
+                elif doc_req_id == 'identity_rtw' and req_id in ['identity_documents', 'right_to_work']:
                     # Try to intelligently route based on document type
                     doc_type = doc.get('document_type_name', '').lower()
                     if req_id == 'identity_documents' and any(x in doc_type for x in ['passport', 'licence', 'license', 'id']):
                         linked_docs.append(doc)
-                    elif req_id == 'right_to_work_documents' and any(x in doc_type for x in ['visa', 'brp', 'share', 'work']):
+                    elif req_id == 'right_to_work' and any(x in doc_type for x in ['visa', 'brp', 'share', 'work', 'rtw']):
                         linked_docs.append(doc)
                 # Legacy support: match dbs to dbs_certificate
                 elif doc_req_id == 'dbs' and req_id == 'dbs_certificate':
@@ -20091,12 +20233,98 @@ async def verify_all_documents_in_requirement(employee_id: str, requirement_id: 
     # Get verifier name
     verifier = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
     verifier_name = verifier.get('name') if verifier else None
-    
+
+    legacy_mapping = {
+        "dbs_certificate": ["dbs", "dbs_certificate"],
+        "dbs_check": ["dbs", "dbs_certificate", "dbs_check"],
+        "dbs_status_check": ["dbs", "dbs_certificate", "dbs_check", "dbs_status_check"],
+        "identity_documents": ["identity_rtw", "identity_documents"],
+        "right_to_work": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+        "right_to_work_check": ["right_to_work", "right_to_work_check", "right_to_work_documents", "right_to_work_evidence", "identity_rtw"],
+        "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+        "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
+    }
+    req_ids_to_search = legacy_mapping.get(requirement_id, [requirement_id])
+    if isinstance(req_ids_to_search, str):
+        req_ids_to_search = [req_ids_to_search]
+
+    if requirement_id in ["right_to_work", "right_to_work_documents", "right_to_work_check"]:
+        check_record = await db.rtw_checks.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        if not check_record:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot verify Right to Work documents without a current RTW check record."
+            )
+        if not check_record.get("proof_document_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Right to Work final verification requires an official proof-of-check document "
+                       "(proof_document_id). Please attach the check evidence as a proof document."
+            )
+        if check_record.get("outcome") != "verified":
+            raise HTTPException(
+                status_code=400,
+                detail=f"The RTW check outcome is '{check_record.get('outcome', 'unknown')}'. Only verified checks can be finalized."
+            )
+        is_indefinite = check_record.get("is_indefinite", False)
+        permission_end_date = check_record.get("permission_end_date")
+        follow_up_required = check_record.get("follow_up_required", False)
+        follow_up_due_at = check_record.get("follow_up_due_at")
+        if not is_indefinite and not permission_end_date:
+            if not (follow_up_required and follow_up_due_at):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Right to Work verification must include an expiry date or a follow-up date when permission is not indefinite."
+                )
+        if follow_up_required and not follow_up_due_at:
+            raise HTTPException(
+                status_code=400,
+                detail="Right to Work follow-up is required but no follow-up due date has been set."
+            )
+
+    elif requirement_id in {"dbs", "dbs_certificate", "dbs_check", "dbs_status_check"}:
+        dbs_check_record = await db.dbs_checks.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0}
+        )
+        if not dbs_check_record:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot verify DBS documents without a current DBS check record."
+            )
+        if dbs_check_record.get("method") == "dbs_update_service_check":
+            if not dbs_check_record.get("proof_document_id"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="DBS Update Service checks require a proof document (proof_document_id). "
+                           "Please attach the update service check result as a proof document."
+                )
+        elif not (dbs_check_record.get("evidence_document_id") or dbs_check_record.get("proof_document_id")):
+            raise HTTPException(
+                status_code=400,
+                detail="The DBS check record has no evidence or proof file attached. Please update the check with proof documentation."
+            )
+        if dbs_check_record.get("outcome") != "verified":
+            raise HTTPException(
+                status_code=400,
+                detail=f"The DBS check outcome is '{dbs_check_record.get('outcome', 'unknown')}'. Only verified checks can be finalized."
+            )
+        recheck_required = dbs_check_record.get("recheck_required", False)
+        review_due_at = dbs_check_record.get("review_due_at") or dbs_check_record.get("next_recheck_date")
+        if recheck_required and not review_due_at:
+            raise HTTPException(
+                status_code=400,
+                detail="DBS recheck is flagged as required but no recheck due date has been set."
+            )
+
     # Find all documents for this requirement
     result = await db.employee_documents.update_many(
         {
             "employee_id": employee_id,
-            "requirement_id": requirement_id,
+            "requirement_id": {"$in": req_ids_to_search},
             "status": {"$in": ["uploaded", "approved"]}
         },
         {"$set": {
@@ -34628,7 +34856,7 @@ async def get_compliance_file(
         "interview_record": {
             "name": "Interview Record",
             "category": "recruitment_record",
-            "affects_readiness": False,
+            "affects_readiness": True,
             "optional": False
         },
         "recruitment_checklist": {

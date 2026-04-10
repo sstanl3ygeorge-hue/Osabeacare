@@ -465,7 +465,7 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
         if resend.api_key:
             await asyncio.to_thread(resend.Emails.send, {
                 "from": SENDER_EMAIL,
-                "to": request.email,
+                "to": [request.email],
                 "subject": "DEBUG Login Link",
                 "html": f"<p>Debug login link:</p><a href='{magic_link}'>{magic_link}</a>"
             })

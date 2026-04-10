@@ -234,7 +234,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     missing_docs = []
     completed_docs = []
-    
+    # Initialised to None here; populated after the documents loop by the
+    # unified-status fetch.  The post-loop second pass below applies the
+    # canonical overrides once both are available.
+    rtw_canonical_item = None
+    dbs_canonical_item = None
+
     for doc_type, doc_config in required_docs.items():
         doc_name = doc_config["name"]
         # All documents here are already filtered to active statuses only (query level)
@@ -813,7 +818,6 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # Unified progress
     unified_training_items = []
-    rtw_canonical_item = None
     try:
         unified_status = await get_unified_employee_status(employee_id, db, user_role="worker", include_details=True)
         progress_percentage = unified_status["progress"]["percentage"]
@@ -860,7 +864,38 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified": item.get("verified", False),
                 "record_id": None
             })
-    
+
+    # Second pass: apply canonical RTW/DBS state to completed_docs entries that were
+    # built from raw document rows before the unified-status fetch.
+    if rtw_canonical_item or dbs_canonical_item:
+        for entry in completed_docs:
+            if entry.get("type") == "right_to_work" and rtw_canonical_item:
+                rtw_is_verified = bool(rtw_canonical_item.get("completed"))
+                entry["verified"] = rtw_is_verified
+                entry["status"] = (
+                    rtw_canonical_item.get("verification_status")
+                    or ("verified" if rtw_is_verified else "pending_verification")
+                )
+                entry["verified_at"] = rtw_canonical_item.get("verified_at")
+                if rtw_canonical_item.get("next_action"):
+                    entry["next_action"] = rtw_canonical_item["next_action"]
+                if rtw_canonical_item.get("expiry_date"):
+                    entry["expiry_date"] = rtw_canonical_item["expiry_date"]
+                if rtw_canonical_item.get("follow_up_due_at"):
+                    entry["follow_up_due_at"] = rtw_canonical_item["follow_up_due_at"]
+            elif entry.get("type") == "dbs" and dbs_canonical_item:
+                dbs_is_verified = bool(dbs_canonical_item.get("completed"))
+                entry["verified"] = dbs_is_verified
+                entry["status"] = (
+                    dbs_canonical_item.get("verification_status")
+                    or ("verified" if dbs_is_verified else "pending_verification")
+                )
+                entry["verified_at"] = dbs_canonical_item.get("verified_at")
+                if dbs_canonical_item.get("next_action"):
+                    entry["next_action"] = dbs_canonical_item["next_action"]
+                if dbs_canonical_item.get("recheck_date"):
+                    entry["recheck_date"] = dbs_canonical_item["recheck_date"]
+
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
     
     # Get form status for onboarding employees

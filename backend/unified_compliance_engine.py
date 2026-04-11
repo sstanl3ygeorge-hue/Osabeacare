@@ -177,7 +177,13 @@ def is_document_verified_with_stamp(doc: dict) -> bool:
     """
     if not doc:
         return False
-    
+
+    # Hard-reject invalidated, rejected, or amendment-requested documents.
+    # A stale verified=True or stamp must not override an active rejection.
+    _active_status = (doc.get("status") or "").lower()
+    if _active_status in ("rejected", "amendment_requested", "invalidated", "deleted", "superseded"):
+        return False
+
     stamp = doc.get("verification_stamp", "")
     status = doc.get("status", "")
     verified_flag = doc.get("verified", False)
@@ -669,10 +675,13 @@ async def get_unified_employee_status(
         # Determine if any matching doc is directly verified (via verify_requirement
         # or verify_all, which write verified=True / status="approved" to
         # employee_documents but NOT to verification_documents).
+        # Exclude any doc whose current status indicates rejection or invalidation —
+        # a stale verified=True must not survive a subsequent rejection.
+        _reject_statuses = frozenset(("rejected", "amendment_requested", "invalidated", "deleted", "superseded"))
         has_verified_docs = any(
-            doc.get("verified") is True or doc.get("status") in ("verified", "approved")
+            (doc.get("verified") is True or doc.get("status") in ("verified", "approved"))
+            and (doc.get("status") or "").lower() not in _reject_statuses
             for doc in matching_docs
-            if doc.get("status") != "amendment_requested"
         )
 
         # Determine current status for UI (computed, never stored)

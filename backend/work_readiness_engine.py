@@ -255,30 +255,22 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     job_role = (employee.get("job_role") or employee.get("role") or "").lower()
     blockers = []
     completed = []
-    
-    # Calculate progress (excluding contract itself)
-    # Count requirements by category
-    
-    # ========== DOCUMENTS ==========
-    required_docs = ["right_to_work", "dbs", "identity", "proof_of_address", "proof_of_address_2"]
+
+    # Use the unified compliance engine as the single source of truth for
+    # document checks. This ensures can_sign_contract reflects the same
+    # computed state as the admin and worker compliance views.
+    from unified_compliance_engine import get_unified_employee_status
+    unified = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
+    live_checks = unified.get("checks", {})
+
+    # ========== DOCUMENTS (from live computed state) ==========
+    core_doc_checks = ["right_to_work", "dbs", "identity", "proof_of_address"]
     if "nurse" in job_role:
-        required_docs.append("nmc_registration")
-    
-    documents = await db.employee_documents.find({
-        "employee_id": employee_id,
-        "status": {"$nin": ["deleted", "superseded"]}
-    }).to_list(200)
-    
+        core_doc_checks.append("nmc_registration")
+
     doc_completed = 0
-    for doc_type in required_docs:
-        is_verified = False
-        for doc in documents:
-            req_id = (doc.get("requirement_id") or "").lower()
-            if doc_type.replace("_", "") in req_id.replace("_", "") or doc_type in req_id:
-                stamp = doc.get("verification_stamp", "")
-                if stamp and stamp not in ["", "not_verified"]:
-                    is_verified = True
-                    break
+    for doc_type in core_doc_checks:
+        is_verified = live_checks.get(doc_type, False)
         if is_verified:
             doc_completed += 1
             completed.append(f"{doc_type.replace('_', ' ').title()} verified")
@@ -365,7 +357,7 @@ async def can_sign_contract(db, employee_id: str) -> dict:
         blockers.append(f"Induction incomplete ({induction_completed}/15)")
     
     # ========== CALCULATE TOTAL (excluding contract) ==========
-    total_requirements = len(required_docs) + len(required_forms) + len(mandatory_training) + 2 + 1  # +2 refs, +1 induction
+    total_requirements = len(core_doc_checks) + len(required_forms) + len(mandatory_training) + 2 + 1  # +2 refs, +1 induction
     total_completed = doc_completed + form_completed + training_completed + ref_completed + (1 if induction_completed >= 15 else 0)
     
     progress_percentage = round((total_completed / total_requirements) * 100) if total_requirements > 0 else 0

@@ -14,7 +14,9 @@ Extracted from server.py for modularity.
 import os
 import uuid
 import logging
-from datetime import datetime, timezone
+import jwt
+import asyncio
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
@@ -26,6 +28,8 @@ from .dependencies import (
     require_manager_or_admin,
     UserRole,
     log_audit_action,
+    JWT_SECRET,
+    SENDER_EMAIL,
 )
 
 logger = logging.getLogger(__name__)
@@ -407,7 +411,28 @@ async def approve_recruitment(
             "status_changed_to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None
         }
     )
-    
+
+    # ── Create worker account + send portal invite ────────────────────────────────
+    # Fetch the refreshed employee (has employee_code and new status)
+    updated_employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    invite_sent = False
+    try:
+        from server import create_worker_account_on_approval, send_welcome_email_with_magic_link
+        await create_worker_account_on_approval(updated_employee)
+        invite_sent = await send_welcome_email_with_magic_link(updated_employee, employee_code)
+        invite_status = "sent" if invite_sent else "failed"
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "portal_invite_status": invite_status,
+                "portal_invite_sent_at": now if invite_sent else None,
+            }}
+        )
+        if not invite_sent:
+            logger.warning(f"Portal invite not sent for {employee_id} — check RESEND_API_KEY and FRONTEND_URL env vars")
+    except Exception as exc:
+        logger.error(f"Failed to send portal invite for {employee_id}: {exc}")
+
     return {
         "status": "approved",
         "employee_id": employee_id,
@@ -415,6 +440,7 @@ async def approve_recruitment(
         "recruitment_approved": True,
         "recruitment_approved_by": user['user_id'],
         "recruitment_approved_at": now,
+        "portal_invite_sent": invite_sent,
         "stage_transition": {
             "from": current_status if current_status in APPLICANT_STATUSES else None,
             "to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None
@@ -490,7 +516,153 @@ async def get_recruitment_approval_status(
         "recruitment_approved_by": employee.get("recruitment_approved_by"),
         "recruitment_approved_at": employee.get("recruitment_approved_at"),
         "recruitment_approval_notes": employee.get("recruitment_approval_notes"),
-        "can_be_activated": employee.get("recruitment_approved", False)
+        "can_be_activated": employee.get("recruitment_approved", False),
+        "portal_invite_status": employee.get("portal_invite_status"),
+        "portal_invite_sent_at": employee.get("portal_invite_sent_at"),
+    }
+
+
+# ==================== SEND PORTAL INVITE (ADMIN ACTION) ====================
+
+@router.post("/employees/{employee_id}/send-portal-invite")
+async def send_portal_invite(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    (Re)send the worker portal access invite to an approved applicant.
+
+    Idempotent: creates the worker account if it doesn’t exist yet,
+    generates a fresh 7-day magic-link token, sends the welcome email,
+    and records portal_invite_status / portal_invite_sent_at on the employee.
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    email = employee.get("email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Employee has no email address")
+
+    employee_code = employee.get("employee_code") or employee_id[:8]
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Ensure worker account exists
+    existing_account = await db.worker_accounts.find_one({"employee_id": employee_id})
+    if not existing_account:
+        account_doc = {
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "email": email.lower(),
+            "password_hash": None,
+            "has_password": False,
+            "account_created_at": now,
+            "created_at": now,
+            "updated_at": now,
+            "last_login": None,
+            "login_count": 0,
+            "account_status": "active",
+        }
+        await db.worker_accounts.insert_one(account_doc)
+        logger.info(f"Worker account created (send-portal-invite) for {employee_id}")
+
+    # Generate fresh magic-link token (7 days)
+    magic_token = jwt.encode(
+        {
+            "employee_id": employee_id,
+            "email": email,
+            "type": "worker_login",
+            "exp": datetime.now(timezone.utc) + timedelta(days=7),
+        },
+        JWT_SECRET,
+        algorithm="HS256",
+    )
+    await db.magic_tokens.update_one(
+        {"employee_id": employee_id, "email": email},
+        {"$set": {
+            "token": magic_token,
+            "employee_id": employee_id,
+            "email": email,
+            "used": False,
+            "created_at": now,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "purpose": "portal_invite",
+        }},
+        upsert=True,
+    )
+
+    frontend_url = os.environ.get("FRONTEND_URL", "https://app.osabeacares.co.uk")
+    portal_link = f"{frontend_url}/worker/verify?token={magic_token}"
+
+    # Compose email
+    import resend as resend_module
+    emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
+    org_settings = await db.org_settings.find_one({}, {"_id": 0})
+    org_name = (org_settings or {}).get("organisation_name", "Osabea Healthcare Solutions")
+
+    email_html = f"""
+    <!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+    <div style="background:linear-gradient(135deg,#7c3aed,#a855f7);padding:32px;border-radius:12px 12px 0 0;text-align:center;">
+        <h1 style="color:white;margin:0;">Your Worker Portal Access</h1>
+    </div>
+    <div style="background:#fff;padding:32px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 12px 12px;">
+        <p style="font-size:16px;">Hi {emp_name},</p>
+        <p>Your access to the <strong>{org_name}</strong> worker portal has been set up.</p>
+        <p>Use the button below to log in and complete your onboarding:</p>
+        <div style="text-align:center;margin:32px 0;">
+            <a href="{portal_link}" style="display:inline-block;background:#7c3aed;color:#fff;padding:16px 40px;
+               border-radius:8px;text-decoration:none;font-weight:600;font-size:16px;">
+                Access Your Portal
+            </a>
+        </div>
+        <p style="color:#6b7280;font-size:13px;">This link is valid for 7 days. Employee code: <strong>{employee_code}</strong></p>
+    </div>
+    </body></html>
+    """
+
+    invite_sent = False
+    try:
+        if resend_module.api_key:
+            await asyncio.to_thread(
+                resend_module.Emails.send,
+                {
+                    "from": SENDER_EMAIL,
+                    "to": [email],
+                    "subject": f"Your {org_name} Worker Portal Access",
+                    "html": email_html,
+                },
+            )
+            invite_sent = True
+        else:
+            logger.warning("send-portal-invite: RESEND_API_KEY not set — email not sent")
+    except Exception as exc:
+        logger.error(f"send-portal-invite email failed for {employee_id}: {exc}")
+
+    invite_status = "sent" if invite_sent else "failed"
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "portal_invite_status": invite_status,
+            "portal_invite_sent_at": now if invite_sent else None,
+        }}
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "send_portal_invite",
+        "employee",
+        employee_id,
+        {"email": email, "invite_sent": invite_sent, "portal_link": portal_link},
+    )
+
+    return {
+        "success": True,
+        "invite_sent": invite_sent,
+        "portal_link": portal_link,
+        "employee_id": employee_id,
+        "message": f"Invite {'sent to' if invite_sent else 'failed for'} {email}",
     }
 
 

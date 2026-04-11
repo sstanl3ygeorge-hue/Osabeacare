@@ -1730,7 +1730,7 @@ async def send_worker_reminder(
     blockers = unified_progress.get("blockers", [])
     overall_pct = unified_progress.get("overall_percentage", 0)
     
-    frontend_url = os.environ.get("FRONTEND_URL", "https://caretrust-portal.preview.emergentagent.com")
+    frontend_url = os.environ.get("FRONTEND_URL", "https://app.osabeacares.co.uk")
     portal_link = f"{frontend_url}/worker/verify?token={magic_token}"
     
     blockers_html = ""
@@ -2175,7 +2175,7 @@ async def submit_worker_form(
                         </tr>
                     </table>
                     <div style="margin-top: 24px; text-align: center;">
-                        <a href="{os.environ.get('FRONTEND_URL', 'https://caretrust-portal.preview.emergentagent.com')}/portal/employees/{employee_id}?tab=compliance" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+                        <a href="{os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')}/portal/employees/{employee_id}?tab=compliance" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
                             Review Submission
                         </a>
                     </div>

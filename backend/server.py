@@ -33438,6 +33438,42 @@ async def get_rtw_check(
     
     return {"current": current}
 
+class InvalidateRTWCheckRequest(BaseModel):
+    reason: str = Field(..., min_length=5)
+
+
+@api_router.post("/employees/{employee_id}/right-to-work/check/invalidate")
+async def invalidate_rtw_check(
+    employee_id: str,
+    payload: InvalidateRTWCheckRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Invalidate the current RTW check. Audit trail preserved; new check needed to restore compliance."""
+    now = datetime.now(timezone.utc).isoformat()
+    current = await db.rtw_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail="No current RTW check found to invalidate")
+
+    await db.rtw_checks.update_one(
+        {"id": current["id"]},
+        {"$set": {
+            "is_current": False,
+            "outcome": "invalidated",
+            "invalidated_at": now,
+            "invalidated_by": user["user_id"],
+            "invalidation_reason": payload.reason,
+        }}
+    )
+
+    await log_audit_action(user["user_id"], "invalidate_rtw_check", "rtw_checks", current["id"], {
+        "employee_id": employee_id,
+        "previous_outcome": current.get("outcome"),
+        "reason": payload.reason,
+    })
+
+    return {"success": True, "message": "RTW check invalidated", "check_id": current["id"]}
+
+
 
 
 
@@ -35226,7 +35262,8 @@ async def get_compliance_file(
                 build_evidence_row(
                     key="identity_evidence",
                     title="Identity Evidence",
-                    doc_requirement_keys=["identity_documents", "id_document", "identity", "identity_evidence"],
+                    doc_requirement_keys=["identity_documents", "id_document", "identity", "identity_evidence",
+                                          "identity_rtw", "passport"],
                     paired_check_key="identity_verification"
                 ),
                 build_check_row(

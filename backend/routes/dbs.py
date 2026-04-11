@@ -424,6 +424,51 @@ async def get_dbs_check(
     return {"current": current}
 
 
+# ==================== DBS CHECK INVALIDATE ENDPOINT ====================
+
+class InvalidateCheckRequest(BaseModel):
+    reason: str = Field(..., min_length=5, description="Reason for invalidating this check (audit requirement)")
+
+
+@router.post("/employees/{employee_id}/dbs/check/invalidate")
+async def invalidate_dbs_check(
+    employee_id: str,
+    payload: InvalidateCheckRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Invalidate the current DBS check record.
+
+    Marks the current check as no longer valid (is_current=False, outcome=invalidated).
+    The audit trail is preserved — a new check record must be recorded to restore compliance.
+    """
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    current = await db.dbs_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0})
+    if not current:
+        raise HTTPException(status_code=404, detail="No current DBS check found to invalidate")
+
+    await db.dbs_checks.update_one(
+        {"id": current["id"]},
+        {"$set": {
+            "is_current": False,
+            "outcome": "invalidated",
+            "invalidated_at": now,
+            "invalidated_by": user["user_id"],
+            "invalidation_reason": payload.reason,
+        }}
+    )
+
+    await log_audit_action(user["user_id"], "invalidate_dbs_check", "dbs_checks", current["id"], {
+        "employee_id": employee_id,
+        "previous_outcome": current.get("outcome"),
+        "reason": payload.reason,
+    })
+
+    return {"success": True, "message": "DBS check invalidated", "check_id": current["id"]}
+
+
 # ==================== DBS STAMP ALL ENDPOINT ====================
 
 @router.post("/employees/{employee_id}/dbs/stamp-all")

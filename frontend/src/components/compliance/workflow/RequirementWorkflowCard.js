@@ -4,6 +4,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { Card, CardContent } from '../../ui/card';
 import { Badge } from '../../ui/badge';
 import { Button } from '../../ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../ui/dialog';
 import { toast } from 'sonner';
 import {
   ChevronDown,
@@ -105,6 +106,7 @@ export default function RequirementWorkflowCard({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [reviewDialog, setReviewDialog] = useState({ open: false, file: null });
   const [checkDialog, setCheckDialog] = useState({ open: false });
+  const [invalidateDialog, setInvalidateDialog] = useState({ open: false, reason: '', loading: false });
 
   // ── Extract rows from section data ────────────────────────────────────
   const evidenceRow = sectionData?.rows?.find((r) => r.row_type === 'evidence');
@@ -184,15 +186,31 @@ export default function RequirementWorkflowCard({
   };
 
   // ── Check record actions ───────────────────────────────────────────────
-  // "Invalidate" opens Record Check dialog so admin re-records with updated outcome.
+  // "Edit Check" re-opens RecordCheckDialog prefilled (existing behaviour).
+  // "Invalidate" opens a separate confirm+reason dialog that calls the invalidate endpoint.
   const handleInvalidateCheck = () => {
-    if (
-      !window.confirm(
-        'Invalidate this check record? You will be prompted to re-record it with the corrected details.',
-      )
-    )
+    setInvalidateDialog({ open: true, reason: '', loading: false });
+  };
+
+  const submitInvalidate = async () => {
+    if (!invalidateDialog.reason.trim()) {
+      toast.error('Please provide a reason for invalidating this check.');
       return;
-    setCheckDialog({ open: true });
+    }
+    setInvalidateDialog((d) => ({ ...d, loading: true }));
+    const isRTW = requirementKey === 'right_to_work';
+    const url = isRTW
+      ? `${API}/employees/${employeeId}/right-to-work/check/invalidate`
+      : `${API}/employees/${employeeId}/dbs/check/invalidate`;
+    try {
+      await axios.post(url, { reason: invalidateDialog.reason }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success('Check record invalidated. Please re-record the check.');
+      setInvalidateDialog({ open: false, reason: '', loading: false });
+      handleRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to invalidate check');
+      setInvalidateDialog((d) => ({ ...d, loading: false }));
+    }
   };
 
   // ── Status display ─────────────────────────────────────────────────────
@@ -437,6 +455,52 @@ export default function RequirementWorkflowCard({
         hasAcceptedEvidence={workflow.hasAcceptedEvidence}
         acceptedEvidenceCount={workflow.acceptedFiles.length}
       />
+
+      {/* ── Invalidate check dialog ──────────────────────────────────── */}
+      <Dialog
+        open={invalidateDialog.open}
+        onOpenChange={(open) => !invalidateDialog.loading && setInvalidateDialog((d) => ({ ...d, open }))}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-red-600">Invalidate Check Record</DialogTitle>
+            <DialogDescription>
+              This will mark the current {requirementKey === 'right_to_work' ? 'Right to Work' : 'DBS'} check
+              as invalid. The check record will be preserved for audit purposes but compliance status will
+              drop until a new check is recorded.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <label className="text-sm font-medium text-gray-700">Reason (required)</label>
+            <textarea
+              className="w-full border border-gray-300 rounded-md p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-red-400"
+              rows={3}
+              placeholder="e.g. Document found to be fraudulent, worker left the organisation…"
+              value={invalidateDialog.reason}
+              onChange={(e) => setInvalidateDialog((d) => ({ ...d, reason: e.target.value }))}
+              disabled={invalidateDialog.loading}
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={invalidateDialog.loading}
+              onClick={() => setInvalidateDialog({ open: false, reason: '', loading: false })}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={invalidateDialog.loading || !invalidateDialog.reason.trim()}
+              onClick={submitInvalidate}
+            >
+              {invalidateDialog.loading ? 'Invalidating…' : 'Confirm Invalidate'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

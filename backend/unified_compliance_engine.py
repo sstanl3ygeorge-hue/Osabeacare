@@ -570,8 +570,13 @@ async def get_unified_employee_status(
     ref_doc = await db.references.find_one({"employee_id": emp_id}, {"_id": 0})
     
     # Get DBS and RTW checks from dedicated collections
-    dbs_check = await db.dbs_checks.find_one({"employee_id": emp_id, "status": "verified"}, {"_id": 0})
-    rtw_check = await db.rtw_checks.find_one({"employee_id": emp_id, "status": "verified"}, {"_id": 0})
+    # Use is_current=True + outcome=verified (these collections don't have a "status" field)
+    dbs_check = await db.dbs_checks.find_one(
+        {"employee_id": emp_id, "is_current": True, "outcome": "verified"}, {"_id": 0}
+    )
+    rtw_check = await db.rtw_checks.find_one(
+        {"employee_id": emp_id, "is_current": True, "outcome": "verified"}, {"_id": 0}
+    )
     
     # Get verification documents (NEW: Smart Verification System)
     verification_docs = await db.verification_documents.find({

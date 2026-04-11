@@ -438,7 +438,7 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
         "email": {"$regex": f"^{re.escape(request.email)}$", "$options": "i"}
     }, {"_id": 1, "id": 1, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
 
-    # 🔥 FORCE SEND DEBUG
+    # 🔥 FORCE SEND DEBU G
     logger.warning(f"[DEBUG] LOGIN REQUEST FOR EMAIL: {request.email}")
 
     # Create token anyway (even if employee not found)

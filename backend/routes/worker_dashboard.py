@@ -197,26 +197,37 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "rejected_by_name": doc.get("amendment_requested_by_name") or doc.get("rejected_by_name") or doc.get("verification_stamp_by_name")
         }
     
-    # Required document types with their acceptable requirement_id patterns
+    # Required document types with their acceptable requirement_id patterns.
+    # IMPORTANT: identity patterns MUST match DOC_REQUIREMENT_ALIASES in unified_compliance_engine.py.
+    # Any change here must be mirrored there and vice-versa.
+    from unified_compliance_engine import DOC_REQUIREMENT_ALIASES
     required_docs = {
         "right_to_work": {
             "name": "Right to Work",
-            "patterns": ["right_to_work", "right_to_work_documents", "right_to_work_evidence", "rtw"],
+            "patterns": ["right_to_work"] + [
+                k for k, v in DOC_REQUIREMENT_ALIASES.items() if v == "right_to_work"
+            ],
             "exclude_patterns": ["right_to_work_check"]
         },
         "dbs": {
             "name": "DBS Certificate",
-            "patterns": ["dbs", "dbs_certificate", "dbs_evidence"],
+            "patterns": ["dbs"] + [
+                k for k, v in DOC_REQUIREMENT_ALIASES.items() if v == "dbs"
+            ],
             "exclude_patterns": ["dbs_check", "dbs_status_check", "dbs_update"]
         },
         "identity": {
             "name": "Identity (Passport/ID)",
-            "patterns": ["identity", "identity_documents", "identity_evidence", "passport", "id_document"],
+            "patterns": ["identity"] + [
+                k for k, v in DOC_REQUIREMENT_ALIASES.items() if v == "identity"
+            ],
             "exclude_patterns": ["identity_check", "identity_verification"]
         },
         "proof_of_address": {
             "name": "Proof of Address",
-            "patterns": ["proof_of_address", "poa", "address_evidence"],
+            "patterns": ["proof_of_address"] + [
+                k for k, v in DOC_REQUIREMENT_ALIASES.items() if v == "proof_of_address"
+            ],
             "exclude_patterns": ["address_check", "address_verification"]
         }
     }

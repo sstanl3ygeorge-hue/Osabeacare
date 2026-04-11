@@ -111,6 +111,28 @@ REQUIRED_DOCUMENTS = [
     {"id": "proof_of_address", "name": "Proof of Address", "requires_stamp": True, "min_count": 2, "category": "identity"},
 ]
 
+# Canonical alias map: maps any legacy/variant requirement_id to the canonical REQUIRED_DOCUMENTS id.
+# This is the SINGLE SOURCE OF TRUTH for requirement matching across the application.
+# Worker dashboard and unified engine MUST use the same alias set.
+DOC_REQUIREMENT_ALIASES: dict[str, str] = {
+    # Identity aliases
+    "identity_documents": "identity",
+    "identity_evidence": "identity",
+    "identity_rtw": "identity",
+    "passport": "identity",
+    "id_document": "identity",
+    # Right-to-work aliases
+    "right_to_work_documents": "right_to_work",
+    "right_to_work_evidence": "right_to_work",
+    "rtw": "right_to_work",
+    # DBS aliases
+    "dbs_certificate": "dbs",
+    "dbs_evidence": "dbs",
+    # Proof-of-address aliases
+    "poa": "proof_of_address",
+    "address_evidence": "proof_of_address",
+}
+
 # Forms required for ALL roles
 # Source: "admin" = Admin creates/submits, "worker" = Worker fills via portal
 REQUIRED_FORMS = [
@@ -603,13 +625,16 @@ async def get_unified_employee_status(
         "employee_id": emp_id
     }, {"_id": 0}).to_list(50)
     
-    # Build a map of approved verifications by requirement_id
+    # Build a map of approved verifications keyed by CANONICAL requirement_id.
+    # A verification_document may store a legacy/alias requirement_id (e.g. "passport")
+    # so resolve it through DOC_REQUIREMENT_ALIASES before indexing.
     approved_verifications = {}
     for vdoc in verification_docs:
         if vdoc.get("verification_approved"):
-            req_id = vdoc.get("requirement_id")
-            if req_id:
-                approved_verifications[req_id] = vdoc
+            raw_req = (vdoc.get("requirement_id") or "").lower().strip()
+            canonical_req = DOC_REQUIREMENT_ALIASES.get(raw_req, raw_req)
+            if canonical_req:
+                approved_verifications[canonical_req] = vdoc
     
     # ==========================================================================
     # INITIALIZE TRACKING
@@ -631,18 +656,34 @@ async def get_unified_employee_status(
     # ==========================================================================
     
     def find_docs_for_requirement(req_id: str) -> List[dict]:
-        """Find all documents matching a requirement ID"""
+        """Find all documents matching a requirement ID, using canonical aliases."""
         matches = []
+        seen_ids: set = set()
         for doc in all_docs:
-            doc_req_id = (doc.get("requirement_id") or "").lower()
+            raw_req_id = (doc.get("requirement_id") or "").lower().strip()
             doc_type = (doc.get("document_type_name") or "").lower()
-            
-            # Match by requirement_id
-            if req_id in doc_req_id or doc_req_id == req_id:
-                matches.append(doc)
-            # Match by document type
-            elif req_id.replace("_", " ") in doc_type or req_id.replace("_", "") in doc_type.replace(" ", ""):
-                matches.append(doc)
+            # Resolve via alias map first
+            canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id, raw_req_id)
+            if canonical == req_id:
+                doc_id = doc.get("id") or id(doc)
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    matches.append(doc)
+                continue
+            # Fallback: substring match on raw requirement_id (preserves legacy rows
+            # that store partial names like "identity_evidence_2" not in the alias map)
+            if req_id in raw_req_id:
+                doc_id = doc.get("id") or id(doc)
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    matches.append(doc)
+                continue
+            # Fallback: document_type_name substring match
+            if req_id.replace("_", " ") in doc_type or req_id.replace("_", "") in doc_type.replace(" ", ""):
+                doc_id = doc.get("id") or id(doc)
+                if doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    matches.append(doc)
         return matches
     
     for doc_req in REQUIRED_DOCUMENTS:

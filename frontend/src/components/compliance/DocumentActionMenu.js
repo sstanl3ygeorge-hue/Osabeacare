@@ -8,7 +8,7 @@ import {
 } from '../ui/dropdown-menu';
 import { 
   MoreVertical, Eye, Download, CheckCircle, RotateCcw, 
-  FileSearch, Trash2, ArrowRight, RefreshCw, History, Stamp
+  FileSearch, Trash2, ArrowRight, RefreshCw, History, Stamp, X
 } from 'lucide-react';
 
 /**
@@ -24,6 +24,8 @@ export default function DocumentActionMenu({
   onView,
   onDownload,
   onVerify,
+  onRequestReplacement,
+  onRejectEvidence,
   onReject,
   onExtractReview,
   onRemoveStamp,
@@ -46,6 +48,8 @@ export default function DocumentActionMenu({
   // Determine primary action based on file state
   const showVerifyAction = !isVerified && isActiveFile && !isAuditor;
   const showRemoveStamp = isVerified && !isAuditor;
+  const canRequestReplacement = !isAuditor && isActiveFile && !!(onRequestReplacement || onReject);
+  const canRejectEvidence = !isAuditor && isActiveFile && !!(onRejectEvidence || onReject);
 
   return (
     <DropdownMenu>
@@ -109,18 +113,31 @@ export default function DocumentActionMenu({
         {!isAuditor && isActiveFile && (
           <>
             <DropdownMenuSeparator />
-            {/* Request Replacement is the preferred way to get new document from employee */}
-            {!isVerified && onReject && (
-              <DropdownMenuItem onClick={onReject} data-testid="action-request-replacement">
+            {/* Amendment path: keep audit reason and ask worker to re-upload */}
+            {canRequestReplacement && (
+              <DropdownMenuItem
+                onClick={onRequestReplacement || onReject}
+                data-testid="action-request-replacement"
+              >
                 <RotateCcw className="h-4 w-4 mr-2 text-amber-600" />
-                <span className="text-amber-600">Request Replacement</span>
+                <span className="text-amber-600">Request Replacement (Amendment)</span>
+              </DropdownMenuItem>
+            )}
+            {/* Hard reject path: explicit evidence rejection */}
+            {canRejectEvidence && (
+              <DropdownMenuItem
+                onClick={onRejectEvidence || onReject}
+                data-testid="action-reject-evidence"
+              >
+                <X className="h-4 w-4 mr-2 text-red-600" />
+                <span className="text-red-600">Reject Evidence</span>
               </DropdownMenuItem>
             )}
             {/* Mark as error - when file shouldn't be here */}
             {onMarkUploadedInError && (
               <DropdownMenuItem onClick={onMarkUploadedInError} data-testid="action-mark-error" className="text-red-600">
                 <Trash2 className="h-4 w-4 mr-2" />
-                Remove (Uploaded in Error)
+                Remove (Uploaded in Error - Admin Cleanup)
               </DropdownMenuItem>
             )}
           </>

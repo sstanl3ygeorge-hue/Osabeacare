@@ -40,6 +40,7 @@ import {
   isPreviewableFile,
   normalizeUploadDrawerData,
 } from './complianceRequirementMap';
+import { getEvidenceRules } from './evidenceRules';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -83,6 +84,7 @@ export default function EvidenceManageDrawer({
   
   const { token } = useAuth();
   const requirementConfig = getRequirementConfig(requirementKey);
+  const sharedRules = getEvidenceRules(requirementKey);
 
   // Fetch files data
   const fetchFiles = useCallback(async () => {
@@ -214,9 +216,31 @@ export default function EvidenceManageDrawer({
     }
   };
 
+  const handleRequestReplacement = async (fileId) => {
+    if (!actionReason.trim()) {
+      toast.error('Please provide a replacement reason');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await axios.post(
+        `${API}/employee-documents/${fileId}/request-replacement`,
+        { reason: actionReason, notify_employee: true },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Replacement requested from worker');
+      closeActionDialog();
+      refreshAfterMutation();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to request replacement');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleMarkUploadedInError = async (fileId) => {
-    if (!actionReason.trim() || actionReason.trim().length < 10) {
-      toast.error('Please provide a reason (at least 10 characters)');
+    if (!actionReason.trim() || actionReason.trim().length < 20) {
+      toast.error('Please provide a stronger reason (at least 20 characters)');
       return;
     }
     if (!fileId) {
@@ -339,9 +363,13 @@ export default function EvidenceManageDrawer({
 
   // PoA specific logic
   const isPoA = requirementKey === 'proof_of_address';
-  const requiredCount = filesData?.multi_file_config?.required_count || (isPoA ? 2 : 1);
+  const effectiveRules = filesData?.evidence_rules || requirementConfig?.evidenceRules || sharedRules;
+  const requiredCount = filesData?.multi_file_config?.required_count || effectiveRules.min_required_files || (isPoA ? 2 : 1);
   const validPoACount = filesData?.counts?.validPoA || 0;
   const needsMoreFiles = isPoA && validPoACount < requiredCount;
+  const maxActiveFiles = effectiveRules.max_active_files;
+  const activeCount = filesData?.counts?.active || 0;
+  const isAtActiveLimit = Boolean(maxActiveFiles && activeCount >= maxActiveFiles);
 
   const requirementCategories = getAllowedMoveTargets(requirementKey);
   const title = requirementConfig?.label || 'Evidence';
@@ -399,9 +427,10 @@ export default function EvidenceManageDrawer({
                 onClick={() => onUploadFile && onUploadFile(requirementKey)}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white h-9"
                 data-testid="evidence-upload-btn"
+                disabled={isAtActiveLimit}
               >
                 <Upload className="h-4 w-4 mr-1.5" />
-                Upload Evidence
+                {isAtActiveLimit ? `Limit Reached (${maxActiveFiles})` : 'Upload Evidence'}
               </Button>
               <Button
                 size="sm"
@@ -520,7 +549,8 @@ export default function EvidenceManageDrawer({
                               onView={() => handleOpenFile(file)}
                               onDownload={() => handleDownloadFile(file)}
                               onVerify={() => handleVerify(file.file_id)}
-                              onReject={() => setActionDialog({ open: true, type: 'reject', file })}
+                              onRequestReplacement={() => setActionDialog({ open: true, type: 'request_replacement', file })}
+                              onRejectEvidence={() => setActionDialog({ open: true, type: 'reject', file })}
                               onExtractReview={() => onExtractReview && onExtractReview(file.file_id)}
                               onMarkUploadedInError={() => setActionDialog({ open: true, type: 'uploaded_in_error', file })}
                               onSupersede={() => setActionDialog({ open: true, type: 'supersede', file })}
@@ -708,9 +738,10 @@ export default function EvidenceManageDrawer({
           <DialogHeader>
             <DialogTitle>
               {actionDialog.type === 'uploaded_in_error' && 'Mark as Uploaded in Error'}
+              {actionDialog.type === 'request_replacement' && 'Request Replacement (Amendment)'}
               {actionDialog.type === 'supersede' && 'Supersede File'}
               {actionDialog.type === 'move_category' && 'Move to Different Category'}
-              {actionDialog.type === 'reject' && 'Reject File'}
+              {actionDialog.type === 'reject' && 'Reject Evidence'}
             </DialogTitle>
             <DialogDescription>
               {actionDialog.file?.file_name}
@@ -742,10 +773,11 @@ export default function EvidenceManageDrawer({
                 value={actionReason}
                 onChange={(e) => setActionReason(e.target.value)}
                 placeholder={
-                  actionDialog.type === 'uploaded_in_error' ? 'Why was this file uploaded in error?' :
+                  actionDialog.type === 'uploaded_in_error' ? 'State exactly why this upload is invalid for audit (minimum 20 characters)' :
+                  actionDialog.type === 'request_replacement' ? 'Explain what worker must correct before re-upload' :
                   actionDialog.type === 'supersede' ? 'Why is this file being superseded?' :
                   actionDialog.type === 'move_category' ? 'Why is this file being moved?' :
-                  actionDialog.type === 'reject' ? 'Why is this file being rejected?' :
+                  actionDialog.type === 'reject' ? 'Explain why this evidence is rejected (wrong/illegible/insufficient)' :
                   'Enter reason...'
                 }
                 className="min-h-[80px]"
@@ -756,7 +788,7 @@ export default function EvidenceManageDrawer({
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                 <p className="text-xs text-amber-700 flex items-start gap-2">
                   <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
-                  This will remove the file from the active set but preserve it in history for audit purposes.
+                  Admin cleanup only. This removes the file from active evidence but preserves immutable audit history.
                 </p>
               </div>
             )}
@@ -775,6 +807,7 @@ export default function EvidenceManageDrawer({
                   return;
                 }
                 if (actionDialog.type === 'uploaded_in_error') handleMarkUploadedInError(fileId);
+                else if (actionDialog.type === 'request_replacement') handleRequestReplacement(fileId);
                 else if (actionDialog.type === 'supersede') handleSupersede(fileId);
                 else if (actionDialog.type === 'move_category') handleMoveCategory(fileId);
                 else if (actionDialog.type === 'reject') handleReject(fileId);
@@ -788,6 +821,7 @@ export default function EvidenceManageDrawer({
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {actionDialog.type === 'uploaded_in_error' && 'Mark as Error'}
+              {actionDialog.type === 'request_replacement' && 'Request Replacement'}
               {actionDialog.type === 'supersede' && 'Supersede'}
               {actionDialog.type === 'move_category' && 'Move File'}
               {actionDialog.type === 'reject' && 'Reject'}

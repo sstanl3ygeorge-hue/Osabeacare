@@ -6,6 +6,13 @@
  * and move-category targets.
  */
 
+import {
+  getEvidenceRules,
+  isActiveEvidenceFile,
+  isHistoricalEvidenceFile,
+  hasValidPoADate as sharedHasValidPoADate,
+} from './evidenceRules';
+
 export const REQUIREMENT_MAP = {
   right_to_work: {
     uiKey: 'right_to_work',
@@ -27,7 +34,7 @@ export const REQUIREMENT_MAP = {
     shortLabel: 'DBS',
     allowedMoveTargets: ['identity_documents', 'other'],
     requiredCount: 1,
-    multiFile: true,
+    multiFile: false,
   },
   identity: {
     uiKey: 'identity',
@@ -71,6 +78,7 @@ export const UPLOAD_REQUIREMENT_KEYS = ['right_to_work', 'dbs', 'identity', 'pro
  * Get requirement configuration by UI key
  */
 export function getRequirementConfig(requirementKey) {
+  const rules = getEvidenceRules(requirementKey);
   if (!requirementKey) {
     return {
       uiKey: '',
@@ -82,9 +90,10 @@ export function getRequirementConfig(requirementKey) {
       allowedMoveTargets: ['other'],
       requiredCount: 1,
       multiFile: true,
+      evidenceRules: rules,
     };
   }
-  return REQUIREMENT_MAP[requirementKey] || {
+  const baseConfig = REQUIREMENT_MAP[requirementKey] || {
     uiKey: requirementKey,
     evidenceEndpointKey: `${requirementKey}_evidence`,
     moveCategoryKey: requirementKey,
@@ -94,6 +103,13 @@ export function getRequirementConfig(requirementKey) {
     allowedMoveTargets: ['other'],
     requiredCount: 1,
     multiFile: true,
+  };
+
+  return {
+    ...baseConfig,
+    requiredCount: rules.min_required_files || baseConfig.requiredCount,
+    multiFile: rules.multi_file_allowed,
+    evidenceRules: rules,
   };
 }
 
@@ -153,42 +169,30 @@ export function isPreviewableFile(file) {
  * Check if file is historical (superseded, rejected, etc.)
  */
 export function isHistoricalFile(file) {
-  return (
-    file?.status === 'superseded' ||
-    file?.status === 'uploaded_in_error' ||
-    file?.status === 'rejected' ||
-    file?.status === 'moved' ||
-    !!file?.superseded_by ||
-    !!file?.superseded_at ||
-    !!file?.uploaded_in_error_reason ||
-    !!file?.moved_to
-  );
+  return isHistoricalEvidenceFile(file);
 }
 
 /**
  * Check if a PoA file has a valid date (within 12 months)
  */
 export function hasValidPoADate(file) {
-  if (!file?.document_date && !file?.uploaded_at) return false;
-
-  const docDate = new Date(file.document_date || file.uploaded_at);
-  if (Number.isNaN(docDate.getTime())) return false;
-
-  const now = new Date();
-  const diffMonths =
-    (now.getFullYear() - docDate.getFullYear()) * 12 +
-    (now.getMonth() - docDate.getMonth());
-
-  return diffMonths <= 12; // 12 months validity per role pack policy
+  return sharedHasValidPoADate(file, 12);
 }
 
 /**
  * Normalize API data for upload requirement drawer
  */
 export function normalizeUploadDrawerData(raw, requirementKey) {
+  const rules = getEvidenceRules(requirementKey);
   const activeFiles = Array.isArray(raw?.active_files) ? raw.active_files : [];
   const historicalFiles = Array.isArray(raw?.historical_files) ? raw.historical_files : [];
   const requests = Array.isArray(raw?.requests) ? [...raw.requests] : [];
+
+  const activeByRule = activeFiles.filter(isActiveEvidenceFile);
+  const historicalByRule = [
+    ...historicalFiles,
+    ...activeFiles.filter(isHistoricalEvidenceFile)
+  ];
 
   // Sort requests by most recent first
   requests.sort(
@@ -198,7 +202,7 @@ export function normalizeUploadDrawerData(raw, requirementKey) {
   );
 
   // A file is pending review only if NOT verified by any indicator
-  const pendingReviewFiles = activeFiles.filter(
+  const pendingReviewFiles = activeByRule.filter(
     (file) =>
       !file?.verified &&
       file?.status !== 'verified' &&
@@ -209,30 +213,31 @@ export function normalizeUploadDrawerData(raw, requirementKey) {
   );
 
   // A file is verified if ANY verification indicator is true
-  const verifiedFiles = activeFiles.filter((file) => 
+  const verifiedFiles = activeByRule.filter((file) => 
     !!file?.verified || file?.status === 'verified' || !!file?.verification_stamp
   );
 
   // For PoA, calculate valid files (within 9 months)
   const validPoAFiles =
     requirementKey === 'proof_of_address'
-      ? activeFiles.filter(
+      ? activeByRule.filter(
           (file) =>
             !file?.rejected &&
             !file?.uploaded_in_error_reason &&
             file?.status !== 'uploaded_in_error' &&
-            hasValidPoADate(file)
+            sharedHasValidPoADate(file, rules.recency_months || 12)
         )
       : [];
 
   return {
     ...raw,
-    active_files: activeFiles,
-    historical_files: historicalFiles,
+    active_files: activeByRule,
+    historical_files: historicalByRule,
     requests,
+    evidence_rules: rules,
     counts: {
-      active: activeFiles.length,
-      historical: historicalFiles.length,
+      active: activeByRule.length,
+      historical: historicalByRule.length,
       pendingReview: pendingReviewFiles.length,
       verified: verifiedFiles.length,
       requests: requests.length,

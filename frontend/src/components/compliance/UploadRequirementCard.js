@@ -17,6 +17,7 @@ import VerificationChecklistModal from './VerificationChecklistModal';
 import AmendmentRequestDialog from './AmendmentRequestDialog';
 import QuickVerifyStampDialog from './QuickVerifyStampDialog';
 import { formatBackendDate } from '../../lib/dateUtils';
+import { getEvidenceRules } from './evidenceRules';
 
 // eslint-disable-next-line no-unused-vars
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -165,20 +166,8 @@ export default function UploadRequirementCard({
   const checkVerified = authoritativeCheck?.status === 'verified';
   const hasPendingRequest = requestState === 'requested' || requestState === 'viewed';
 
-  // Document upload limits per requirement type (NHS CQC compliance)
-  const DOCUMENT_LIMITS = {
-    right_to_work: 2,
-    right_to_work_evidence: 2,
-    dbs: 1,
-    dbs_certificate: 1,
-    dbs_certificate_evidence: 1,
-    identity: 2,
-    identity_evidence: 2,
-    proof_of_address: 3,
-    proof_of_address_evidence: 3
-  };
-  
-  const documentLimit = DOCUMENT_LIMITS[key] || null; // null = unlimited
+  const evidenceRules = getEvidenceRules(key);
+  const documentLimit = evidenceRules.max_active_files || null; // null = unlimited
   const isAtLimit = documentLimit && counters.active >= documentLimit;
   const limitMessage = isAtLimit 
     ? `Maximum ${documentLimit} document${documentLimit > 1 ? 's' : ''} allowed` 

@@ -5,6 +5,13 @@
  * All UI rendering should use these normalized surfaces, not raw API data.
  */
 
+import {
+  getEvidenceRules,
+  isActiveEvidenceFile,
+  isHistoricalEvidenceFile,
+  hasValidPoADate,
+} from './evidenceRules';
+
 // ============================================================================
 // UPLOAD REQUIREMENT SURFACE
 // ============================================================================
@@ -16,12 +23,9 @@ const UPLOAD_LABELS = {
   proof_of_address: 'Proof of Address'
 };
 
-const UPLOAD_RULES = {
-  right_to_work: {},
-  dbs: {},
-  identity: {},
-  proof_of_address: { minimumFilesRequired: 2 }
-};
+function getUploadRules(requirementKey) {
+  return getEvidenceRules(requirementKey);
+}
 
 /**
  * Convert method enum values to human-friendly labels
@@ -88,9 +92,16 @@ function deriveRequestState(latestRequest) {
 /**
  * Derive row status from files, request, and check state
  */
-function deriveUploadRowStatus({ activeFiles, latestRequest, authoritativeCheck, requirementKey }) {
-  const rules = UPLOAD_RULES[requirementKey] || {};
-  const minRequired = rules.minimumFilesRequired || 1;
+function deriveUploadRowStatus({
+  activeFiles,
+  latestRequest,
+  authoritativeCheck,
+  requirementKey,
+  activeCountOverride,
+  validFreshOverride,
+}) {
+  const rules = getUploadRules(requirementKey);
+  const minRequired = rules.min_required_files || 1;
   
   // Check decides readiness
   if (authoritativeCheck?.status === 'verified') {
@@ -102,7 +113,10 @@ function deriveUploadRowStatus({ activeFiles, latestRequest, authoritativeCheck,
   }
   
   // Files state
-  const activeCount = activeFiles.length;
+  const activeCount = typeof activeCountOverride === 'number' ? activeCountOverride : activeFiles.length;
+  const effectiveCount = (requirementKey === 'proof_of_address' && rules.file_recency_required)
+    ? (typeof validFreshOverride === 'number' ? validFreshOverride : activeFiles.filter(f => hasValidPoADate(f, rules.recency_months || 12)).length)
+    : activeCount;
   // A file is pending review only if it's NOT verified by any indicator
   const pendingReview = activeFiles.filter(f => 
     !f.verified && 
@@ -115,7 +129,7 @@ function deriveUploadRowStatus({ activeFiles, latestRequest, authoritativeCheck,
     return 'awaiting_review';
   }
   
-  if (activeCount < minRequired) {
+  if (effectiveCount < minRequired) {
     const requestState = deriveRequestState(latestRequest);
     if (requestState === 'requested' || requestState === 'viewed') {
       return 'awaiting_submission';
@@ -137,11 +151,14 @@ function deriveUploadRowStatus({ activeFiles, latestRequest, authoritativeCheck,
  */
 function buildUploadSummary({ requirementKey, activeFiles, historicalFiles, latestRequest, authoritativeCheck }) {
   const parts = [];
-  const rules = UPLOAD_RULES[requirementKey] || {};
-  const minRequired = rules.minimumFilesRequired || 1;
+  const rules = getUploadRules(requirementKey);
+  const minRequired = rules.min_required_files || 1;
   const requestState = deriveRequestState(latestRequest);
   
   const activeCount = activeFiles.length;
+  const validCount = (requirementKey === 'proof_of_address' && rules.file_recency_required)
+    ? activeFiles.filter(f => hasValidPoADate(f, rules.recency_months || 12)).length
+    : activeCount;
   const verifiedCount = activeFiles.filter(f => f.verified || f.status === 'verified' || f.verification_stamp).length;
   // A file is pending review only if it's NOT verified by any indicator
   const pendingReview = activeFiles.filter(f => 
@@ -186,9 +203,9 @@ function buildUploadSummary({ requirementKey, activeFiles, historicalFiles, late
   
   // Multi-file special handling
   if (minRequired > 1) {
-    if (activeCount < minRequired) {
-      parts.push(`${activeCount} file${activeCount !== 1 ? 's' : ''}`);
-      parts.push(`${minRequired - activeCount} more needed`);
+    if (validCount < minRequired) {
+      parts.push(`${validCount}/${minRequired} valid`);
+      parts.push(`${Math.max(0, minRequired - validCount)} more needed`);
     } else {
       if (verifiedCount > 0) {
         parts.push(`${verifiedCount}/${activeCount} accepted`);
@@ -227,38 +244,12 @@ export function normalizeUploadRequirementSurface({
   files = [],
   requests = [],
   checks = [],
-  freshness = null  // PoA freshness data
+  freshness = null,  // PoA freshness data
+  serverCounts = null,
 }) {
-  // EVIDENCE STATE MODEL:
-  // Active/current files (visible on main card):
-  //   - uploaded: File uploaded, awaiting review
-  //   - active: Legacy status, treated as pending review
-  //   - approved: File accepted after evidence review
-  //   - pending_review: Awaiting evidence review
-  //   - under_review: Being reviewed
-  //   - verified: Explicit verified status
-  //
-  // Hidden from main card (only in Manage/Historical):
-  //   - rejected: File rejected during evidence review
-  //   - uploaded_in_error: Marked as wrong file/upload mistake
-  //   - superseded: Replaced by newer version
-  //   - misfiled: Wrong requirement
-  //   - historical: Archived
-  
-  const ACTIVE_STATUSES = ['active', 'uploaded', 'approved', 'pending_review', 'under_review', 'verified'];
-  const EXCLUDED_STATUSES = ['rejected', 'uploaded_in_error', 'superseded', 'misfiled', 'historical'];
-  
-  const activeFiles = files.filter(f => {
-    const status = f.status || 'active';
-    // Include if status is active OR not in excluded list
-    return ACTIVE_STATUSES.includes(status) || 
-           (!EXCLUDED_STATUSES.includes(status) && !f.superseded_at && !f.error_at);
-  });
-  
-  const historicalFiles = files.filter(f => {
-    const status = f.status;
-    return EXCLUDED_STATUSES.includes(status) || f.superseded_at || f.error_at;
-  });
+  const rules = getUploadRules(requirementKey);
+  const activeFiles = files.filter(isActiveEvidenceFile);
+  const historicalFiles = files.filter(isHistoricalEvidenceFile);
   
   // Sort requests by date descending
   const sortedRequests = [...requests].sort((a, b) => 
@@ -273,19 +264,25 @@ export function normalizeUploadRequirementSurface({
   const authoritativeCheck = sortedChecks[0] || null;
   
   const requestState = deriveRequestState(latestRequest);
+  const activeCountOverride = typeof serverCounts?.active_files === 'number' ? serverCounts.active_files : undefined;
+  const validFreshOverride = requirementKey === 'proof_of_address'
+    ? (freshness?.valid_count ?? undefined)
+    : undefined;
   const rowStatus = deriveUploadRowStatus({
     activeFiles,
     latestRequest,
     authoritativeCheck,
-    requirementKey
+    requirementKey,
+    activeCountOverride,
+    validFreshOverride,
   });
   
   // Build counters
   const counters = {
-    active: activeFiles.length,
+    active: typeof activeCountOverride === 'number' ? activeCountOverride : activeFiles.length,
     pendingReview: activeFiles.filter(f => 
       !f.verified && 
-      !EXCLUDED_STATUSES.includes(f.status) &&
+      isActiveEvidenceFile(f) &&
       (f.extraction_status?.status === 'awaiting_review' || 
        f.status === 'active' || 
        f.status === 'uploaded' ||
@@ -297,7 +294,9 @@ export function normalizeUploadRequirementSurface({
     superseded: historicalFiles.filter(f => f.status === 'superseded').length,
     rejected: historicalFiles.filter(f => f.status === 'rejected').length,
     uploadedInError: historicalFiles.filter(f => f.status === 'uploaded_in_error').length,
-    historical: historicalFiles.length
+    historical: typeof serverCounts?.history === 'number'
+      ? Math.max(0, serverCounts.history - (typeof activeCountOverride === 'number' ? activeCountOverride : activeFiles.length))
+      : historicalFiles.length
   };
   
   // Add PoA freshness counters
@@ -305,15 +304,15 @@ export function normalizeUploadRequirementSurface({
     counters.validFresh = freshness.valid_count || 0;
     counters.expired = freshness.expired_count || 0;
     counters.dateUnclear = freshness.unclear_count || 0;
-    counters.freshnessRequired = freshness.required_count || 2;
+    counters.freshnessRequired = freshness.required_count || (rules.min_required_files || 2);
     counters.freshnessComplete = freshness.is_complete || false;
   } else if (requirementKey === 'proof_of_address') {
     // Derive from file-level freshness data if no aggregate provided
     counters.validFresh = activeFiles.filter(f => f.freshness_is_valid).length;
     counters.expired = activeFiles.filter(f => f.freshness_status === 'expired').length;
     counters.dateUnclear = activeFiles.filter(f => f.freshness_status === 'date_unclear').length;
-    counters.freshnessRequired = 2;
-    counters.freshnessComplete = counters.validFresh >= 2;
+    counters.freshnessRequired = rules.min_required_files || 2;
+    counters.freshnessComplete = counters.validFresh >= (rules.min_required_files || 2);
   }
   
   // Build summary with freshness for PoA
@@ -355,7 +354,7 @@ export function normalizeUploadRequirementSurface({
     counters,
     requestState,
     rowStatus,
-    rules: UPLOAD_RULES[requirementKey] || {},
+    rules,
     freshness: requirementKey === 'proof_of_address' ? {
       validCount: counters.validFresh,
       expiredCount: counters.expired,

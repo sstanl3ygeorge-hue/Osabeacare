@@ -361,7 +361,8 @@ export default function DualRowComplianceSection({
       files,
       requests,
       checks,
-      freshness: sectionKey === 'proof_of_address' && checkRow ? checkRow.freshness : null
+      freshness: sectionKey === 'proof_of_address' && checkRow ? checkRow.freshness : null,
+      serverCounts: evidenceRow.counts || null,
     });
   };
 

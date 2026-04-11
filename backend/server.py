@@ -33465,6 +33465,16 @@ async def invalidate_rtw_check(
         }}
     )
 
+    # Clear any stale employee-level RTW verification flags.
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$unset": {
+            "rtw_fully_verified": "",
+            "right_to_work_check_completed": "",
+            "right_to_work_verified": "",
+        }}
+    )
+
     await log_audit_action(user["user_id"], "invalidate_rtw_check", "rtw_checks", current["id"], {
         "employee_id": employee_id,
         "previous_outcome": current.get("outcome"),

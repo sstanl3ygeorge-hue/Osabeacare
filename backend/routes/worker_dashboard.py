@@ -166,11 +166,15 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     employee_status = employee.get("status", "onboarding")
     is_active_employee = employee_status == "active_employee"
     
-    # Get documents - Import the global constant from server.py for single source of truth
+    # Get documents - Import the global constant from server.py for single source of truth.
+    # Also exclude amendment_requested and invalidated: those docs are not live evidence.
+    # Filter review_status to exclude docs an admin has rejected via review workflow.
     from server import EXCLUDED_DOC_STATUSES
+    _worker_excluded = list(EXCLUDED_DOC_STATUSES) + ["amendment_requested", "invalidated"]
     documents = await db.employee_documents.find({
         "employee_id": employee_id,
-        "status": {"$nin": EXCLUDED_DOC_STATUSES},
+        "status": {"$nin": _worker_excluded},
+        "review_status": {"$nin": ["rejected", "amendment_requested", "invalidated"]},
         "$or": [
             {"is_active": True},
             {"is_active": {"$exists": False}}
@@ -867,9 +871,17 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
 
     # Second pass: apply canonical RTW/DBS state to completed_docs entries that were
     # built from raw document rows before the unified-status fetch.
+    # If the canonical item says no live evidence exists, remove the entry from
+    # completed_docs and add it to missing_docs so the worker is prompted to upload.
     if rtw_canonical_item or dbs_canonical_item:
+        entries_to_remove = []
         for entry in completed_docs:
             if entry.get("type") == "right_to_work" and rtw_canonical_item:
+                if not rtw_canonical_item.get("has_upload"):
+                    # Canonical says no live evidence — move to missing
+                    entries_to_remove.append(entry)
+                    missing_docs.append({"type": "right_to_work", "name": "Right to Work", "action": "upload"})
+                    continue
                 rtw_is_verified = bool(rtw_canonical_item.get("completed"))
                 entry["verified"] = rtw_is_verified
                 entry["status"] = (
@@ -887,6 +899,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 if rtw_canonical_item.get("follow_up_due_at"):
                     entry["follow_up_due_at"] = rtw_canonical_item["follow_up_due_at"]
             elif entry.get("type") == "dbs" and dbs_canonical_item:
+                if not dbs_canonical_item.get("has_upload"):
+                    # Canonical says no live evidence — move to missing
+                    entries_to_remove.append(entry)
+                    missing_docs.append({"type": "dbs", "name": "DBS Certificate", "action": "upload"})
+                    continue
                 dbs_is_verified = bool(dbs_canonical_item.get("completed"))
                 entry["verified"] = dbs_is_verified
                 entry["status"] = (
@@ -901,6 +918,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                     entry["next_action"] = dbs_canonical_item["next_action"]
                 if dbs_canonical_item.get("recheck_date"):
                     entry["recheck_date"] = dbs_canonical_item["recheck_date"]
+        for entry in entries_to_remove:
+            completed_docs.remove(entry)
 
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
     

@@ -460,6 +460,17 @@ async def invalidate_dbs_check(
         }}
     )
 
+    # Clear any stale employee-level DBS verification flags so that
+    # subsequent reads from non-engine endpoints don't show stale state.
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$unset": {
+            "dbs_fully_verified": "",
+            "dbs_check_completed": "",
+            "dbs_verified": "",
+        }}
+    )
+
     await log_audit_action(user["user_id"], "invalidate_dbs_check", "dbs_checks", current["id"], {
         "employee_id": employee_id,
         "previous_outcome": current.get("outcome"),

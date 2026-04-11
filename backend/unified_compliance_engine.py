@@ -180,8 +180,15 @@ def is_document_verified_with_stamp(doc: dict) -> bool:
 
     # Hard-reject invalidated, rejected, or amendment-requested documents.
     # A stale verified=True or stamp must not override an active rejection.
-    _active_status = (doc.get("status") or "").lower()
-    if _active_status in ("rejected", "amendment_requested", "invalidated", "deleted", "superseded"):
+    # Check BOTH status and review_status — review_status may be set after the
+    # document status was last updated (e.g. admin reviewed but didn't change status).
+    _dead_statuses = frozenset((
+        "rejected", "amendment_requested", "invalidated",
+        "deleted", "superseded", "uploaded_in_error",
+    ))
+    if (doc.get("status") or "").lower() in _dead_statuses:
+        return False
+    if (doc.get("review_status") or "").lower() in _dead_statuses:
         return False
 
     stamp = doc.get("verification_stamp", "")
@@ -536,10 +543,23 @@ async def get_unified_employee_status(
     # FETCH ALL DATA IN PARALLEL (Efficient - 5 E's)
     # ==========================================================================
     
-    # Get all documents
+    # Get all documents — exclude all dead/invalid statuses and inactive docs.
+    # amendment_requested = admin asked for re-upload → not valid evidence
+    # invalidated = explicitly voided → not valid evidence
+    # review_status rejected/amendment_requested → supersedes a stale status field
+    _DEAD_DOC_STATUSES = [
+        "deleted", "superseded", "rejected", "amendment_requested",
+        "invalidated", "uploaded_in_error", "removed", "archived",
+        "misfiled", "moved", "replaced",
+    ]
     all_docs = await db.employee_documents.find({
         "employee_id": emp_id,
-        "status": {"$nin": ["deleted", "superseded", "rejected"]}
+        "status": {"$nin": _DEAD_DOC_STATUSES},
+        "review_status": {"$nin": ["rejected", "amendment_requested", "invalidated"]},
+        "$or": [
+            {"is_active": True},
+            {"is_active": {"$exists": False}},
+        ],
     }, {"_id": 0}).to_list(500)
     
     # Get training records (exclude deleted/superseded)
@@ -635,26 +655,28 @@ async def get_unified_employee_status(
         
         # Find matching documents
         matching_docs = find_docs_for_requirement(req_id)
-        
+
         # NEW: Check for approved verification documents FIRST
         # This is the primary source of truth for CQC compliance
         has_approved_verification = req_id in approved_verifications
-        
-        # Count verified documents with stamps (fallback for legacy data)
-        verified_count = 0
-        for doc in matching_docs:
-            if is_document_verified_with_stamp(doc):
-                verified_count += 1
-        
-        # If we have an approved verification, that counts as 1 verified
-        if has_approved_verification:
-            verified_count = max(verified_count, 1)
-        
-        # Special handling for DBS and RTW from dedicated collections
-        if req_id == "dbs" and dbs_check:
-            verified_count = max(verified_count, 1)
-        if req_id == "right_to_work" and rtw_check:
-            verified_count = max(verified_count, 1)
+
+        # ── verified_count ───────────────────────────────────────────────────
+        # DBS and RTW require a dedicated check record PLUS live evidence.
+        # Document stamps alone MUST NOT make these requirements complete —
+        # otherwise invalidating a check still shows the requirement as done.
+        # For all other requirements: count verified stamps as before.
+        if req_id in ("dbs", "right_to_work"):
+            _active_check = dbs_check if req_id == "dbs" else rtw_check
+            _has_live_evidence = len(matching_docs) > 0
+            verified_count = 1 if (_has_live_evidence and _active_check is not None) else 0
+        else:
+            verified_count = 0
+            for doc in matching_docs:
+                if is_document_verified_with_stamp(doc):
+                    verified_count += 1
+            # Approved verifications count for non-check-based requirements
+            if has_approved_verification:
+                verified_count = max(verified_count, 1)
 
         # ---------------------------------------------------------------------------
         # PROOF-OF-CHECK REQUIREMENT (single source of truth)
@@ -680,33 +702,53 @@ async def get_unified_employee_status(
         # Determine if any matching doc is directly verified (via verify_requirement
         # or verify_all, which write verified=True / status="approved" to
         # employee_documents but NOT to verification_documents).
-        # Exclude any doc whose current status indicates rejection or invalidation —
-        # a stale verified=True must not survive a subsequent rejection.
-        _reject_statuses = frozenset(("rejected", "amendment_requested", "invalidated", "deleted", "superseded"))
+        # Exclude any doc whose current status OR review_status indicates rejection.
+        _reject_statuses = frozenset((
+            "rejected", "amendment_requested", "invalidated",
+            "deleted", "superseded", "uploaded_in_error",
+        ))
         has_verified_docs = any(
             (doc.get("verified") is True or doc.get("status") in ("verified", "approved"))
             and (doc.get("status") or "").lower() not in _reject_statuses
+            and (doc.get("review_status") or "").lower() not in _reject_statuses
             for doc in matching_docs
         )
 
-        # Determine current status for UI (computed, never stored)
-        if has_approved_verification:
-            verification_status = "verified"
-        elif req_id == "dbs" and dbs_check:
-            # DBS check record exists — final status depends on proof
-            verification_status = "verified" if _proof_satisfied else "incomplete"
-        elif req_id == "right_to_work" and rtw_check:
-            # RTW check record exists — final status depends on proof
-            verification_status = "verified" if _proof_satisfied else "incomplete"
-        elif has_verified_docs:
-            # Identity / PoA / other — docs directly verified
-            verification_status = "verified"
-        elif req_id in [v.get("requirement_id") for v in verification_docs if v.get("status") == "pending_approval"]:
-            verification_status = "pending_approval"
-        elif len(matching_docs) > 0:
-            verification_status = "evidence_uploaded"
+        # ── verification_status (UI label, never stored) ──────────────────────
+        # DBS and RTW: status is ONLY determined by the check record + evidence.
+        # We deliberately skip has_approved_verification / has_verified_docs for
+        # these two — doc stamps alone must not mark them as verified.
+        if req_id in ("dbs", "right_to_work"):
+            _active_check = dbs_check if req_id == "dbs" else rtw_check
+            if not matching_docs:
+                verification_status = "not_started"
+            elif _active_check is None:
+                # Evidence uploaded but no current check record
+                verification_status = "evidence_uploaded"
+            elif not _proof_satisfied:
+                verification_status = "incomplete"
+            else:
+                verification_status = "verified"
         else:
-            verification_status = "not_started"
+            if has_approved_verification:
+                verification_status = "verified"
+            elif has_verified_docs:
+                # Identity / PoA / other — docs directly verified
+                verification_status = "verified"
+            elif (
+                len(matching_docs) > 0
+                and req_id in [
+                    v.get("requirement_id")
+                    for v in verification_docs
+                    if v.get("status") == "pending_approval"
+                ]
+            ):
+                # Stale pending_approval entries are ignored when no live docs exist
+                verification_status = "pending_approval"
+            elif len(matching_docs) > 0:
+                verification_status = "evidence_uploaded"
+            else:
+                verification_status = "not_started"
         
         item_data = {
             "id": req_id,

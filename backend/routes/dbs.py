@@ -572,7 +572,7 @@ async def stamp_all_dbs_documents(
         
         check_data = dbs_check.get('dbs_check') if dbs_check else None
         if check_data:
-            proof_doc_id = check_data.get('evidence_document_id')
+            proof_doc_id = check_data.get('proof_document_id') or check_data.get('evidence_document_id')
             if proof_doc_id:
                 try:
                     proof_doc = await db.employee_documents.find_one({"id": proof_doc_id})

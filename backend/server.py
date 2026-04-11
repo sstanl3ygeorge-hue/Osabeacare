@@ -885,6 +885,22 @@ EXCLUDED_TRAINING_STATUSES = [
     "deleted",           # Permanently removed
 ]
 
+PROOF_ROLE_VALUES = {"proof", "verification_proof", "check_proof"}
+PROOF_SOURCE_TYPES = {"verification_proof", "check_proof"}
+
+
+def is_proof_role_document(doc: dict, current_proof_doc_ids: Optional[set] = None) -> bool:
+    role = (doc.get("document_role") or "").lower().strip()
+    source_type = (doc.get("source_type") or "").lower().strip()
+    doc_id = doc.get("id")
+    if role in PROOF_ROLE_VALUES:
+        return True
+    if source_type in PROOF_SOURCE_TYPES:
+        return True
+    if current_proof_doc_ids and doc_id and doc_id in current_proof_doc_ids:
+        return True
+    return False
+
 
 # Onboarding Status values
 class OnboardingStatus:
@@ -16732,14 +16748,34 @@ async def get_requirement_files(
         "employee_id": employee_id,
         "requirement_id": {"$in": req_ids_to_search}
     }, {"_id": 0}).to_list(200)
+
+    current_proof_doc_ids = set()
+    is_rtw_or_dbs_requirement = requirement_key in {
+        "right_to_work", "right_to_work_documents", "right_to_work_evidence",
+        "dbs", "dbs_certificate", "dbs_evidence", "dbs_certificate_evidence",
+    }
+    if is_rtw_or_dbs_requirement:
+        current_rtw = await db.rtw_checks.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0, "proof_document_id": 1}
+        )
+        current_dbs = await db.dbs_checks.find_one(
+            {"employee_id": employee_id, "is_current": True},
+            {"_id": 0, "proof_document_id": 1}
+        )
+        for candidate_id in [
+            (current_rtw or {}).get("proof_document_id"),
+            (current_dbs or {}).get("proof_document_id"),
+        ]:
+            if candidate_id:
+                current_proof_doc_ids.add(candidate_id)
     
     active_files = []
     historical_files = []
     
-    # Use global constant for consistency across all views
-    # EXCLUDED_DOC_STATUSES is defined at module level for single source of truth
-    
     for doc in all_docs:
+        if is_rtw_or_dbs_requirement and is_proof_role_document(doc, current_proof_doc_ids):
+            continue
         file_status = doc.get('status', 'active')
         is_historical = file_status in EXCLUDED_DOC_STATUSES
         
@@ -27390,6 +27426,7 @@ class CheckRecordService:
                 {"id": previous["id"]},
                 {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
             )
+        previous_proof_doc_id = (previous or {}).get("proof_document_id")
         
         check_record = {
             "id": check_id,
@@ -27437,12 +27474,43 @@ class CheckRecordService:
         }
         
         await db.rtw_checks.insert_one(check_record)
+
+        evidence_doc_id = data.get("evidence_document_id")
+        proof_doc_id = data.get("proof_document_id")
+        if evidence_doc_id:
+            await db.employee_documents.update_one(
+                {"id": evidence_doc_id},
+                {"$set": {"document_role": "evidence", "updated_at": now}}
+            )
+        if proof_doc_id:
+            await db.employee_documents.update_one(
+                {"id": proof_doc_id},
+                {"$set": {
+                    "document_role": "proof",
+                    "proof_role_current": True,
+                    "proof_role_check_id": check_id,
+                    "updated_at": now,
+                }}
+            )
+        if previous_proof_doc_id and previous_proof_doc_id != proof_doc_id:
+            await db.employee_documents.update_one(
+                {"id": previous_proof_doc_id},
+                {"$set": {
+                    "proof_role_current": False,
+                    "proof_role_replaced_at": now,
+                    "proof_role_replaced_by_check_id": check_id,
+                    "updated_at": now,
+                }}
+            )
         
         # Log audit
         await log_audit_action(recorded_by, "record_rtw_check", "rtw_checks", check_id, {
             "employee_id": employee_id,
             "method": data.get("method"),
-            "outcome": data.get("outcome")
+            "outcome": data.get("outcome"),
+            "evidence_document_id": evidence_doc_id,
+            "proof_document_id": proof_doc_id,
+            "previous_proof_document_id": previous_proof_doc_id,
         })
         
         check_record.pop("_id", None)
@@ -27470,6 +27538,18 @@ class CheckRecordService:
         # Compute and attach RTW status
         if check:
             check["rtw_status"] = CheckRecordService.compute_rtw_status(check)
+            if check.get("proof_document_id"):
+                proof_doc = await db.employee_documents.find_one(
+                    {"id": check["proof_document_id"]},
+                    {"_id": 0, "id": 1, "filename": 1, "original_filename": 1, "uploaded_at": 1, "file_type": 1}
+                )
+                if proof_doc:
+                    check["proof_document"] = {
+                        "id": proof_doc.get("id"),
+                        "filename": proof_doc.get("original_filename") or proof_doc.get("filename"),
+                        "uploaded_at": proof_doc.get("uploaded_at"),
+                        "file_type": proof_doc.get("file_type")
+                    }
         
         return check
     
@@ -27717,6 +27797,7 @@ class CheckRecordService:
                 {"id": previous["id"]},
                 {"$set": {"is_current": False, "superseded_at": now, "superseded_by": check_id}}
             )
+        previous_proof_doc_id = (previous or {}).get("proof_document_id")
         
         check_record = {
             "id": check_id,
@@ -27753,8 +27834,8 @@ class CheckRecordService:
             "result_summary": data.get("result_summary"),
             
             # Linked evidence/proof
-            "evidence_document_id": data.get("evidence_document_id") or data.get("proof_document_id"),
-            "proof_document_id": data.get("proof_document_id") or data.get("evidence_document_id"),
+            "evidence_document_id": data.get("evidence_document_id"),
+            "proof_document_id": data.get("proof_document_id"),
             "linked_evidence_ids": data.get("linked_evidence_ids", []),
             
             # Notes and metadata
@@ -27769,10 +27850,12 @@ class CheckRecordService:
         
         # P0 FIX: Sync verification stamp on linked evidence document
         # When DBS check is verified, update the evidence document verification stamp
-        evidence_doc_id = data.get("evidence_document_id") or data.get("proof_document_id")
+        evidence_doc_id = data.get("evidence_document_id")
+        proof_doc_id = data.get("proof_document_id")
+        verification_doc_id = proof_doc_id or evidence_doc_id
         outcome = data.get("outcome", "awaiting_review")
         
-        if evidence_doc_id and outcome in ["clear", "verified", "information_reviewed"]:
+        if verification_doc_id and outcome in ["clear", "verified", "information_reviewed"]:
             # Determine appropriate stamp based on method
             method = data.get("method")
             if method == "dbs_update_service_check":
@@ -27785,7 +27868,7 @@ class CheckRecordService:
                 stamp_audit = "DBS CERTIFICATE VERIFIED"
             
             await db.employee_documents.update_one(
-                {"id": evidence_doc_id},
+                {"id": verification_doc_id},
                 {"$set": {
                     "verification_stamp": stamp_type,
                     "verification_stamp_label": stamp_label,
@@ -27799,7 +27882,33 @@ class CheckRecordService:
                     "status": "verified"
                 }}
             )
-            logger.info(f"P0 FIX: Synced verification stamp to evidence doc {evidence_doc_id}")
+            logger.info(f"P0 FIX: Synced verification stamp to verification doc {verification_doc_id}")
+
+        if evidence_doc_id:
+            await db.employee_documents.update_one(
+                {"id": evidence_doc_id},
+                {"$set": {"document_role": "evidence", "updated_at": now}}
+            )
+        if proof_doc_id:
+            await db.employee_documents.update_one(
+                {"id": proof_doc_id},
+                {"$set": {
+                    "document_role": "proof",
+                    "proof_role_current": True,
+                    "proof_role_check_id": check_id,
+                    "updated_at": now,
+                }}
+            )
+        if previous_proof_doc_id and previous_proof_doc_id != proof_doc_id:
+            await db.employee_documents.update_one(
+                {"id": previous_proof_doc_id},
+                {"$set": {
+                    "proof_role_current": False,
+                    "proof_role_replaced_at": now,
+                    "proof_role_replaced_by_check_id": check_id,
+                    "updated_at": now,
+                }}
+            )
         
         await log_audit_action(recorded_by, "record_dbs_check", "dbs_checks", check_id, {
             "employee_id": employee_id,
@@ -27807,7 +27916,10 @@ class CheckRecordService:
             "outcome": data.get("outcome"),
             "dbs_level": data.get("dbs_level"),
             "certificate_number": data.get("certificate_number"),
-            "evidence_synced": bool(evidence_doc_id and outcome in ["clear", "verified", "information_reviewed"])
+            "evidence_document_id": evidence_doc_id,
+            "proof_document_id": proof_doc_id,
+            "previous_proof_document_id": previous_proof_doc_id,
+            "evidence_synced": bool(verification_doc_id and outcome in ["clear", "verified", "information_reviewed"])
         })
         
         check_record.pop("_id", None)
@@ -27849,6 +27961,18 @@ class CheckRecordService:
                         "filename": evidence_doc.get("original_filename") or evidence_doc.get("filename"),
                         "uploaded_at": evidence_doc.get("uploaded_at"),
                         "file_type": evidence_doc.get("file_type")
+                    }
+            if check.get("proof_document_id"):
+                proof_doc = await db.employee_documents.find_one(
+                    {"id": check["proof_document_id"]},
+                    {"_id": 0, "id": 1, "filename": 1, "original_filename": 1, "uploaded_at": 1, "file_type": 1}
+                )
+                if proof_doc:
+                    check["proof_document"] = {
+                        "id": proof_doc.get("id"),
+                        "filename": proof_doc.get("original_filename") or proof_doc.get("filename"),
+                        "uploaded_at": proof_doc.get("uploaded_at"),
+                        "file_type": proof_doc.get("file_type")
                     }
         
         return check
@@ -33849,6 +33973,12 @@ async def get_compliance_file(
     dbs_check = await CheckRecordService.get_current_dbs_check(employee_id)
     identity_check = await CheckRecordService.get_current_identity_check(employee_id)
     address_check = await CheckRecordService.get_current_address_check(employee_id)
+    current_proof_doc_ids = {
+        doc_id for doc_id in [
+            (rtw_check or {}).get("proof_document_id"),
+            (dbs_check or {}).get("proof_document_id"),
+        ] if doc_id
+    }
     
     # Get check history counts
     rtw_history = await CheckRecordService.get_rtw_check_history(employee_id, limit=50)
@@ -33990,20 +34120,23 @@ async def get_compliance_file(
         
         # DIAGNOSTIC: Log total collected before filtering
         logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, total collected={len(all_docs)}, doc_requirement_keys={doc_requirement_keys}")
+
+        if key in {"right_to_work_evidence", "dbs_certificate_evidence"}:
+            all_docs = [d for d in all_docs if not is_proof_role_document(d, current_proof_doc_ids)]
         
         # EVIDENCE STATE MODEL:
         # Active files (visible on main card):
         #   - uploaded, active, approved, pending_review, under_review, verified, None
-        # 
+        #
         # Hidden from main card (historical/manage only):
         #   - rejected, uploaded_in_error, superseded, misfiled
         EXCLUDED_STATUSES = [
             DocumentStatus.SUPERSEDED.value,        # "superseded"
-            DocumentStatus.UPLOADED_IN_ERROR.value, # "uploaded_in_error" 
+            DocumentStatus.UPLOADED_IN_ERROR.value, # "uploaded_in_error"
             DocumentStatus.MISFILED.value,          # "misfiled"
             DocumentStatus.REJECTED.value,          # "rejected"
         ]
-        
+
         # Filter out excluded documents for active display
         active_docs = [d for d in all_docs if d.get("status") not in EXCLUDED_STATUSES]
         
@@ -34012,7 +34145,6 @@ async def get_compliance_file(
             filtered_out = len(all_docs) - len(active_docs)
             logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, after filtering: {len(active_docs)} active, {filtered_out} filtered out. Active statuses: {[d.get('status') for d in active_docs]}")
         
-        # Historical files are the excluded ones
         historical_docs = [d for d in all_docs if d.get("status") in EXCLUDED_STATUSES]
         
         verified_count = len([d for d in active_docs if d.get("verified") or d.get("status") == "approved"])
@@ -34365,6 +34497,7 @@ async def get_compliance_file(
                 "checked_by_name": check_data.get("checked_by_name") if has_check else None,
                 "notes": check_data.get("notes") if has_check else None,
                 "evidence_document_id": check_data.get("evidence_document_id") if has_check else None,
+                "proof_document_id": check_data.get("proof_document_id") if has_check else None,
                 # COMPLIANCE-CRITICAL: Include evidence document details for proof display
                 "evidence_document": next(
                     (
@@ -34379,6 +34512,19 @@ async def get_compliance_file(
                     ),
                     None
                 ) if has_check and check_data.get("evidence_document_id") else None,
+                "proof_document": next(
+                    (
+                        {
+                            "id": d.get("id"),
+                            "filename": d.get("original_filename") or d.get("file_name"),
+                            "uploaded_at": d.get("uploaded_at") or d.get("created_at"),
+                            "content_type": d.get("content_type") or d.get("mime_type")
+                        }
+                        for d in documents
+                        if d.get("id") == check_data.get("proof_document_id")
+                    ),
+                    None
+                ) if has_check and check_data.get("proof_document_id") else None,
                 # IDENTITY-SPECIFIC FIELDS (for Identity Result Panel)
                 "document_type": check_data.get("document_type") if has_check else None,
                 "full_name_on_document": check_data.get("full_name_on_document") if has_check else None,

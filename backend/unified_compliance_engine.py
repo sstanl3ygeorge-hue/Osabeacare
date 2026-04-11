@@ -643,6 +643,12 @@ async def get_unified_employee_status(
     rtw_check = await db.rtw_checks.find_one(
         {"employee_id": emp_id, "is_current": True}, {"_id": 0}
     )
+    current_proof_doc_ids = {
+        doc_id for doc_id in [
+            (dbs_check or {}).get("proof_document_id"),
+            (rtw_check or {}).get("proof_document_id"),
+        ] if doc_id
+    }
     
     # Get verification documents (NEW: Smart Verification System)
     verification_docs = await db.verification_documents.find({
@@ -678,12 +684,25 @@ async def get_unified_employee_status(
     # ==========================================================================
     # CHECK 1: DOCUMENTS (RTW, DBS, Identity, PoA)
     # ==========================================================================
+
+    def is_proof_role_document(doc: dict) -> bool:
+        role = (doc.get("document_role") or "").lower().strip()
+        source_type = (doc.get("source_type") or "").lower().strip()
+        if role in {"proof", "verification_proof", "check_proof"}:
+            return True
+        if source_type in {"verification_proof", "check_proof"}:
+            return True
+        return False
     
     def find_docs_for_requirement(req_id: str) -> List[dict]:
         """Find all documents matching a requirement ID, using canonical aliases."""
         matches = []
         seen_ids: set = set()
         for doc in all_docs:
+            if req_id in ("dbs", "right_to_work"):
+                doc_id = doc.get("id")
+                if is_proof_role_document(doc) or (doc_id and doc_id in current_proof_doc_ids):
+                    continue
             raw_req_id = (doc.get("requirement_id") or "").lower().strip()
             if not raw_req_id:
                 continue
@@ -724,6 +743,10 @@ async def get_unified_employee_status(
     def has_reupload_signal(req_id: str) -> bool:
         """True when requirement has historical rejected/invalidated evidence and no live doc."""
         for doc in reupload_signal_docs:
+            if req_id in ("dbs", "right_to_work"):
+                doc_id = doc.get("id")
+                if is_proof_role_document(doc) or (doc_id and doc_id in current_proof_doc_ids):
+                    continue
             raw_req_id = (doc.get("requirement_id") or "").lower().strip()
             if not raw_req_id:
                 continue

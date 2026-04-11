@@ -994,7 +994,7 @@ async def stamp_all_rtw_documents(
         
         check_data = rtw_check.get('rtw_check') or rtw_check.get('right_to_work_check') if rtw_check else None
         if check_data:
-            proof_doc_id = check_data.get('evidence_document_id')
+            proof_doc_id = check_data.get('proof_document_id') or check_data.get('evidence_document_id')
             if proof_doc_id:
                 try:
                     proof_doc = await db.employee_documents.find_one({"id": proof_doc_id})

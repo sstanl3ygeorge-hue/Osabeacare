@@ -51,6 +51,19 @@ def _is_live_document(doc: dict) -> bool:
     return True
 
 
+def _is_proof_role_document(doc: dict, current_proof_doc_ids: Optional[set] = None) -> bool:
+    role = (doc.get("document_role") or "").lower().strip()
+    source_type = (doc.get("source_type") or "").lower().strip()
+    doc_id = doc.get("id")
+    if role in {"proof", "verification_proof", "check_proof"}:
+        return True
+    if source_type in {"verification_proof", "check_proof"}:
+        return True
+    if current_proof_doc_ids and doc_id and doc_id in current_proof_doc_ids:
+        return True
+    return False
+
+
 def _matches_canonical_requirement(
     requirement_id: str,
     canonical_target: str,
@@ -201,6 +214,15 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    rtw_check = await db.rtw_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0, "proof_document_id": 1})
+    dbs_check = await db.dbs_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0, "proof_document_id": 1})
+    current_proof_doc_ids = {
+        doc_id for doc_id in [
+            (rtw_check or {}).get("proof_document_id"),
+            (dbs_check or {}).get("proof_document_id"),
+        ] if doc_id
+    }
     
     # Determine if active employee or still onboarding
     employee_status = employee.get("status", "onboarding")
@@ -221,6 +243,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         ]
     }).to_list(length=200)
     documents = [d for d in documents if _is_live_document(d)]
+    documents = [d for d in documents if not _is_proof_role_document(d, current_proof_doc_ids)]
     
     rejected_documents = await db.employee_documents.find({
         "employee_id": employee_id,
@@ -240,6 +263,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         ]
     }).to_list(length=200)
     rejected_documents = [d for d in rejected_documents if (d.get("is_active") is not False)]
+    rejected_documents = [d for d in rejected_documents if not _is_proof_role_document(d, current_proof_doc_ids)]
 
     def get_rejection_details(doc: dict) -> dict:
         return {
@@ -1461,6 +1485,7 @@ async def worker_upload_document(
             }, {"_id": 0, "id": 1, "requirement_id": 1, "status": 1, "review_status": 1, "is_active": 1, "source_type": 1, "file_name": 1, "original_filename": 1, "uploaded_by": 1}).to_list(length=300)
 
             live_docs = [d for d in live_docs if _is_live_document(d)]
+            live_docs = [d for d in live_docs if not _is_proof_role_document(d)]
             _matching_live_count = sum(
                 1 for d in live_docs
                 if _matches_canonical_requirement(
@@ -1530,7 +1555,8 @@ async def worker_upload_document(
         "verification_stamp": None,  # Changed from "not_verified" to None for cleaner display
         "is_active": True,
         "created_at": now,
-        "source_type": "worker_portal_upload"
+        "source_type": "worker_portal_upload",
+        "document_role": "evidence"
     }
     
     await db.employee_documents.insert_one(doc_record)

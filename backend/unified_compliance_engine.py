@@ -644,12 +644,48 @@ async def get_unified_employee_status(
             verified_count = max(verified_count, 1)
         if req_id == "right_to_work" and rtw_check:
             verified_count = max(verified_count, 1)
-        
-        is_complete = verified_count >= min_count
+
+        # ---------------------------------------------------------------------------
+        # PROOF-OF-CHECK REQUIREMENT (single source of truth)
+        # DBS Update Service check requires proof_document_id on the check record.
+        # RTW always requires proof_document_id on the check record.
+        # If proof is required but absent the requirement is NOT complete.
+        # ---------------------------------------------------------------------------
+        _dbs_proof_required = (
+            req_id == "dbs"
+            and dbs_check is not None
+            and dbs_check.get("method", "") in ("update_service_check", "dbs_update_service")
+        )
+        _rtw_proof_required = req_id == "right_to_work" and rtw_check is not None
+        _proof_satisfied = True
+        if _dbs_proof_required:
+            _proof_satisfied = bool(dbs_check.get("proof_document_id"))
+        elif _rtw_proof_required:
+            _proof_satisfied = bool(rtw_check.get("proof_document_id"))
+
+        is_complete = verified_count >= min_count and _proof_satisfied
         checks[req_id] = is_complete
-        
-        # Determine current status for UI
+
+        # Determine if any matching doc is directly verified (via verify_requirement
+        # or verify_all, which write verified=True / status="approved" to
+        # employee_documents but NOT to verification_documents).
+        has_verified_docs = any(
+            doc.get("verified") is True or doc.get("status") in ("verified", "approved")
+            for doc in matching_docs
+            if doc.get("status") != "amendment_requested"
+        )
+
+        # Determine current status for UI (computed, never stored)
         if has_approved_verification:
+            verification_status = "verified"
+        elif req_id == "dbs" and dbs_check:
+            # DBS check record exists — final status depends on proof
+            verification_status = "verified" if _proof_satisfied else "incomplete"
+        elif req_id == "right_to_work" and rtw_check:
+            # RTW check record exists — final status depends on proof
+            verification_status = "verified" if _proof_satisfied else "incomplete"
+        elif has_verified_docs:
+            # Identity / PoA / other — docs directly verified
             verification_status = "verified"
         elif req_id in [v.get("requirement_id") for v in verification_docs if v.get("status") == "pending_approval"]:
             verification_status = "pending_approval"

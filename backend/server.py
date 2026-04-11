@@ -17740,6 +17740,7 @@ async def verify_requirement(
             {"employee_id": employee_id, "requirement_id": {"$in": req_ids_to_search}},
             {"$set": {
                 "verified": True,
+                "status": "approved",
                 "verified_by": user['user_id'],
                 "verified_by_name": verified_by_name,
                 "verified_at": now,

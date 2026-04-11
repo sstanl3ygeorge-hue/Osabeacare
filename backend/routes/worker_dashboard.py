@@ -876,6 +876,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                     rtw_canonical_item.get("verification_status")
                     or ("verified" if rtw_is_verified else "pending_verification")
                 )
+                # Safeguard: proof required but missing → not verified
+                if entry["status"] == "incomplete":
+                    entry["verified"] = False
                 entry["verified_at"] = rtw_canonical_item.get("verified_at")
                 if rtw_canonical_item.get("next_action"):
                     entry["next_action"] = rtw_canonical_item["next_action"]
@@ -890,6 +893,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                     dbs_canonical_item.get("verification_status")
                     or ("verified" if dbs_is_verified else "pending_verification")
                 )
+                # Safeguard: proof required but missing → not verified
+                if entry["status"] == "incomplete":
+                    entry["verified"] = False
                 entry["verified_at"] = dbs_canonical_item.get("verified_at")
                 if dbs_canonical_item.get("next_action"):
                     entry["next_action"] = dbs_canonical_item["next_action"]

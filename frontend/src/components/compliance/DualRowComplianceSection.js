@@ -23,6 +23,7 @@ import ApplicationFormViewDrawer from './ApplicationFormViewDrawer';
 import RejectFormDialog from './RejectFormDialog';
 import { normalizeUploadRequirementSurface } from './surfaceNormalizers';
 import { UPLOAD_REQUIREMENT_KEYS } from './complianceRequirementMap';
+import { RequirementWorkflowCard } from './workflow';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -364,18 +365,39 @@ export default function DualRowComplianceSection({
     });
   };
 
+  // Requirements that use the new 5-step workflow card
+  const WORKFLOW_CARD_KEYS = new Set(['right_to_work', 'dbs']);
+
   /**
-   * Render upload-type requirement using UploadRequirementCard
-   * DUAL-ROW MODEL: Each card shows Evidence row + Verification row
+   * Render upload-type requirement.
+   * RTW and DBS use the new RequirementWorkflowCard (5-step workflow).
+   * Identity and PoA continue to use UploadRequirementCard.
    */
   const renderUploadSection = (sectionKey, section) => {
+    // New workflow card for RTW and DBS
+    if (WORKFLOW_CARD_KEYS.has(sectionKey)) {
+      return (
+        <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
+          <RequirementWorkflowCard
+            requirementKey={sectionKey}
+            sectionData={section}
+            employeeId={employeeId}
+            employeeName={employeeName}
+            onRefresh={handleRefresh}
+            isAdminView={!isAuditor}
+            onPreviewFile={onPreviewFile}
+            onUploadEvidence={() => openUploadDrawer(sectionKey)}
+            defaultOpen={expandedSections[sectionKey] !== false}
+          />
+        </div>
+      );
+    }
+
+    // Legacy card for identity and proof_of_address
     const surface = transformToUploadSurface(sectionKey, section);
     if (!surface) return null;
     
     const isExpanded = expandedSections[sectionKey] !== false;
-    
-    // Get RTW status for Right to Work section
-    const rtwStatus = sectionKey === 'right_to_work' ? section.rtw_status : null;
     
     return (
       <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
@@ -395,7 +417,6 @@ export default function DualRowComplianceSection({
           employeeName={employeeName}
           onRefresh={handleRefresh}
           isAuditor={isAuditor}
-          rtwStatus={rtwStatus}
         />
       </div>
     );

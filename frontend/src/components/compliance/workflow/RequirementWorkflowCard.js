@@ -1,0 +1,442 @@
+import { useState, useCallback } from 'react';
+import axios from 'axios';
+import { useAuth } from '../../../context/AuthContext';
+import { Card, CardContent } from '../../ui/card';
+import { Badge } from '../../ui/badge';
+import { Button } from '../../ui/button';
+import { toast } from 'sonner';
+import {
+  ChevronDown,
+  ChevronUp,
+  CheckCircle,
+  Clock,
+  AlertTriangle,
+  XCircle,
+  ShieldCheck,
+} from 'lucide-react';
+import { useComplianceWorkflow } from './useComplianceWorkflow';
+import { EvidenceSection } from './EvidenceSection';
+import { CheckSection } from './CheckSection';
+import { ProofSection } from './ProofSection';
+import { FinalStatusSection } from './FinalStatusSection';
+import RecordCheckDialog from '../RecordCheckDialog';
+import EvidenceReviewDialog from '../EvidenceReviewDialog';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Map requirement key → check type string used by RecordCheckDialog
+const REQUIREMENT_TO_CHECK_TYPE = {
+  right_to_work: 'right_to_work_check',
+  dbs: 'dbs_status_check',
+  identity: 'identity_verification',
+  proof_of_address: 'address_verification',
+};
+
+const STATUS_CONFIG = {
+  verified: { icon: CheckCircle, color: 'emerald' },
+  pending: { icon: Clock, color: 'amber' },
+  incomplete: { icon: AlertTriangle, color: 'orange' },
+  failed: { icon: XCircle, color: 'red' },
+  overdue: { icon: AlertTriangle, color: 'red' },
+  expired: { icon: AlertTriangle, color: 'red' },
+  follow_up_overdue: { icon: AlertTriangle, color: 'amber' },
+};
+
+const COLOR_CLASSES = {
+  emerald: {
+    badge: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    header: 'border-emerald-200 bg-gradient-to-r from-emerald-50/60 to-white',
+    iconBg: 'bg-emerald-100',
+    iconText: 'text-emerald-600',
+  },
+  amber: {
+    badge: 'bg-amber-100 text-amber-800 border-amber-200',
+    header: 'border-amber-200 bg-gradient-to-r from-amber-50/40 to-white',
+    iconBg: 'bg-amber-100',
+    iconText: 'text-amber-600',
+  },
+  orange: {
+    badge: 'bg-orange-100 text-orange-800 border-orange-200',
+    header: 'border-orange-200 bg-gradient-to-r from-orange-50/40 to-white',
+    iconBg: 'bg-orange-100',
+    iconText: 'text-orange-600',
+  },
+  red: {
+    badge: 'bg-red-100 text-red-800 border-red-200',
+    header: 'border-red-200 bg-gradient-to-r from-red-50/40 to-white',
+    iconBg: 'bg-red-100',
+    iconText: 'text-red-600',
+  },
+};
+
+/**
+ * RequirementWorkflowCard
+ *
+ * Structured 5-step compliance workflow card for RTW, DBS, Identity, and PoA.
+ *
+ * Consumes raw section data from GET /api/employees/{id}/compliance-file
+ * (serializer_version: dual_row_v1).  Does NOT call any backend endpoint
+ * directly except for evidence accept/reject actions.  Check recording and
+ * proof management are delegated to RecordCheckDialog and ProofSection.
+ *
+ * Props:
+ *   requirementKey  'dbs' | 'right_to_work' | 'identity' | 'proof_of_address'
+ *   sectionData     Raw section object from compliance-file API
+ *   employeeId      string
+ *   employeeName    string
+ *   onRefresh       () => void  — called after any mutation
+ *   isAdminView     bool (default true)
+ *   onPreviewFile   (fileObj) => void
+ *   onUploadEvidence () => void  — delegated to parent for upload drawer
+ *   defaultOpen     bool (default true)
+ */
+export default function RequirementWorkflowCard({
+  requirementKey,
+  sectionData,
+  employeeId,
+  employeeName,
+  onRefresh,
+  isAdminView = true,
+  onPreviewFile,
+  onUploadEvidence,
+  defaultOpen = true,
+}) {
+  const { token } = useAuth();
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [reviewDialog, setReviewDialog] = useState({ open: false, file: null });
+  const [checkDialog, setCheckDialog] = useState({ open: false });
+
+  // ── Extract rows from section data ────────────────────────────────────
+  const evidenceRow = sectionData?.rows?.find((r) => r.row_type === 'evidence');
+  const checkRow = sectionData?.rows?.find((r) => r.row_type === 'check');
+  const evidenceFiles = evidenceRow?.documents_preview || [];
+  const checkRecord = checkRow?.check_data || null;
+  const sectionTitle = sectionData?.title || requirementKey;
+  const checkType = REQUIREMENT_TO_CHECK_TYPE[requirementKey] || requirementKey;
+
+  // ── Derived workflow state ─────────────────────────────────────────────
+  const workflow = useComplianceWorkflow({
+    requirementKey,
+    evidenceFiles,
+    checkRecord,
+    isAdminView,
+  });
+
+  const handleRefresh = useCallback(() => {
+    if (onRefresh) onRefresh();
+  }, [onRefresh]);
+
+  // ── Evidence actions (evidence layer only; never touch check or proof) ──
+  const handleAcceptFile = async (docId, notes = '') => {
+    try {
+      await axios.post(
+        `${API}/employee-documents/${docId}/verify`,
+        { notes },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast.success('Evidence accepted');
+      handleRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to accept evidence');
+    }
+  };
+
+  const handleRejectFile = async (docId, reason) => {
+    try {
+      await axios.post(
+        `${API}/employee-documents/${docId}/reject`,
+        { reason },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast.success('Evidence rejected');
+      handleRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to reject evidence');
+    }
+  };
+
+  const handleRemoveFile = async (docId, reason) => {
+    try {
+      await axios.post(
+        `${API}/employee-documents/${docId}/mark-uploaded-in-error`,
+        { reason },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast.success('Document removed from active records');
+      handleRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to remove document');
+    }
+  };
+
+  const handleRequestReplacement = async (docId) => {
+    try {
+      await axios.post(
+        `${API}/employee-documents/${docId}/request-replacement`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      toast.success('Replacement requested');
+      handleRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to request replacement');
+    }
+  };
+
+  // ── Check record actions ───────────────────────────────────────────────
+  // "Invalidate" opens Record Check dialog so admin re-records with updated outcome.
+  const handleInvalidateCheck = () => {
+    if (
+      !window.confirm(
+        'Invalidate this check record? You will be prompted to re-record it with the corrected details.',
+      )
+    )
+      return;
+    setCheckDialog({ open: true });
+  };
+
+  // ── Status display ─────────────────────────────────────────────────────
+  const cfg = STATUS_CONFIG[workflow.finalStatus] || STATUS_CONFIG.pending;
+  const StatusIcon = cfg.icon;
+  const colors = COLOR_CLASSES[cfg.color] || COLOR_CLASSES.amber;
+
+  return (
+    <Card
+      className={`overflow-hidden border ${colors.header}`}
+      data-testid={`requirement-workflow-${requirementKey}`}
+    >
+      {/* ── Card header ──────────────────────────────────────────────── */}
+      <div
+        className={`flex items-center justify-between p-4 cursor-pointer ${colors.header}`}
+        onClick={() => setIsOpen((o) => !o)}
+      >
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div
+            className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${colors.iconBg}`}
+          >
+            <StatusIcon className={`h-5 w-5 ${colors.iconText}`} />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-heading font-semibold text-text-primary text-sm">
+                {sectionTitle}
+              </h3>
+              <Badge className={`text-[10px] px-1.5 py-0 border ${colors.badge}`}>
+                {workflow.finalStatusLabel}
+              </Badge>
+              {workflow.finalStatus === 'verified' && (
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 opacity-80" />
+              )}
+            </div>
+            {workflow.nextAction && isAdminView && (
+              <p className="text-xs text-text-muted mt-0.5">
+                Next: {workflow.nextAction.label}
+              </p>
+            )}
+            {workflow.reviewDueAt && requirementKey === 'dbs' && (
+              <p
+                className={`text-xs mt-0.5 ${
+                  workflow.isOverdue ? 'text-red-600 font-medium' : 'text-text-muted'
+                }`}
+              >
+                Recheck due:{' '}
+                {new Date(workflow.reviewDueAt).toLocaleDateString('en-GB')}
+                {workflow.isOverdue && ' (OVERDUE)'}
+              </p>
+            )}
+            {workflow.permissionEndDate &&
+              requirementKey === 'right_to_work' &&
+              !workflow.isIndefinite && (
+                <p
+                  className={`text-xs mt-0.5 ${
+                    workflow.isExpired
+                      ? 'text-red-600 font-medium'
+                      : 'text-text-muted'
+                  }`}
+                >
+                  Permission ends:{' '}
+                  {new Date(workflow.permissionEndDate).toLocaleDateString(
+                    'en-GB',
+                  )}
+                  {workflow.isExpired && ' (EXPIRED)'}
+                </p>
+              )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Single primary CTA — only shown in collapsed header */}
+          {workflow.nextAction && isAdminView && !isOpen && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (
+                  workflow.nextAction.type === 'record_check' ||
+                  workflow.nextAction.type === 'resolve_followup'
+                ) {
+                  setCheckDialog({ open: true });
+                } else {
+                  setIsOpen(true);
+                }
+              }}
+              disabled={workflow.nextAction.disabled}
+              data-testid={`${requirementKey}-primary-action-btn`}
+            >
+              {workflow.nextAction.label}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            {isOpen ? (
+              <ChevronUp className="h-4 w-4" />
+            ) : (
+              <ChevronDown className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Step tracker (RTW & DBS only) ────────────────────────────── */}
+      {isOpen && workflow.isRTWOrDBS && (
+        <div className="px-4 pt-3 pb-2 border-b border-gray-100 bg-white/80">
+          <div className="flex items-center justify-between">
+            {workflow.steps.map((step, idx) => (
+              <div key={step.id} className="flex items-center flex-1">
+                <div className="flex flex-col items-center">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
+                      step.complete
+                        ? 'bg-emerald-500 text-white'
+                        : step.active
+                          ? 'bg-primary text-white ring-2 ring-primary/30'
+                          : step.locked
+                            ? 'bg-gray-100 text-gray-400'
+                            : 'bg-gray-200 text-gray-500'
+                    }`}
+                    data-testid={`${requirementKey}-step-${step.id}`}
+                  >
+                    {step.complete ? (
+                      <CheckCircle className="h-3.5 w-3.5" />
+                    ) : (
+                      step.id
+                    )}
+                  </div>
+                  <span
+                    className={`text-[9px] mt-1 font-medium ${
+                      step.active
+                        ? 'text-primary'
+                        : step.complete
+                          ? 'text-emerald-600'
+                          : 'text-gray-400'
+                    }`}
+                  >
+                    {step.label}
+                    {step.optional && (
+                      <span className="text-gray-400"> *</span>
+                    )}
+                  </span>
+                </div>
+                {/* Connector line */}
+                {idx < workflow.steps.length - 1 && (
+                  <div
+                    className={`flex-1 h-0.5 mx-1 mb-4 rounded-full transition-colors ${
+                      idx + 1 < workflow.currentStep || workflow.steps[idx + 1].complete
+                        ? 'bg-emerald-500'
+                        : 'bg-gray-200'
+                    }`}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Section content ───────────────────────────────────────────── */}
+      {isOpen && (
+        <CardContent className="p-0 divide-y divide-gray-100">
+          {/* Steps 1 + 2: Evidence */}
+          <EvidenceSection
+            requirementKey={requirementKey}
+            files={evidenceFiles}
+            pendingRequests={evidenceRow?.pending_requests || []}
+            counts={evidenceRow?.counts || {}}
+            isAdminView={isAdminView}
+            onAccept={handleAcceptFile}
+            onReject={handleRejectFile}
+            onRemove={handleRemoveFile}
+            onRequestReplacement={handleRequestReplacement}
+            onReviewFile={(file) => setReviewDialog({ open: true, file })}
+            onPreviewFile={onPreviewFile}
+            onUpload={onUploadEvidence || (() => {})}
+            workflow={workflow}
+          />
+
+          {/* Step 3: Check record (RTW & DBS only) */}
+          {workflow.isRTWOrDBS && (
+            <CheckSection
+              requirementKey={requirementKey}
+              checkRecord={checkRecord}
+              hasAcceptedEvidence={workflow.hasAcceptedEvidence}
+              isAdminView={isAdminView}
+              onRecordCheck={() => setCheckDialog({ open: true })}
+              onInvalidate={handleInvalidateCheck}
+            />
+          )}
+
+          {/* Step 4: Proof of check (RTW & DBS only) */}
+          {workflow.isRTWOrDBS && (
+            <ProofSection
+              requirementKey={requirementKey}
+              checkRecord={checkRecord}
+              proofDocumentId={workflow.proofDocumentId}
+              proofDocument={workflow.proofDocument}
+              hasProof={workflow.hasProof}
+              proofRequired={workflow.proofRequired}
+              employeeId={employeeId}
+              isAdminView={isAdminView}
+              onProofChanged={handleRefresh}
+              onPreviewFile={onPreviewFile}
+            />
+          )}
+
+          {/* Step 5: Final status */}
+          <FinalStatusSection
+            workflow={workflow}
+            requirementKey={requirementKey}
+            checkRecord={checkRecord}
+          />
+        </CardContent>
+      )}
+
+      {/* ── Dialogs ───────────────────────────────────────────────────── */}
+      <EvidenceReviewDialog
+        isOpen={reviewDialog.open}
+        onClose={() => setReviewDialog({ open: false, file: null })}
+        file={reviewDialog.file}
+        employeeId={employeeId}
+        requirementKey={requirementKey}
+        requirementLabel={sectionTitle}
+        onReviewComplete={() => {
+          setReviewDialog({ open: false, file: null });
+          handleRefresh();
+        }}
+      />
+
+      <RecordCheckDialog
+        open={checkDialog.open}
+        onClose={() => setCheckDialog({ open: false })}
+        employeeId={employeeId}
+        checkType={checkType}
+        onComplete={() => {
+          setCheckDialog({ open: false });
+          handleRefresh();
+        }}
+        hasAcceptedEvidence={workflow.hasAcceptedEvidence}
+        acceptedEvidenceCount={workflow.acceptedFiles.length}
+      />
+    </Card>
+  );
+}

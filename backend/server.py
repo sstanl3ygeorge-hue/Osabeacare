@@ -123,7 +123,7 @@ from routes.recruitment import router as recruitment_router
 from routes.employees import router as employees_router
 from routes.references import router as references_router
 from routes.notifications import router as notifications_router
-from routes.compliance import router as compliance_router
+from routes.compliance import router as compliance_router, CORE_POLICIES
 from routes.templates import router as templates_router
 from routes.service_users import router as service_users_router
 from routes.forms import router as forms_router
@@ -140,7 +140,7 @@ from routes.agreements import router as agreements_router
 from routes.dbs import router as dbs_router
 from routes.verifications import router as verifications_router
 from routes.migrations import router as migrations_router
-from routes.readiness import router as readiness_router
+from routes.readiness import router as readiness_router, get_employee_readiness
 from routes.cv_extractions import router as cv_extractions_router
 from routes.profile_photos import router as profile_photos_router
 from routes.worker_dashboard import router as worker_dashboard_router
@@ -150,7 +150,7 @@ from routes.audit_email import router as audit_email_router
 from routes.feedback_complaints import router as feedback_complaints_router
 from routes.policies import router as policies_router
 from routes.referee_outreach import router as referee_outreach_router
-from routes.induction import router as induction_router
+from routes.induction import router as induction_router, DEFAULT_INDUCTION_ITEMS, INDUCTION_TRAINING_MAP
 from routes.competency import router as competency_router
 from routes.spot_checks import router as spot_checks_router
 from routes.task_queue import router as task_queue_router
@@ -165,6 +165,18 @@ from routes.test_cleanup import router as test_cleanup_router
 from routes.reference_comparison import router as reference_comparison_router
 from routes.cqc_evidence import router as cqc_evidence_router, CQC_EVIDENCE_MAPPING
 from routes.inspection_pack import router as inspection_pack_router
+
+INSURANCE_TYPES = [
+    {"name": "Public Liability Insurance", "type": "public_liability"},
+    {"name": "Employers Liability Insurance", "type": "employers_liability"},
+    {"name": "Professional Indemnity Insurance", "type": "professional_indemnity"},
+    {"name": "CQC Registration Certificate", "type": "cqc_registration"},
+    {"name": "ICO Registration", "type": "ico_registration"},
+    {"name": "PAT Testing Certificate", "type": "pat_testing"},
+    {"name": "Fire Risk Assessment", "type": "fire_risk"},
+    {"name": "Gas Safety Certificate", "type": "gas_safety"},
+    {"name": "Electrical Installation Certificate", "type": "electrical"},
+]
 
 # P0 FIX: UNIFIED COMPLIANCE ENGINE - SINGLE SOURCE OF TRUTH
 # All progress/blocker calculations MUST use this module
@@ -3352,7 +3364,7 @@ def convert_document_to_pdf(input_bytes: bytes, content_type: str, filename: str
         if "heic" in content_type or "heif" in content_type or filename.endswith((".heic", ".heif")):
             try:
                 # Try pillow-heif for HEIC support
-                from pillow_heif import register_heif_opener
+                from pillow_heif import register_heif_opener  # pyright: ignore[reportMissingImports]
                 register_heif_opener()
                 
                 img = PILImage.open(BytesIO(input_bytes))
@@ -19730,7 +19742,7 @@ async def apply_verification_stamp(
                     
                     # Try emergent CloudStorage first, then Supabase, then local
                     try:
-                        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig
+                        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig  # pyright: ignore[reportMissingImports]
                         CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
                         
                         if CLOUD_STORAGE_URL:
@@ -20733,7 +20745,7 @@ async def back_stamp_verified_documents(
                 # If still no bytes, try emergent cloud storage
                 if not original_bytes and stored_file_url:
                     try:
-                        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig
+                        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig  # pyright: ignore[reportMissingImports]
                         CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
                         if CLOUD_STORAGE_URL:
                             storage = CloudStorage(StorageConfig(storage_url=CLOUD_STORAGE_URL))
@@ -32081,7 +32093,7 @@ async def get_compliance_structured(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     # Get readiness
-    readiness = await get_employee_readiness(employee_id)
+    readiness = await get_employee_readiness(employee_id, user)
     
     # Get compliance requirements
     compliance = await get_compliance_requirements(employee_id, user)

@@ -198,9 +198,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         }
     
     # Required document types with their acceptable requirement_id patterns.
-    # IMPORTANT: identity patterns MUST match DOC_REQUIREMENT_ALIASES in unified_compliance_engine.py.
-    # Any change here must be mirrored there and vice-versa.
-    from unified_compliance_engine import DOC_REQUIREMENT_ALIASES
+    # Patterns and exclusions are derived directly from the unified engine constants
+    # so worker dashboard and unified engine always agree on which docs count.
+    from unified_compliance_engine import DOC_REQUIREMENT_ALIASES, DOC_REQUIREMENT_EXCLUSIONS
     required_docs = {
         "right_to_work": {
             "name": "Right to Work",
@@ -233,16 +233,29 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     }
     
     def matches_requirement(requirement_id: str, doc_config: dict) -> bool:
-        """Check if a requirement_id matches a document type's patterns."""
+        """Check if a requirement_id matches a document type's patterns.
+
+        Uses the same alias + exclusion logic as unified_compliance_engine so that
+        worker and admin always agree on which documents count for each requirement.
+        """
         if not requirement_id:
             return False
-        req_lower = requirement_id.lower()
-        
-        for exclude in doc_config.get("exclude_patterns", []):
-            if exclude in req_lower:
-                return False
-        
+        req_lower = requirement_id.lower().strip()
+
+        # Hard-reject any known exclusion (check/verification record IDs that share
+        # a prefix with real evidence requirement IDs).
+        if req_lower in DOC_REQUIREMENT_EXCLUSIONS:
+            return False
+
+        # Resolve alias: if req_lower maps to a canonical, compare to canonical patterns
+        canonical = DOC_REQUIREMENT_ALIASES.get(req_lower, req_lower)
+
         for pattern in doc_config.get("patterns", []):
+            # Exact match on the resolved canonical name (primary path)
+            if canonical == pattern:
+                return True
+            # Substring fallback for un-mapped legacy IDs
+            # (e.g. "identity_evidence_2" not in alias map)
             if pattern in req_lower:
                 return True
         return False

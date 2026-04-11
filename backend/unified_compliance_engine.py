@@ -133,6 +133,21 @@ DOC_REQUIREMENT_ALIASES: dict[str, str] = {
     "address_evidence": "proof_of_address",
 }
 
+# Requirement IDs that must NEVER be counted as evidence for a canonical requirement,
+# even if they contain the canonical name as a substring.
+# These are check-record or verification categories, not uploadable evidence.
+# MUST stay in sync with worker_dashboard.py exclude_patterns.
+DOC_REQUIREMENT_EXCLUSIONS: frozenset[str] = frozenset({
+    # DBS exclusions — check records, not certificate evidence
+    "dbs_check", "dbs_status_check", "dbs_update",
+    # RTW exclusions — check records, not evidence documents
+    "right_to_work_check",
+    # Identity exclusions — verification records, not uploadable identity docs
+    "identity_check", "identity_verification",
+    # PoA exclusions — verification records
+    "address_check", "address_verification",
+})
+
 # Forms required for ALL roles
 # Source: "admin" = Admin creates/submits, "worker" = Worker fills via portal
 REQUIRED_FORMS = [
@@ -661,8 +676,14 @@ async def get_unified_employee_status(
         seen_ids: set = set()
         for doc in all_docs:
             raw_req_id = (doc.get("requirement_id") or "").lower().strip()
+            if not raw_req_id:
+                continue
+            # Reject any requirement_id that is an explicit exclusion (check/verification
+            # records that share a name prefix with the canonical evidence requirement).
+            if raw_req_id in DOC_REQUIREMENT_EXCLUSIONS:
+                continue
             doc_type = (doc.get("document_type_name") or "").lower()
-            # Resolve via alias map first
+            # Resolve via alias map first — exact canonical match
             canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id, raw_req_id)
             if canonical == req_id:
                 doc_id = doc.get("id") or id(doc)
@@ -671,15 +692,20 @@ async def get_unified_employee_status(
                     matches.append(doc)
                 continue
             # Fallback: substring match on raw requirement_id (preserves legacy rows
-            # that store partial names like "identity_evidence_2" not in the alias map)
-            if req_id in raw_req_id:
+            # that store partial names like "identity_evidence_2" not in the alias map).
+            # Only applies when the raw_req_id is not already mapped to a DIFFERENT canonical.
+            raw_canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id)
+            if raw_canonical is None and req_id in raw_req_id:
                 doc_id = doc.get("id") or id(doc)
                 if doc_id not in seen_ids:
                     seen_ids.add(doc_id)
                     matches.append(doc)
                 continue
-            # Fallback: document_type_name substring match
-            if req_id.replace("_", " ") in doc_type or req_id.replace("_", "") in doc_type.replace(" ", ""):
+            # Fallback: document_type_name substring match (for docs missing requirement_id)
+            if not raw_req_id and (
+                req_id.replace("_", " ") in doc_type
+                or req_id.replace("_", "") in doc_type.replace(" ", "")
+            ):
                 doc_id = doc.get("id") or id(doc)
                 if doc_id not in seen_ids:
                     seen_ids.add(doc_id)

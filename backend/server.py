@@ -17745,7 +17745,16 @@ async def verify_requirement(
                 "verified_by_name": verified_by_name,
                 "verified_at": now,
                 "verification_notes": verification_notes,
-                "updated_at": now
+                "updated_at": now,
+                # Clear stale rejection/amendment metadata
+                "rejection_reason": None,
+                "amendment_reason": None,
+                "rejected_at": None,
+                "amendment_requested_at": None,
+                "rejected_by": None,
+                "rejected_by_name": None,
+                "review_status": "approved",
+                "review_reason": None,
             }}
         )
     
@@ -19061,7 +19070,16 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
         "verified_by": user['user_id'],
         "verified_by_name": verifier_name,  # P0 FIX: Store name, not email
         "verified_at": now,
-        "status": "approved"  # Ensure status is approved
+        "status": "approved",  # Ensure status is approved
+        # Clear stale rejection/amendment metadata
+        "rejection_reason": None,
+        "amendment_reason": None,
+        "rejected_at": None,
+        "amendment_requested_at": None,
+        "rejected_by": None,
+        "rejected_by_name": None,
+        "review_status": "approved",
+        "review_reason": None,
     }
     
     await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
@@ -19560,7 +19578,16 @@ async def apply_verification_stamp(
         "verified_at": now,
         "verified_by": user['user_id'],
         "verified_by_name": reviewer_name,
-        "status": "verified"
+        "status": "verified",
+        # Clear stale rejection/amendment metadata
+        "rejection_reason": None,
+        "amendment_reason": None,
+        "rejected_at": None,
+        "amendment_requested_at": None,
+        "rejected_by": None,
+        "rejected_by_name": None,
+        "review_status": "approved",
+        "review_reason": None,
     }
     
     # ==========================================================================
@@ -19946,7 +19973,16 @@ async def verify_document_with_digital_stamp(
         "verification_stamp_by_name": reviewer_name,
         "verification_stamp_at": now,
         "verification_id": verification_id,
-        "status": "verified"
+        "status": "verified",
+        # Clear stale rejection/amendment metadata
+        "rejection_reason": None,
+        "amendment_reason": None,
+        "rejected_at": None,
+        "amendment_requested_at": None,
+        "rejected_by": None,
+        "rejected_by_name": None,
+        "review_status": "approved",
+        "review_reason": None,
     }
     
     if stamped_file_url:
@@ -20333,7 +20369,16 @@ async def verify_all_documents_in_requirement(employee_id: str, requirement_id: 
             "verified_by": user['user_id'],
             "verified_by_name": verifier_name,
             "verified_at": now,
-            "status": "approved"
+            "status": "approved",
+            # Clear stale rejection/amendment metadata
+            "rejection_reason": None,
+            "amendment_reason": None,
+            "rejected_at": None,
+            "amendment_requested_at": None,
+            "rejected_by": None,
+            "rejected_by_name": None,
+            "review_status": "approved",
+            "review_reason": None,
         }}
     )
     

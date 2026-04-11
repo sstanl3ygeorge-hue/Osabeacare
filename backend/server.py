@@ -33956,12 +33956,37 @@ async def get_compliance_file(
         
         # Collect documents from multiple requirement keys
         all_docs = []
+        seen_doc_ids: set = set()
         for req_key in doc_requirement_keys:
             docs_for_key = docs_by_requirement.get(req_key, [])
-            all_docs.extend(docs_for_key)
+            for doc in docs_for_key:
+                doc_id = doc.get("id") or id(doc)
+                if doc_id not in seen_doc_ids:
+                    seen_doc_ids.add(doc_id)
+                    all_docs.append(doc)
             # DIAGNOSTIC: Log what we're collecting
             if docs_for_key:
                 logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, req_key={req_key}, found {len(docs_for_key)} docs with statuses: {[d.get('status') for d in docs_for_key]}")
+        # Alias-based catch-all: any requirement_id not already included that maps to
+        # the same canonical via DOC_REQUIREMENT_ALIASES (handles legacy / non-standard IDs).
+        try:
+            from unified_compliance_engine import DOC_REQUIREMENT_ALIASES
+            # Derive the canonical for this evidence key (e.g. "identity_evidence" → "identity")
+            _ev_canonical = DOC_REQUIREMENT_ALIASES.get(key, key.replace("_evidence", "").replace("_certificate", "").replace("_documents", ""))
+            for req_id_in_db, docs_for_req in docs_by_requirement.items():
+                if req_id_in_db in doc_requirement_keys:
+                    continue  # already collected above
+                if not req_id_in_db:
+                    continue
+                _canon = DOC_REQUIREMENT_ALIASES.get(req_id_in_db, req_id_in_db)
+                if _canon == _ev_canonical or (DOC_REQUIREMENT_ALIASES.get(_ev_canonical) is None and _ev_canonical in req_id_in_db):
+                    for doc in docs_for_req:
+                        doc_id = doc.get("id") or id(doc)
+                        if doc_id not in seen_doc_ids:
+                            seen_doc_ids.add(doc_id)
+                            all_docs.append(doc)
+        except Exception:
+            pass  # alias enrichment is best-effort
         
         # DIAGNOSTIC: Log total collected before filtering
         logger.info(f"BUILD_EVIDENCE_DIAGNOSTIC: key={key}, total collected={len(all_docs)}, doc_requirement_keys={doc_requirement_keys}")
@@ -35273,7 +35298,9 @@ async def get_compliance_file(
                     key="identity_evidence",
                     title="Identity Evidence",
                     doc_requirement_keys=["identity_documents", "id_document", "identity", "identity_evidence",
-                                          "identity_rtw", "passport"],
+                                          "identity_rtw", "passport",
+                                          "identity_evidence_2", "identity_evidence_3",
+                                          "identity_document", "identity_upload"],
                     paired_check_key="identity_verification"
                 ),
                 build_check_row(

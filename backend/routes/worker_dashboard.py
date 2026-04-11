@@ -267,6 +267,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # canonical overrides once both are available.
     rtw_canonical_item = None
     dbs_canonical_item = None
+    identity_canonical_item = None
 
     for doc_type, doc_config in required_docs.items():
         doc_name = doc_config["name"]
@@ -869,6 +870,13 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             ),
             None
         )
+        identity_canonical_item = next(
+            (
+                item for item in unified_status.get("categories", {}).get("documents", {}).get("items", [])
+                if item.get("id") == "identity"
+            ),
+            None
+        )
     except Exception as e:
         logger.error(f"Unified progress failed for {employee_id}: {e}")
         total_required = len(required_docs) + 1 + len(mandatory_trainings)
@@ -879,6 +887,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         has_blockers = len(missing_docs) > 0 or len(missing_trainings) > 0 or len(expired_trainings) > 0 or not contract_signed
         unified_blockers = []
         dbs_canonical_item = None
+        identity_canonical_item = None
     
     if unified_training_items:
         all_mandatory_trainings = []
@@ -893,14 +902,31 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "record_id": None
             })
 
-    # Second pass: apply canonical RTW/DBS state to completed_docs entries that were
+    # Second pass: apply canonical UCE state to completed_docs entries that were
     # built from raw document rows before the unified-status fetch.
     # If the canonical item says no live evidence exists, remove the entry from
     # completed_docs and add it to missing_docs so the worker is prompted to upload.
-    if rtw_canonical_item or dbs_canonical_item:
+    # This prevents phantom "Pending Verification" entries when admin sees no evidence
+    # (e.g. a doc stored with a non-canonical requirement_id that the worker's substring
+    # matcher catches but the admin's exact-key lookup misses).
+    if rtw_canonical_item or dbs_canonical_item or identity_canonical_item:
         entries_to_remove = []
         for entry in completed_docs:
-            if entry.get("type") == "right_to_work" and rtw_canonical_item:
+            if entry.get("type") == "identity" and identity_canonical_item:
+                if not identity_canonical_item.get("has_upload"):
+                    # UCE says no live identity evidence — move to missing so worker can upload
+                    entries_to_remove.append(entry)
+                    missing_docs.append({"type": "identity", "name": "Identity (Passport/ID)", "action": "upload"})
+                    continue
+                identity_is_verified = bool(identity_canonical_item.get("completed"))
+                entry["verified"] = identity_is_verified
+                entry["status"] = (
+                    identity_canonical_item.get("verification_status")
+                    or ("verified" if identity_is_verified else "pending_verification")
+                )
+                if entry["status"] in ("incomplete", "not_started"):
+                    entry["verified"] = False
+            elif entry.get("type") == "right_to_work" and rtw_canonical_item:
                 if not rtw_canonical_item.get("has_upload"):
                     # Canonical says no live evidence — move to missing
                     entries_to_remove.append(entry)

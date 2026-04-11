@@ -2414,7 +2414,7 @@ export default function EmployeeProfilePage() {
     { value: 'staff_health_questionnaire', label: 'Health Questionnaire' },
     { value: 'staff_personal_info', label: 'Personal Details Form' },
     { value: 'hmrc_starter_checklist', label: 'HMRC Starter Checklist' },
-    { value: 'interview_record', label: 'Interview Record' }
+    { value: 'interview_record', label: 'Interview Assessment Record (Admin Only)' }
   ];
   
   const openSendFormDialog = (formType) => {
@@ -4254,9 +4254,10 @@ export default function EmployeeProfilePage() {
                 })}
               </div>
               
-              {/* Interview Record - Admin completes this */}
+              {/* Step 2: Interview Assessment Record - Admin only */}
               <div className="mt-6 pt-6 border-t">
-                <h4 className="font-medium text-gray-800 mb-3">Admin Forms</h4>
+                <h4 className="font-medium text-gray-800 mb-1">Interview Assessment (Admin Only)</h4>
+                <p className="text-xs text-gray-500 mb-3">Step 2 after worker pre-screen questionnaire submission.</p>
                 <InterviewFormPanel 
                   employeeId={employeeId}
                   employeeName={`${employee?.first_name} ${employee?.last_name}`}

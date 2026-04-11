@@ -51,6 +51,22 @@ const getDocumentGuidance = (docType) => {
 // Accepted file formats text
 const ACCEPTED_FORMATS = "Accepted formats: PDF, JPG, PNG (max 10MB per file)";
 
+const DOCUMENT_WORKFLOW_UI = {
+  missing: { label: 'Missing', className: 'bg-red-100 text-red-700' },
+  awaiting_review: { label: 'Awaiting Review', className: 'bg-amber-100 text-amber-700' },
+  reupload_required: { label: 'Re-upload Required', className: 'bg-red-100 text-red-700' },
+  check_required: { label: 'Check Required', className: 'bg-orange-100 text-orange-700' },
+  check_in_progress: { label: 'Check In Progress', className: 'bg-blue-100 text-blue-700' },
+  proof_required: { label: 'Proof Required', className: 'bg-purple-100 text-purple-700' },
+  verified: { label: 'Verified', className: 'bg-green-100 text-green-700' },
+};
+
+const getDocumentWorkflowBadgeMeta = (doc) => {
+  const status = (doc?.status || '').toLowerCase();
+  if (doc?.verified) return DOCUMENT_WORKFLOW_UI.verified;
+  return DOCUMENT_WORKFLOW_UI[status] || DOCUMENT_WORKFLOW_UI.awaiting_review;
+};
+
 // Forms Section Component
 function FormsSection() {
   const [forms, setForms] = useState([]);
@@ -2330,9 +2346,9 @@ export default function WorkerDashboard() {
                         </>
                       ) : (
                         <>
-                          <Badge className="bg-amber-100 text-amber-700 text-xs" data-testid={`pending-verification-${doc.type}`}>
+                          <Badge className={`${getDocumentWorkflowBadgeMeta(doc).className} text-xs`} data-testid={`pending-verification-${doc.type}`}>
                             <Clock className="h-3 w-3 mr-1" />
-                            Pending Verification
+                            {getDocumentWorkflowBadgeMeta(doc).label}
                           </Badge>
                           {doc.file_url && (
                             <Button 

@@ -40,6 +40,13 @@ export const WORK_READINESS_STATUS = {
 
 // Document workflow statuses
 export const DOCUMENT_STATUS = {
+  MISSING: 'missing',
+  AWAITING_REVIEW: 'awaiting_review',
+  REUPLOAD_REQUIRED: 'reupload_required',
+  CHECK_REQUIRED: 'check_required',
+  CHECK_IN_PROGRESS: 'check_in_progress',
+  PROOF_REQUIRED: 'proof_required',
+  VERIFIED: 'verified',
   NOT_STARTED: 'not_started',
   REQUESTED: 'requested',
   UPLOADED: 'uploaded',
@@ -67,8 +74,11 @@ export function getStatusCategory(status) {
   const normalized = (status || '').toLowerCase();
   
   const successStatuses = ['valid', 'verified', 'completed', 'approved', 'work_ready', 'ready', 'current'];
-  const warningStatuses = ['pending', 'expiring', 'expiring_soon', 'needs_renewal', 'supervised_start', 'under_review', 'in_progress'];
-  const errorStatuses = ['expired', 'missing', 'blocked', 'not_ready', 'rejected', 'overdue'];
+  const warningStatuses = [
+    'pending', 'expiring', 'expiring_soon', 'needs_renewal', 'supervised_start', 'under_review', 'in_progress',
+    'awaiting_review', 'check_required', 'check_in_progress', 'proof_required'
+  ];
+  const errorStatuses = ['expired', 'missing', 'blocked', 'not_ready', 'rejected', 'overdue', 'reupload_required'];
   
   if (successStatuses.includes(normalized)) return 'success';
   if (warningStatuses.includes(normalized)) return 'warning';

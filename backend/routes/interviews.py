@@ -117,7 +117,12 @@ async def get_interview_records(
         "requirement_id": "interview_record"
     }, {"_id": 0}).sort("created_at", -1).to_list(50)
     
-    return {"records": records}
+    return {
+        "stage": "admin_final_assessment",
+        "stage_label": "Interview Assessment Record (Admin Only)",
+        "depends_on": "worker_pre_screen",
+        "records": records,
+    }
 
 
 @router.post("/employees/{employee_id}/interview-records")
@@ -244,7 +249,8 @@ async def create_interview_record(
     
     return {
         "id": record_id,
-        "message": "Interview record created",
+        "message": "Interview assessment record created",
+        "stage": "admin_final_assessment",
         "status": submission["status"],
         "decision": form_data.get("decision")
     }
@@ -273,12 +279,17 @@ async def get_pre_interview_questionnaire(
         # Return empty questionnaire structure
         return {
             "employee_id": employee_id,
+            "stage": "worker_pre_screen",
+            "stage_label": "Pre-Screen Questionnaire (Worker)",
             "status": "not_submitted",
             "form_data": None
         }
     
     return {
         "employee_id": employee_id,
+        "stage": "worker_pre_screen",
+        "stage_label": "Pre-Screen Questionnaire (Worker)",
+        "next_stage": "admin_final_assessment",
         "status": questionnaire.get("status", "submitted"),
         "form_data": questionnaire.get("form_data") or questionnaire.get("data"),
         "submitted_at": questionnaire.get("submitted_at"),
@@ -331,6 +342,8 @@ async def review_pre_interview_questionnaire(
     )
     
     return {
-        "message": "Pre-interview questionnaire reviewed",
+        "message": "Pre-screen questionnaire reviewed",
+        "stage": "worker_pre_screen",
+        "next_stage": "admin_final_assessment",
         "review_status": review.review_decision
     }

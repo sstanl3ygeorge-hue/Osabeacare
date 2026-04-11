@@ -88,6 +88,11 @@ export default function CheckRow({
       'failed': 'Failed',
       'follow_up_required': 'Follow-up Required',
       'awaiting_review': 'Awaiting Review',
+      'check_required': 'Check Required',
+      'check_in_progress': 'Check In Progress',
+      'proof_required': 'Proof Required',
+      'reupload_required': 'Re-upload Required',
+      'missing': 'Missing',
       'not_recorded': 'Not Recorded'
     };
     return outcomes[outcome] || outcome?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'Unknown';

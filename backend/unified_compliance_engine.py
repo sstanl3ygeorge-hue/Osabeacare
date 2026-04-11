@@ -598,7 +598,16 @@ async def get_unified_employee_status(
             {"is_active": {"$exists": False}},
         ],
     }, {"_id": 0}).to_list(500)
-    
+    _REUPLOAD_SIGNAL_STATUSES = [
+        "rejected", "amendment_requested", "invalidated", "uploaded_in_error", "superseded",
+    ]
+    reupload_signal_docs = await db.employee_documents.find({
+        "employee_id": emp_id,
+        "$or": [
+            {"status": {"$in": _REUPLOAD_SIGNAL_STATUSES}},
+            {"review_status": {"$in": ["rejected", "amendment_requested", "invalidated"]}},
+        ],
+    }, {"_id": 0}).to_list(300)
     # Get training records (exclude deleted/superseded)
     all_training = await db.training_records.find({
         "employee_id": emp_id,
@@ -626,13 +635,13 @@ async def get_unified_employee_status(
     references = employee.get("references", [])
     ref_doc = await db.references.find_one({"employee_id": emp_id}, {"_id": 0})
     
-    # Get DBS and RTW checks from dedicated collections
-    # Use is_current=True + outcome=verified (these collections don't have a "status" field)
+    # Get current DBS and RTW checks from dedicated collections.
+    # Keep non-verified outcomes too, so UI can show check_in_progress/check_required.
     dbs_check = await db.dbs_checks.find_one(
-        {"employee_id": emp_id, "is_current": True, "outcome": "verified"}, {"_id": 0}
+        {"employee_id": emp_id, "is_current": True}, {"_id": 0}
     )
     rtw_check = await db.rtw_checks.find_one(
-        {"employee_id": emp_id, "is_current": True, "outcome": "verified"}, {"_id": 0}
+        {"employee_id": emp_id, "is_current": True}, {"_id": 0}
     )
     
     # Get verification documents (NEW: Smart Verification System)
@@ -711,6 +720,22 @@ async def get_unified_employee_status(
                     seen_ids.add(doc_id)
                     matches.append(doc)
         return matches
+
+    def has_reupload_signal(req_id: str) -> bool:
+        """True when requirement has historical rejected/invalidated evidence and no live doc."""
+        for doc in reupload_signal_docs:
+            raw_req_id = (doc.get("requirement_id") or "").lower().strip()
+            if not raw_req_id:
+                continue
+            if raw_req_id in DOC_REQUIREMENT_EXCLUSIONS:
+                continue
+            canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id, raw_req_id)
+            if canonical == req_id:
+                return True
+            raw_canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id)
+            if raw_canonical is None and req_id in raw_req_id:
+                return True
+        return False
     
     for doc_req in REQUIRED_DOCUMENTS:
         req_id = doc_req["id"]
@@ -734,8 +759,9 @@ async def get_unified_employee_status(
         # For all other requirements: count verified stamps as before.
         if req_id in ("dbs", "right_to_work"):
             _active_check = dbs_check if req_id == "dbs" else rtw_check
+            _check_verified = bool(_active_check and (_active_check.get("outcome") == "verified"))
             _has_live_evidence = len(matching_docs) > 0
-            verified_count = 1 if (_has_live_evidence and _active_check is not None) else 0
+            verified_count = 1 if (_has_live_evidence and _check_verified) else 0
         else:
             verified_count = 0
             for doc in matching_docs:
@@ -787,13 +813,15 @@ async def get_unified_employee_status(
         # these two — doc stamps alone must not mark them as verified.
         if req_id in ("dbs", "right_to_work"):
             _active_check = dbs_check if req_id == "dbs" else rtw_check
+            _check_verified = bool(_active_check and (_active_check.get("outcome") == "verified"))
             if not matching_docs:
-                verification_status = "not_started"
+                verification_status = "reupload_required" if has_reupload_signal(req_id) else "missing"
             elif _active_check is None:
-                # Evidence uploaded but no current check record
-                verification_status = "evidence_uploaded"
+                verification_status = "check_required"
+            elif not _check_verified:
+                verification_status = "check_in_progress"
             elif not _proof_satisfied:
-                verification_status = "incomplete"
+                verification_status = "proof_required"
             else:
                 verification_status = "verified"
         else:
@@ -802,20 +830,10 @@ async def get_unified_employee_status(
             elif has_verified_docs:
                 # Identity / PoA / other — docs directly verified
                 verification_status = "verified"
-            elif (
-                len(matching_docs) > 0
-                and req_id in [
-                    v.get("requirement_id")
-                    for v in verification_docs
-                    if v.get("status") == "pending_approval"
-                ]
-            ):
-                # Stale pending_approval entries are ignored when no live docs exist
-                verification_status = "pending_approval"
             elif len(matching_docs) > 0:
-                verification_status = "evidence_uploaded"
+                verification_status = "awaiting_review"
             else:
-                verification_status = "not_started"
+                verification_status = "reupload_required" if has_reupload_signal(req_id) else "missing"
         
         item_data = {
             "id": req_id,
@@ -840,14 +858,14 @@ async def get_unified_employee_status(
             # Add to blockers with clear label - NEW: Updated messages for verification model
             if has_approved_verification:
                 continue  # Should not happen, but skip if approved
-            elif req_id in [v.get("requirement_id") for v in verification_docs if v.get("status") == "pending_approval"]:
-                blocker_msg = f"{get_clear_label(req_id)}: Verification pending approval"
+            elif verification_status in ("awaiting_review", "check_in_progress", "proof_required"):
+                blocker_msg = f"{get_clear_label(req_id)}: {verification_status.replace('_', ' ').title()}"
                 severity = "pending"
-            elif len(matching_docs) > 0:
-                blocker_msg = f"{get_clear_label(req_id)}: Evidence uploaded - awaiting admin verification"
-                severity = "pending"
+            elif verification_status in ("check_required", "reupload_required"):
+                blocker_msg = f"{get_clear_label(req_id)}: {verification_status.replace('_', ' ').title()}"
+                severity = "critical"
             else:
-                blocker_msg = f"{get_clear_label(req_id)}: No evidence uploaded"
+                blocker_msg = f"{get_clear_label(req_id)}: Missing"
                 severity = "critical"
             
             blockers.append({

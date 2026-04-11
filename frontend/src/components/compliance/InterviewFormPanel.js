@@ -427,7 +427,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
         <CardTitle className="font-heading text-lg flex items-center justify-between">
           <span className="flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-primary" />
-            Interview Records
+            Interview Assessment Records (Admin Only)
           </span>
           <div className="flex gap-2">
             <Button 
@@ -613,7 +613,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-primary" />
-            {editingId ? 'Edit Interview Record' : 'Interview Assessment'}
+            {editingId ? 'Edit Interview Assessment Record' : 'Interview Assessment (Final Scored Admin Record)'}
           </DialogTitle>
           <DialogDescription>
             Osabea Interview Questions – Support Workers | Minimum Score Required: 11 points

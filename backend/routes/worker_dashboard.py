@@ -30,6 +30,46 @@ from .dependencies import (
 
 logger = logging.getLogger(__name__)
 
+# Live evidence statuses only (everything else is historical/non-counting)
+_LIVE_EXCLUDED_STATUSES = frozenset({
+    "deleted", "superseded", "rejected", "amendment_requested",
+    "invalidated", "uploaded_in_error", "removed", "archived",
+    "misfiled", "moved", "replaced",
+})
+
+
+def _is_live_document(doc: dict) -> bool:
+    status = (doc.get("status") or "").lower().strip()
+    review_status = (doc.get("review_status") or "").lower().strip()
+    is_active = doc.get("is_active")
+    if status in _LIVE_EXCLUDED_STATUSES:
+        return False
+    if review_status in {"rejected", "amendment_requested", "invalidated"}:
+        return False
+    if is_active is False:
+        return False
+    return True
+
+
+def _matches_canonical_requirement(
+    requirement_id: str,
+    canonical_target: str,
+    aliases: dict,
+    exclusions: frozenset,
+) -> bool:
+    if not requirement_id:
+        return False
+    req_lower = requirement_id.lower().strip()
+    if req_lower in exclusions:
+        return False
+    canonical = aliases.get(req_lower, req_lower)
+    if canonical == canonical_target:
+        return True
+    raw_canonical = aliases.get(req_lower)
+    if raw_canonical is None and canonical_target in req_lower:
+        return True
+    return False
+
 # ==================== ROUTER ====================
 router = APIRouter(tags=["Worker Dashboard"])
 
@@ -180,15 +220,26 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             {"is_active": {"$exists": False}}
         ]
     }).to_list(length=200)
+    documents = [d for d in documents if _is_live_document(d)]
     
     rejected_documents = await db.employee_documents.find({
         "employee_id": employee_id,
-        "status": "rejected",
-        "$or": [
-            {"is_active": True},
-            {"is_active": {"$exists": False}}
+        "$and": [
+            {
+                "$or": [
+                    {"status": {"$in": ["rejected", "amendment_requested", "invalidated"]}},
+                    {"review_status": {"$in": ["rejected", "amendment_requested", "invalidated"]}},
+                ]
+            },
+            {
+                "$or": [
+                    {"is_active": True},
+                    {"is_active": {"$exists": False}}
+                ]
+            }
         ]
     }).to_list(length=200)
+    rejected_documents = [d for d in rejected_documents if (d.get("is_active") is not False)]
 
     def get_rejection_details(doc: dict) -> dict:
         return {
@@ -311,7 +362,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 rtw_is_verified = bool(rtw_canonical_item.get("completed"))
                 rtw_display_status = (
                     rtw_canonical_item.get("verification_status")
-                    or ("verified" if rtw_is_verified else "pending_verification")
+                    or ("verified" if rtw_is_verified else "check_required")
                 )
                 rtw_entry = {
                     "id": doc.get("id"),
@@ -348,7 +399,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 dbs_is_verified = bool(dbs_canonical_item.get("completed"))
                 dbs_display_status = (
                     dbs_canonical_item.get("verification_status")
-                    or ("verified" if dbs_is_verified else "pending_verification")
+                    or ("verified" if dbs_is_verified else "check_required")
                 )
                 dbs_entry = {
                     "id": doc.get("id"),
@@ -381,7 +432,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 if is_verified:
                     display_status = "verified"
                 elif canonical_status_value in ["pending", "submitted", "uploaded", "pending_review", "pending_approval"]:
-                    display_status = "pending_verification"
+                    display_status = "awaiting_review"
                 else:
                     display_status = canonical_status_value or doc.get("status", "uploaded")
 
@@ -413,7 +464,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             rtw_is_verified = bool(rtw_canonical_item.get("completed"))
             rtw_display_status = (
                 rtw_canonical_item.get("verification_status")
-                or ("verified" if rtw_is_verified else "pending_verification")
+                or ("verified" if rtw_is_verified else "check_required")
             )
             rtw_file_doc = (rtw_canonical_item.get("documents") or [{}])[0]
             canonical_entry = {
@@ -450,7 +501,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             dbs_is_verified = bool(dbs_canonical_item.get("completed"))
             dbs_display_status = (
                 dbs_canonical_item.get("verification_status")
-                or ("verified" if dbs_is_verified else "pending_verification")
+                or ("verified" if dbs_is_verified else "check_required")
             )
             dbs_file_doc = (dbs_canonical_item.get("documents") or [{}])[0]
             dbs_canonical_entry = {
@@ -552,7 +603,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "file_name": poa_doc.get("file_name") or poa_doc.get("original_filename"),
             "document_id": poa_doc.get("id"),
             "partial": True,
-            "status": "verified" if is_verified else "pending_verification",
+            "status": "verified" if is_verified else "awaiting_review",
             "verified_by_name": poa_doc.get("verification_stamp_by_name") or poa_doc.get("verified_by_name"),
             "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
         })
@@ -581,7 +632,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "file_name": poa_doc.get("file_name") or poa_doc.get("original_filename"),
                 "document_id": poa_doc.get("id"),
                 "partial": False,
-                "status": "verified" if is_verified else "pending_verification",
+                "status": "verified" if is_verified else "awaiting_review",
                 "verified_by_name": poa_doc.get("verification_stamp_by_name") or poa_doc.get("verified_by_name"),
                 "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
             })
@@ -922,9 +973,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 entry["verified"] = identity_is_verified
                 entry["status"] = (
                     identity_canonical_item.get("verification_status")
-                    or ("verified" if identity_is_verified else "pending_verification")
+                    or ("verified" if identity_is_verified else "awaiting_review")
                 )
-                if entry["status"] in ("incomplete", "not_started"):
+                if entry["status"] in ("missing", "reupload_required", "check_required", "check_in_progress", "proof_required"):
                     entry["verified"] = False
             elif entry.get("type") == "right_to_work" and rtw_canonical_item:
                 if not rtw_canonical_item.get("has_upload"):
@@ -936,10 +987,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 entry["verified"] = rtw_is_verified
                 entry["status"] = (
                     rtw_canonical_item.get("verification_status")
-                    or ("verified" if rtw_is_verified else "pending_verification")
+                    or ("verified" if rtw_is_verified else "check_required")
                 )
                 # Safeguard: proof required but missing → not verified
-                if entry["status"] == "incomplete":
+                if entry["status"] in ("proof_required", "check_required", "check_in_progress", "missing", "reupload_required"):
                     entry["verified"] = False
                 entry["verified_at"] = rtw_canonical_item.get("verified_at")
                 if rtw_canonical_item.get("next_action"):
@@ -958,10 +1009,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 entry["verified"] = dbs_is_verified
                 entry["status"] = (
                     dbs_canonical_item.get("verification_status")
-                    or ("verified" if dbs_is_verified else "pending_verification")
+                    or ("verified" if dbs_is_verified else "check_required")
                 )
                 # Safeguard: proof required but missing → not verified
-                if entry["status"] == "incomplete":
+                if entry["status"] in ("proof_required", "check_required", "check_in_progress", "missing", "reupload_required"):
                     entry["verified"] = False
                 entry["verified_at"] = dbs_canonical_item.get("verified_at")
                 if dbs_canonical_item.get("next_action"):
@@ -1372,6 +1423,63 @@ async def worker_upload_document(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Server-side guardrail: enforce max ACTIVE LIVE evidence files per requirement.
+    # This prevents worker/admin desync when frontend limits are bypassed.
+    is_training_cert = requirement_id.startswith("training") or "training" in requirement_id.lower()
+    if not is_training_cert:
+        from unified_compliance_engine import DOC_REQUIREMENT_ALIASES, DOC_REQUIREMENT_EXCLUSIONS
+
+        _raw_req = requirement_id.lower().strip()
+        _canonical_req = DOC_REQUIREMENT_ALIASES.get(_raw_req, _raw_req)
+        if _canonical_req not in {"right_to_work", "dbs", "identity", "proof_of_address"}:
+            if "right_to_work" in _raw_req:
+                _canonical_req = "right_to_work"
+            elif "dbs" in _raw_req:
+                _canonical_req = "dbs"
+            elif "identity" in _raw_req or "passport" in _raw_req or "id_document" in _raw_req:
+                _canonical_req = "identity"
+            elif "proof_of_address" in _raw_req or _raw_req.startswith("poa"):
+                _canonical_req = "proof_of_address"
+        _max_active_limits = {
+            "right_to_work": 2,
+            "dbs": 1,
+            "identity": 2,
+            "proof_of_address": 3,
+        }
+        _max_allowed = _max_active_limits.get(_canonical_req)
+
+        if _max_allowed is not None:
+            live_docs = await db.employee_documents.find({
+                "employee_id": employee_id,
+                "status": {"$nin": list(_LIVE_EXCLUDED_STATUSES)},
+                "review_status": {"$nin": ["rejected", "amendment_requested", "invalidated"]},
+                "$or": [
+                    {"is_active": True},
+                    {"is_active": {"$exists": False}},
+                ],
+            }, {"_id": 0, "id": 1, "requirement_id": 1, "status": 1, "review_status": 1, "is_active": 1, "source_type": 1, "file_name": 1, "original_filename": 1, "uploaded_by": 1}).to_list(length=300)
+
+            live_docs = [d for d in live_docs if _is_live_document(d)]
+            _matching_live_count = sum(
+                1 for d in live_docs
+                if _matches_canonical_requirement(
+                    d.get("requirement_id", ""),
+                    _canonical_req,
+                    DOC_REQUIREMENT_ALIASES,
+                    DOC_REQUIREMENT_EXCLUSIONS,
+                )
+            )
+
+            if _matching_live_count >= _max_allowed:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Upload limit reached for {_canonical_req.replace('_', ' ')}: "
+                        f"{_matching_live_count}/{_max_allowed} active files. "
+                        "Please remove/reject/supersede old files before uploading a new one."
+                    )
+                )
     
     contents = await file.read()
     
@@ -1391,8 +1499,6 @@ async def worker_upload_document(
     now = datetime.now(timezone.utc).isoformat()
     
     doc_id = str(uuid.uuid4())
-    
-    is_training_cert = requirement_id.startswith("training") or "training" in requirement_id.lower()
     
     # Normalize requirement_id for identity documents to ensure admin can find them
     # The admin dashboard searches for identity_evidence which maps to these values

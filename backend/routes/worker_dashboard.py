@@ -79,6 +79,9 @@ def _matches_canonical_requirement(
     if canonical == canonical_target:
         return True
     raw_canonical = aliases.get(req_lower)
+    # Never treat verification/check buckets as upload evidence via substring fallback.
+    if "verification" in req_lower or "check" in req_lower:
+        return False
     if raw_canonical is None and canonical_target in req_lower:
         return True
     return False

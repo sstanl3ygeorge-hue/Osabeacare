@@ -150,7 +150,7 @@ DOC_REQUIREMENT_EXCLUSIONS: frozenset[str] = frozenset({
     # RTW exclusions — check records, not evidence documents
     "right_to_work_check",
     # Identity exclusions — verification records, not uploadable identity docs
-    "identity_check", "identity_verification",
+    "identity_check", "identity_verification", "identity_verifications",
     # PoA exclusions — verification records
     "address_check", "address_verification",
 })
@@ -730,6 +730,8 @@ async def get_unified_employee_status(
             # that store partial names like "identity_evidence_2" not in the alias map).
             # Only applies when the raw_req_id is not already mapped to a DIFFERENT canonical.
             raw_canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id)
+            if "verification" in raw_req_id or "check" in raw_req_id:
+                continue
             if raw_canonical is None and req_id in raw_req_id:
                 doc_id = doc.get("id") or id(doc)
                 if doc_id not in seen_ids:
@@ -763,6 +765,8 @@ async def get_unified_employee_status(
             if canonical == req_id:
                 return True
             raw_canonical = DOC_REQUIREMENT_ALIASES.get(raw_req_id)
+            if "verification" in raw_req_id or "check" in raw_req_id:
+                continue
             if raw_canonical is None and req_id in raw_req_id:
                 return True
         return False

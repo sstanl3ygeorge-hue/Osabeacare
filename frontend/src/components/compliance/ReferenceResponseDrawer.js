@@ -145,8 +145,8 @@ export default function ReferenceResponseDrawer({
     setActionLoading('verify');
     try {
       await axios.post(
-        `${API}/references/${employeeId}/${referenceNum}/verify`,
-        {},
+        `${API}/employees/${employeeId}/references/${referenceNum}/verify`,
+        { action: 'verify' },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`Reference ${referenceNum} verified`);
@@ -169,8 +169,8 @@ export default function ReferenceResponseDrawer({
     setActionLoading('reject');
     try {
       await axios.post(
-        `${API}/references/${employeeId}/${referenceNum}/reject`,
-        { rejection_reason: rejectReason.trim() },
+        `${API}/employees/${employeeId}/references/${referenceNum}/verify`,
+        { action: 'reject', notes: rejectReason.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`Reference ${referenceNum} rejected`);
@@ -244,8 +244,8 @@ export default function ReferenceResponseDrawer({
     setActionLoading('replacement');
     try {
       await axios.post(
-        `${API}/references/${employeeId}/${referenceNum}/request-replacement`,
-        { replacement_reason: replacementReason.trim() },
+        `${API}/employees/${employeeId}/references/${referenceNum}/verify`,
+        { action: 'request_replacement', notes: replacementReason.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`Replacement requested for Reference ${referenceNum}`);

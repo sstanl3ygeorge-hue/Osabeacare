@@ -10016,6 +10016,37 @@ async def update_reference(
             "reason": data.edit_reason
         }
     )
+
+    # Sync flat fields to db.employees and db.references to keep all three stores consistent.
+    # The blocker engine reads employee.reference_N_verified flat fields, so we must mirror here.
+    ref_num = reference.get('reference_number')
+    if ref_num:
+        flat_field_map = {
+            'referee_name': f'reference_{ref_num}_name',
+            'referee_email': f'reference_{ref_num}_email',
+            'referee_phone': f'reference_{ref_num}_phone',
+            'referee_organisation': f'reference_{ref_num}_company',
+            'referee_position': f'reference_{ref_num}_job_title',
+            'referee_relationship': f'reference_{ref_num}_relationship',
+        }
+        emp_flat = {flat_field_map[k]: v for k, v in update_fields.items() if k in flat_field_map}
+        if emp_flat:
+            await db.employees.update_one({"id": employee_id}, {"$set": emp_flat})
+            nested_field_map = {
+                'referee_name': f'ref{ref_num}.declared.name',
+                'referee_email': f'ref{ref_num}.declared.email',
+                'referee_phone': f'ref{ref_num}.declared.phone',
+                'referee_organisation': f'ref{ref_num}.declared.organisation',
+                'referee_position': f'ref{ref_num}.declared.position',
+                'referee_relationship': f'ref{ref_num}.declared.relationship',
+            }
+            nested = {nested_field_map[k]: v for k, v in update_fields.items() if k in nested_field_map}
+            if nested:
+                await db.references.update_one(
+                    {"employee_id": employee_id},
+                    {"$set": nested},
+                    upsert=True
+                )
     
     return {
         "success": True,
@@ -31183,6 +31214,86 @@ async def get_employee_references(
     return result
 
 
+# ============================================================================
+# REFERENCE STATUS NORMALIZATION - Read-Time Only (No Data Migration)
+# ============================================================================
+# Maps legacy internal statuses to canonical 9-value lifecycle.
+# This function is applied at read-time only; storage remains unchanged.
+# ============================================================================
+
+def get_canonical_status(has_declared: bool, rejected: bool, replacement_requested_at: any, alternative_recorded_at: any, verified: bool, reviewed: bool, verification_status: str, has_response: bool) -> str:
+    """
+    Normalize reference status to canonical 9-value lifecycle (read-time only).
+    
+    Priority (explicit signals checked first to preserve state hierarchy):
+    1. not_declared: No referee details
+    2. rejected: Explicitly rejected by admin
+    3. replacement_required: Replacement requested, not yet recorded
+    4. replaced: Alternative reference recorded after replacement
+    5. verified: Explicitly verified by admin
+    6. under_review: Admin reviewing response (checked BEFORE has_response)
+    7. response_received: Referee response submitted, awaiting review
+    8. request_pending: Request sent/viewed, awaiting response
+    9. declared: Declared but request not sent
+    """
+    # 1. Not declared
+    if not has_declared:
+        return "not_declared"
+    
+    # 2. Rejected
+    if rejected:
+        return "rejected"
+    
+    # 3. Replacement required (but not yet replaced)
+    if replacement_requested_at and not alternative_recorded_at:
+        return "replacement_required"
+    
+    # 4. Replaced (alternative recorded after replacement requested)
+    if alternative_recorded_at:
+        return "replaced"
+    
+    # 5. Verified
+    if verified:
+        return "verified"
+    
+    # 6. Under review (checked BEFORE has_response to not swallow this state)
+    if reviewed or verification_status == "awaiting_verification":
+        return "under_review"
+    
+    # 7. Response received
+    if has_response:
+        return "response_received"
+    
+    # 8. Request pending (sent, viewed, awaiting response)
+    if verification_status in ["sent", "viewed", "awaiting_response"]:
+        return "request_pending"
+    
+    # 9. Declared (default for has_declared without higher state)
+    return "declared"
+
+
+def normalize_organisation_field(ref_data: dict) -> dict:
+    """
+    Normalize organisation field name variants on read.
+    Returns a copy with 'organisation' as canonical field.
+    """
+    if not ref_data:
+        return ref_data
+    
+    # If 'organisation' already exists, use it (copy exact)
+    if "organisation" in ref_data:
+        return ref_data
+    
+    # Try variant names (company, organization, employer, org)
+    for variant in ["company", "organization", "employer", "org"]:
+        if variant in ref_data:
+            ref_copy = ref_data.copy()
+            ref_copy["organisation"] = ref_data[variant]
+            return ref_copy
+    
+    return ref_data
+
+
 @api_router.get("/employees/{employee_id}/references-normalized")
 async def get_normalized_references(
     employee_id: str,
@@ -31694,16 +31805,26 @@ async def get_normalized_references(
             "applicant_name": applicant_name,
             
             # 5 sections of truth (now 6 with alternative path)
-            "declared_referee": declared_referee if has_declared else None,
+            "declared_referee": normalize_organisation_field(declared_referee) if has_declared else None,
             "request": request,
-            "response": response if has_response else {"exists": False, "source": None},
+            "response": normalize_organisation_field(response) if has_response else {"exists": False, "source": None},
             "integrity": integrity,
             "verification": verification,
             "alternative_path": alternative_path if alternative_path.get("is_alternative") or alternative_path.get("original_referee_attempts") else None,
             
             # UI helpers
             "summary_text": summary_text,
-            "lifecycle_status": verification_status,
+            "lifecycle_status": verification_status,  # Keep original for backward compatibility
+            "canonical_status": get_canonical_status(
+                has_declared=has_declared,
+                rejected=rejected,
+                replacement_requested_at=replacement_requested_at,
+                alternative_recorded_at=alternative_path.get("alternative_recorded_at"),
+                verified=verified,
+                reviewed=reviewed,
+                verification_status=verification_status,
+                has_response=has_response
+            ),
             "allowed_actions": list(set(allowed_actions)),
             "blocker_text": blocker_text,
             "blocks_approval": blocks_approval,
@@ -31734,7 +31855,11 @@ async def get_normalized_references(
             "minimum_required": 2,
             "meets_minimum": valid_count >= 2,
             "all_blockers": [r.get("blocker_text") for r in [ref1, ref2] if r.get("blocks_approval")],
-        }
+        },
+        "canonical_status_values": [
+            "not_declared", "declared", "request_pending", "response_received",
+            "under_review", "verified", "rejected", "replacement_required", "replaced"
+        ]
     }
 
 

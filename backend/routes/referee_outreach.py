@@ -512,11 +512,11 @@ async def verify_or_reject_reference(
     if reference_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
     
-    if request.action not in ['verify', 'reject']:
-        raise HTTPException(status_code=400, detail="action must be 'verify' or 'reject'")
+    if request.action not in ['verify', 'reject', 'request_replacement']:
+        raise HTTPException(status_code=400, detail="action must be 'verify', 'reject', or 'request_replacement'")
     
-    if request.action == 'reject' and not request.notes:
-        raise HTTPException(status_code=400, detail="Rejection reason (notes) is required")
+    if request.action in ['reject', 'request_replacement'] and not request.notes:
+        raise HTTPException(status_code=400, detail="Reason (notes) is required")
     
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
@@ -628,6 +628,63 @@ async def verify_or_reject_reference(
             "status": "success",
             "message": f"Reference {reference_num} rejected and data cleared",
             "rejected_at": now
+        }
+    else:
+        # Request replacement — clear current referee data so worker.can_provide_new = True.
+        # Sets rejected=True + clears name so existing worker_dashboard gating (data_cleared) fires.
+        # Additionally stores replacement-specific metadata to distinguish from a plain rejection.
+        update_data = {
+            # Existing gating reads: is_rejected AND not referee_name → data_cleared → can_provide_new
+            f"{prefix}request_status": "rejected",
+            f"{prefix}rejected": True,
+            f"{prefix}rejected_by": user['user_id'],
+            f"{prefix}rejected_at": now,
+            f"{prefix}rejection_reason": request.notes,
+            # Clear referee data so worker can re-enter new details
+            f"{prefix}name": None,
+            f"{prefix}email": None,
+            f"{prefix}phone": None,
+            f"{prefix}company": None,
+            f"{prefix}position": None,
+            f"{prefix}relationship": None,
+            f"{prefix}years_known": None,
+            f"{prefix}declared": False,
+            f"{prefix}response_data": None,
+            f"{prefix}response_received_at": None,
+            f"{prefix}reviewed": False,
+            f"{prefix}reviewed_by": None,
+            f"{prefix}reviewed_at": None,
+            # Replacement-specific metadata (distinguishes from plain reject in audit + canonical_status)
+            f"{prefix}replacement_requested_at": now,
+            f"{prefix}replacement_requested_by": user['user_id'],
+            f"{prefix}replacement_reason": request.notes,
+        }
+        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
+
+        # Update all matching document records so no stale active row remains
+        await db.employee_documents.update_many(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
+            {"$set": {
+                "verified": False,
+                "status": "rejected",
+                "rejected_by": user['user_id'],
+                "rejected_at": now,
+                "rejection_reason": request.notes,
+                "is_active": False
+            }}
+        )
+
+        await log_audit_action(user['user_id'], "request_reference_replacement", "employee", employee_id, {
+            "reference_num": reference_num,
+            "reason": request.notes,
+            "employee_id": employee_id,
+            "data_cleared": True
+        })
+
+        return {
+            "status": "success",
+            "message": f"Replacement requested for Reference {reference_num}. Worker has been notified to provide new referee details.",
+            "replacement_requested_at": now
         }
 
 

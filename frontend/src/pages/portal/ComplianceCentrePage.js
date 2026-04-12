@@ -111,6 +111,9 @@ export default function ComplianceCentrePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isReplaceMode, setIsReplaceMode] = useState(false);
   const [replaceReason, setReplaceReason] = useState('');
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null);
+  const [removeReason, setRemoveReason] = useState('');
   
   // Incident form
   const [incidentDialogOpen, setIncidentDialogOpen] = useState(false);
@@ -460,19 +463,27 @@ export default function ComplianceCentrePage() {
   // ==================== DOCUMENT REMOVE/REPLACE HANDLERS ====================
   
   const handleRemoveDocument = async (type, id, name) => {
-    const reason = window.prompt(`Why are you removing the document from "${name}"?\n\nThis will mark the document as missing.`);
-    if (!reason) return; // User cancelled
-    
+    setRemoveTarget({ type, id, name });
+    setRemoveReason('');
+    setRemoveDialogOpen(true);
+  };
+
+  const handleConfirmRemoveDocument = async () => {
+    if (!removeTarget || !removeReason.trim()) return;
+
     try {
-      const endpoint = type === 'policy' 
-        ? `${API}/compliance/policies/${id}/file`
-        : `${API}/compliance/insurance/${id}/file`;
+      const endpoint = removeTarget.type === 'policy' 
+        ? `${API}/compliance/policies/${removeTarget.id}/file`
+        : `${API}/compliance/insurance/${removeTarget.id}/file`;
       
-      await axios.delete(`${endpoint}?reason=${encodeURIComponent(reason)}`, {
+      await axios.delete(`${endpoint}?reason=${encodeURIComponent(removeReason.trim())}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
       toast.success('Document removed successfully');
+      setRemoveDialogOpen(false);
+      setRemoveTarget(null);
+      setRemoveReason('');
       fetchData();
     } catch (error) {
       console.error('Failed to remove document:', error);
@@ -2680,6 +2691,57 @@ export default function ComplianceCentrePage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove Document Dialog */}
+      <Dialog open={removeDialogOpen} onOpenChange={(open) => {
+        setRemoveDialogOpen(open);
+        if (!open) {
+          setRemoveTarget(null);
+          setRemoveReason('');
+        }
+      }}>
+        <DialogContent className="max-w-md w-[95vw]">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-lg">Remove Document</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <p className="text-sm text-text-muted">
+              {removeTarget?.name
+                ? `This will mark the document under "${removeTarget.name}" as missing.`
+                : 'This will mark the document as missing.'}
+            </p>
+            <div className="space-y-2">
+              <Label>Reason *</Label>
+              <Textarea
+                value={removeReason}
+                onChange={(e) => setRemoveReason(e.target.value)}
+                placeholder="Why are you removing this document?"
+                className="min-h-[90px]"
+              />
+            </div>
+            <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setRemoveDialogOpen(false);
+                  setRemoveTarget(null);
+                  setRemoveReason('');
+                }}
+                className="rounded-xl w-full sm:w-auto"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmRemoveDocument}
+                disabled={!removeReason.trim()}
+                className="bg-red-600 hover:bg-red-700 text-white rounded-xl w-full sm:w-auto"
+              >
+                Remove Document
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

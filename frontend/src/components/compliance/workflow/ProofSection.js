@@ -3,6 +3,13 @@ import axios from 'axios';
 import { useAuth } from '../../../context/AuthContext';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../../ui/dialog';
 import { toast } from 'sonner';
 import {
   Shield,
@@ -132,6 +139,7 @@ export function ProofSection({
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [removeProofDialogOpen, setRemoveProofDialogOpen] = useState(false);
 
   const checkType = PROOF_CHECK_TYPE[requirementKey];
   const checkEndpoint =
@@ -214,13 +222,11 @@ export function ProofSection({
 
   const handleRemoveProof = async () => {
     if (!proofDocumentId || !checkRecord || !checkEndpoint) return;
+    setRemoveProofDialogOpen(true);
+  };
 
-    const confirmed = window.confirm(
-      'Remove this proof document?\n\n' +
-        'IMPORTANT: Evidence files are NOT affected — they are stored separately.\n' +
-        'The check record will be updated to remove the proof reference.',
-    );
-    if (!confirmed) return;
+  const handleConfirmRemoveProof = async () => {
+    if (!proofDocumentId || !checkRecord || !checkEndpoint) return;
 
     setRemoving(true);
     try {
@@ -248,6 +254,7 @@ export function ProofSection({
       );
     } finally {
       setRemoving(false);
+      setRemoveProofDialogOpen(false);
     }
   };
 
@@ -317,6 +324,30 @@ export function ProofSection({
                     {formatBackendDate(proofDocument.uploaded_at, {
                       format: 'medium',
                     })}
+
+                    <Dialog open={removeProofDialogOpen} onOpenChange={setRemoveProofDialogOpen}>
+                      <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                          <DialogTitle>Remove Proof Document</DialogTitle>
+                        </DialogHeader>
+                        <p className="text-sm text-text-muted py-2">
+                          This removes the proof link from the check record. Evidence files remain unchanged.
+                        </p>
+                        <DialogFooter>
+                          <Button variant="outline" onClick={() => setRemoveProofDialogOpen(false)}>
+                            Cancel
+                          </Button>
+                          <Button
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            onClick={handleConfirmRemoveProof}
+                            disabled={removing}
+                          >
+                            {removing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                            Remove Proof
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </p>
                 )}
               </div>

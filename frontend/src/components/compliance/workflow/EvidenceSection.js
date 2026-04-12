@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   FileText,
   Upload,
@@ -13,6 +14,14 @@ import {
 } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
+import { Textarea } from '../../ui/textarea';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../../ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +56,8 @@ export function EvidenceSection({
   onUpload,
   workflow,
 }) {
+  const [removeDialog, setRemoveDialog] = useState({ open: false, docId: null, fileName: '' });
+  const [removeReason, setRemoveReason] = useState('Uploaded in error');
   const hasFiles = files.length > 0;
   const latestRequest = pendingRequests[0] || null;
 
@@ -86,14 +97,15 @@ export function EvidenceSection({
   };
 
   const handleRemoveWithConfirm = (docId, fileName) => {
-    const reason = window.prompt(
-      `Reason for removing "${fileName}" from active records:`,
-      'Uploaded in error',
-    );
-    // If user clicked Cancel, reason is null — do nothing
-    if (reason !== null) {
-      onRemove(docId, reason || 'Uploaded in error');
-    }
+    setRemoveDialog({ open: true, docId, fileName });
+    setRemoveReason('Uploaded in error');
+  };
+
+  const handleConfirmRemove = () => {
+    if (!removeDialog.docId) return;
+    onRemove(removeDialog.docId, removeReason.trim() || 'Uploaded in error');
+    setRemoveDialog({ open: false, docId: null, fileName: '' });
+    setRemoveReason('Uploaded in error');
   };
 
   return (
@@ -317,6 +329,50 @@ export function EvidenceSection({
             : 'Evidence is being reviewed by admin. No action needed.'}
         </p>
       )}
+
+      <Dialog
+        open={removeDialog.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRemoveDialog({ open: false, docId: null, fileName: '' });
+            setRemoveReason('Uploaded in error');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove Evidence</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-text-muted">
+              Remove "{removeDialog.fileName}" from active records. This keeps audit history.
+            </p>
+            <Textarea
+              value={removeReason}
+              onChange={(e) => setRemoveReason(e.target.value)}
+              placeholder="Reason for removal"
+              className="min-h-[90px]"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRemoveDialog({ open: false, docId: null, fileName: '' });
+                setRemoveReason('Uploaded in error');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleConfirmRemove}
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -3728,6 +3728,11 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
     
     requirement_id = item["id"]
     item_type = item.get("type", "document")
+    rtw_dbs_requirement_ids = {
+        "right_to_work", "right_to_work_documents", "right_to_work_evidence",
+        "dbs", "dbs_certificate", "dbs_evidence", "dbs_certificate_evidence",
+    }
+    current_proof_doc_ids: set[str] = set()
     
     # ====== ACKNOWLEDGEMENT TYPE ======
     if item_type == "acknowledgement":
@@ -3804,6 +3809,22 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
     # ====== DOCUMENT TYPE ======
     if item_type == "document":
         min_count = item.get("min_files", 1)
+
+        if requirement_id in rtw_dbs_requirement_ids:
+            current_rtw = await db.rtw_checks.find_one(
+                {"employee_id": employee_id, "is_current": True},
+                {"_id": 0, "proof_document_id": 1}
+            )
+            current_dbs = await db.dbs_checks.find_one(
+                {"employee_id": employee_id, "is_current": True},
+                {"_id": 0, "proof_document_id": 1}
+            )
+            for proof_doc_id in [
+                (current_rtw or {}).get("proof_document_id"),
+                (current_dbs or {}).get("proof_document_id"),
+            ]:
+                if proof_doc_id:
+                    current_proof_doc_ids.add(proof_doc_id)
         
         # Get active documents (exclude deleted/superseded)
         docs = await db.employee_documents.find({
@@ -3815,6 +3836,9 @@ async def check_item_completion(employee_id: str, item: dict) -> dict:
                 {"active": True}
             ]
         }, {"_id": 0}).to_list(20)
+
+        if requirement_id in rtw_dbs_requirement_ids:
+            docs = [d for d in docs if not is_proof_role_document(d, current_proof_doc_ids)]
         
         # Count documents with active evidence (file_url or active evidence_files)
         active_docs_count = 0
@@ -16720,9 +16744,19 @@ async def get_requirement_files(
         "dbs_certificate": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
         "dbs_evidence": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
         "dbs_certificate_evidence": ["dbs", "dbs_certificate", "dbs_check", "dbs_evidence", "dbs_certificate_evidence"],
-        # Identity: Include "passport" to sync with worker dashboard
-        "identity_documents": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document", "passport"],
-        "identity_evidence": ["identity", "identity_rtw", "identity_documents", "identity_evidence", "id_document", "passport"],
+        # Identity: full alias set — must match DOC_REQUIREMENT_ALIASES identity entries
+        "identity_documents": [
+            "identity", "identity_rtw", "identity_documents", "identity_evidence",
+            "id_document", "passport",
+            "proof_of_identity", "identity_document",
+            "identity_evidence_2", "identity_evidence_3", "identity_upload",
+        ],
+        "identity_evidence": [
+            "identity", "identity_rtw", "identity_documents", "identity_evidence",
+            "id_document", "passport",
+            "proof_of_identity", "identity_document",
+            "identity_evidence_2", "identity_evidence_3", "identity_upload",
+        ],
         "right_to_work": ["right_to_work", "right_to_work_documents", "right_to_work_evidence", "right_to_work_check", "identity_rtw"],
         "right_to_work_documents": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
         "right_to_work_evidence": ["right_to_work", "identity_rtw", "right_to_work_documents", "right_to_work_evidence"],
@@ -18059,6 +18093,26 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         ],
         "status": {"$ne": "superseded"}
     }, {"_id": 0}).to_list(500)
+
+    current_rtw = await db.rtw_checks.find_one(
+        {"employee_id": employee_id, "is_current": True},
+        {"_id": 0, "proof_document_id": 1}
+    )
+    current_dbs = await db.dbs_checks.find_one(
+        {"employee_id": employee_id, "is_current": True},
+        {"_id": 0, "proof_document_id": 1}
+    )
+    current_proof_doc_ids = {
+        doc_id for doc_id in [
+            (current_rtw or {}).get("proof_document_id"),
+            (current_dbs or {}).get("proof_document_id"),
+        ] if doc_id
+    }
+
+    rtw_dbs_requirement_ids = {
+        "right_to_work", "right_to_work_documents", "right_to_work_evidence",
+        "dbs", "dbs_certificate", "dbs_evidence", "dbs_certificate_evidence",
+    }
     
     # Get all forms for this employee
     all_forms = await db.generated_forms.find({"employee_id": employee_id}, {"_id": 0}).to_list(500)
@@ -18196,8 +18250,11 @@ async def get_compliance_requirements(employee_id: str, user: dict = Depends(get
         if req_type in ['document', 'form-generated']:
             # Find ALL linked documents for this requirement
             linked_docs = []
+            should_exclude_rtw_dbs_proof = req_id in rtw_dbs_requirement_ids
             for doc in all_docs:
                 doc_req_id = doc.get('requirement_id')
+                if should_exclude_rtw_dbs_proof and is_proof_role_document(doc, current_proof_doc_ids):
+                    continue
                 if doc_req_id == req_id:
                     linked_docs.append(doc)
                 # Also match by document type name if no explicit requirement_id
@@ -34121,7 +34178,7 @@ async def get_compliance_file(
                 if not req_id_in_db:
                     continue
                 _canon = DOC_REQUIREMENT_ALIASES.get(req_id_in_db, req_id_in_db)
-                if _canon == _ev_canonical or (DOC_REQUIREMENT_ALIASES.get(_ev_canonical) is None and _ev_canonical in req_id_in_db):
+                if _canon == _ev_canonical:  # strict alias match only — no unsafe substring fallback
                     for doc in docs_for_req:
                         doc_id = doc.get("id") or id(doc)
                         if doc_id not in seen_doc_ids:

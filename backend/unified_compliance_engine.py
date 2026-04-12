@@ -121,6 +121,12 @@ DOC_REQUIREMENT_ALIASES: dict[str, str] = {
     "identity_rtw": "identity",
     "passport": "identity",
     "id_document": "identity",
+    # Identity extended variants (legacy / upload-slot IDs that must stay in Identity only)
+    "proof_of_identity": "identity",     # legacy admin-import ID
+    "identity_document": "identity",     # singular form variant
+    "identity_evidence_2": "identity",   # numbered upload-slot variant
+    "identity_evidence_3": "identity",
+    "identity_upload": "identity",       # generic upload-slot variant
     # Right-to-work aliases
     "right_to_work_documents": "right_to_work",
     "right_to_work_evidence": "right_to_work",
@@ -131,6 +137,7 @@ DOC_REQUIREMENT_ALIASES: dict[str, str] = {
     # Proof-of-address aliases
     "poa": "proof_of_address",
     "address_evidence": "proof_of_address",
+    "address_proof": "proof_of_address",  # legacy variant used in drawer / admin imports
 }
 
 # Requirement IDs that must NEVER be counted as evidence for a canonical requirement,

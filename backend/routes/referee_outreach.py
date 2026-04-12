@@ -269,7 +269,7 @@ async def get_referee_form(token: str):
     
     # Check if already submitted
     current_status = employee.get(f"{prefix}request_status")
-    if current_status in ["submitted", "awaiting_review", "verified"]:
+    if current_status in ["submitted", "awaiting_review", "verified", "rejected"]:
         raise HTTPException(status_code=400, detail="This reference has already been submitted")
     
     # Check token age (30 day expiry)
@@ -328,7 +328,7 @@ async def submit_referee_form(token: str, form_data: dict):
     
     # Check if already submitted
     current_status = employee.get(f"{prefix}request_status")
-    if current_status in ["submitted", "awaiting_review", "verified"]:
+    if current_status in ["submitted", "awaiting_review", "verified", "rejected"]:
         raise HTTPException(status_code=400, detail="This reference has already been submitted")
     
     # Validate required fields
@@ -416,6 +416,14 @@ async def submit_referee_form(token: str, form_data: dict):
     }
     
     await db.employee_documents.insert_one(doc_record)
+
+    await log_audit_action("system", "reference_response_received", "employee", employee['id'], {
+        "reference_num": ref_num,
+        "requirement_id": requirement_id,
+        "submission_id": submission_id,
+        "token_consumed": True,
+        "mismatch_detected": mismatch_detected
+    })
     
     return {
         "status": "success",
@@ -574,6 +582,7 @@ async def verify_or_reject_reference(
             f"{prefix}rejected_by": user['user_id'],
             f"{prefix}rejected_at": now,
             f"{prefix}rejection_reason": request.notes,
+            f"{prefix}request_token": None,
             # Clear all reference data fields so worker can re-enter
             f"{prefix}name": None,
             f"{prefix}email": None,
@@ -593,7 +602,7 @@ async def verify_or_reject_reference(
         await db.employees.update_one({"id": employee_id}, {"$set": update_data})
         
         # Update document record as rejected
-        await db.employee_documents.update_one(
+        await db.employee_documents.update_many(
             {"employee_id": employee_id, "requirement_id": requirement_id},
             {"$set": {
                 "verified": False, 
@@ -609,7 +618,7 @@ async def verify_or_reject_reference(
         await db.references.update_one(
             {"employee_id": employee_id},
             {"$set": {
-                f"ref{reference_num}": None,
+                f"ref{reference_num}": {},
                 f"ref{reference_num}_status": "rejected",
                 f"ref{reference_num}_rejected_at": now,
                 f"ref{reference_num}_rejection_reason": request.notes
@@ -640,6 +649,7 @@ async def verify_or_reject_reference(
             f"{prefix}rejected_by": user['user_id'],
             f"{prefix}rejected_at": now,
             f"{prefix}rejection_reason": request.notes,
+            f"{prefix}request_token": None,
             # Clear referee data so worker can re-enter new details
             f"{prefix}name": None,
             f"{prefix}email": None,
@@ -671,6 +681,17 @@ async def verify_or_reject_reference(
                 "rejected_at": now,
                 "rejection_reason": request.notes,
                 "is_active": False
+            }}
+        )
+
+        # Keep db.references consistent with cleared replacement state
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": {
+                f"ref{reference_num}": {},
+                f"ref{reference_num}_status": "rejected",
+                f"ref{reference_num}_rejected_at": now,
+                f"ref{reference_num}_rejection_reason": request.notes
             }}
         )
 

@@ -778,9 +778,12 @@ async def get_unified_employee_status(
         # Find matching documents
         matching_docs = find_docs_for_requirement(req_id)
 
-        # NEW: Check for approved verification documents FIRST
-        # This is the primary source of truth for CQC compliance
+        # NEW: Check for approved verification documents FIRST.
+        # Guardrail: identity verification alone must not keep Identity in
+        # awaiting/verified state when no live identity upload exists.
         has_approved_verification = req_id in approved_verifications
+        if req_id == "identity" and len(matching_docs) == 0:
+            has_approved_verification = False
 
         # ── verified_count ───────────────────────────────────────────────────
         # DBS and RTW require a dedicated check record PLUS live evidence.

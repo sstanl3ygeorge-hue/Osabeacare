@@ -1046,6 +1046,28 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         for entry in entries_to_remove:
             completed_docs.remove(entry)
 
+    # HARD RULE: no live canonical identity file => no identity awaiting/completed entry.
+    # Identity state for workers must be driven only by live active identity documents,
+    # never by stale verification/check history.
+    live_identity_docs = [
+        d for d in documents
+        if _matches_canonical_requirement(
+            d.get("requirement_id", ""),
+            "identity",
+            DOC_REQUIREMENT_ALIASES,
+            DOC_REQUIREMENT_EXCLUSIONS,
+        )
+    ]
+    if len(live_identity_docs) == 0:
+        completed_docs = [d for d in completed_docs if d.get("type") != "identity"]
+        has_identity_missing_entry = any(d.get("type") == "identity" for d in missing_docs)
+        if not has_identity_missing_entry:
+            missing_docs.append({
+                "type": "identity",
+                "name": "Identity (Passport/ID)",
+                "action": "upload"
+            })
+
     status = "READY" if is_active_employee else ("NOT_READY" if has_blockers else "READY")
     
     # Get form status for onboarding employees

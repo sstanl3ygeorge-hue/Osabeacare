@@ -43,8 +43,6 @@ import {
   CompetencyRecordsPanel, 
   PreEmploymentGatesPanel, 
   ReferenceEmploymentComparison,
-  ProfessionalRegistrationPanel,
-  ApplicationDataPanel,
   PoliciesTabContent,
   TrainingTabContent,
   AuditTabContent,
@@ -366,25 +364,43 @@ export default function EmployeeProfilePage() {
       return { sectionId: 'section-proof_of_address', tab: 'checklist' };
     }
     if (text.includes('training') || text.includes('certificate') || text.includes('qualification')) {
-      return { sectionId: null, tab: 'training' };
+      return { sectionId: text.includes('induction') ? 'section-training-induction' : 'section-training-root', tab: 'training' };
     }
     if (text.includes('reference')) {
-      return { sectionId: 'section-references', tab: 'checklist' };
+      return { sectionId: 'section-references-root', tab: 'references' };
     }
-    if (text.includes('application') || text.includes('form') || text.includes('interview')) {
-      return { sectionId: 'section-recruitment_record', tab: 'checklist' };
+    if (text.includes('interview')) {
+      return { sectionId: 'section-forms-interview', tab: 'forms' };
+    }
+    if (text.includes('declaration')) {
+      return { sectionId: 'section-forms-declarations', tab: 'forms' };
+    }
+    if (text.includes('application') || text.includes('pre-screen') || text.includes('pre screen')) {
+      return { sectionId: 'section-forms-pre-screen', tab: 'forms' };
+    }
+    if (text.includes('form') || text.includes('hmrc') || text.includes('emergency') || text.includes('health questionnaire') || text.includes('personal information')) {
+      return { sectionId: 'section-forms-core', tab: 'forms' };
     }
     if (text.includes('contract') || text.includes('handbook')) {
       return { sectionId: 'section-agreements', tab: 'checklist' };
+    }
+    if (text.includes('employment') || text.includes('gap') || text.includes('cv')) {
+      if (text.includes('gap')) return { sectionId: 'section-employment-gaps', tab: 'employment' };
+      if (text.includes('qualif') || text.includes('education')) return { sectionId: 'section-employment-qualifications', tab: 'employment' };
+      return { sectionId: 'section-employment-cv', tab: 'employment' };
+    }
+    if (text.includes('spot check')) {
+      return { sectionId: 'section-spot-checks-root', tab: 'spot_checks' };
+    }
+    if (text.includes('competenc')) {
+      return { sectionId: 'section-competencies-root', tab: 'competencies' };
     }
     // Default to checklist tab
     return { sectionId: null, tab: 'checklist' };
   };
   
   // Handler: Navigate to blocker section
-  const handleBlockerClick = (blockerText) => {
-    const { sectionId, tab } = mapBlockerToSection(blockerText);
-    
+  const navigateToTabSection = (tab, sectionId = null) => {
     // Switch to the correct tab first
     if (tab !== activeTab) {
       setActiveTab(tab);
@@ -413,6 +429,11 @@ export default function EmployeeProfilePage() {
         }
       }
     }
+  };
+
+  const handleBlockerClick = (blockerText) => {
+    const { sectionId, tab } = mapBlockerToSection(blockerText);
+    navigateToTabSection(tab, sectionId);
   };
   
   // Fetch recruitment status (Reference Integrity, CV Gaps, Proof of Address)
@@ -3857,6 +3878,10 @@ export default function EmployeeProfilePage() {
           onNavigateToTab={(tab) => {
             setActiveTab(tab === 'compliance' ? 'checklist' : tab);
           }}
+          onNavigateToItem={(tab, sectionId) => {
+            const normalizedTab = tab === 'compliance' ? 'checklist' : tab;
+            navigateToTabSection(normalizedTab, sectionId || null);
+          }}
           onRefresh={() => {
             fetchEmployee();
             fetchComplianceFile();
@@ -4086,14 +4111,14 @@ export default function EmployeeProfilePage() {
         {/* Health Questionnaire, Personal Info, HMRC, Emergency Contacts */}
         <TabsContent value="forms">
           {/* Application Form Viewer - Shows original submitted application */}
-          <div className="mb-6">
+          <div className="mb-6" data-testid="section-forms-pre-screen">
             <ApplicationFormViewer
               employeeId={employeeId}
               employeeName={`${employee?.first_name} ${employee?.last_name}`}
             />
           </div>
 
-          <Card className="border-[#E4E8EB] shadow-sm">
+          <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
             <CardHeader>
               <CardTitle className="font-heading text-lg">Employee Forms</CardTitle>
               <p className="text-xs text-text-muted">
@@ -4107,7 +4132,8 @@ export default function EmployeeProfilePage() {
                   { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations' },
                   { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details' },
                   { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
-                  { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details' }
+                  { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details' },
+                  { key: 'pre_screen_questionnaire', name: 'Pre-Screen Questionnaire', description: 'Worker pre-screen/application intake responses', allowReminder: false }
                 ].map((form) => {
                   // Find submission from form_submissions endpoint data
                   const submission = formSubmissions?.find(fs => 
@@ -4223,7 +4249,7 @@ export default function EmployeeProfilePage() {
                             )}
                             
                             {/* Send Reminder - only if not submitted */}
-                            {!isSubmitted && (
+                            {!isSubmitted && form.allowReminder !== false && (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -4246,6 +4272,11 @@ export default function EmployeeProfilePage() {
                                 Send Reminder
                               </Button>
                             )}
+                            {!isSubmitted && form.allowReminder === false && (
+                              <Badge className="bg-slate-100 text-slate-700">
+                                Managed via Application Form
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -4255,7 +4286,7 @@ export default function EmployeeProfilePage() {
               </div>
               
               {/* Step 2: Interview Assessment Record - Admin only */}
-              <div className="mt-6 pt-6 border-t">
+              <div className="mt-6 pt-6 border-t" data-testid="section-forms-interview">
                 <h4 className="font-medium text-gray-800 mb-1">Interview Assessment (Admin Only)</h4>
                 <p className="text-xs text-gray-500 mb-3">Step 2 after worker pre-screen questionnaire submission.</p>
                 <InterviewFormPanel 
@@ -4267,6 +4298,32 @@ export default function EmployeeProfilePage() {
                     fetchFormSubmissions();
                   }}
                 />
+              </div>
+
+              <div className="mt-6 pt-6 border-t" data-testid="section-forms-declarations">
+                <h4 className="font-medium text-gray-800 mb-1">Applicant Declarations</h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Consent and declaration data from application intake. Use this section to review or amend declarations.
+                </p>
+                <div className="p-4 rounded-lg border bg-gray-50 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Declarations & Consent</p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Includes criminal/health declarations, DBS consent, right-to-work restrictions, and professional declarations.
+                    </p>
+                  </div>
+                  {!isAuditor() && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditDeclarationsOpen(true)}
+                      data-testid="open-declarations-review"
+                    >
+                      <Edit className="h-4 w-4 mr-1" />
+                      Review Declarations
+                    </Button>
+                  )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -4312,7 +4369,7 @@ export default function EmployeeProfilePage() {
         {/* ========== TAB 6: EMPLOYMENT ========== */}
         {/* Employment history + gap verification + declarations */}
         <TabsContent value="employment">
-          <Card className="border-[#E4E8EB] shadow-sm">
+          <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-employment-cv">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle className="font-heading text-lg">Employment History</CardTitle>
@@ -4399,25 +4456,27 @@ export default function EmployeeProfilePage() {
               
               {/* Employment Gap Panel */}
               {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
-                <EmploymentGapPanel
-                  employeeId={employeeId}
-                  employeeName={`${employee?.first_name} ${employee?.last_name}`}
-                  initialData={{
-                    has_gaps: true,
-                    gaps: complianceFile.sections.employment_history.rows[0].gaps,
-                    evaluation: complianceFile.sections.employment_history.rows[0].gap_evaluation
-                  }}
-                  isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
-                  onGapUpdate={() => {
-                    fetchCompliance();
-                    fetchComplianceFile();
-                  }}
-                />
+                <div data-testid="section-employment-gaps">
+                  <EmploymentGapPanel
+                    employeeId={employeeId}
+                    employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                    initialData={{
+                      has_gaps: true,
+                      gaps: complianceFile.sections.employment_history.rows[0].gaps,
+                      evaluation: complianceFile.sections.employment_history.rows[0].gap_evaluation
+                    }}
+                    isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
+                    onGapUpdate={() => {
+                      fetchCompliance();
+                      fetchComplianceFile();
+                    }}
+                  />
+                </div>
               )}
               
               {/* Employment History from Application */}
               {employee?.employment_history?.length > 0 && (
-                <div className="mt-6">
+                <div className="mt-6" data-testid="section-employment-history">
                   <h4 className="font-medium text-gray-800 mb-3">Employment Records</h4>
                   <div className="space-y-3">
                     {employee.employment_history.map((job, idx) => (
@@ -4433,6 +4492,26 @@ export default function EmployeeProfilePage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {(employee?.qualifications || employee?.education) && (
+                <div className="mt-6 pt-6 border-t border-gray-200" data-testid="section-employment-qualifications">
+                  <h4 className="font-medium text-gray-800 mb-3">Qualifications & Education</h4>
+                  <div className="space-y-3">
+                    {employee?.qualifications && (
+                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-sm font-medium text-gray-700 mb-1">Qualifications</p>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{employee.qualifications}</p>
+                      </div>
+                    )}
+                    {employee?.education && (
+                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-sm font-medium text-gray-700 mb-1">Education</p>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{employee.education}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -4562,32 +4641,6 @@ export default function EmployeeProfilePage() {
                     />
                   </div>
 
-                  {/* Professional Registration Panel - NHS Requirement for regulated roles */}
-                  <div className="mb-6">
-                    <ProfessionalRegistrationPanel
-                      employeeId={employeeId}
-                      employeeRole={employee?.system_role || employee?.role}
-                      onRefresh={() => {
-                        fetchData();
-                        fetchCompliance();
-                      }}
-                    />
-                  </div>
-
-                  {/* Application Form Data - Employment History, Declarations, etc. */}
-                  <div className="mb-6">
-                    <ApplicationDataPanel
-                      employeeId={employeeId}
-                      onRefresh={() => {
-                        fetchData();
-                        fetchCompliance();
-                      }}
-                      onEditDeclarations={(emp) => {
-                        setEditDeclarationsOpen(true);
-                      }}
-                    />
-                  </div>
-
                   {/* TRAINING SUMMARY CARD - Phase 4A */}
                 </div>
               )}
@@ -4607,7 +4660,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* Training Tab */}
-        <TabsContent value="training" ref={trainingSectionRef}>
+        <TabsContent value="training" ref={trainingSectionRef} data-testid="section-training-root">
           {/* Audit-Ready Training Matrix - Complete training record with tabs */}
           {/* Contains: Mandatory Training, All Qualifications, Certificates tabs */}
           <AuditReadyTrainingMatrix
@@ -4628,7 +4681,7 @@ export default function EmployeeProfilePage() {
           />
           
           {/* Induction Checklist - 15 Care Certificate Standards */}
-          <div className="mt-6">
+          <div className="mt-6" data-testid="section-training-induction">
             <InductionChecklistPanel
               employeeId={employeeId}
               employeeName={`${employee?.first_name} ${employee?.last_name}`}
@@ -4647,7 +4700,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* ========== TAB: COMPETENCIES ========== */}
-        <TabsContent value="competencies">
+        <TabsContent value="competencies" data-testid="section-competencies-root">
           <CompetencyAssessmentsPanel
             employeeId={employeeId}
             employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
@@ -4659,7 +4712,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* ========== TAB: SPOT CHECKS ========== */}
-        <TabsContent value="spot_checks">
+        <TabsContent value="spot_checks" data-testid="section-spot-checks-root">
           <SpotChecksPanel
             employeeId={employeeId}
             employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
@@ -4671,7 +4724,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* References Tab - Extracted to ReferencesTabContent */}
-        <TabsContent value="references">
+        <TabsContent value="references" data-testid="section-references-root">
           <ReferencesTabContent 
             employeeId={employeeId}
             onRefresh={() => {

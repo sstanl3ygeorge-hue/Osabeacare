@@ -668,6 +668,13 @@ async def verify_and_stamp_identity(
     document = await db.employee_documents.find_one({"id": data.document_id})
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Require checklist completion before final verification.
+    if not document.get("file_viewed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Must complete review checklist before verification. Call /start-review endpoint first."
+        )
     
     now = datetime.now(timezone.utc).isoformat()
     admin_name = user.get('name', 'Admin')
@@ -704,6 +711,8 @@ async def verify_and_stamp_identity(
         "verification_id": str(uuid.uuid4())[:8].upper()
     }
     
+    stamped_url = None
+
     try:
         file_url = document.get('file_url')
         if file_url:
@@ -716,25 +725,37 @@ async def verify_and_stamp_identity(
                     stamped_filename, 
                     f"employees/{employee_id}/identity"
                 )
-                
-                await db.employee_documents.update_one(
-                    {"id": data.document_id},
-                    {"$set": {
-                        "stamped_file_url": stamped_url,
-                        "verification_stamp": stamp_data,
-                        "status": "verified",
-                        "verified_at": now,
-                        "verified_by": user['user_id'],
-                        "review_status": "verified",
-                        "review_reason": None,
-                        "reviewed_at": now,
-                        "reviewed_by": user['user_id'],
-                        "reviewed_by_name": admin_name,
-                        "updated_at": now
-                    }}
-                )
     except Exception as e:
         logging.error(f"Failed to apply stamp to identity document: {e}")
+
+    document_update = {
+        "status": "approved",
+        "verified": True,
+        "verified_at": now,
+        "verified_by": user['user_id'],
+        "verified_by_name": admin_name,
+        "review_status": "approved",
+        "review_reason": None,
+        "reviewed_at": now,
+        "reviewed_by": user['user_id'],
+        "reviewed_by_name": admin_name,
+        "rejection_reason": None,
+        "amendment_reason": None,
+        "rejected_at": None,
+        "amendment_requested_at": None,
+        "rejected_by": None,
+        "rejected_by_name": None,
+        "updated_at": now
+    }
+
+    if stamped_url:
+        document_update["stamped_file_url"] = stamped_url
+        document_update["verification_stamp"] = stamp_data
+
+    await db.employee_documents.update_one(
+        {"id": data.document_id},
+        {"$set": document_update}
+    )
     
     # STEP 3: Log audit trail
     await log_audit_action(
@@ -754,7 +775,7 @@ async def verify_and_stamp_identity(
         "success": True,
         "message": "Identity verified and stamped successfully",
         "verification": verification_record,
-        "stamp_applied": True
+        "stamp_applied": stamped_url is not None
     }
 
 
@@ -786,6 +807,13 @@ async def verify_and_stamp_address(
     document = await db.employee_documents.find_one({"id": data.document_id})
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    # Require checklist completion before final verification.
+    if not document.get("file_viewed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Must complete review checklist before verification. Call /start-review endpoint first."
+        )
     
     now = datetime.now(timezone.utc).isoformat()
     admin_name = user.get('name', 'Admin')
@@ -806,7 +834,7 @@ async def verify_and_stamp_address(
     existing_verified = await db.employee_documents.count_documents({
         "employee_id": employee_id,
         "requirement_id": "proof_of_address",
-        "status": "verified",
+        "status": {"$in": ["verified", "approved", "accepted"]},
         "id": {"$ne": data.document_id}
     })
     
@@ -835,6 +863,8 @@ async def verify_and_stamp_address(
         "verification_id": str(uuid.uuid4())[:8].upper()
     }
     
+    stamped_url = None
+
     try:
         file_url = document.get('file_url')
         if file_url:
@@ -847,25 +877,37 @@ async def verify_and_stamp_address(
                     stamped_filename, 
                     f"employees/{employee_id}/address"
                 )
-                
-                await db.employee_documents.update_one(
-                    {"id": data.document_id},
-                    {"$set": {
-                        "stamped_file_url": stamped_url,
-                        "verification_stamp": stamp_data,
-                        "status": "verified",
-                        "verified_at": now,
-                        "verified_by": user['user_id'],
-                        "review_status": "verified",
-                        "review_reason": None,
-                        "reviewed_at": now,
-                        "reviewed_by": user['user_id'],
-                        "reviewed_by_name": admin_name,
-                        "updated_at": now
-                    }}
-                )
     except Exception as e:
         logging.error(f"Failed to apply stamp to address document: {e}")
+
+    document_update = {
+        "status": "approved",
+        "verified": True,
+        "verified_at": now,
+        "verified_by": user['user_id'],
+        "verified_by_name": admin_name,
+        "review_status": "approved",
+        "review_reason": None,
+        "reviewed_at": now,
+        "reviewed_by": user['user_id'],
+        "reviewed_by_name": admin_name,
+        "rejection_reason": None,
+        "amendment_reason": None,
+        "rejected_at": None,
+        "amendment_requested_at": None,
+        "rejected_by": None,
+        "rejected_by_name": None,
+        "updated_at": now
+    }
+
+    if stamped_url:
+        document_update["stamped_file_url"] = stamped_url
+        document_update["verification_stamp"] = stamp_data
+
+    await db.employee_documents.update_one(
+        {"id": data.document_id},
+        {"$set": document_update}
+    )
     
     # STEP 3: Log audit trail
     await log_audit_action(
@@ -887,7 +929,7 @@ async def verify_and_stamp_address(
         "success": True,
         "message": f"Address document verified and stamped. {total_verified}/2 documents verified.",
         "verification": verification_record,
-        "stamp_applied": True,
+        "stamp_applied": stamped_url is not None,
         "documents_verified_count": total_verified,
         "is_complete": is_complete
     }

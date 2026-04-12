@@ -726,35 +726,6 @@ export default function DualRowComplianceSection({
 
   return (
     <div className="space-y-6" data-testid="dual-row-compliance-section">
-      {/* Summary Panel */}
-      {summary && summary.blocking_requirements > 0 && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-              <AlertTriangle className="h-5 w-5 text-red-600" />
-            </div>
-            <div className="flex-1">
-              <h4 className="font-semibold text-red-900">
-                {summary.blocking_requirements} Blocking Requirement{summary.blocking_requirements !== 1 ? 's' : ''}
-              </h4>
-              <p className="text-sm text-red-700 mb-2">
-                These items must be resolved before work readiness can be achieved.
-              </p>
-              {summary.blocking_items && summary.blocking_items.length > 0 && (
-                <ul className="space-y-1">
-                  {summary.blocking_items.map((item, idx) => (
-                    <li key={idx} className="text-sm text-red-800 flex items-center gap-2">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-                      {item.message}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Refresh Button */}
       <div className="flex justify-end">
         <Button 
@@ -790,10 +761,7 @@ export default function DualRowComplianceSection({
           {/* NOTE: Training REMOVED - Now ONLY in dedicated Training tab */}
           {/* NOTE: Health & Competency REMOVED - Now ONLY in Training tab's HealthCompetencySection */}
           
-          {/* Recruitment Record - Form-type requirements */}
-          {sections.recruitment_record && sections.recruitment_record.rows && renderSection('recruitment_record', sections.recruitment_record)}
-          
-          {/* NOTE: Admin Forms moved to dedicated Forms Tab to avoid duplication */}
+          {/* NOTE: Recruitment Record moved to Forms tab to avoid duplication */}
         </>
       )}
       

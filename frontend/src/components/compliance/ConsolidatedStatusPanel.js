@@ -124,6 +124,7 @@ export default function ConsolidatedStatusPanel({
   personStage,
   recruitmentApproved,
   onNavigateToTab,
+  onNavigateToItem,
   onRefresh,
   onVerifyWithEvidence,  // NEW: Callback to open verification modal
   onViewDocument         // NEW: Callback to open document viewer
@@ -338,6 +339,7 @@ export default function ConsolidatedStatusPanel({
                     return { 
                       label: 'Review', 
                       tab: 'references',
+                      sectionId: 'section-references-root',
                       tooltip: 'Review and verify the reference response'
                     };
                   }
@@ -346,6 +348,7 @@ export default function ConsolidatedStatusPanel({
                     return { 
                       label: 'Complete Interview', 
                       tab: 'forms',
+                      sectionId: 'section-forms-interview',
                       tooltip: 'Complete the interview record form'
                     };
                   }
@@ -353,7 +356,8 @@ export default function ConsolidatedStatusPanel({
                   if (blocker.gate?.includes('contract')) {
                     return { 
                       label: 'Locked', 
-                      tab: 'compliance', 
+                      tab: 'checklist', 
+                      sectionId: 'section-agreements',
                       locked: true,
                       tooltip: 'Contract signing unlocks when all other requirements are complete. Worker signs via their dashboard.'
                     };
@@ -362,7 +366,8 @@ export default function ConsolidatedStatusPanel({
                   if (blocker.gate?.includes('induction')) {
                     return { 
                       label: 'Start', 
-                      tab: 'compliance',
+                      tab: 'training',
+                      sectionId: 'section-training-induction',
                       tooltip: 'Start the 15-item induction checklist'
                     };
                   }
@@ -371,6 +376,7 @@ export default function ConsolidatedStatusPanel({
                     return { 
                       label: 'Send to Worker', 
                       tab: 'forms',
+                      sectionId: 'section-forms-core',
                       tooltip: 'Send health questionnaire link to worker'
                     };
                   }
@@ -379,6 +385,7 @@ export default function ConsolidatedStatusPanel({
                     return { 
                       label: 'View Training', 
                       tab: 'training',
+                      sectionId: 'section-training-root',
                       tooltip: 'View and manage mandatory training records'
                     };
                   }
@@ -387,7 +394,26 @@ export default function ConsolidatedStatusPanel({
                     return { 
                       label: 'Review Gaps', 
                       tab: 'employment',
+                      sectionId: 'section-employment-gaps',
                       tooltip: 'Review unexplained employment history gaps'
+                    };
+                  }
+                  // Spot check blockers
+                  if (blocker.gate?.includes('spot_check') || blocker.gate?.includes('spot check')) {
+                    return {
+                      label: 'Open Spot Checks',
+                      tab: 'spot_checks',
+                      sectionId: 'section-spot-checks-root',
+                      tooltip: 'Open spot checks and complete follow-up actions'
+                    };
+                  }
+                  // Competency blockers
+                  if (blocker.gate?.includes('competenc')) {
+                    return {
+                      label: 'Open Competencies',
+                      tab: 'competencies',
+                      sectionId: 'section-competencies-root',
+                      tooltip: 'Open competency assessments and remediation actions'
                     };
                   }
                   // Document blockers: DBS, RTW, Identity, POA - use "Verify with Evidence"
@@ -396,14 +422,20 @@ export default function ConsolidatedStatusPanel({
                       blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address')) {
                     return { 
                       label: 'Verify with Evidence', 
-                      tab: 'compliance',
+                      tab: 'checklist',
+                      sectionId: blocker.gate?.includes('dbs') ? 'section-dbs' :
+                        blocker.gate?.includes('rtw') || blocker.gate?.includes('right_to_work') ? 'section-right_to_work' :
+                        blocker.gate?.includes('identity') ? 'section-identity' :
+                        blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address') ? 'section-proof_of_address' :
+                        null,
                       tooltip: 'Upload evidence and apply verification stamp'
                     };
                   }
                   // Default action
                   return { 
                     label: severity === 'PENDING' ? 'Verify' : 'View', 
-                    tab: 'compliance',
+                    tab: 'checklist',
+                    sectionId: null,
                     tooltip: 'View and verify this requirement'
                   };
                 };
@@ -472,7 +504,11 @@ export default function ConsolidatedStatusPanel({
                                 if (action.label === 'Verify with Evidence' && onVerifyWithEvidence) {
                                   onVerifyWithEvidence(blocker.gate, gateData);
                                 } else {
-                                  onNavigateToTab?.(action.tab);
+                                  if (onNavigateToItem) {
+                                    onNavigateToItem(action.tab, action.sectionId || null);
+                                  } else {
+                                    onNavigateToTab?.(action.tab);
+                                  }
                                 }
                               }}
                               className={cn(

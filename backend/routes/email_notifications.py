@@ -23,7 +23,7 @@ from .dependencies import (
 router = APIRouter(tags=["Email Notifications"])
 
 # Configuration
-ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabeacares.co.uk')
 PORTAL_URL = os.environ.get('PORTAL_URL', 'https://app.osabeacares.co.uk')
 
 

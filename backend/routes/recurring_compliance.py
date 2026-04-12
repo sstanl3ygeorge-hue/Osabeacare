@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Recurring Compliance"])
 
 # ==================== EMAIL CONFIG ====================
-ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabeacares.co.uk')
 
 # ==================== ENUMS ====================
 

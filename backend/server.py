@@ -619,8 +619,8 @@ storage_key = None
 # Resend Config
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'Osabea Recruitment Team <recruitment@osabeacares.co.uk>')
-REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'info@osabeacaresolutions.co.uk')
-ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')
+REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'info@beamedicare.co.uk')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@osabeacares.co.uk')
 
 # Initialize storage
 def init_storage():
@@ -2895,7 +2895,7 @@ def create_verification_footer_elements(
     
     # Integrity notice
     if stamp.get("integrity_hash"):
-        hash_text = f"Document integrity hash: {stamp['integrity_hash']} — For verification: contact compliance@osabea.care"
+        hash_text = f"Document integrity hash: {stamp['integrity_hash']} — For verification: contact compliance@osabeacares.co.uk"
         elements.append(Spacer(1, 1*mm))
         elements.append(Paragraph(hash_text, stamp_style))
     
@@ -10460,7 +10460,7 @@ async def send_welcome_email_with_magic_link(employee: dict, employee_code: str)
         """
         
         await asyncio.to_thread(resend.Emails.send, {
-            "from": f"{org_name} <compliance@osabea.care>",
+            "from": f"{org_name} <compliance@osabeacares.co.uk>",
             "to": [emp_email],
             "subject": f"Welcome to {org_name} - Your Portal Access",
             "html": welcome_email_html
@@ -24912,7 +24912,7 @@ async def submit_contact_form(form: ContactForm):
         try:
             await asyncio.to_thread(resend.Emails.send, {
                 "from": SENDER_EMAIL,
-                "to": [os.environ.get('ADMIN_EMAIL', 'admin@osabea.care')],
+                "to": [os.environ.get('ADMIN_EMAIL', 'admin@osabeacares.co.uk')],
                 "subject": f"New Contact Form: {form.subject}",
                 "html": f"""
                 <h2>New Contact Form Submission</h2>
@@ -36786,7 +36786,7 @@ async def request_documents_batch(
             import resend
             resend.api_key = resend_api_key
             
-            from_email = os.environ.get("FROM_EMAIL", "compliance@osabea.care")
+            from_email = os.environ.get("FROM_EMAIL", "compliance@osabeacares.co.uk")
             
             email_response = resend.Emails.send({
                 "from": f"Compliance Team <{from_email}>",
@@ -37972,7 +37972,7 @@ async def send_training_expiry_reminder_email(
     
     try:
         await asyncio.to_thread(resend.Emails.send, {
-            "from": "Osabea Healthcare <compliance@osabea.care>",
+            "from": "Osabea Healthcare <compliance@osabeacares.co.uk>",
             "to": [employee_email],
             "subject": f"Training Renewal Reminder - {len(expiring_trainings)} Certificate(s) Expiring Soon",
             "html": email_html
@@ -38357,7 +38357,7 @@ async def send_document_expiry_reminder_email(
     
     try:
         await asyncio.to_thread(resend.Emails.send, {
-            "from": "Osabea Healthcare <compliance@osabea.care>",
+            "from": "Osabea Healthcare <compliance@osabeacares.co.uk>",
             "to": [employee_email],
             "subject": f"{urgency_prefix}Document Renewal Required - {len(expiring_documents)} Item(s) Expiring",
             "html": email_html
@@ -38509,7 +38509,7 @@ async def send_admin_expiry_digest_email(
     
     try:
         await asyncio.to_thread(resend.Emails.send, {
-            "from": "Osabea Healthcare <compliance@osabea.care>",
+            "from": "Osabea Healthcare <compliance@osabeacares.co.uk>",
             "to": [admin_email],
             "subject": f"📊 Daily Compliance Report: {total_items} items expiring soon",
             "html": email_html

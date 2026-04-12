@@ -40,7 +40,7 @@ JWT_EXPIRATION_HOURS = 24 * 7  # 7 days
 
 # ==================== EMAIL CONFIG ====================
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'Osabea Recruitment Team <recruitment@osabeacares.co.uk>')
-REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'info@osabeacaresolutions.co.uk')
+REPLY_TO_EMAIL = os.environ.get('REPLY_TO_EMAIL', 'info@beamedicare.co.uk')
 
 # ==================== USER ROLES ====================
 class UserRole:

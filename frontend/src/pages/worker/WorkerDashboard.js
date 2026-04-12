@@ -243,6 +243,9 @@ export default function WorkerDashboard() {
   const [referenceMismatches, setReferenceMismatches] = useState(null);
   const [showMismatchExplanationModal, setShowMismatchExplanationModal] = useState(false);
   const [selectedMismatch, setSelectedMismatch] = useState(null);
+    const [provideNewRefNum, setProvideNewRefNum] = useState(null);
+    const [provideNewForm, setProvideNewForm] = useState({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '' });
+    const [provideNewLoading, setProvideNewLoading] = useState(false);
   const [mismatchExplanationType, setMismatchExplanationType] = useState('');
   const [mismatchExplanationText, setMismatchExplanationText] = useState('');
   const [submittingMismatchExplanation, setSubmittingMismatchExplanation] = useState(false);
@@ -394,6 +397,31 @@ export default function WorkerDashboard() {
   };
 
   // Submit mismatch explanation
+    // Worker submits replacement referee after rejection
+    const handleProvideNewSubmit = async (refNum) => {
+      if (!provideNewForm.name || !provideNewForm.email) {
+        toast.error('Name and email are required');
+        return;
+      }
+      setProvideNewLoading(true);
+      try {
+        await axios.post(
+          `${API}/worker/references/${refNum}/provide-new`,
+          provideNewForm,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success('Referee details submitted. Your manager will be in touch shortly.');
+        setProvideNewRefNum(null);
+        setProvideNewForm({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '' });
+        fetchDashboard();
+      } catch (err) {
+        toast.error(err.response?.data?.detail || 'Failed to submit referee details');
+      } finally {
+        setProvideNewLoading(false);
+      }
+    };
+
+    // Submit mismatch explanation
   const handleSubmitMismatchExplanation = async () => {
     if (!mismatchExplanationType) {
       toast.error('Please select a reason for the mismatch');
@@ -1884,10 +1912,10 @@ export default function WorkerDashboard() {
                             size="sm"
                             variant="outline"
                             className="text-xs border-primary text-primary hover:bg-primary hover:text-white"
-                            onClick={() => navigate('/worker/forms')}
+                            onClick={() => setProvideNewRefNum(prev => prev === ref.reference_number ? null : ref.reference_number)}
                             data-testid={`provide-new-ref-${ref.reference_number}`}
                           >
-                            Provide New Referee
+                            {provideNewRefNum === ref.reference_number ? 'Cancel' : 'Provide New Referee'}
                           </Button>
                         )}
                         <Badge className={`text-xs ${
@@ -1903,6 +1931,77 @@ export default function WorkerDashboard() {
                           {(ref.status === 'response_received' || ref.status === 'sent') && <Clock className="h-3 w-3 mr-1" />}
                           {ref.status_label}
                         </Badge>
+                          {/* Inline replacement-referee form */}
+                          {provideNewRefNum === ref.reference_number && (
+                            <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
+                              <p className="text-sm font-medium text-slate-700">Enter your new referee's details</p>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <div>
+                                  <label className="text-xs text-slate-500">Full Name *</label>
+                                  <input
+                                    className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    placeholder="Jane Smith"
+                                    value={provideNewForm.name}
+                                    onChange={e => setProvideNewForm(f => ({ ...f, name: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-slate-500">Email *</label>
+                                  <input
+                                    type="email"
+                                    className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    placeholder="jane@company.com"
+                                    value={provideNewForm.email}
+                                    onChange={e => setProvideNewForm(f => ({ ...f, email: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-slate-500">Phone</label>
+                                  <input
+                                    className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    placeholder="07700 000000"
+                                    value={provideNewForm.phone}
+                                    onChange={e => setProvideNewForm(f => ({ ...f, phone: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-slate-500">Organisation</label>
+                                  <input
+                                    className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    placeholder="ABC Care Ltd"
+                                    value={provideNewForm.organisation}
+                                    onChange={e => setProvideNewForm(f => ({ ...f, organisation: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-slate-500">Job Title / Position</label>
+                                  <input
+                                    className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    placeholder="Line Manager"
+                                    value={provideNewForm.position}
+                                    onChange={e => setProvideNewForm(f => ({ ...f, position: e.target.value }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-xs text-slate-500">Relationship</label>
+                                  <input
+                                    className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30"
+                                    placeholder="e.g. Line Manager"
+                                    value={provideNewForm.relationship}
+                                    onChange={e => setProvideNewForm(f => ({ ...f, relationship: e.target.value }))}
+                                  />
+                                </div>
+                              </div>
+                              <Button
+                                size="sm"
+                                disabled={provideNewLoading || !provideNewForm.name || !provideNewForm.email}
+                                onClick={() => handleProvideNewSubmit(ref.reference_number)}
+                                className="mt-2"
+                              >
+                                {provideNewLoading ? 'Submitting…' : 'Submit Referee Details'}
+                              </Button>
+                            </div>
+                          )}
                       </div>
                     </div>
                   </div>

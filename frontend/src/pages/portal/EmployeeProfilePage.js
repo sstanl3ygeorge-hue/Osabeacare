@@ -238,6 +238,33 @@ export default function EmployeeProfilePage() {
     file_label: '',
     reason: ''
   });
+
+  const getSafeErrorMessage = async (error, fallbackMessage) => {
+    const data = error?.response?.data;
+
+    if (data instanceof Blob) {
+      try {
+        const text = await data.text();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            return parsed?.detail || parsed?.message || fallbackMessage;
+          } catch {
+            return text;
+          }
+        }
+      } catch {
+        // Ignore blob parsing failures and fall through to fallback handling.
+      }
+      return fallbackMessage;
+    }
+
+    if (typeof data === 'string' && data.trim()) {
+      return data;
+    }
+
+    return data?.detail || data?.message || fallbackMessage;
+  };
   
   // File management state
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
@@ -981,12 +1008,15 @@ export default function EmployeeProfilePage() {
   const fetchFormSubmissions = async () => {
     try {
       const response = await axios.get(
-        `${API}/employees/${employeeId}/forms`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        `${API}/form-submissions`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { employee_id: employeeId }
+        }
       );
       setFormSubmissions(response.data.forms || response.data || []);
-    } catch (error) {
-      console.error('Failed to fetch form submissions:', error);
+    } catch {
+      // Optional data for the tab; fail quietly to avoid noisy console output.
       setFormSubmissions([]);
     }
   };
@@ -1054,7 +1084,9 @@ export default function EmployeeProfilePage() {
         const blobUrl = URL.createObjectURL(response.data);
         setProfilePhotoBlob(blobUrl);
       } catch (error) {
-        console.error('Failed to fetch profile photo:', error);
+        if (error?.response?.status !== 404) {
+          console.error('Failed to fetch profile photo:', error);
+        }
         setProfilePhotoBlob(null);
       }
     };
@@ -1109,7 +1141,7 @@ export default function EmployeeProfilePage() {
       
       toast.success('Employee file exported successfully');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to export file');
+      toast.error(await getSafeErrorMessage(error, 'Failed to export file'));
     } finally {
       setIsExporting(false);
     }
@@ -1160,7 +1192,7 @@ export default function EmployeeProfilePage() {
       
       toast.success('Compliance PDF exported successfully');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to export PDF');
+      toast.error(await getSafeErrorMessage(error, 'Failed to export PDF'));
     } finally {
       setIsExporting(false);
     }
@@ -1209,7 +1241,7 @@ export default function EmployeeProfilePage() {
       
       toast.success('Compliance file exported');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to export compliance file');
+      toast.error(await getSafeErrorMessage(error, 'Failed to export compliance file'));
     } finally {
       setIsExporting(false);
     }
@@ -2870,7 +2902,7 @@ export default function EmployeeProfilePage() {
       
       toast.success('PDF downloaded successfully');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to download PDF');
+      toast.error(await getSafeErrorMessage(error, 'Failed to download PDF'));
     }
   };
 
@@ -2894,7 +2926,7 @@ export default function EmployeeProfilePage() {
       // Note: We don't revoke immediately so the tab can load
       // The blob URL will be garbage collected when the tab closes
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to view PDF');
+      toast.error(await getSafeErrorMessage(error, 'Failed to view PDF'));
     }
   };
 

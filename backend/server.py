@@ -19116,6 +19116,96 @@ async def update_employee_document(doc_id: str, update: EmployeeDocumentUpdate, 
     
     return EmployeeDocumentResponse(**doc)
 
+
+class DocumentReviewChecklistRequest(BaseModel):
+    """Lightweight review checklist for Identity/PoA documents before verification."""
+    file_viewed: bool = Field(..., description="Admin has opened and viewed the file")
+    name_matches: bool = Field(..., description="Name/details on document match profile")
+    document_acceptable: bool = Field(..., description="Document type is acceptable")
+    legible: bool = Field(..., description="Document is legible and clear")
+    front_present: Optional[bool] = Field(None, description="Front side present (Identity only)")
+    back_present: Optional[bool] = Field(None, description="Back side present (Identity only)")
+    address_valid: Optional[bool] = Field(None, description="Address valid (PoA only)")
+    date_valid: Optional[bool] = Field(None, description="Document within acceptable date range (PoA only)")
+
+
+@api_router.post("/employee-documents/{doc_id}/start-review")
+async def start_document_review(
+    doc_id: str, 
+    payload: DocumentReviewChecklistRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Record that admin has opened a document and confirms review checklist items.
+    This enables the verify action for Identity and Proof of Address documents.
+    
+    For minimal compliance hardening only - stores file_viewed and checklist.
+    """
+    doc = await db.employee_documents.find_one({"id": doc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    requirement_id = doc.get("requirement_id", "").lower()
+    is_identity_poa = any(x in requirement_id for x in ["identity", "proof_of_address"])
+    
+    if not is_identity_poa:
+        raise HTTPException(status_code=400, detail="Review checklist only for Identity and Proof of Address documents")
+    
+    # Validate checklist - at least file_viewed + one other must be true
+    checklist_items = [
+        payload.file_viewed,
+        payload.name_matches,
+        payload.document_acceptable,
+        payload.legible
+    ]
+    if sum(checklist_items) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 checklist items required (file_viewed must be true)")
+    
+    if not payload.file_viewed:
+        raise HTTPException(status_code=400, detail="file_viewed must be true before verification")
+    
+    now = datetime.now(timezone.utc).isoformat()
+    reviewer = await db.users.find_one({"user_id": user['user_id']}, {"_id": 0, "name": 1})
+    reviewer_name = reviewer.get('name') if reviewer else user.get('email', 'Admin')
+    
+    review_checklist = {
+        "file_viewed": payload.file_viewed,
+        "name_matches": payload.name_matches,
+        "document_acceptable": payload.document_acceptable,
+        "legible": payload.legible,
+    }
+    
+    # Add type-specific fields
+    if "identity" in requirement_id:
+        review_checklist["front_present"] = payload.front_present or False
+        review_checklist["back_present"] = payload.back_present or False
+    elif "address" in requirement_id:
+        review_checklist["address_valid"] = payload.address_valid or False
+        review_checklist["date_valid"] = payload.date_valid or False
+    
+    update_data = {
+        "file_viewed": True,
+        "file_viewed_at": now,
+        "file_viewed_by": user['user_id'],
+        "file_viewed_by_name": reviewer_name,
+        "review_checklist": review_checklist,
+        "last_reviewed_at": now,
+        "last_reviewed_by": user['user_id'],
+        "last_reviewed_by_name": reviewer_name
+    }
+    
+    await db.employee_documents.update_one({"id": doc_id}, {"$set": update_data})
+    
+    # Log to audit trail
+    await log_audit_action(user['user_id'], "start_document_review", "employee_document", doc_id, {
+        "checklist": review_checklist,
+        "requirement_id": requirement_id,
+        "employee_id": doc.get("employee_id")
+    })
+    
+    return {"success": True, "message": "Review checklist recorded. Verification enabled."}
+
+
 @api_router.post("/employee-documents/{doc_id}/verify")
 async def verify_employee_document(doc_id: str, user: dict = Depends(require_manager_or_admin)):
     """
@@ -19123,6 +19213,9 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
     
     LEGAL DOCUMENT RESTRICTION:
     - Sensitive/legal documents require ADMIN+ to verify
+    
+    IDENTITY/POA HARDENING:
+    - Requires review checklist completion before verification
     """
     doc = await db.employee_documents.find_one({"id": doc_id})
     if not doc:
@@ -19145,6 +19238,14 @@ async def verify_employee_document(doc_id: str, user: dict = Depends(require_man
                 status_code=403,
                 detail=f"Legal/sensitive documents ({requirement_id}) require Admin verification."
             )
+    
+    # HARDENING: For Identity/PoA, require review checklist before verification
+    is_identity_poa = any(x in requirement_id.lower() for x in ["identity", "proof_of_address"])
+    if is_identity_poa and not doc.get("file_viewed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Must complete review checklist before verification. Call /start-review endpoint first."
+        )
     
     # Ensure document is approved before verification
     if doc.get('status') not in ['approved', 'uploaded']:
@@ -19268,7 +19369,6 @@ class RejectDocumentRequest(BaseModel):
 
 class MarkUploadedInErrorRequest(BaseModel):
     reason: str = Field(..., min_length=10, description="Reason for marking as uploaded in error")
-
 
 class DocumentVerificationStampRequest(BaseModel):
     """Request model for applying document verification stamps."""
@@ -19951,6 +20051,9 @@ async def verify_document_with_digital_stamp(
     CQC/Medway Requirement: Visible proof of document verification.
     
     Supported formats: PDF, JPG, JPEG, PNG
+    
+    IDENTITY/POA HARDENING:
+    - Requires review checklist completion before stamping
     """
     from io import BytesIO
     
@@ -19964,6 +20067,15 @@ async def verify_document_with_digital_stamp(
     doc = await db.employee_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    
+    # HARDENING: For Identity/PoA, require review checklist before stamping
+    requirement_id = doc.get("requirement_id", "").lower()
+    is_identity_poa = any(x in requirement_id for x in ["identity", "proof_of_address"])
+    if is_identity_poa and not doc.get("file_viewed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Must complete review checklist before stamping. Call /start-review endpoint first."
+        )
     
     # Get employee info for stamp
     employee = await db.employees.find_one(

@@ -97,6 +97,17 @@ export default function QuickVerifyStampDialog({
   onVerificationComplete
 }) {
   const { token } = useAuth();
+  const [step, setStep] = useState('checklist'); // 'checklist' | 'verification'
+  const [minimalChecklist, setMinimalChecklist] = useState({
+    fileViewed: false,
+    nameMatches: false,
+    documentAcceptable: false,
+    legible: false,
+    frontPresent: false,
+    backPresent: false,
+    addressValid: false,
+    dateValid: false
+  });
   const [selectedMethod, setSelectedMethod] = useState('');
   const [confirmChecks, setConfirmChecks] = useState({
     documentGenuine: false,
@@ -104,6 +115,7 @@ export default function QuickVerifyStampDialog({
     dateValid: false // For PoA only
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [checklistError, setChecklistError] = useState('');
 
   const isIdentity = requirementType === 'identity';
   const isAddress = requirementType === 'proof_of_address';
@@ -112,12 +124,24 @@ export default function QuickVerifyStampDialog({
   // Reset state when dialog opens
   useEffect(() => {
     if (isOpen) {
+      setStep('checklist');
+      setMinimalChecklist({
+        fileViewed: false,
+        nameMatches: false,
+        documentAcceptable: false,
+        legible: false,
+        frontPresent: false,
+        backPresent: false,
+        addressValid: false,
+        dateValid: false
+      });
       setSelectedMethod('');
       setConfirmChecks({
         documentGenuine: false,
         detailsMatch: false,
         dateValid: false
       });
+      setChecklistError('');
     }
   }, [isOpen]);
 
@@ -195,6 +219,66 @@ export default function QuickVerifyStampDialog({
 
   const selectedMethodData = methods.find(m => m.value === selectedMethod);
 
+  // Handle review checklist - calls backend /start-review
+  const handleStartReview = async () => {
+    setChecklistError('');
+    
+    if (!minimalChecklist.fileViewed) {
+      setChecklistError('You must confirm the file was viewed');
+      return;
+    }
+    
+    const baseChecks = [minimalChecklist.fileViewed, minimalChecklist.nameMatches, minimalChecklist.documentAcceptable, minimalChecklist.legible];
+    if (baseChecks.filter(Boolean).length < 2) {
+      setChecklistError('Please confirm at least 2 basic checklist items');
+      return;
+    }
+    
+    if (isIdentity && !minimalChecklist.frontPresent) {
+      setChecklistError('Please confirm front side is present');
+      return;
+    }
+    
+    if (isAddress && !minimalChecklist.addressValid) {
+      setChecklistError('Please confirm address is valid');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const docId = file.file_id || file.id;
+      if (!docId) {
+        setChecklistError('Document ID not found');
+        return;
+      }
+
+      await axios.post(
+        `${API}/employee-documents/${docId}/start-review`,
+        {
+          file_viewed: minimalChecklist.fileViewed,
+          name_matches: minimalChecklist.nameMatches,
+          document_acceptable: minimalChecklist.documentAcceptable,
+          legible: minimalChecklist.legible,
+          front_present: isIdentity ? minimalChecklist.frontPresent : undefined,
+          back_present: isIdentity ? minimalChecklist.backPresent : undefined,
+          address_valid: isAddress ? minimalChecklist.addressValid : undefined,
+          date_valid: isAddress ? minimalChecklist.dateValid : undefined
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      setStep('verification');
+      toast.success('Review checklist recorded. Proceed with verification.');
+    } catch (err) {
+      console.error('Review checklist failed:', err);
+      setChecklistError(err.response?.data?.detail || 'Failed to record review checklist');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-lg" data-testid="quick-verify-stamp-dialog">
@@ -213,8 +297,132 @@ export default function QuickVerifyStampDialog({
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* AI Validation Status for PoA */}
-          {isAddress && aiValidation && (
+          {/* STEP 1: MINIMAL REVIEW CHECKLIST */}
+          {step === 'checklist' && (
+            <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center gap-2 text-blue-900">
+                <FileCheck className="h-5 w-5" />
+                <h3 className="font-semibold">Review Checklist</h3>
+              </div>
+              <p className="text-sm text-blue-800">
+                Before verification, please confirm you have reviewed this document:
+              </p>
+              
+              <div className="space-y-3 bg-white p-3 rounded border">
+                <div className="flex items-start gap-3">
+                  <Checkbox 
+                    id="fileViewed"
+                    checked={minimalChecklist.fileViewed}
+                    onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, fileViewed: checked}))}
+                  />
+                  <label htmlFor="fileViewed" className="text-sm cursor-pointer">
+                    ✓ File has been opened and viewed
+                  </label>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <Checkbox 
+                    id="nameMatches"
+                    checked={minimalChecklist.nameMatches}
+                    onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, nameMatches: checked}))}
+                  />
+                  <label htmlFor="nameMatches" className="text-sm cursor-pointer">
+                    ✓ Name/details match profile
+                  </label>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <Checkbox 
+                    id="documentAcceptable"
+                    checked={minimalChecklist.documentAcceptable}
+                    onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, documentAcceptable: checked}))}
+                  />
+                  <label htmlFor="documentAcceptable" className="text-sm cursor-pointer">
+                    ✓ Document type acceptable
+                  </label>
+                </div>
+                
+                <div className="flex items-start gap-3">
+                  <Checkbox 
+                    id="legible"
+                    checked={minimalChecklist.legible}
+                    onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, legible: checked}))}
+                  />
+                  <label htmlFor="legible" className="text-sm cursor-pointer">
+                    ✓ Document is legible and clear
+                  </label>
+                </div>
+                
+                {isIdentity && (
+                  <>
+                    <div className="flex items-start gap-3">
+                      <Checkbox 
+                        id="frontPresent"
+                        checked={minimalChecklist.frontPresent}
+                        onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, frontPresent: checked}))}
+                      />
+                      <label htmlFor="frontPresent" className="text-sm cursor-pointer">
+                        ✓ Front side present
+                      </label>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <Checkbox 
+                        id="backPresent"
+                        checked={minimalChecklist.backPresent}
+                        onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, backPresent: checked}))}
+                      />
+                      <label htmlFor="backPresent" className="text-sm cursor-pointer">
+                        ✓ Back side present
+                      </label>
+                    </div>
+                  </>
+                )}
+                
+                {isAddress && (
+                  <>
+                    <div className="flex items-start gap-3">
+                      <Checkbox 
+                        id="addressValid"
+                        checked={minimalChecklist.addressValid}
+                        onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, addressValid: checked}))}
+                      />
+                      <label htmlFor="addressValid" className="text-sm cursor-pointer">
+                        ✓ Address matches declared
+                      </label>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <Checkbox 
+                        id="dateValid"
+                        checked={minimalChecklist.dateValid}
+                        onCheckedChange={(checked) => setMinimalChecklist(prev => ({...prev, dateValid: checked}))}
+                      />
+                      <label htmlFor="dateValid" className="text-sm cursor-pointer">
+                        ✓ Document within acceptable date range
+                      </label>
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {checklistError && (
+                <div className="text-sm text-red-600 bg-red-50 p-2 rounded flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  {checklistError}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STEP 2: VERIFICATION CONFIRMED */}
+          {step === 'verification' && (
+            <div className="text-sm text-green-700 bg-green-50 p-2 rounded flex items-center gap-2">
+              <CheckCircle className="h-4 w-4" />
+              Review checklist confirmed. Proceed with verification.
+            </div>
+          )}
+
+          {/* AI Validation Status for PoA - only show on verification step */}
+          {step === 'verification' && isAddress && aiValidation && (
             <div className={`p-3 rounded-lg border ${
               aiValidation.isValid 
                 ? 'bg-green-50 border-green-200' 
@@ -241,7 +449,8 @@ export default function QuickVerifyStampDialog({
             </div>
           )}
 
-          {/* Verification Method Selection */}
+          {/* Verification Method Selection - only on verification step */}
+          {step === 'verification' && (
           <div className="space-y-3">
             <Label className="text-sm font-semibold">How did you verify this document?</Label>
             <RadioGroup value={selectedMethod} onValueChange={setSelectedMethod}>
@@ -273,8 +482,10 @@ export default function QuickVerifyStampDialog({
               })}
             </RadioGroup>
           </div>
+          )}
 
-          {/* Confirmation Checkboxes */}
+          {/* Confirmation Checkboxes - only on verification step */}
+          {step === 'verification' && (
           <div className="space-y-3 p-4 bg-slate-50 rounded-lg border">
             <Label className="text-sm font-semibold text-slate-700">
               Confirm verification checks:
@@ -322,9 +533,10 @@ export default function QuickVerifyStampDialog({
               )}
             </div>
           </div>
+          )}
 
-          {/* Stamp Preview */}
-          {selectedMethodData && (
+          {/* Stamp Preview - only on verification step */}
+          {step === 'verification' && selectedMethodData && (
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center gap-2 text-blue-800">
                 <Stamp className="h-4 w-4" />
@@ -356,19 +568,40 @@ export default function QuickVerifyStampDialog({
           <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </Button>
-          <Button 
-            onClick={handleSubmit}
-            disabled={isSubmitting || !selectedMethod || !confirmChecks.documentGenuine || !confirmChecks.detailsMatch || (isAddress && !confirmChecks.dateValid)}
-            className="gap-2 bg-green-600 hover:bg-green-700"
-            data-testid="verify-stamp-btn"
-          >
-            {isSubmitting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle className="h-4 w-4" />
-            )}
-            Verify & Apply Stamp
-          </Button>
+          
+          {/* Checklist Step: Confirm Checklist Button */}
+          {step === 'checklist' && (
+            <Button 
+              onClick={handleStartReview}
+              disabled={isSubmitting || !minimalChecklist.fileViewed}
+              className="gap-2 bg-blue-600 hover:bg-blue-700"
+              data-testid="confirm-checklist-btn"
+            >
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4" />
+              )}
+              Confirm Checklist
+            </Button>
+          )}
+          
+          {/* Verification Step: Verify & Apply Stamp Button */}
+          {step === 'verification' && (
+            <Button 
+              onClick={handleSubmit}
+              disabled={isSubmitting || !selectedMethod || !confirmChecks.documentGenuine || !confirmChecks.detailsMatch || (isAddress && !confirmChecks.dateValid)}
+              className="gap-2 bg-green-600 hover:bg-green-700"
+              data-testid="verify-stamp-btn"
+            >
+              {isSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4" />
+              )}
+              Verify & Apply Stamp
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -325,6 +325,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         if req_lower in DOC_REQUIREMENT_EXCLUSIONS:
             return False
 
+        # Never classify verification/check/review buckets as upload evidence.
+        # This prevents stale identity verification IDs from showing as live
+        # "Awaiting Review" identity documents on the worker dashboard.
+        if "verification" in req_lower or "check" in req_lower or "review" in req_lower:
+            return False
+
         # Resolve alias: if req_lower maps to a canonical, compare to canonical patterns
         canonical = DOC_REQUIREMENT_ALIASES.get(req_lower, req_lower)
 

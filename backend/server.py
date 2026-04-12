@@ -9955,6 +9955,39 @@ class ReferenceUpdate(BaseModel):
     can_contact_before_offer: Optional[bool] = None
     edit_reason: str  # Required
 
+
+async def _monitor_legacy_reference_write_usage(
+    route_path: str,
+    user: Optional[dict],
+    employee_id: Optional[str] = None,
+    details: Optional[dict] = None,
+) -> None:
+    """
+    Monitor-first helper for legacy reference write handlers.
+    Logs usage and emits audit telemetry without blocking live behavior.
+    """
+    payload = {
+        "route_path": route_path,
+        "employee_id": employee_id,
+        "monitor_mode": True,
+    }
+    if details:
+        payload.update(details)
+
+    logger.warning(f"LEGACY_REFERENCE_WRITE_USED: {payload}")
+
+    try:
+        actor_id = (user or {}).get("user_id") or "system"
+        await log_audit_action(
+            actor_id,
+            "legacy_reference_write_used",
+            "reference",
+            employee_id or "unknown",
+            payload,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to audit legacy reference write usage: {e}")
+
 @api_router.put("/employees/{employee_id}/references/{reference_id}")
 async def update_reference(
     employee_id: str,
@@ -9971,6 +10004,13 @@ async def update_reference(
     - Direct supervisor flag
     - Can contact before offer flag
     """
+    await _monitor_legacy_reference_write_usage(
+        route_path="/employees/{employee_id}/references/{reference_id}",
+        user=user,
+        employee_id=employee_id,
+        details={"reference_id": reference_id},
+    )
+
     reference = await db.employee_references.find_one({
         "id": reference_id,
         "employee_id": employee_id
@@ -32126,6 +32166,13 @@ async def add_referee_details(
     This is simpler than change_referee - intended for initial entry.
     If details already exist, use change_referee instead.
     """
+    await _monitor_legacy_reference_write_usage(
+        route_path="/employees/{employee_id}/references/{ref_num}",
+        user=user,
+        employee_id=employee_id,
+        details={"ref_num": ref_num},
+    )
+
     if ref_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
     
@@ -32226,6 +32273,13 @@ async def change_referee_details(
     Stores change history (old vs new referee).
     Can be done even after verification (in case of correction).
     """
+    await _monitor_legacy_reference_write_usage(
+        route_path="/references/{employee_id}/{ref_num}/change-referee",
+        user=user,
+        employee_id=employee_id,
+        details={"ref_num": ref_num},
+    )
+
     if ref_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
     
@@ -32327,6 +32381,13 @@ async def set_reference_response_source(
     - manual_entry: Admin entered response data manually
     - test_data: Test/placeholder data (should be replaced)
     """
+    await _monitor_legacy_reference_write_usage(
+        route_path="/references/{employee_id}/{ref_num}/set-response-source",
+        user=user,
+        employee_id=employee_id,
+        details={"ref_num": ref_num, "source": source},
+    )
+
     if ref_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
     

@@ -22,6 +22,7 @@ from pydantic import BaseModel, EmailStr
 from .dependencies import (
     get_db,
     get_current_user,
+    require_admin,
     require_manager_or_admin,
     log_audit_action,
 )
@@ -439,4 +440,167 @@ async def get_references_status(
         "all_verified": all_verified,
         "any_rejected": any_rejected,
         "overall_status": "complete" if all_verified else ("rejected" if any_rejected else "incomplete")
+    }
+
+
+# ==================== ADMIN DRIFT REPORT (READ-ONLY) ====================
+
+def _norm_text(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _is_verified_from_status(value: Optional[str]) -> bool:
+    return _norm_text(value) == "verified"
+
+
+@router.get("/admin/references/drift-report")
+async def get_references_drift_report(
+    employee_id: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    only_drifted: bool = True,
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin-only read-only drift visibility for the three reference stores.
+
+    Compares per reference slot:
+    - employees flat reference fields
+    - references collection declared/verification fields
+    - employee_references collection
+    """
+    db = get_db()
+
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+
+    employee_query = {"id": employee_id} if employee_id else {}
+    employees = await db.employees.find(
+        employee_query,
+        {
+            "_id": 0,
+            "id": 1,
+            "first_name": 1,
+            "last_name": 1,
+            "reference_1_name": 1,
+            "reference_1_email": 1,
+            "reference_1_company": 1,
+            "reference_1_verified": 1,
+            "reference_2_name": 1,
+            "reference_2_email": 1,
+            "reference_2_company": 1,
+            "reference_2_verified": 1,
+        },
+    ).sort("updated_at", -1).skip(offset).limit(limit).to_list(limit)
+
+    if employee_id and not employees:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    report_rows = []
+    total_slots_checked = 0
+    total_slot_mismatches = 0
+
+    for emp in employees:
+        emp_id = emp.get("id")
+        refs_doc = await db.references.find_one({"employee_id": emp_id}, {"_id": 0})
+        emp_refs = await db.employee_references.find(
+            {"employee_id": emp_id},
+            {
+                "_id": 0,
+                "reference_number": 1,
+                "referee_name": 1,
+                "referee_email": 1,
+                "referee_organisation": 1,
+                "status": 1,
+            },
+        ).to_list(10)
+
+        by_num = {r.get("reference_number"): r for r in emp_refs if r.get("reference_number") in [1, 2]}
+        employee_slot_results = {}
+        employee_mismatches = 0
+
+        for ref_num in [1, 2]:
+            total_slots_checked += 1
+            ref_key = f"ref{ref_num}"
+            refs_ref = (refs_doc or {}).get(ref_key) or {}
+            declared = refs_ref.get("declared") or {}
+            emp_ref = by_num.get(ref_num) or {}
+
+            employees_name = _norm_text(emp.get(f"reference_{ref_num}_name"))
+            employees_email = _norm_text(emp.get(f"reference_{ref_num}_email"))
+            employees_org = _norm_text(emp.get(f"reference_{ref_num}_company"))
+            employees_verified = bool(emp.get(f"reference_{ref_num}_verified", False))
+
+            references_name = _norm_text(declared.get("name"))
+            references_email = _norm_text(declared.get("email"))
+            references_org = _norm_text(declared.get("organisation"))
+            references_verified = _is_verified_from_status(refs_ref.get("verification_status"))
+
+            emp_refs_name = _norm_text(emp_ref.get("referee_name"))
+            emp_refs_email = _norm_text(emp_ref.get("referee_email"))
+            emp_refs_org = _norm_text(emp_ref.get("referee_organisation"))
+            emp_refs_verified = _is_verified_from_status(emp_ref.get("status"))
+
+            field_mismatches = []
+            if len({employees_name, references_name, emp_refs_name} - {""}) > 1:
+                field_mismatches.append("name")
+            if len({employees_email, references_email, emp_refs_email} - {""}) > 1:
+                field_mismatches.append("email")
+            if len({employees_org, references_org, emp_refs_org} - {""}) > 1:
+                field_mismatches.append("organisation")
+            if len({employees_verified, references_verified, emp_refs_verified}) > 1:
+                field_mismatches.append("verified_status")
+
+            slot_mismatch_count = len(field_mismatches)
+            total_slot_mismatches += slot_mismatch_count
+            employee_mismatches += slot_mismatch_count
+
+            employee_slot_results[f"reference_{ref_num}"] = {
+                "mismatch_fields": field_mismatches,
+                "employees": {
+                    "name": emp.get(f"reference_{ref_num}_name"),
+                    "email": emp.get(f"reference_{ref_num}_email"),
+                    "organisation": emp.get(f"reference_{ref_num}_company"),
+                    "verified": employees_verified,
+                },
+                "references": {
+                    "name": declared.get("name"),
+                    "email": declared.get("email"),
+                    "organisation": declared.get("organisation"),
+                    "verified": references_verified,
+                    "verification_status": refs_ref.get("verification_status"),
+                },
+                "employee_references": {
+                    "name": emp_ref.get("referee_name"),
+                    "email": emp_ref.get("referee_email"),
+                    "organisation": emp_ref.get("referee_organisation"),
+                    "verified": emp_refs_verified,
+                    "status": emp_ref.get("status"),
+                },
+            }
+
+        row = {
+            "employee_id": emp_id,
+            "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+            "mismatch_count": employee_mismatches,
+            "has_drift": employee_mismatches > 0,
+            "references": employee_slot_results,
+        }
+
+        if not only_drifted or row["has_drift"]:
+            report_rows.append(row)
+
+    return {
+        "report": "references_drift",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "scope": {"employee_id": employee_id, "offset": offset, "limit": limit, "only_drifted": only_drifted},
+        "summary": {
+            "employees_checked": len(employees),
+            "employees_with_drift": sum(1 for r in report_rows if r.get("has_drift")),
+            "reference_slots_checked": total_slots_checked,
+            "slot_mismatch_count": total_slot_mismatches,
+        },
+        "results": report_rows,
     }

@@ -96,7 +96,7 @@ export default function ReferenceRow({
   const StatusIcon = statusConfig.icon;
 
   // Handle send/resend reference request
-  const handleSendRequest = async () => {
+  const handleSendRequest = async (forceResend = false) => {
     if (!declared_referee?.email) {
       toast.error('Referee email not provided. Update employee profile first.');
       return;
@@ -108,7 +108,7 @@ export default function ReferenceRow({
         `${API}/employees/${employeeId}/send-reference-request`,
         null,
         { 
-          params: { reference_num },
+          params: { reference_num, force_resend: forceResend },
           headers: { Authorization: `Bearer ${token}` } 
         }
       );
@@ -225,7 +225,7 @@ export default function ReferenceRow({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={(e) => { e.stopPropagation(); handleSendRequest(); }}
+                onClick={(e) => { e.stopPropagation(); handleSendRequest(true); }}
                 disabled={isSending}
                 className="h-8 text-xs rounded-lg text-amber-600 border-amber-300 hover:bg-amber-50"
                 data-testid={`resend-request-${key}`}

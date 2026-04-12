@@ -118,6 +118,7 @@ async def send_reference_request_to_referee(
     employee_id: str,
     reference_num: int = Query(..., description="Reference number: 1 or 2"),
     message: Optional[str] = Query(None, description="Optional custom message to referee"),
+    force_resend: bool = Query(False, description="If true, resend even when a pending request exists"),
     user: dict = Depends(require_manager_or_admin)
 ):
     """
@@ -159,7 +160,7 @@ async def send_reference_request_to_referee(
     
     # Check if request already pending
     existing_status = employee.get(f"{prefix}request_status")
-    if existing_status in ["requested", "awaiting_response"]:
+    if existing_status in ["requested", "awaiting_response"] and not force_resend:
         return {
             "status": "duplicate",
             "message": "Reference request already sent and awaiting response",
@@ -171,13 +172,20 @@ async def send_reference_request_to_referee(
     now = datetime.now(timezone.utc).isoformat()
     
     # Update employee with request tracking
+    update_fields = {
+        f"{prefix}request_status": "requested",
+        f"{prefix}request_sent_at": now,
+        f"{prefix}request_token": token
+    }
+
+    # Track resend metadata when explicitly resending an existing pending request
+    if force_resend and existing_status in ["requested", "awaiting_response"]:
+        update_fields[f"{prefix}resend_count"] = int(employee.get(f"{prefix}resend_count", 0) or 0) + 1
+        update_fields[f"{prefix}last_reminder_at"] = now
+
     await db.employees.update_one(
         {"id": employee_id},
-        {"$set": {
-            f"{prefix}request_status": "requested",
-            f"{prefix}request_sent_at": now,
-            f"{prefix}request_token": token
-        }}
+        {"$set": update_fields}
     )
     
     # Prepare email

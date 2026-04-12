@@ -86,8 +86,10 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
     try {
       setSendingRequest(refNum);
       const token = localStorage.getItem('token');
+      const currentRef = references?.references?.[`reference_${refNum}`] || {};
+      const isResend = ['sent', 'requested', 'awaiting_response'].includes(currentRef?.status);
       const response = await axios.post(
-        `${API}/employees/${employeeId}/send-reference-request?reference_num=${refNum}${customMessage ? `&message=${encodeURIComponent(customMessage)}` : ''}`,
+        `${API}/employees/${employeeId}/send-reference-request?reference_num=${refNum}&force_resend=${isResend}${customMessage ? `&message=${encodeURIComponent(customMessage)}` : ''}`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

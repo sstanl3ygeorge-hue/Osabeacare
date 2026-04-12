@@ -79,6 +79,10 @@ def _matches_canonical_requirement(
     if canonical == canonical_target:
         return True
     raw_canonical = aliases.get(req_lower)
+    # Identity must match explicit canonical alias mapping only.
+    # Do not allow loose substring fallback for identity.
+    if canonical_target == "identity" and raw_canonical is None:
+        return False
     # Never treat verification/check buckets as upload evidence via substring fallback.
     if "verification" in req_lower or "check" in req_lower:
         return False
@@ -333,6 +337,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
 
         # Resolve alias: if req_lower maps to a canonical, compare to canonical patterns
         canonical = DOC_REQUIREMENT_ALIASES.get(req_lower, req_lower)
+        raw_canonical = DOC_REQUIREMENT_ALIASES.get(req_lower)
+        is_identity_doc_type = "identity" in doc_config.get("patterns", [])
 
         for pattern in doc_config.get("patterns", []):
             # Exact match on the resolved canonical name (primary path)
@@ -340,6 +346,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 return True
             # Substring fallback for un-mapped legacy IDs
             # (e.g. "identity_evidence_2" not in alias map)
+            if is_identity_doc_type and raw_canonical is None and pattern == "identity":
+                continue
             if pattern in req_lower:
                 return True
         return False

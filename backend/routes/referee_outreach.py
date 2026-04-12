@@ -566,7 +566,7 @@ async def verify_or_reject_reference(
             "message": f"Reference {reference_num} verified",
             "verified_at": now
         }
-    else:
+    elif request.action == 'reject':
         # Reject the reference and clear data for fresh input
         update_data = {
             f"{prefix}request_status": "rejected",
@@ -629,7 +629,7 @@ async def verify_or_reject_reference(
             "message": f"Reference {reference_num} rejected and data cleared",
             "rejected_at": now
         }
-    else:
+    elif request.action == 'request_replacement':
         # Request replacement — clear current referee data so worker.can_provide_new = True.
         # Sets rejected=True + clears name so existing worker_dashboard gating (data_cleared) fires.
         # Additionally stores replacement-specific metadata to distinguish from a plain rejection.

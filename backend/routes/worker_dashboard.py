@@ -2399,3 +2399,132 @@ async def submit_worker_form(
         "submitted_at": now,
         "message": f"{WORKER_FORM_DEFINITIONS[form_id]['name']} submitted successfully. Awaiting admin review."
     }
+
+
+    # ==================== WORKER REPLACEMENT REFEREE ====================
+    class ProvideNewRefereeRequest(BaseModel):
+        name: str
+        email: str
+        phone: Optional[str] = None
+        organisation: Optional[str] = None
+        position: Optional[str] = None
+        relationship: Optional[str] = None
+
+
+    @router.post("/worker/references/{ref_num}/provide-new")
+    async def worker_provide_new_referee(
+        ref_num: int,
+        request: ProvideNewRefereeRequest,
+        worker: dict = Depends(get_current_worker)
+    ):
+        """
+        Worker submits replacement referee details after their reference was rejected
+        or they are providing their first declaration.
+
+        Only allowed when:
+        - reference_N_request_status == 'rejected' (data was cleared, can_provide_new=True)
+        - reference_N_name is None (never declared, not_declared)
+        """
+        db = get_db()
+        if ref_num not in [1, 2]:
+            raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
+        emp = await db.employees.find_one({"id": worker["employee_id"]}, {"_id": 0})
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        prefix = f"reference_{ref_num}_"
+        current_status = emp.get(f"{prefix}request_status")
+        current_name = emp.get(f"{prefix}name")
+
+        # Gate: only allowed when worker can provide new details
+        data_cleared = (current_status == "rejected" and not current_name)
+        not_declared = (current_name is None and current_status not in ["verified", "requested", "awaiting_response", "submitted", "awaiting_review"])
+        if not (data_cleared or not_declared):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Reference {ref_num} does not require new referee details at this time."
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        employee_id = worker["employee_id"]
+
+        # 1. Write to db.employees flat fields and reset status
+        emp_update = {
+            f"{prefix}name": request.name,
+            f"{prefix}email": request.email,
+            f"{prefix}phone": request.phone,
+            f"{prefix}company": request.organisation,
+            f"{prefix}job_title": request.position,
+            f"{prefix}relationship": request.relationship,
+            f"{prefix}declared": True,
+            f"{prefix}request_status": None,   # cleared — admin must re-send request
+            f"{prefix}rejected_by": None,
+            f"{prefix}rejected_at": None,
+            f"{prefix}rejection_reason": None,
+            "updated_at": now,
+        }
+        await db.employees.update_one({"id": employee_id}, {"$set": emp_update})
+
+        # 2. Write to db.references nested doc (upsert)
+        ref_nested = {
+            f"ref{ref_num}.declared.name": request.name,
+            f"ref{ref_num}.declared.email": request.email,
+            f"ref{ref_num}.declared.phone": request.phone,
+            f"ref{ref_num}.declared.organisation": request.organisation,
+            f"ref{ref_num}.declared.position": request.position,
+            f"ref{ref_num}.declared.relationship": request.relationship,
+            f"ref{ref_num}.verification_status": "declared",
+            "updated_at": now,
+        }
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": ref_nested},
+            upsert=True
+        )
+
+        # 3. Write to db.employee_references (upsert by employee_id + reference_number)
+        existing_ref_doc = await db.employee_references.find_one(
+            {"employee_id": employee_id, "reference_number": ref_num}
+        )
+        ref_collection_update = {
+            "employee_id": employee_id,
+            "reference_number": ref_num,
+            "referee_name": request.name,
+            "referee_email": request.email,
+            "referee_phone": request.phone,
+            "referee_organisation": request.organisation,
+            "referee_position": request.position,
+            "referee_relationship": request.relationship,
+            "status": "declared",
+            "request_status": None,
+            "updated_at": now,
+            "source": "worker_provided",
+        }
+        if existing_ref_doc:
+            await db.employee_references.update_one(
+                {"employee_id": employee_id, "reference_number": ref_num},
+                {"$set": ref_collection_update}
+            )
+        else:
+            ref_collection_update["id"] = str(uuid.uuid4())
+            ref_collection_update["created_at"] = now
+            await db.employee_references.insert_one(ref_collection_update)
+
+        await log_audit_action(
+            worker["employee_id"],
+            "worker_provided_new_referee",
+            "employee",
+            employee_id,
+            {
+                "reference_number": ref_num,
+                "referee_name": request.name,
+                "referee_email": request.email,
+            }
+        )
+
+        return {
+            "success": True,
+            "message": f"Reference {ref_num} details submitted. Your manager will send the reference request shortly.",
+            "reference_number": ref_num,
+        }

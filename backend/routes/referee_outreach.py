@@ -601,20 +601,42 @@ async def verify_or_reject_reference(
     requirement_id = f"reference_{reference_num}"
     now = datetime.now(timezone.utc).isoformat()
 
+    references_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    if not references_doc:
+        raise HTTPException(status_code=404, detail="Reference record not found")
+
+    ref_data = references_doc.get(ref_key) or {}
+    response_data = ref_data.get("response") or {}
+
+    if not response_data:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot verify or reject a reference without a returned response"
+        )
+
     if request.action == 'verify':
         verification_fields = {
             f"{ref_key}.request.status": "verified",
+            f"{ref_key}.verification.status": "verified",
             f"{ref_key}.verification.verified": True,
             f"{ref_key}.verification.verified_by": user['user_id'],
             f"{ref_key}.verification.verified_at": now,
             f"{ref_key}.verification.notes": request.notes,
+            f"{ref_key}.verification.rejected_by": None,
+            f"{ref_key}.verification.rejected_at": None,
+            f"{ref_key}.verification.rejection_reason": None,
         }
 
         if request.mismatch_reason:
             verification_fields[f"{ref_key}.mismatch.documented"] = True
             verification_fields[f"{ref_key}.mismatch.reason"] = request.mismatch_reason
 
-        await db.references.update_one({"employee_id": employee_id}, {"$set": verification_fields})
+        update_result = await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": verification_fields}
+        )
+        if update_result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Reference record not found")
 
         # Update document record as verified
         await db.employee_documents.update_one(
@@ -645,6 +667,7 @@ async def verify_or_reject_reference(
         rejection_fields = {
             f"{ref_key}.request.status": "rejected",
             f"{ref_key}.request.token": None,
+            f"{ref_key}.verification.status": "rejected",
             f"{ref_key}.verification.verified": False,
             f"{ref_key}.verification.rejected_by": user['user_id'],
             f"{ref_key}.verification.rejected_at": now,
@@ -656,7 +679,12 @@ async def verify_or_reject_reference(
             f"{ref_key}.mismatch": {},
         }
 
-        await db.references.update_one({"employee_id": employee_id}, {"$set": rejection_fields})
+        update_result = await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": rejection_fields}
+        )
+        if update_result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Reference record not found")
 
         await db.employee_documents.update_many(
             {"employee_id": employee_id, "requirement_id": requirement_id},

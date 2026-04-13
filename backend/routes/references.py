@@ -323,61 +323,14 @@ async def verify_reference(
     employee = await db.employees.find_one({"id": employee_id})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Update employee record
-    await db.employees.update_one(
-        {"id": employee_id},
-        {
-            "$set": {
-                f"reference_{ref_num}_verified": True,
-                f"reference_{ref_num}_verified_by": user.get("user_id"),
-                f"reference_{ref_num}_verified_at": now,
-                f"reference_{ref_num}_verification_notes": notes,
-                "updated_at": now
-            }
-        }
+
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Legacy reference verify endpoint is disabled. "
+            "Use the canonical employee reference lifecycle verification flow instead."
+        )
     )
-    
-    # Update references collection
-    ref_key = f"ref{ref_num}"
-    await db.references.update_one(
-        {"employee_id": employee_id},
-        {
-            "$set": {
-                f"{ref_key}.verification_status": "verified",
-                f"{ref_key}.verified_by": user.get("user_id"),
-                f"{ref_key}.verified_at": now,
-                f"{ref_key}.verification_notes": notes,
-                "updated_at": now
-            }
-        }
-    )
-    
-    # Update employee_references collection
-    await db.employee_references.update_one(
-        {"employee_id": employee_id, "reference_number": ref_num},
-        {
-            "$set": {
-                "status": "verified",
-                "verified_by": user.get("user_id"),
-                "verified_at": now,
-                "verification_notes": notes,
-                "updated_at": now
-            }
-        }
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "verify_reference",
-        "reference",
-        f"{employee_id}_ref_{ref_num}",
-        {"notes": notes}
-    )
-    
-    return {"success": True, "message": f"Reference {ref_num} verified"}
 
 
 # ==================== REFERENCE STATUS ====================

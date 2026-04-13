@@ -131,6 +131,184 @@ def get_calculate_employee_compliance():
     return calculate_employee_compliance
 
 
+def get_unified_employee_status_func():
+    """Lazy import of canonical unified status calculator."""
+    from unified_compliance_engine import get_unified_employee_status
+    return get_unified_employee_status
+
+
+def adapt_unified_status_to_legacy_readiness(unified_status: dict, employee: dict) -> dict:
+    """Map canonical unified status to legacy readiness response shape."""
+    checks = unified_status.get("checks", {}) or {}
+    blockers = unified_status.get("blockers", []) or []
+    category_details = unified_status.get("category_details", {}) or {}
+
+    form_items = category_details.get("forms", {}).get("items", []) or []
+    training_items = category_details.get("training", {}).get("items", []) or []
+    document_items = category_details.get("documents", {}).get("items", []) or []
+    reference_items = category_details.get("references", {}).get("items", []) or []
+
+    blocked_reasons = [
+        {
+            "code": blocker.get("id") or blocker.get("gate") or "unknown",
+            "message": blocker.get("reason") or blocker.get("label") or "Requirement incomplete"
+        }
+        for blocker in blockers
+    ]
+
+    def _find_item(items: list[dict], item_id: str) -> dict:
+        for item in items:
+            if item.get("id") == item_id:
+                return item
+        return {}
+
+    def _is_expired_from_documents(item: dict) -> bool:
+        now_date = datetime.now(timezone.utc).date()
+        for doc in item.get("documents", []) or []:
+            expiry_str = doc.get("expiry_date")
+            if not expiry_str:
+                continue
+            try:
+                expiry_date = datetime.fromisoformat(str(expiry_str).replace("Z", "+00:00")).date()
+            except (ValueError, TypeError):
+                continue
+            if expiry_date < now_date:
+                return True
+        return False
+
+    rtw_doc_item = _find_item(document_items, "right_to_work")
+    dbs_doc_item = _find_item(document_items, "dbs")
+    id_doc_item = _find_item(document_items, "identity")
+
+    rtw_passed = bool(checks.get("right_to_work"))
+    dbs_passed = bool(checks.get("dbs"))
+    id_passed = bool(checks.get("identity"))
+
+    # Unified output does not currently expose explicit RTW/DBS check expiry booleans.
+    # Use document expiry only as the least-misleading approximation for legacy expired flags.
+    rtw_expired = _is_expired_from_documents(rtw_doc_item)
+    dbs_expired = _is_expired_from_documents(dbs_doc_item)
+    id_expired = _is_expired_from_documents(id_doc_item)
+
+    rtw_has_upload = bool(rtw_doc_item.get("has_upload", False))
+    dbs_has_upload = bool(dbs_doc_item.get("has_upload", False))
+    id_has_upload = bool(id_doc_item.get("has_upload", False))
+
+    health_item = _find_item(form_items, "staff_health_questionnaire")
+    interview_item = _find_item(form_items, "interview_record")
+
+    health_submitted = bool(health_item.get("submitted", False))
+    health_verified = bool(health_item.get("verified", checks.get("staff_health_questionnaire", False)))
+    interview_submitted = bool(interview_item.get("submitted", False))
+    interview_verified = bool(interview_item.get("verified", checks.get("interview_record", False)))
+
+    training_legacy_items = []
+    training_blockers = []
+    training_warnings = []
+    for item in training_items:
+        completed = bool(item.get("completed"))
+        invalid_reason = item.get("invalid_reason")
+        has_record = bool(item.get("has_record"))
+        status = "completed" if completed else "missing"
+        if not completed and has_record:
+            if isinstance(invalid_reason, str) and "expired" in invalid_reason.lower():
+                status = "expired"
+            else:
+                status = "awaiting_review"
+        entry = {
+            "code": item.get("id"),
+            "label": item.get("name"),
+            "status": status,
+            "blocker": not completed,
+            "detail": invalid_reason or "Training requirement incomplete",
+        }
+        training_legacy_items.append(entry)
+        if entry["blocker"]:
+            if status == "awaiting_review":
+                training_warnings.append(entry)
+            else:
+                training_blockers.append(entry)
+
+    training_passed = bool(checks.get("mandatory_training"))
+
+    references_verified = sum(1 for item in reference_items if item.get("completed"))
+    poa_verified_count = int(_find_item(document_items, "proof_of_address").get("verified_count", 0) or 0)
+    poa_required_count = int(_find_item(document_items, "proof_of_address").get("required_count", 2) or 2)
+
+    # Preserve legacy tri-state status semantics using canonical blocker severities.
+    has_critical_blocker = any((b.get("severity") or "").lower() == "critical" for b in blockers)
+    has_any_blocker = len(blockers) > 0
+
+    if not has_any_blocker:
+        final_status = "READY_TO_WORK"
+        label = "Ready to Work"
+        color = "green"
+    elif has_critical_blocker:
+        final_status = "NOT_READY"
+        label = "Not Ready to Work"
+        color = "red"
+    else:
+        final_status = "READY_WITH_CONDITIONS"
+        label = "Ready with Conditions"
+        color = "amber"
+
+    return {
+        "ready": final_status == "READY_TO_WORK",
+        "status": final_status,
+        "label": label,
+        "color": color,
+        "blockedReasons": blocked_reasons,
+        "checks": {
+            "recruitmentApproved": employee.get("recruitment_approved", False),
+            "referencesVerified": {
+                "required": 2,
+                "verified": references_verified,
+                "passed": bool(checks.get("reference_1")) and bool(checks.get("reference_2"))
+            },
+            "proofOfAddress": {
+                "required": poa_required_count,
+                "verified": poa_verified_count,
+                "passed": bool(checks.get("proof_of_address"))
+            },
+            "rightToWork": {
+                "passed": rtw_passed,
+                "missing": (not rtw_passed) and (not rtw_expired) and (not rtw_has_upload),
+                "expired": rtw_expired
+            },
+            "dbs": {
+                "passed": dbs_passed,
+                "missing": (not dbs_passed) and (not dbs_expired) and (not dbs_has_upload),
+                "expired": dbs_expired
+            },
+            "id": {
+                "passed": id_passed,
+                "missing": (not id_passed) and (not id_expired) and (not id_has_upload),
+                "expired": id_expired
+            },
+            "healthForm": {
+                "passed": health_verified,
+                "submitted": health_submitted,
+                "verified": health_verified
+            },
+            "interviewForm": {
+                "passed": interview_verified,
+                "submitted": interview_submitted,
+                "verified": interview_verified
+            },
+            "training": {
+                "passed": training_passed,
+                "blockerCount": len(training_blockers),
+                "warningCount": len(training_warnings),
+                "overall": "complete" if training_passed else "incomplete",
+                # Legacy training evaluator exposed richer diagnostics; adapter keeps best-effort item parity from structured unified data.
+                "items": training_legacy_items
+            }
+        },
+        "calculatedAt": datetime.now(timezone.utc).isoformat(),
+        "source_of_truth": "unified_employee_status_adapter"
+    }
+
+
 def calculate_audit_score(ready: int, review: int, pending: int, 
                          policies_missing: int, insurance_missing: int, 
                          critical_missing: int) -> dict:
@@ -237,151 +415,30 @@ async def get_employee_readiness(employee_id: str, user: dict = Depends(get_curr
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    # Get functions
-    get_compliance_requirements_for_employee = get_compliance_requirements_func()
-    calculate_work_readiness_3tier = get_work_readiness_3tier_func()
-    evaluate_employee_training_status = get_employee_training_status_func()
-    get_training_blocker_config = get_training_blocker_config_func()
-    
-    # Get requirements
-    role = employee.get('role', '')
-    requirements = await get_compliance_requirements_for_employee(employee_id, role)
-    
-    # Calculate 3-tier readiness (authoritative calculation)
-    readiness = await calculate_work_readiness_3tier(employee_id, requirements, employee, role)
-    
-    # Build detailed checks
-    req_lookup = {r.get('id'): r for r in requirements}
-    
-    # Reference check details
-    ref1 = req_lookup.get('reference_1', {})
-    ref2 = req_lookup.get('reference_2', {})
-    ref1_verified = ref1.get('has_evidence') and ref1.get('verified')
-    ref2_verified = ref2.get('has_evidence') and ref2.get('verified')
-    
-    # Proof of address check
-    poa = req_lookup.get('proof_of_address', {})
-    poa_count = poa.get('document_count', 0)
-    poa_verified = poa.get('verified', False)
-    
-    # RTW check
-    rtw = req_lookup.get('right_to_work_documents', {}) or req_lookup.get('right_to_work_check', {})
-    rtw_has = rtw.get('has_evidence', False)
-    rtw_expired = False
-    if rtw.get('expiry_date'):
-        try:
-            exp_date = datetime.fromisoformat(rtw['expiry_date'].replace('Z', '+00:00')).date()
-            rtw_expired = exp_date < datetime.now(timezone.utc).date()
-        except (ValueError, AttributeError):
-            pass
-    
-    # DBS check
-    dbs = req_lookup.get('dbs_certificate', {}) or req_lookup.get('dbs_check', {})
-    dbs_has = dbs.get('has_evidence', False)
-    dbs_expired = False
-    if dbs.get('expiry_date'):
-        try:
-            exp_date = datetime.fromisoformat(dbs['expiry_date'].replace('Z', '+00:00')).date()
-            dbs_expired = exp_date < datetime.now(timezone.utc).date()
-        except (ValueError, AttributeError):
-            pass
-    
-    # ID check
-    id_doc = req_lookup.get('identity_documents', {})
-    id_has = id_doc.get('has_evidence', False)
-    id_expired = False
-    if id_doc.get('expiry_date'):
-        try:
-            exp_date = datetime.fromisoformat(id_doc['expiry_date'].replace('Z', '+00:00')).date()
-            id_expired = exp_date < datetime.now(timezone.utc).date()
-        except (ValueError, AttributeError):
-            pass
-    
-    # Health form check
-    health = req_lookup.get('health_questionnaire', {})
-    health_submitted = health.get('has_evidence', False)
-    health_verified = health.get('verified', False)
-    
-    # Interview form check
-    interview = req_lookup.get('interview_record', {}) or req_lookup.get('interview_form', {})
-    interview_submitted = interview.get('has_evidence', False)
-    interview_verified = interview.get('verified', False)
-    
-    # Training check (canonical evaluator)
-    training_status = await evaluate_employee_training_status(employee_id, role)
-    training_blocker_count = training_status.get('blockerCount', 0)
-    
-    # Add training blockers to readiness reasons if any
-    blocked_reasons = list(readiness.get('reasons', []))
-    if training_blocker_count > 0:
-        for item in training_status.get('items', []):
-            if item.get('blocker') and item.get('status') in ['missing', 'expired', 'awaiting_review']:
-                blocker_config = get_training_blocker_config(item.get('code', ''))
-                blocked_reasons.append({
-                    "code": blocker_config.get('reason_code', f"training_{item['code']}_missing"),
-                    "message": item.get('detail', blocker_config.get('reason_message'))
-                })
-    
-    # Recalculate final status if training blockers exist
-    final_status = readiness.get('status')
-    if training_blocker_count > 0 and final_status != 'NOT_READY':
-        final_status = 'NOT_READY'
-    
-    return {
-        "ready": final_status == 'READY_TO_WORK',
-        "status": final_status,
-        "label": readiness.get('label') if final_status == readiness.get('status') else "Not Ready to Work",
-        "color": readiness.get('color') if final_status == readiness.get('status') else "red",
-        "blockedReasons": blocked_reasons,
-        "checks": {
-            "recruitmentApproved": employee.get('recruitment_approved', False),
-            "referencesVerified": {
-                "required": 2,
-                "verified": (1 if ref1_verified else 0) + (1 if ref2_verified else 0),
-                "passed": ref1_verified and ref2_verified
-            },
-            "proofOfAddress": {
-                "required": 2,
-                "verified": poa_count if poa_verified else 0,
-                "passed": poa_count >= 2 and poa_verified
-            },
-            "rightToWork": {
-                "passed": rtw_has and rtw.get('verified', False) and not rtw_expired,
-                "missing": not rtw_has,
-                "expired": rtw_expired
-            },
-            "dbs": {
-                "passed": dbs_has and dbs.get('verified', False) and not dbs_expired,
-                "missing": not dbs_has,
-                "expired": dbs_expired
-            },
-            "id": {
-                "passed": id_has and id_doc.get('verified', False) and not id_expired,
-                "missing": not id_has,
-                "expired": id_expired
-            },
-            "healthForm": {
-                "passed": health_submitted and health_verified,
-                "submitted": health_submitted,
-                "verified": health_verified
-            },
-            "interviewForm": {
-                "passed": interview_submitted and interview_verified,
-                "submitted": interview_submitted,
-                "verified": interview_verified
-            },
-            "training": {
-                "passed": training_blocker_count == 0,
-                "blockerCount": training_blocker_count,
-                "warningCount": training_status.get('warningCount', 0),
-                "overall": training_status.get('overall'),
-                "items": training_status.get('items', [])
-            }
-        },
-        "calculatedAt": datetime.now(timezone.utc).isoformat(),
-        "source_of_truth": "authoritative_readiness_calculation"
-    }
+
+    get_unified_employee_status = get_unified_employee_status_func()
+    unified_status = await get_unified_employee_status(
+        employee_id,
+        db,
+        user_role="admin",
+        include_details=True,
+    )
+
+    if unified_status.get("error") == "Employee not found":
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    adapted_response = adapt_unified_status_to_legacy_readiness(unified_status, employee)
+
+    # Temporary parity logging for rollout safety.
+    logger.info(
+        "readiness_adapter employee_id=%s blockers=%s status=%s ready=%s",
+        employee_id,
+        unified_status.get("blocker_count", 0),
+        adapted_response.get("status"),
+        adapted_response.get("ready"),
+    )
+
+    return adapted_response
 
 
 # ==================== RECRUITMENT APPROVAL ENGINE ENDPOINTS ====================

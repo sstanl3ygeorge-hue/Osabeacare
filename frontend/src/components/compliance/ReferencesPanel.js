@@ -136,6 +136,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
   // Handle verify/reject
   const handleVerifyReference = async () => {
     setVerifyLoading(true);
+
     try {
       const token = localStorage.getItem('token');
       await axios.post(
@@ -147,13 +148,76 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      
-      toast.success(verifyAction === 'verify' 
-        ? 'Reference verified successfully' 
-        : 'Reference rejected');
+
+      const nextStatus = verifyAction === 'verify' ? 'verified' : 'rejected';
+
+      setReferences(prev => {
+        if (!prev?.references) return prev;
+
+        const key = `reference_${verifyRefNum}`;
+        const currentRef = prev.references[key] || {};
+
+        return {
+          ...prev,
+          references: {
+            ...prev.references,
+            [key]: {
+              ...currentRef,
+              status: nextStatus,
+              request: {
+                ...(currentRef.request || {}),
+                status: nextStatus
+              },
+              verification: {
+                ...(currentRef.verification || {}),
+                status: nextStatus,
+                verified: verifyAction === 'verify',
+                verified_at:
+                  verifyAction === 'verify'
+                    ? new Date().toISOString()
+                    : currentRef.verification?.verified_at,
+                rejected_at:
+                  verifyAction === 'reject'
+                    ? new Date().toISOString()
+                    : currentRef.verification?.rejected_at,
+                rejection_reason:
+                  verifyAction === 'reject'
+                    ? verifyNotes
+                    : currentRef.verification?.rejection_reason,
+                notes:
+                  verifyAction === 'verify'
+                    ? verifyNotes
+                    : currentRef.verification?.notes
+              },
+              ...(verifyAction === 'reject'
+                ? {
+                    declared: {},
+                    response: {},
+                    review: {},
+                    mismatch: {}
+                  }
+                : {})
+            }
+          }
+        };
+      });
+
+      toast.success(
+        verifyAction === 'verify'
+          ? 'Reference verified successfully'
+          : 'Reference rejected'
+      );
+
+      setReviewDialogOpen(false);
       setVerifyDialogOpen(false);
-      fetchReferences();
-      if (onRefresh) onRefresh();
+      setVerifyRefNum(null);
+      setVerifyNotes('');
+      setMismatchReason('');
+
+      await fetchReferences();
+      if (onRefresh) {
+        await onRefresh();
+      }
     } catch (error) {
       const msg = error.response?.data?.detail || `Failed to ${verifyAction} reference`;
       toast.error(msg);

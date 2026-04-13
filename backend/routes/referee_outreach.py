@@ -12,6 +12,7 @@ This module handles:
 import os
 import secrets
 import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -23,6 +24,7 @@ from .dependencies import (
 )
 
 router = APIRouter(tags=["Referee Outreach"])
+logger = logging.getLogger(__name__)
 
 # Get portal URL from environment
 PORTAL_URL = os.environ.get('PORTAL_URL', os.environ.get('REACT_APP_BACKEND_URL', 'http://localhost:3000'))
@@ -137,6 +139,14 @@ async def send_reference_request_to_referee(
         import resend
     except ImportError:
         resend = None
+
+    logger.info(
+        "EMAIL_OBS flow=reference_request_send stage=route_entry employee_id=%s recipient=unknown sender=%s resend_api_key_present=%s is_resend=%s",
+        employee_id,
+        SENDER_EMAIL,
+        bool(resend and resend.api_key),
+        bool(force_resend),
+    )
     
     db = get_db()
     
@@ -219,6 +229,14 @@ async def send_reference_request_to_referee(
     email_sent = False
     try:
         if resend and resend.api_key:
+            logger.info(
+                "EMAIL_OBS flow=reference_request_send stage=before_resend_call employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+                employee_id,
+                referee_email,
+                SENDER_EMAIL,
+                bool(resend and resend.api_key),
+                bool(force_resend),
+            )
             resend.Emails.send({
                 "from": SENDER_EMAIL,
                 "to": [referee_email],
@@ -226,6 +244,14 @@ async def send_reference_request_to_referee(
                 "html": email_body
             })
             email_sent = True
+            logger.info(
+                "EMAIL_OBS flow=reference_request_send stage=after_resend_success employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+                employee_id,
+                referee_email,
+                SENDER_EMAIL,
+                bool(resend and resend.api_key),
+                bool(force_resend),
+            )
             
             # Update status to awaiting_response
             await db.employees.update_one(
@@ -233,8 +259,16 @@ async def send_reference_request_to_referee(
                 {"$set": {f"{prefix}request_status": "awaiting_response"}}
             )
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Failed to send referee email: {e}")
+        logger.error(
+            "EMAIL_OBS flow=reference_request_send stage=send_failure employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s exception=%s",
+            employee_id,
+            referee_email,
+            SENDER_EMAIL,
+            bool(resend and resend.api_key),
+            bool(force_resend),
+            str(e),
+        )
+        logger.error(f"Failed to send referee email: {e}")
     
     await log_audit_action(user['user_id'], "send_reference_request", "employee", employee_id, {
         "reference_num": reference_num,

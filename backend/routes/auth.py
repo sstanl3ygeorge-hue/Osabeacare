@@ -426,6 +426,13 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
     Rate limited: 5 attempts per email per hour.
     """
     db = get_db()
+    logger.info(
+        "EMAIL_OBS flow=magic_link_send stage=route_entry employee_id=unknown recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+        request.email,
+        SENDER_EMAIL,
+        bool(resend.api_key),
+        False,
+    )
     
     # Rate limiting check
     identifier = request.email.lower()
@@ -463,17 +470,42 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
     # 🔥 FORCE email send attempt
     try:
         if resend.api_key:
+            logger.info(
+                "EMAIL_OBS flow=magic_link_send stage=before_resend_call employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+                employee.get("id") if employee else "unknown",
+                request.email,
+                SENDER_EMAIL,
+                bool(resend.api_key),
+                False,
+            )
             await asyncio.to_thread(resend.Emails.send, {
                 "from": SENDER_EMAIL,
                 "to": [request.email],
                 "subject": "DEBUG Login Link",
                 "html": f"<p>Debug login link:</p><a href='{magic_link}'>{magic_link}</a>"
             })
+            logger.info(
+                "EMAIL_OBS flow=magic_link_send stage=after_resend_success employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+                employee.get("id") if employee else "unknown",
+                request.email,
+                SENDER_EMAIL,
+                bool(resend.api_key),
+                False,
+            )
             logger.warning("[DEBUG] EMAIL SENT VIA RESEND")
         else:
             logger.error("[DEBUG] RESEND API KEY MISSING")
 
     except Exception as e:
+        logger.error(
+            "EMAIL_OBS flow=magic_link_send stage=send_failure employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s exception=%s",
+            employee.get("id") if employee else "unknown",
+            request.email,
+            SENDER_EMAIL,
+            bool(resend.api_key),
+            False,
+            str(e),
+        )
         logger.error(f"[DEBUG] EMAIL SEND FAILED: {e}")
 
     # Always return success

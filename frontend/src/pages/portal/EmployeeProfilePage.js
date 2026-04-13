@@ -782,8 +782,11 @@ export default function EmployeeProfilePage() {
     
     setIsRequestingReference(true);
     try {
+      // Detect if this is a resend (reference already sent/requested/awaiting response)
+      const isResend = ['sent', 'requested', 'awaiting_response'].includes(selectedRefForRequest.request_status);
+      
       const response = await axios.post(
-        `${API}/employees/${employeeId}/send-reference-request?reference_num=${selectedRefForRequest.reference_num}${referenceRequestMessage ? `&message=${encodeURIComponent(referenceRequestMessage)}` : ''}`,
+        `${API}/employees/${employeeId}/send-reference-request?reference_num=${selectedRefForRequest.reference_num}&force_resend=${isResend}${referenceRequestMessage ? `&message=${encodeURIComponent(referenceRequestMessage)}` : ''}`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );

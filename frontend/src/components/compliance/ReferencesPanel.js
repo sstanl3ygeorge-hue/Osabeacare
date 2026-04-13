@@ -827,12 +827,12 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
             {verifyAction === 'verify' && (
               <div>
                 <Label>Organisation Mismatch Reason (if applicable)</Label>
-                <Select value={mismatchReason} onValueChange={setMismatchReason}>
+                <Select value={mismatchReason || 'none'} onValueChange={(value) => setMismatchReason(value === 'none' ? '' : value)}>
                   <SelectTrigger className="mt-1">
                     <SelectValue placeholder="Select if referee not in employment history" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">No mismatch</SelectItem>
+                    <SelectItem value="none">No mismatch</SelectItem>
                     <SelectItem value="earlier_employment">Referee is from earlier employment</SelectItem>
                     <SelectItem value="personal_reference">Referee is personal/professional reference</SelectItem>
                     <SelectItem value="changed_employers">Applicant changed employers since declaration</SelectItem>

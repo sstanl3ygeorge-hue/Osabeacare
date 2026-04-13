@@ -153,10 +153,15 @@ async def send_reference_request_to_referee(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Get referee details from declared data
+    # Get referee details from canonical references document first
     prefix = f"reference_{reference_num}_"
-    referee_name = employee.get(f"{prefix}name")
-    referee_email = employee.get(f"{prefix}email")
+    references_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    ref_key = f"ref{reference_num}"
+    declared_ref = ((references_doc or {}).get(ref_key) or {}).get("declared") or {}
+
+    # Fallback to legacy flat employee fields if needed
+    referee_name = declared_ref.get("name") or employee.get(f"{prefix}name")
+    referee_email = declared_ref.get("email") or employee.get(f"{prefix}email")
     
     if not referee_email:
         raise HTTPException(status_code=400, detail=f"Reference {reference_num} email not provided. Update employee profile first.")
@@ -164,34 +169,36 @@ async def send_reference_request_to_referee(
     if not referee_name:
         raise HTTPException(status_code=400, detail=f"Reference {reference_num} name not provided. Update employee profile first.")
     
-    # Check if request already pending
-    existing_status = employee.get(f"{prefix}request_status")
+    # Check if request already pending - read from canonical references document
+    existing_request = ((references_doc or {}).get(ref_key) or {}).get("request") or {}
+    existing_status = existing_request.get("status")
     if existing_status in ["requested", "awaiting_response"] and not force_resend:
         return {
             "status": "duplicate",
             "message": "Reference request already sent and awaiting response",
             "current_status": existing_status
         }
-    
+
     # Generate secure token
     token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Update employee with request tracking
-    update_fields = {
-        f"{prefix}request_status": "requested",
-        f"{prefix}request_sent_at": now,
-        f"{prefix}request_token": token
+
+    # Write request tracking to canonical references document
+    ref_request_fields = {
+        f"{ref_key}.request.status": "requested",
+        f"{ref_key}.request.sent_at": now,
+        f"{ref_key}.request.token": token,
     }
 
     # Track resend metadata when explicitly resending an existing pending request
     if force_resend and existing_status in ["requested", "awaiting_response"]:
-        update_fields[f"{prefix}resend_count"] = int(employee.get(f"{prefix}resend_count", 0) or 0) + 1
-        update_fields[f"{prefix}last_reminder_at"] = now
+        ref_request_fields[f"{ref_key}.request.resend_count"] = int(existing_request.get("resend_count", 0) or 0) + 1
+        ref_request_fields[f"{ref_key}.request.last_reminder_at"] = now
 
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": update_fields}
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": ref_request_fields},
+        upsert=True
     )
     
     # Prepare email
@@ -252,9 +259,9 @@ async def send_reference_request_to_referee(
         )
 
         # Update status to awaiting_response
-        await db.employees.update_one(
-            {"id": employee_id},
-            {"$set": {f"{prefix}request_status": "awaiting_response"}}
+        await db.references.update_one(
+            {"employee_id": employee_id},
+            {"$set": {f"{ref_key}.request.status": "awaiting_response"}}
         )
     except Exception as e:
         logger.error(
@@ -292,28 +299,36 @@ async def get_referee_form(token: str):
     """
     db = get_db()
     
-    # Find employee by reference request token
-    employee = await db.employees.find_one({
+    # Find references document by token - canonical store
+    references_doc = await db.references.find_one({
         "$or": [
-            {"reference_1_request_token": token},
-            {"reference_2_request_token": token}
+            {"ref1.request.token": token},
+            {"ref2.request.token": token}
         ]
     }, {"_id": 0})
-    
+
+    if not references_doc:
+        raise HTTPException(status_code=400, detail="Invalid or expired reference link")
+
+    # Determine which reference this token belongs to
+    ref_num = 1 if ((references_doc.get("ref1") or {}).get("request") or {}).get("token") == token else 2
+    ref_key = f"ref{ref_num}"
+    ref_data = references_doc.get(ref_key) or {}
+    request_data = ref_data.get("request") or {}
+    declared_data = ref_data.get("declared") or {}
+
+    employee_id = references_doc.get("employee_id")
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=400, detail="Invalid or expired reference link")
-    
-    # Determine which reference this is for
-    ref_num = 1 if employee.get("reference_1_request_token") == token else 2
-    prefix = f"reference_{ref_num}_"
-    
+
     # Check if already submitted
-    current_status = employee.get(f"{prefix}request_status")
+    current_status = request_data.get("status")
     if current_status in ["submitted", "awaiting_review", "verified", "rejected"]:
         raise HTTPException(status_code=400, detail="This reference has already been submitted")
-    
+
     # Check token age (30 day expiry)
-    sent_at = employee.get(f"{prefix}request_sent_at")
+    sent_at = request_data.get("sent_at")
     if sent_at:
         try:
             sent_date = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
@@ -321,21 +336,18 @@ async def get_referee_form(token: str):
                 raise HTTPException(status_code=400, detail="This reference link has expired. Please contact the recruitment team.")
         except (ValueError, TypeError):
             pass
-    
+
     # Get applicant info for context
     applicant_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
-    declared_referee_name = employee.get(f"{prefix}name", "")
-    declared_company = employee.get(f"{prefix}company", "")
-    declared_job_title = employee.get(f"{prefix}job_title", "")
-    
+
     return {
-        "employee_id": employee['id'],
+        "employee_id": employee_id,
         "reference_num": ref_num,
         "applicant_name": applicant_name,
         "declared_referee_details": {
-            "name": declared_referee_name,
-            "company": declared_company,
-            "job_title": declared_job_title
+            "name": declared_data.get("name", ""),
+            "company": declared_data.get("organisation", declared_data.get("company", "")),
+            "job_title": declared_data.get("job_title", "")
         },
         "form_template": REFEREE_FORM_TEMPLATE
     }
@@ -351,23 +363,31 @@ async def submit_referee_form(token: str, form_data: dict):
     """
     db = get_db()
     
-    # Find employee
-    employee = await db.employees.find_one({
+    # Find references document by token - canonical store
+    references_doc = await db.references.find_one({
         "$or": [
-            {"reference_1_request_token": token},
-            {"reference_2_request_token": token}
+            {"ref1.request.token": token},
+            {"ref2.request.token": token}
         ]
     }, {"_id": 0})
-    
+
+    if not references_doc:
+        raise HTTPException(status_code=400, detail="Invalid or expired reference link")
+
+    ref_num = 1 if ((references_doc.get("ref1") or {}).get("request") or {}).get("token") == token else 2
+    ref_key = f"ref{ref_num}"
+    requirement_id = f"reference_{ref_num}"
+    ref_data = references_doc.get(ref_key) or {}
+    request_data = ref_data.get("request") or {}
+    declared_data = ref_data.get("declared") or {}
+
+    employee_id = references_doc.get("employee_id")
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=400, detail="Invalid or expired reference link")
-    
-    ref_num = 1 if employee.get("reference_1_request_token") == token else 2
-    prefix = f"reference_{ref_num}_"
-    requirement_id = f"reference_{ref_num}"
-    
+
     # Check if already submitted
-    current_status = employee.get(f"{prefix}request_status")
+    current_status = request_data.get("status")
     if current_status in ["submitted", "awaiting_review", "verified", "rejected"]:
         raise HTTPException(status_code=400, detail="This reference has already been submitted")
     
@@ -386,34 +406,33 @@ async def submit_referee_form(token: str, form_data: dict):
     now = datetime.now(timezone.utc).isoformat()
     
     # Detect mismatches between declared and returned details
-    declared_name = employee.get(f"{prefix}name", "").lower().strip()
+    declared_name = (declared_data.get("name") or "").lower().strip()
     returned_name = form_data.get("referee_full_name", "").lower().strip()
-    declared_company = employee.get(f"{prefix}company", "").lower().strip()
+    declared_company = (declared_data.get("organisation") or declared_data.get("company") or "").lower().strip()
     returned_company = form_data.get("referee_organisation", "").lower().strip()
-    
+
     mismatch_detected = False
     mismatch_reasons = []
-    
+
     if declared_name and returned_name and declared_name != returned_name:
         mismatch_detected = True
-        mismatch_reasons.append(f"Name: declared '{employee.get(f'{prefix}name')}' vs returned '{form_data.get('referee_full_name')}'")
-    
+        mismatch_reasons.append(f"Name: declared '{declared_data.get('name')}' vs returned '{form_data.get('referee_full_name')}'")
+
     if declared_company and returned_company and declared_company != returned_company:
         mismatch_detected = True
-        mismatch_reasons.append(f"Organisation: declared '{employee.get(f'{prefix}company')}' vs returned '{form_data.get('referee_organisation')}'")
-    
-    # Update employee with response data
-    update_data = {
-        f"{prefix}request_status": "submitted",
-        f"{prefix}response_received_at": now,
-        f"{prefix}response_data": form_data,
-        f"{prefix}mismatch_detected": mismatch_detected,
+        mismatch_reasons.append(f"Organisation: declared '{declared_data.get('organisation') or declared_data.get('company')}' vs returned '{form_data.get('referee_organisation')}'")
+
+    # Write response and status to canonical references document; clear token after use
+    response_doc = {**form_data, "received_at": now}
+    ref_update = {
+        f"{ref_key}.request.status": "submitted",
+        f"{ref_key}.request.token": None,
+        f"{ref_key}.response": response_doc,
+        f"{ref_key}.mismatch.detected": mismatch_detected,
+        f"{ref_key}.mismatch.reasons": mismatch_reasons if mismatch_detected else [],
     }
-    
-    # Clear token after use (security)
-    update_data[f"{prefix}request_token"] = None
-    
-    await db.employees.update_one({"id": employee['id']}, {"$set": update_data})
+
+    await db.references.update_one({"employee_id": employee_id}, {"$set": ref_update})
     
     # Create form submission for audit trail
     submission_id = str(uuid.uuid4())

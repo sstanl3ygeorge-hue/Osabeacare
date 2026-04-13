@@ -31167,7 +31167,8 @@ async def get_employee_references(
         req = next((r for r in ref_requests if r.get("requirement_id") == f"reference_{ref_num}"), None)
         
         # Determine status
-        verification_status = ref_data.get("verification_status", "pending")
+        verification = ref_data.get("verification") or {}
+        verification_status = verification.get("status") or ref_data.get("verification_status", "pending")
         
         # Check for response data - first from db.references, then fallback to employee record
         response_data = ref_data.get("response") or employee.get(f"reference_{ref_num}_response_data")
@@ -31244,10 +31245,10 @@ async def get_employee_references(
             "response": response_data,
             "response_submitted_at": response_submitted_at,
             "verification": {
-                "status": verification_status,
-                "verified_by": ref_data.get("verified_by") or emp_verified_by,
-                "verified_at": ref_data.get("verified_at") or emp_verified_at,
-                "notes": ref_data.get("notes")
+                "status": verification.get("status") or ref_data.get("verification_status"),
+                "verified_by": verification.get("verified_by") or ref_data.get("verified_by") or emp_verified_by,
+                "verified_at": verification.get("verified_at") or ref_data.get("verified_at") or emp_verified_at,
+                "notes": verification.get("notes") or ref_data.get("notes") or employee.get(f"reference_{ref_num}_verification_notes")
             }
         }
     

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from .dependencies import (
     get_db, get_current_user, require_admin, require_manager_or_admin,
-    log_audit_action
+    log_audit_action, SENDER_EMAIL
 )
 
 router = APIRouter(tags=["Referee Outreach"])
@@ -220,7 +220,7 @@ async def send_reference_request_to_referee(
     try:
         if resend and resend.api_key:
             resend.Emails.send({
-                "from": f"Osabea Healthcare <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                "from": SENDER_EMAIL,
                 "to": [referee_email],
                 "subject": email_subject,
                 "html": email_body

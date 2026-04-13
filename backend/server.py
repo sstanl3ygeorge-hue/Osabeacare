@@ -19604,7 +19604,7 @@ async def reject_employee_document(
                 """
                 
                 await asyncio.to_thread(resend.Emails.send, {
-                    "from": f"Osabea Compliance <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                    "from": SENDER_EMAIL,
                     "to": [emp_email],
                     "subject": f"Action Required: Your {doc_type_name} document needs attention",
                     "html": email_html
@@ -19721,7 +19721,7 @@ async def request_document_replacement(
                     """
                     
                     resend.Emails.send({
-                        "from": f"Osabea Recruitment <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                        "from": SENDER_EMAIL,
                         "to": [emp_email],
                         "subject": f"Action Required: Please Upload New {doc_type_name}",
                         "html": email_html
@@ -30484,7 +30484,7 @@ class ReferenceIntegrityService:
                 """
                 
                 await asyncio.to_thread(resend.Emails.send, {
-                    "from": f"Osabea Compliance <{os.environ.get('RESEND_FROM_EMAIL', 'onboarding@resend.dev')}>",
+                    "from": SENDER_EMAIL,
                     "to": [emp_email],
                     "subject": f"Action Required: Reference {ref_num} needs to be replaced",
                     "html": email_html

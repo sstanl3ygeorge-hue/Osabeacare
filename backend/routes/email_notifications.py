@@ -218,8 +218,15 @@ async def send_notification_email(notification_type: str, to_email: str, recipie
     now = datetime.now(timezone.utc).isoformat()
     
     try:
-        await EmailService.send_email(to_email, subject, body)
-        status = "sent"
+        result = await EmailService.send_raw(
+            sender_key="recruitment",
+            recipient_email=to_email,
+            subject=subject,
+            html_body=body,
+            employee_id=employee_id,
+            email_type=notification_type
+        )
+        status = result.get("status", "failed")
     except Exception as e:
         status = f"failed: {str(e)}"
     

@@ -7556,6 +7556,8 @@ export default function EmployeeProfilePage() {
         onSuccess={() => {
           fetchEmployee();
           fetchComplianceFile();
+          fetchReferenceStatus();
+          fetchRecruitmentStatus();
         }}
       />
       

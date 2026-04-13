@@ -10011,39 +10011,74 @@ async def update_reference(
         details={"reference_id": reference_id},
     )
 
-    reference = await db.employee_references.find_one({
-        "id": reference_id,
-        "employee_id": employee_id
-    }, {"_id": 0})
-    
-    if not reference:
-        raise HTTPException(status_code=404, detail="Reference not found")
-    
-    # Build update
-    update_fields = {}
-    old_values = {}
-    
-    for field in ['referee_name', 'referee_email', 'referee_phone', 'referee_organisation',
-                  'referee_position', 'referee_relationship', 'referee_type',
-                  'period_of_supervision', 'is_direct_supervisor', 'can_contact_before_offer']:
-        value = getattr(data, field)
-        if value is not None:
-            old_values[field] = reference.get(field)
-            update_fields[field] = value
-    
-    if not update_fields:
-        return {"message": "No fields to update"}
-    
-    update_fields['updated_at'] = datetime.now(timezone.utc).isoformat()
-    update_fields['last_edited_by'] = user['user_id']
-    update_fields['last_edit_reason'] = data.edit_reason
-    
-    await db.employee_references.update_one(
-        {"id": reference_id},
-        {"$set": update_fields}
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    refs_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    ref_key = f"ref{reference_id}"
+    ref_doc = ((refs_doc or {}).get(ref_key) or {})
+    declared = ref_doc.get("declared") or {}
+
+    old_values = {
+        "referee_name": declared.get("name") or employee.get(f"reference_{reference_id}_name"),
+        "referee_email": declared.get("email") or employee.get(f"reference_{reference_id}_email"),
+        "referee_phone": declared.get("phone") or employee.get(f"reference_{reference_id}_phone"),
+        "referee_organisation": declared.get("organisation") or employee.get(f"reference_{reference_id}_company"),
+        "referee_position": declared.get("job_title") or declared.get("position") or employee.get(f"reference_{reference_id}_job_title"),
+        "referee_relationship": declared.get("relationship") or employee.get(f"reference_{reference_id}_relationship"),
+        "referee_type": declared.get("referee_type"),
+        "period_of_supervision": declared.get("period_of_supervision"),
+        "is_direct_supervisor": declared.get("is_direct_supervisor"),
+        "can_contact_before_offer": declared.get("can_contact_before_offer")
+    }
+
+    now = datetime.now(timezone.utc).isoformat()
+    declared_payload = {
+        "name": data.referee_name,
+        "email": data.referee_email,
+        "phone": data.referee_phone,
+        "organisation": data.referee_organisation,
+        "job_title": data.referee_position,
+        "relationship": data.referee_relationship,
+        "referee_type": data.referee_type,
+        "period_of_supervision": data.period_of_supervision,
+        "is_direct_supervisor": data.is_direct_supervisor,
+        "can_contact_before_offer": data.can_contact_before_offer,
+        "updated_at": now,
+        "updated_by": user["user_id"],
+    }
+
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {
+            "$set": {
+                f"{ref_key}.declared": declared_payload,
+                "updated_at": now
+            },
+            "$setOnInsert": {
+                "employee_id": employee_id,
+                "created_at": now
+            }
+        },
+        upsert=True
     )
-    
-    # Log audit
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                f"reference_{reference_id}_name": data.referee_name,
+                f"reference_{reference_id}_email": data.referee_email,
+                f"reference_{reference_id}_phone": data.referee_phone,
+                f"reference_{reference_id}_company": data.referee_organisation,
+                f"reference_{reference_id}_job_title": data.referee_position,
+                f"reference_{reference_id}_relationship": data.referee_relationship,
+                "updated_at": now
+            }
+        }
+    )
+
     await log_audit_action(
         user['user_id'],
         "edit_reference",
@@ -10052,41 +10087,21 @@ async def update_reference(
         {
             "employee_id": employee_id,
             "old_values": old_values,
-            "new_values": {k: v for k, v in update_fields.items() if k not in ['updated_at', 'last_edited_by', 'last_edit_reason']},
+            "new_values": {
+                "referee_name": data.referee_name,
+                "referee_email": data.referee_email,
+                "referee_phone": data.referee_phone,
+                "referee_organisation": data.referee_organisation,
+                "referee_position": data.referee_position,
+                "referee_relationship": data.referee_relationship,
+                "referee_type": data.referee_type,
+                "period_of_supervision": data.period_of_supervision,
+                "is_direct_supervisor": data.is_direct_supervisor,
+                "can_contact_before_offer": data.can_contact_before_offer,
+            },
             "reason": data.edit_reason
         }
     )
-
-    # Sync flat fields to db.employees and db.references to keep all three stores consistent.
-    # The blocker engine reads employee.reference_N_verified flat fields, so we must mirror here.
-    ref_num = reference.get('reference_number')
-    if ref_num:
-        flat_field_map = {
-            'referee_name': f'reference_{ref_num}_name',
-            'referee_email': f'reference_{ref_num}_email',
-            'referee_phone': f'reference_{ref_num}_phone',
-            'referee_organisation': f'reference_{ref_num}_company',
-            'referee_position': f'reference_{ref_num}_job_title',
-            'referee_relationship': f'reference_{ref_num}_relationship',
-        }
-        emp_flat = {flat_field_map[k]: v for k, v in update_fields.items() if k in flat_field_map}
-        if emp_flat:
-            await db.employees.update_one({"id": employee_id}, {"$set": emp_flat})
-            nested_field_map = {
-                'referee_name': f'ref{ref_num}.declared.name',
-                'referee_email': f'ref{ref_num}.declared.email',
-                'referee_phone': f'ref{ref_num}.declared.phone',
-                'referee_organisation': f'ref{ref_num}.declared.organisation',
-                'referee_position': f'ref{ref_num}.declared.position',
-                'referee_relationship': f'ref{ref_num}.declared.relationship',
-            }
-            nested = {nested_field_map[k]: v for k, v in update_fields.items() if k in nested_field_map}
-            if nested:
-                await db.references.update_one(
-                    {"employee_id": employee_id},
-                    {"$set": nested},
-                    upsert=True
-                )
     
     return {
         "success": True,

@@ -849,16 +849,37 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
             <Button variant="outline" onClick={() => setReviewDialogOpen(false)}>
               Close
             </Button>
-            <Button
-              className="bg-green-600 hover:bg-green-700"
-              onClick={() => {
-                setReviewDialogOpen(false);
-                openVerifyDialog(reviewRefNum, 'verify');
-              }}
-            >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Verify Reference
-            </Button>
+
+            {reviewRefNum && (() => {
+              const currentRef = references?.references?.[`reference_${reviewRefNum}`];
+
+              const isVerified =
+                currentRef?.status === 'verified' ||
+                currentRef?.verification?.status === 'verified' ||
+                currentRef?.verification?.verified === true;
+
+              if (isVerified) {
+                return (
+                  <div className="inline-flex items-center px-3 py-2 rounded-lg bg-green-50 text-green-700 border border-green-200 text-sm font-medium">
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Already verified
+                  </div>
+                );
+              }
+
+              return (
+                <Button
+                  className="bg-green-600 hover:bg-green-700"
+                  onClick={() => {
+                    setReviewDialogOpen(false);
+                    openVerifyDialog(reviewRefNum, 'verify');
+                  }}
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Verify Reference
+                </Button>
+              );
+            })()}
           </DialogFooter>
         </DialogContent>
       </Dialog>

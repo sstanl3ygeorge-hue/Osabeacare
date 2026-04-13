@@ -12,7 +12,9 @@ This module handles:
 import os
 import secrets
 import uuid
+import asyncio
 import logging
+import resend
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -134,17 +136,11 @@ async def send_reference_request_to_referee(
     - Request status tracked: requested -> awaiting_response -> submitted -> awaiting_review -> verified
     - Response attached to correct requirement slot (reference_1 or reference_2)
     """
-    # Lazy import resend to avoid circular imports
-    try:
-        import resend
-    except ImportError:
-        resend = None
-
     logger.info(
         "EMAIL_OBS flow=reference_request_send stage=route_entry employee_id=%s recipient=unknown sender=%s resend_api_key_present=%s is_resend=%s",
         employee_id,
         SENDER_EMAIL,
-        bool(resend and resend.api_key),
+        bool(resend.api_key),
         bool(force_resend),
     )
     
@@ -227,44 +223,46 @@ async def send_reference_request_to_referee(
     
     # Send email
     email_sent = False
+    if not resend.api_key:
+        raise HTTPException(status_code=503, detail="Email service unavailable")
+
     try:
-        if resend and resend.api_key:
-            logger.info(
-                "EMAIL_OBS flow=reference_request_send stage=before_resend_call employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
-                employee_id,
-                referee_email,
-                SENDER_EMAIL,
-                bool(resend and resend.api_key),
-                bool(force_resend),
-            )
-            resend.Emails.send({
-                "from": SENDER_EMAIL,
-                "to": [referee_email],
-                "subject": email_subject,
-                "html": email_body
-            })
-            email_sent = True
-            logger.info(
-                "EMAIL_OBS flow=reference_request_send stage=after_resend_success employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
-                employee_id,
-                referee_email,
-                SENDER_EMAIL,
-                bool(resend and resend.api_key),
-                bool(force_resend),
-            )
-            
-            # Update status to awaiting_response
-            await db.employees.update_one(
-                {"id": employee_id},
-                {"$set": {f"{prefix}request_status": "awaiting_response"}}
-            )
+        logger.info(
+            "EMAIL_OBS flow=reference_request_send stage=before_resend_call employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+            employee_id,
+            referee_email,
+            SENDER_EMAIL,
+            bool(resend.api_key),
+            bool(force_resend),
+        )
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [referee_email],
+            "subject": email_subject,
+            "html": email_body
+        })
+        email_sent = True
+        logger.info(
+            "EMAIL_OBS flow=reference_request_send stage=after_resend_success employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+            employee_id,
+            referee_email,
+            SENDER_EMAIL,
+            bool(resend.api_key),
+            bool(force_resend),
+        )
+
+        # Update status to awaiting_response
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {f"{prefix}request_status": "awaiting_response"}}
+        )
     except Exception as e:
         logger.error(
             "EMAIL_OBS flow=reference_request_send stage=send_failure employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s exception=%s",
             employee_id,
             referee_email,
             SENDER_EMAIL,
-            bool(resend and resend.api_key),
+            bool(resend.api_key),
             bool(force_resend),
             str(e),
         )

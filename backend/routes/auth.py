@@ -445,57 +445,97 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
         "email": {"$regex": f"^{re.escape(request.email)}$", "$options": "i"}
     }, {"_id": 1, "id": 1, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
 
-    # 🔥 FORCE SEND DEBU G
-    logger.warning(f"[DEBUG] LOGIN REQUEST FOR EMAIL: {request.email}")
+    if not employee:
+        return {"success": True, "message": "If an account exists, you will receive a login link"}
 
-    # Create token anyway (even if employee not found)
+    # Generate magic token
     token_payload = {
-        "employee_id": str(employee.get("_id")) if employee else "debug-no-user",
-        "email": request.email,
+        "employee_id": employee["id"],
+        "email": request.email.lower(),
         "type": "worker_login",
         "exp": datetime.now(timezone.utc) + timedelta(hours=24)
     }
 
     magic_token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
 
+    # Store token for tracking
+    await db.magic_tokens.insert_one({
+        "token": magic_token,
+        "employee_id": employee["id"],
+        "email": request.email.lower(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+        "used": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    })
+
     frontend_url = os.environ.get(
         "FRONTEND_URL",
         "https://app.osabeacares.co.uk"
     )
 
-    magic_link = f"{frontend_url}/worker/verify?token={magic_token}"
+    login_url = f"{frontend_url}/worker/verify?token={magic_token}"
 
-    logger.warning(f"[DEBUG] MAGIC LINK: {magic_link}")
+    email_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #0F172A; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0;">Osabea Healthcare</h1>
+        </div>
+        <div style="padding: 30px; background: #f8fafc;">
+            <h2 style="color: #1e293b;">Hi {employee.get('first_name', 'there')},</h2>
+            <p style="color: #475569; line-height: 1.6;">
+                Click the button below to access your compliance dashboard:
+            </p>
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{login_url}" style="background: #2563EB; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                    Access My Dashboard
+                </a>
+            </div>
+            <p style="color: #64748b; font-size: 14px;">
+                This link expires in 24 hours. If you didn't request this, please ignore this email.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="color: #94a3b8; font-size: 12px; text-align: center;">
+                Osabea Healthcare Solutions | Compliance Portal
+            </p>
+        </div>
+    </div>
+    """
 
-    # 🔥 FORCE email send attempt
+    if not resend.api_key:
+        logger.error(
+            "EMAIL_OBS flow=magic_link_send stage=send_failure employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s exception=%s",
+            employee.get("id") if employee else "unknown",
+            request.email,
+            SENDER_EMAIL,
+            bool(resend.api_key),
+            False,
+            "resend_api_key_missing",
+        )
+        raise HTTPException(status_code=503, detail="Email service unavailable")
+
     try:
-        if resend.api_key:
-            logger.info(
-                "EMAIL_OBS flow=magic_link_send stage=before_resend_call employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
-                employee.get("id") if employee else "unknown",
-                request.email,
-                SENDER_EMAIL,
-                bool(resend.api_key),
-                False,
-            )
-            await asyncio.to_thread(resend.Emails.send, {
-                "from": SENDER_EMAIL,
-                "to": [request.email],
-                "subject": "DEBUG Login Link",
-                "html": f"<p>Debug login link:</p><a href='{magic_link}'>{magic_link}</a>"
-            })
-            logger.info(
-                "EMAIL_OBS flow=magic_link_send stage=after_resend_success employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
-                employee.get("id") if employee else "unknown",
-                request.email,
-                SENDER_EMAIL,
-                bool(resend.api_key),
-                False,
-            )
-            logger.warning("[DEBUG] EMAIL SENT VIA RESEND")
-        else:
-            logger.error("[DEBUG] RESEND API KEY MISSING")
-
+        logger.info(
+            "EMAIL_OBS flow=magic_link_send stage=before_resend_call employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+            employee.get("id") if employee else "unknown",
+            request.email,
+            SENDER_EMAIL,
+            bool(resend.api_key),
+            False,
+        )
+        await asyncio.to_thread(resend.Emails.send, {
+            "from": SENDER_EMAIL,
+            "to": [request.email],
+            "subject": "Your Osabea Healthcare Login Link",
+            "html": email_content
+        })
+        logger.info(
+            "EMAIL_OBS flow=magic_link_send stage=after_resend_success employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s",
+            employee.get("id") if employee else "unknown",
+            request.email,
+            SENDER_EMAIL,
+            bool(resend.api_key),
+            False,
+        )
     except Exception as e:
         logger.error(
             "EMAIL_OBS flow=magic_link_send stage=send_failure employee_id=%s recipient=%s sender=%s resend_api_key_present=%s is_resend=%s exception=%s",
@@ -506,10 +546,9 @@ async def worker_request_login(request: WorkerLoginRequest, http_request: Reques
             False,
             str(e),
         )
-        logger.error(f"[DEBUG] EMAIL SEND FAILED: {e}")
+        raise HTTPException(status_code=502, detail="Failed to send login email")
 
-    # Always return success
-    return {"status": "ok"}
+    return {"success": True, "message": "If an account exists, you will receive a login link"}
 
 
 @router.post("/worker/login")
@@ -621,11 +660,6 @@ async def worker_verify_login(request: WorkerVerifyRequest):
         if not token_record:
             raise HTTPException(status_code=400, detail="Token already used or invalid")
         
-        await db.magic_tokens.update_one(
-            {"token": request.token},
-            {"$set": {"used": True, "used_at": datetime.now(timezone.utc).isoformat()}}
-        )
-        
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         
         is_applicant = False
@@ -641,6 +675,11 @@ async def worker_verify_login(request: WorkerVerifyRequest):
         
         if not employee:
             raise HTTPException(status_code=404, detail="Account not found. Your application may still be under review.")
+        
+        await db.magic_tokens.update_one(
+            {"token": request.token},
+            {"$set": {"used": True, "used_at": datetime.now(timezone.utc).isoformat()}}
+        )
         
         access_token = jwt.encode({
             "sub": email,

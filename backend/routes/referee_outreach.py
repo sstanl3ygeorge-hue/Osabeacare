@@ -29,7 +29,7 @@ router = APIRouter(tags=["Referee Outreach"])
 logger = logging.getLogger(__name__)
 
 # Get portal URL from environment
-PORTAL_URL = os.environ.get('PORTAL_URL', os.environ.get('REACT_APP_BACKEND_URL', 'http://localhost:3000'))
+PORTAL_URL = os.environ.get('FRONTEND_URL', 'https://app.osabeacares.co.uk')
 
 # Referee form template - comprehensive NHS-compliant reference form
 REFEREE_FORM_TEMPLATE = {
@@ -506,46 +506,53 @@ async def review_reference(
     If mismatch is detected, notes are required.
     """
     db = get_db()
-    
+
     if reference_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    prefix = f"reference_{reference_num}_"
-    
+
+    ref_key = f"ref{reference_num}"
+    references_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    if not references_doc:
+        raise HTTPException(status_code=404, detail="Reference record not found")
+
+    ref_data = references_doc.get(ref_key) or {}
+    request_data = ref_data.get("request") or {}
+
     # Check reference has been submitted
-    current_status = employee.get(f"{prefix}request_status")
+    current_status = request_data.get("status")
     if current_status not in ["submitted", "awaiting_review"]:
         raise HTTPException(status_code=400, detail="Reference must be submitted before review")
-    
+
     # If mismatch detected, require notes
-    mismatch_detected = employee.get(f"{prefix}mismatch_detected", False)
+    mismatch_detected = (ref_data.get("mismatch") or {}).get("detected", False)
     if mismatch_detected and not mismatch_notes:
         raise HTTPException(status_code=400, detail="Mismatch detected - notes explaining the mismatch are required")
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    update_data = {
-        f"{prefix}request_status": "awaiting_review",
-        f"{prefix}reviewed": True,
-        f"{prefix}reviewed_by": user['user_id'],
-        f"{prefix}reviewed_at": now,
+
+    review_fields = {
+        f"{ref_key}.request.status": "awaiting_review",
+        f"{ref_key}.review.reviewed": True,
+        f"{ref_key}.review.reviewed_by": user['user_id'],
+        f"{ref_key}.review.reviewed_at": now,
     }
-    
+
     if mismatch_notes:
-        update_data[f"{prefix}mismatch_notes"] = mismatch_notes
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
+        review_fields[f"{ref_key}.mismatch.notes"] = mismatch_notes
+
+    await db.references.update_one({"employee_id": employee_id}, {"$set": review_fields})
+
     await log_audit_action(user['user_id'], "review_reference", "employee", employee_id, {
         "reference_num": reference_num,
         "mismatch_detected": mismatch_detected,
         "mismatch_notes": mismatch_notes
     })
-    
+
     return {
         "status": "success",
         "message": f"Reference {reference_num} reviewed. Ready for final verification.",
@@ -575,51 +582,51 @@ async def verify_or_reject_reference(
     - other: Other reason (specify in notes)
     """
     db = get_db()
-    
+
     if reference_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
-    
+
     if request.action not in ['verify', 'reject', 'request_replacement']:
         raise HTTPException(status_code=400, detail="action must be 'verify', 'reject', or 'request_replacement'")
-    
+
     if request.action in ['reject', 'request_replacement'] and not request.notes:
         raise HTTPException(status_code=400, detail="Reason (notes) is required")
-    
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    prefix = f"reference_{reference_num}_"
+
+    ref_key = f"ref{reference_num}"
     requirement_id = f"reference_{reference_num}"
     now = datetime.now(timezone.utc).isoformat()
-    
+
     if request.action == 'verify':
-        # Verify the reference
-        update_data = {
-            f"{prefix}request_status": "verified",
-            f"{prefix}verified": True,
-            f"{prefix}verified_by": user['user_id'],
-            f"{prefix}verified_at": now,
-            f"{prefix}verification_notes": request.notes,
+        verification_fields = {
+            f"{ref_key}.request.status": "verified",
+            f"{ref_key}.verification.verified": True,
+            f"{ref_key}.verification.verified_by": user['user_id'],
+            f"{ref_key}.verification.verified_at": now,
+            f"{ref_key}.verification.notes": request.notes,
         }
-        
+
         if request.mismatch_reason:
-            update_data[f"{prefix}mismatch_documented"] = True
-            update_data[f"{prefix}mismatch_reason"] = request.mismatch_reason
-        
-        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-        
+            verification_fields[f"{ref_key}.mismatch.documented"] = True
+            verification_fields[f"{ref_key}.mismatch.reason"] = request.mismatch_reason
+
+        await db.references.update_one({"employee_id": employee_id}, {"$set": verification_fields})
+
         # Update document record as verified
         await db.employee_documents.update_one(
             {"employee_id": employee_id, "requirement_id": requirement_id},
             {"$set": {
-                "verified": True, 
-                "verified_by": user['user_id'], 
+                "verified": True,
+                "verified_by": user['user_id'],
                 "verified_at": now,
                 "status": "verified"
             }}
         )
-        
+
         await log_audit_action(user['user_id'], "verify_reference", "employee", employee_id, {
             "reference_num": reference_num,
             "action": "verified",
@@ -627,110 +634,30 @@ async def verify_or_reject_reference(
             "notes": request.notes,
             "employee_id": employee_id
         })
-        
+
         return {
             "status": "success",
             "message": f"Reference {reference_num} verified",
             "verified_at": now
         }
-    elif request.action == 'reject':
-        # Reject the reference and clear data for fresh input
-        update_data = {
-            f"{prefix}request_status": "rejected",
-            f"{prefix}verified": False,
-            f"{prefix}rejected_by": user['user_id'],
-            f"{prefix}rejected_at": now,
-            f"{prefix}rejection_reason": request.notes,
-            f"{prefix}request_token": None,
-            # Clear all reference data fields so worker can re-enter
-            f"{prefix}name": None,
-            f"{prefix}email": None,
-            f"{prefix}phone": None,
-            f"{prefix}company": None,
-            f"{prefix}position": None,
-            f"{prefix}relationship": None,
-            f"{prefix}years_known": None,
-            f"{prefix}declared": False,
-            f"{prefix}response_data": None,
-            f"{prefix}response_received_at": None,
-            f"{prefix}reviewed": False,
-            f"{prefix}reviewed_by": None,
-            f"{prefix}reviewed_at": None,
-        }
-        
-        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-        
-        # Update document record as rejected
-        await db.employee_documents.update_many(
-            {"employee_id": employee_id, "requirement_id": requirement_id},
-            {"$set": {
-                "verified": False, 
-                "status": "rejected",
-                "rejected_by": user['user_id'],
-                "rejected_at": now,
-                "rejection_reason": request.notes,
-                "is_active": False
-            }}
-        )
-        
-        # Also clear from db.references collection if exists
-        await db.references.update_one(
-            {"employee_id": employee_id},
-            {"$set": {
-                f"ref{reference_num}": {},
-                f"ref{reference_num}_status": "rejected",
-                f"ref{reference_num}_rejected_at": now,
-                f"ref{reference_num}_rejection_reason": request.notes
-            }}
-        )
-        
-        await log_audit_action(user['user_id'], "reject_reference", "employee", employee_id, {
-            "reference_num": reference_num,
-            "action": "rejected",
-            "reason": request.notes,
-            "employee_id": employee_id,
-            "data_cleared": True
-        })
-        
-        return {
-            "status": "success",
-            "message": f"Reference {reference_num} rejected and data cleared",
-            "rejected_at": now
-        }
-    elif request.action == 'request_replacement':
-        # Request replacement — clear current referee data so worker.can_provide_new = True.
-        # Sets rejected=True + clears name so existing worker_dashboard gating (data_cleared) fires.
-        # Additionally stores replacement-specific metadata to distinguish from a plain rejection.
-        update_data = {
-            # Existing gating reads: is_rejected AND not referee_name → data_cleared → can_provide_new
-            f"{prefix}request_status": "rejected",
-            f"{prefix}rejected": True,
-            f"{prefix}rejected_by": user['user_id'],
-            f"{prefix}rejected_at": now,
-            f"{prefix}rejection_reason": request.notes,
-            f"{prefix}request_token": None,
-            # Clear referee data so worker can re-enter new details
-            f"{prefix}name": None,
-            f"{prefix}email": None,
-            f"{prefix}phone": None,
-            f"{prefix}company": None,
-            f"{prefix}position": None,
-            f"{prefix}relationship": None,
-            f"{prefix}years_known": None,
-            f"{prefix}declared": False,
-            f"{prefix}response_data": None,
-            f"{prefix}response_received_at": None,
-            f"{prefix}reviewed": False,
-            f"{prefix}reviewed_by": None,
-            f"{prefix}reviewed_at": None,
-            # Replacement-specific metadata (distinguishes from plain reject in audit + canonical_status)
-            f"{prefix}replacement_requested_at": now,
-            f"{prefix}replacement_requested_by": user['user_id'],
-            f"{prefix}replacement_reason": request.notes,
-        }
-        await db.employees.update_one({"id": employee_id}, {"$set": update_data})
 
-        # Update all matching document records so no stale active row remains
+    elif request.action == 'reject':
+        rejection_fields = {
+            f"{ref_key}.request.status": "rejected",
+            f"{ref_key}.request.token": None,
+            f"{ref_key}.verification.verified": False,
+            f"{ref_key}.verification.rejected_by": user['user_id'],
+            f"{ref_key}.verification.rejected_at": now,
+            f"{ref_key}.verification.rejection_reason": request.notes,
+            # Clear declared and response so worker can re-enter
+            f"{ref_key}.declared": {},
+            f"{ref_key}.response": {},
+            f"{ref_key}.review": {},
+            f"{ref_key}.mismatch": {},
+        }
+
+        await db.references.update_one({"employee_id": employee_id}, {"$set": rejection_fields})
+
         await db.employee_documents.update_many(
             {"employee_id": employee_id, "requirement_id": requirement_id},
             {"$set": {
@@ -743,14 +670,49 @@ async def verify_or_reject_reference(
             }}
         )
 
-        # Keep db.references consistent with cleared replacement state
-        await db.references.update_one(
-            {"employee_id": employee_id},
+        await log_audit_action(user['user_id'], "reject_reference", "employee", employee_id, {
+            "reference_num": reference_num,
+            "action": "rejected",
+            "reason": request.notes,
+            "employee_id": employee_id,
+            "data_cleared": True
+        })
+
+        return {
+            "status": "success",
+            "message": f"Reference {reference_num} rejected and data cleared",
+            "rejected_at": now
+        }
+
+    elif request.action == 'request_replacement':
+        replacement_fields = {
+            f"{ref_key}.request.status": "rejected",
+            f"{ref_key}.request.token": None,
+            f"{ref_key}.verification.verified": False,
+            f"{ref_key}.verification.rejected_by": user['user_id'],
+            f"{ref_key}.verification.rejected_at": now,
+            f"{ref_key}.verification.rejection_reason": request.notes,
+            f"{ref_key}.verification.replacement_requested_at": now,
+            f"{ref_key}.verification.replacement_requested_by": user['user_id'],
+            f"{ref_key}.verification.replacement_reason": request.notes,
+            # Clear declared and response so worker can re-enter new referee
+            f"{ref_key}.declared": {},
+            f"{ref_key}.response": {},
+            f"{ref_key}.review": {},
+            f"{ref_key}.mismatch": {},
+        }
+
+        await db.references.update_one({"employee_id": employee_id}, {"$set": replacement_fields})
+
+        await db.employee_documents.update_many(
+            {"employee_id": employee_id, "requirement_id": requirement_id},
             {"$set": {
-                f"ref{reference_num}": {},
-                f"ref{reference_num}_status": "rejected",
-                f"ref{reference_num}_rejected_at": now,
-                f"ref{reference_num}_rejection_reason": request.notes
+                "verified": False,
+                "status": "rejected",
+                "rejected_by": user['user_id'],
+                "rejected_at": now,
+                "rejection_reason": request.notes,
+                "is_active": False
             }}
         )
 
@@ -782,56 +744,64 @@ async def verify_reference_strict(
     Response must exist (cannot verify without returned reference).
     """
     db = get_db()
-    
+
     if reference_num not in [1, 2]:
         raise HTTPException(status_code=400, detail="reference_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+
+    # Verify employee exists
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
-    prefix = f"reference_{reference_num}_"
+
+    ref_key = f"ref{reference_num}"
     requirement_id = f"reference_{reference_num}"
-    
+
+    references_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    if not references_doc:
+        raise HTTPException(status_code=404, detail="Reference record not found")
+
+    ref_data = references_doc.get(ref_key) or {}
+    response_data = ref_data.get("response") or {}
+    review_data = ref_data.get("review") or {}
+    mismatch_data = ref_data.get("mismatch") or {}
+
     # Check reference has response
-    response_data = employee.get(f"{prefix}response_data")
     if not response_data:
         raise HTTPException(status_code=400, detail="Cannot verify reference without returned response")
-    
+
     # Check reference has been reviewed
-    reviewed = employee.get(f"{prefix}reviewed", False)
-    if not reviewed:
+    if not review_data.get("reviewed", False):
         raise HTTPException(status_code=400, detail="Reference must be reviewed before final verification")
-    
+
     # Check mismatch is documented if detected
-    mismatch_detected = employee.get(f"{prefix}mismatch_detected", False)
-    mismatch_notes = employee.get(f"{prefix}mismatch_notes")
+    mismatch_detected = mismatch_data.get("detected", False)
+    mismatch_notes = mismatch_data.get("notes")
     if mismatch_detected and not mismatch_notes:
         raise HTTPException(status_code=400, detail="Mismatch detected but not documented. Review must include mismatch notes.")
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Update employee
-    update_data = {
-        f"{prefix}request_status": "verified",
-        f"{prefix}verified": True,
-        f"{prefix}verified_by": user['user_id'],
-        f"{prefix}verified_at": now,
-    }
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
+
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": {
+            f"{ref_key}.request.status": "verified",
+            f"{ref_key}.verification.verified": True,
+            f"{ref_key}.verification.verified_by": user['user_id'],
+            f"{ref_key}.verification.verified_at": now,
+        }}
+    )
+
     # Update document record as verified
     await db.employee_documents.update_one(
         {"employee_id": employee_id, "requirement_id": requirement_id, "source": "external_referee_response"},
         {"$set": {"verified": True, "verified_by": user['user_id'], "verified_at": now}}
     )
-    
+
     await log_audit_action(user['user_id'], "verify_reference", "employee", employee_id, {
         "reference_num": reference_num,
         "two_step_verification": True
     })
-    
+
     return {
         "status": "success",
         "message": f"Reference {reference_num} verified (2-step verification complete)",
@@ -848,55 +818,63 @@ async def get_reference_status(
     Get detailed reference status for an employee including mismatch indicators.
     """
     db = get_db()
-    
+
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
-    
+
+    references_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0}) or {}
+
     references = []
-    
+
     for ref_num in [1, 2]:
-        prefix = f"reference_{ref_num}_"
-        
+        ref_key = f"ref{ref_num}"
+        ref_data = references_doc.get(ref_key) or {}
+        declared_data = ref_data.get("declared") or {}
+        request_data = ref_data.get("request") or {}
+        response_raw = ref_data.get("response") or {}
+        review_data = ref_data.get("review") or {}
+        verification_data = ref_data.get("verification") or {}
+        mismatch_data = ref_data.get("mismatch") or {}
+
         declared = {
-            "name": employee.get(f"{prefix}name"),
-            "company": employee.get(f"{prefix}company"),
-            "email": employee.get(f"{prefix}email"),
-            "phone": employee.get(f"{prefix}phone"),
-            "job_title": employee.get(f"{prefix}job_title"),
-            "relationship": employee.get(f"{prefix}relationship"),
-            "from_cv": employee.get(f"{prefix}from_cv"),
-            "override_reason": employee.get(f"{prefix}override_reason"),
+            "name": declared_data.get("name"),
+            "company": declared_data.get("organisation") or declared_data.get("company"),
+            "email": declared_data.get("email"),
+            "phone": declared_data.get("phone"),
+            "job_title": declared_data.get("job_title"),
+            "relationship": declared_data.get("relationship"),
+            "from_cv": declared_data.get("from_cv"),
+            "override_reason": declared_data.get("override_reason"),
         }
-        
-        response_data = employee.get(f"{prefix}response_data") or {}
+
         returned = {
-            "name": response_data.get("referee_full_name"),
-            "company": response_data.get("referee_organisation"),
-            "email": response_data.get("referee_work_email"),
-            "phone": response_data.get("referee_phone"),
-            "job_title": response_data.get("referee_job_title"),
-            "relationship": response_data.get("relationship_type"),
+            "name": response_raw.get("referee_full_name"),
+            "company": response_raw.get("referee_organisation"),
+            "email": response_raw.get("referee_work_email"),
+            "phone": response_raw.get("referee_phone"),
+            "job_title": response_raw.get("referee_job_title"),
+            "relationship": response_raw.get("relationship_type"),
         }
-        
+
         ref_status = {
             "reference_num": ref_num,
             "declared": declared,
             "returned": returned,
-            "request_status": employee.get(f"{prefix}request_status"),
-            "request_sent_at": employee.get(f"{prefix}request_sent_at"),
-            "response_received_at": employee.get(f"{prefix}response_received_at"),
-            "mismatch_detected": employee.get(f"{prefix}mismatch_detected", False),
-            "mismatch_notes": employee.get(f"{prefix}mismatch_notes"),
-            "reviewed": employee.get(f"{prefix}reviewed", False),
-            "reviewed_by": employee.get(f"{prefix}reviewed_by"),
-            "reviewed_at": employee.get(f"{prefix}reviewed_at"),
-            "verified": employee.get(f"{prefix}verified", False),
-            "verified_by": employee.get(f"{prefix}verified_by"),
-            "verified_at": employee.get(f"{prefix}verified_at"),
-            "response_data": response_data if user.get('role') in ['admin', 'manager'] else None
+            "request_status": request_data.get("status"),
+            "request_sent_at": request_data.get("sent_at"),
+            "response_received_at": response_raw.get("received_at"),
+            "mismatch_detected": mismatch_data.get("detected", False),
+            "mismatch_notes": mismatch_data.get("notes"),
+            "reviewed": review_data.get("reviewed", False),
+            "reviewed_by": review_data.get("reviewed_by"),
+            "reviewed_at": review_data.get("reviewed_at"),
+            "verified": verification_data.get("verified", False),
+            "verified_by": verification_data.get("verified_by"),
+            "verified_at": verification_data.get("verified_at"),
+            "response_data": response_raw if user.get('role') in ['admin', 'manager'] else None
         }
-        
+
         references.append(ref_status)
-    
+
     return {"references": references}

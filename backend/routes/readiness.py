@@ -77,13 +77,23 @@ async def get_employee_agreements_data(employee_id: str) -> dict:
     Used by work readiness engine to check contract and handbook status.
     """
     db = get_db()
-    
-    # Get agreement submissions
+
+    agreement_acknowledgements = await db.agreement_acknowledgements.find(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+
+    if agreement_acknowledgements:
+        return {
+            "acknowledgements": agreement_acknowledgements
+        }
+
+    # Legacy fallback: preserve readiness compatibility for records not yet migrated.
     agreement_submissions = await db.agreement_submissions.find(
         {"employee_id": employee_id},
         {"_id": 0}
     ).sort("created_at", -1).to_list(100)
-    
+
     return {
         "acknowledgements": agreement_submissions
     }

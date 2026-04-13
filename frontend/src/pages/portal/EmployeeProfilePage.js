@@ -149,6 +149,7 @@ export default function EmployeeProfilePage() {
   const [editDeclarationsOpen, setEditDeclarationsOpen] = useState(false);
   const [selectedReferenceId, setSelectedReferenceId] = useState(null);
   const [selectedReferenceData, setSelectedReferenceData] = useState(null);
+  const [referencesTabRefreshKey, setReferencesTabRefreshKey] = useState(0);
   const [supersedeContractOpen, setSupersedeContractOpen] = useState(false);
   const [currentContract, setCurrentContract] = useState(null);
   
@@ -980,6 +981,17 @@ export default function EmployeeProfilePage() {
       setCompliance(response.data);
     } catch (error) {
       console.error('Failed to fetch compliance:', error);
+    }
+  };
+
+  const fetchEmployee = async () => {
+    try {
+      const response = await axios.get(`${API}/employees/${employeeId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setEmployee(response.data);
+    } catch (error) {
+      console.error('Failed to fetch employee:', error);
     }
   };
 
@@ -4761,6 +4773,7 @@ export default function EmployeeProfilePage() {
         {/* References Tab - Extracted to ReferencesTabContent */}
         <TabsContent value="references" data-testid="section-references-root">
           <ReferencesTabContent 
+            key={`references-${employeeId}-${referencesTabRefreshKey}`}
             employeeId={employeeId}
             onRefresh={() => {
               fetchComplianceFile();
@@ -7553,11 +7566,15 @@ export default function EmployeeProfilePage() {
         employeeId={employeeId}
         referenceId={selectedReferenceId}
         currentData={selectedReferenceData}
-        onSuccess={() => {
-          fetchEmployee();
-          fetchComplianceFile();
-          fetchReferenceStatus();
-          fetchRecruitmentStatus();
+        onSuccess={async () => {
+          await Promise.allSettled([
+            fetchEmployee(),
+            fetchCompliance(),
+            fetchComplianceFile(),
+            fetchReferenceStatus(),
+            fetchRecruitmentStatus(),
+          ]);
+          setReferencesTabRefreshKey((current) => current + 1);
         }}
       />
       

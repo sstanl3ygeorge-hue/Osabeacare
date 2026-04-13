@@ -82,7 +82,7 @@ export default function EditReferenceDialog({
 
     setIsLoading(true);
     try {
-      await axios.put(
+      const response = await axios.put(
         `${API}/employees/${employeeId}/references/${referenceId}`,
         {
           ...formData,
@@ -90,9 +90,17 @@ export default function EditReferenceDialog({
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Reference updated');
-      if (onSuccess) onSuccess();
+
+      if (onSuccess) {
+        try {
+          await onSuccess();
+        } catch (refreshError) {
+          console.error('Failed to refresh reference data after update:', refreshError);
+        }
+      }
+
       onClose();
+      toast.success(response.data?.message || 'Reference updated');
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to update reference');
     } finally {

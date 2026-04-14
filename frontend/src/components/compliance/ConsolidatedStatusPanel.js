@@ -269,7 +269,7 @@ export default function ConsolidatedStatusPanel({
                   {isBlocked ? (
                     <>Cannot be promoted yet</>
                   ) : (
-                    <>All requirements complete</>
+                    <>No current pre-employment blockers</>
                   )}
                 </p>
                 <p className="text-sm text-gray-600">
@@ -319,7 +319,7 @@ export default function ConsolidatedStatusPanel({
           <CardHeader className="py-3 px-4 bg-red-50/50 border-b border-red-100">
             <CardTitle className="text-base font-semibold text-red-800 flex items-center gap-2">
               <XCircle className="h-5 w-5" />
-              WHAT'S BLOCKING PROMOTION ({blockers.length} items)
+              OPEN PRE-EMPLOYMENT BLOCKERS ({blockers.length} items)
             </CardTitle>
             <p className="text-xs text-gray-600 mt-1">
               🔴 Critical = Missing/Unverified &nbsp;|&nbsp; 🟡 Pending = Awaiting Verification
@@ -541,7 +541,7 @@ export default function ConsolidatedStatusPanel({
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-700">
-              PROGRESS: {gatesPassed}/{totalGates} requirements complete ({gatesPercentage}%)
+              PRE-EMPLOYMENT PROGRESS: {gatesPassed}/{totalGates} requirements complete ({gatesPercentage}%)
             </CardTitle>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />

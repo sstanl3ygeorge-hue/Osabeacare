@@ -484,7 +484,7 @@ export default function RecruitmentPage() {
                         {approval?.progressPct === 100 && (
                           <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200" data-testid={`ready-badge-${applicant.id}`}>
                             <CheckCircle className="w-3 h-3 mr-1" />
-                            Ready
+                            Progress complete
                           </Badge>
                         )}
                       </div>
@@ -613,7 +613,7 @@ export default function RecruitmentPage() {
               Cannot Approve - Blockers Exist
             </DialogTitle>
             <DialogDescription>
-              The following items must be completed before recruitment approval.
+              The following items must be resolved or verified before recruitment approval.
             </DialogDescription>
           </DialogHeader>
           

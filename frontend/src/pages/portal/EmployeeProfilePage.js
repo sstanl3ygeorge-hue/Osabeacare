@@ -3149,18 +3149,18 @@ export default function EmployeeProfilePage() {
                         </span>
                       );
                     }
-                    // Ready - 100% complete, pending promotion
+                    // Progress complete - 100% complete, pending promotion
                     if (isComplete) {
                       return (
                         <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
-                          Ready
+                          Progress complete
                         </span>
                       );
                     }
-                    // Awaiting Approval - 0-99% complete (default for all applicants/onboarding)
+                    // Outstanding items remain - 0-99% complete (default for all applicants/onboarding)
                     return (
                       <span className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-800" data-testid="awaiting-approval-badge">
-                        Awaiting Approval
+                        Outstanding items remain
                       </span>
                     );
                   })()}

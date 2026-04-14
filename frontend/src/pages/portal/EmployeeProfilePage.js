@@ -4220,6 +4220,11 @@ export default function EmployeeProfilePage() {
               <ApplicationFormViewer
                 employeeId={employeeId}
                 employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                applicationSubmission={applicationSubmission}
+                applicationPdfDocument={applicationPdfDocument}
+                onApplicationUpdated={async () => {
+                  await Promise.all([fetchData(), fetchFormSubmissions()]);
+                }}
               />
 
               <div className="border-t pt-6" data-testid="section-forms-declarations">

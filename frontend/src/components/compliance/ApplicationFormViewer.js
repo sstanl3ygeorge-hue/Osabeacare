@@ -49,19 +49,34 @@ const DeclarationItem = ({ label, value, details }) => (
   </div>
 );
 
-export default function ApplicationFormViewer({ employeeId, employeeName, onClose }) {
+export default function ApplicationFormViewer({
+  employeeId,
+  employeeName,
+  onClose,
+  applicationSubmission = undefined,
+  applicationPdfDocument = undefined,
+  onApplicationUpdated,
+}) {
   const [loading, setLoading] = useState(true);
   const [applicationData, setApplicationData] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const usingProvidedApplicationState =
+    applicationSubmission !== undefined || applicationPdfDocument !== undefined;
+  const resolvedApplicationData = usingProvidedApplicationState
+    ? (applicationSubmission?.form_data || applicationSubmission?.data || null)
+    : applicationData;
+  const resolvedPdfUrl = usingProvidedApplicationState
+    ? (applicationPdfDocument?.file_url || applicationSubmission?.file_url || null)
+    : pdfUrl;
 
   useEffect(() => {
-    if (employeeId) {
+    if (employeeId && !usingProvidedApplicationState) {
       fetchApplicationData();
     }
-  }, [employeeId]);
+  }, [employeeId, usingProvidedApplicationState]);
 
   const fetchApplicationData = async () => {
     try {
@@ -69,9 +84,12 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
       const token = localStorage.getItem('token');
       
       // Fetch form submissions for this employee
-      const response = await axios.get(`${API}/api/employees/${employeeId}/forms`, {
+      const response = await axios.get(`${API}/api/form-submissions`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { requirement_id: 'application_form' }
+        params: {
+          employee_id: employeeId,
+          requirement_id: 'application_form'
+        }
       });
       
       const forms = response.data.forms || response.data || [];
@@ -126,7 +144,11 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
       
       toast.success('Application form uploaded successfully');
       setShowUploadDialog(false);
-      fetchApplicationData();
+      if (onApplicationUpdated) {
+        await onApplicationUpdated();
+      } else {
+        fetchApplicationData();
+      }
       
     } catch (error) {
       console.error('Upload failed:', error);
@@ -144,7 +166,7 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
     );
   }
 
-  if (!applicationData && !pdfUrl) {
+  if (!resolvedApplicationData && !resolvedPdfUrl) {
     return (
       <Card className="border-dashed">
         <CardContent className="py-12 text-center">
@@ -163,48 +185,48 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
   }
 
   // Handle both nested structure (personal_details.first_name) and flat structure (first_name)
-  const personal = applicationData?.personal_details || {
-    title: applicationData?.title,
-    first_name: applicationData?.first_name,
-    middle_name: applicationData?.middle_name,
-    last_name: applicationData?.last_name,
-    preferred_name: applicationData?.preferred_name,
-    date_of_birth: applicationData?.date_of_birth,
-    national_insurance: applicationData?.national_insurance || applicationData?.ni_number,
+  const personal = resolvedApplicationData?.personal_details || {
+    title: resolvedApplicationData?.title,
+    first_name: resolvedApplicationData?.first_name,
+    middle_name: resolvedApplicationData?.middle_name,
+    last_name: resolvedApplicationData?.last_name,
+    preferred_name: resolvedApplicationData?.preferred_name,
+    date_of_birth: resolvedApplicationData?.date_of_birth,
+    national_insurance: resolvedApplicationData?.national_insurance || resolvedApplicationData?.ni_number,
   };
   
-  const contact = applicationData?.contact_details || {
-    email: applicationData?.email,
-    phone: applicationData?.phone,
-    phone_secondary: applicationData?.phone_secondary,
+  const contact = resolvedApplicationData?.contact_details || {
+    email: resolvedApplicationData?.email,
+    phone: resolvedApplicationData?.phone,
+    phone_secondary: resolvedApplicationData?.phone_secondary,
   };
   
-  const address = applicationData?.address || {
-    line_1: applicationData?.address_line_1,
-    line_2: applicationData?.address_line_2,
-    city: applicationData?.city,
-    county: applicationData?.county,
-    postcode: applicationData?.postcode,
-    country: applicationData?.country,
-    years_at_address: applicationData?.years_at_current_address,
+  const address = resolvedApplicationData?.address || {
+    line_1: resolvedApplicationData?.address_line_1,
+    line_2: resolvedApplicationData?.address_line_2,
+    city: resolvedApplicationData?.city,
+    county: resolvedApplicationData?.county,
+    postcode: resolvedApplicationData?.postcode,
+    country: resolvedApplicationData?.country,
+    years_at_address: resolvedApplicationData?.years_at_current_address,
   };
   
-  const roleAvail = applicationData?.role_availability || {
-    role_applied: applicationData?.role_applied,
-    availability: applicationData?.availability,
-    earliest_start_date: applicationData?.earliest_start_date,
-    has_driving_licence: applicationData?.has_driving_licence,
-    has_own_transport: applicationData?.has_own_transport,
+  const roleAvail = resolvedApplicationData?.role_availability || {
+    role_applied: resolvedApplicationData?.role_applied,
+    availability: resolvedApplicationData?.availability,
+    earliest_start_date: resolvedApplicationData?.earliest_start_date,
+    has_driving_licence: resolvedApplicationData?.has_driving_licence,
+    has_own_transport: resolvedApplicationData?.has_own_transport,
   };
   
-  const employment = applicationData?.employment_history || [];
-  const references = applicationData?.references || [];
-  const qualifications = applicationData?.qualifications || {};
-  const healthDecl = applicationData?.health_declaration || {};
-  const criminalDecl = applicationData?.criminal_declaration || {};
-  const rtwDecl = applicationData?.right_to_work || {};
-  const declarations = applicationData?.declarations || {};
-  const gapExplanation = applicationData?.employment_gap_explanation || applicationData?.gap_explanation;
+  const employment = resolvedApplicationData?.employment_history || [];
+  const references = resolvedApplicationData?.references || [];
+  const qualifications = resolvedApplicationData?.qualifications || {};
+  const healthDecl = resolvedApplicationData?.health_declaration || {};
+  const criminalDecl = resolvedApplicationData?.criminal_declaration || {};
+  const rtwDecl = resolvedApplicationData?.right_to_work || {};
+  const declarations = resolvedApplicationData?.declarations || {};
+  const gapExplanation = resolvedApplicationData?.employment_gap_explanation || resolvedApplicationData?.gap_explanation;
 
   return (
     <>
@@ -219,9 +241,9 @@ export default function ApplicationFormViewer({ employeeId, employeeName, onClos
               </Badge>
             </CardTitle>
             <div className="flex gap-2">
-              {pdfUrl && (
+              {resolvedPdfUrl && (
                 <Button variant="outline" size="sm" asChild className="rounded-xl">
-                  <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
+                  <a href={resolvedPdfUrl} target="_blank" rel="noopener noreferrer">
                     <Eye className="h-4 w-4 mr-1" />
                     View PDF
                   </a>

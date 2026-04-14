@@ -16,6 +16,13 @@ import VerificationStampDialog from './VerificationStampDialog';
 import VerificationChecklistModal from './VerificationChecklistModal';
 import AmendmentRequestDialog from './AmendmentRequestDialog';
 import QuickVerifyStampDialog from './QuickVerifyStampDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../ui/dialog';
 import { formatBackendDate } from '../../lib/dateUtils';
 import { getEvidenceRules } from './evidenceRules';
 
@@ -105,6 +112,7 @@ export default function UploadRequirementCard({
   
   // NEW: Stamp All state for RTW/DBS
   const [stampingAll, setStampingAll] = useState(false);
+  const [stampAllDialog, setStampAllDialog] = useState({ open: false, message: '', files: [] });
   
   // Handle Stamp All for RTW/DBS - stamps both evidence and verification proof
   const handleStampAll = async (requirementKey, filesToStamp) => {
@@ -1828,9 +1836,11 @@ export default function UploadRequirementCard({
                               `It's recommended to upload proof (e.g., Home Office screenshot) before stamping.\n\n` +
                               `Continue anyway?`;
                           
-                          if (window.confirm(confirmMsg)) {
-                            handleStampAll(key, activeFiles.filter(f => !f.verification_stamp));
-                          }
+                          setStampAllDialog({
+                            open: true,
+                            message: confirmMsg,
+                            files: activeFiles.filter(f => !f.verification_stamp)
+                          });
                         }}
                         className="h-8 text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg"
                         data-testid={`${key}-confirm-stamp-all-btn`}
@@ -2057,6 +2067,32 @@ export default function UploadRequirementCard({
           }
         }}
       />
+
+      <Dialog
+        open={stampAllDialog.open}
+        onOpenChange={(open) => setStampAllDialog(prev => ({ ...prev, open }))}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm & Stamp</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-text-muted whitespace-pre-line py-2">{stampAllDialog.message}</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStampAllDialog({ open: false, message: '', files: [] })}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => {
+                handleStampAll(key, stampAllDialog.files);
+                setStampAllDialog({ open: false, message: '', files: [] });
+              }}
+            >
+              Continue
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </RequirementSectionShell>
   );
 }

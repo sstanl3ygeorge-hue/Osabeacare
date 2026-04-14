@@ -128,6 +128,10 @@ export default function AuditReadyTrainingMatrix({
   const [deletingItem, setDeletingItem] = useState(null);
   const [deleteReason, setDeleteReason] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [unverifyDialogOpen, setUnverifyDialogOpen] = useState(false);
+  const [unverifyItem, setUnverifyItem] = useState(null);
+  const [unverifyReason, setUnverifyReason] = useState('');
+  const [unverifying, setUnverifying] = useState(false);
   
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin' || user?.role === 'super_admin';
 
@@ -320,20 +324,31 @@ export default function AuditReadyTrainingMatrix({
 
   // Unverify training record - Admin only, requires reason
   const handleUnverifyTraining = async (item) => {
-    const reason = window.prompt('Reason for unverifying this training record:');
-    if (!reason) return;
-    
+    setUnverifyItem(item);
+    setUnverifyReason('');
+    setUnverifyDialogOpen(true);
+  };
+
+  const confirmUnverifyTraining = async () => {
+    if (!unverifyItem || !unverifyReason.trim()) return;
+
+    setUnverifying(true);
     try {
       await axios.post(
-        `${API}/api/employees/${employeeId}/training/${item.code || item.id}/unverify`,
-        { reason },
+        `${API}/api/employees/${employeeId}/training/${unverifyItem.code || unverifyItem.id}/unverify`,
+        { reason: unverifyReason.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success(`${item.title} unverified`);
+      toast.success(`${unverifyItem.title} unverified`);
+      setUnverifyDialogOpen(false);
+      setUnverifyItem(null);
+      setUnverifyReason('');
       fetchTrainingData();
       onRefresh?.();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to unverify training');
+    } finally {
+      setUnverifying(false);
     }
   };
 
@@ -1275,6 +1290,52 @@ export default function AuditReadyTrainingMatrix({
                 <Trash2 className="h-4 w-4 mr-2" />
               )}
               Delete Training
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={unverifyDialogOpen} onOpenChange={setUnverifyDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Unverify Training Record
+            </DialogTitle>
+            <DialogDescription>
+              This will mark "{unverifyItem?.title}" as unverified and require re-verification.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <label className="block text-sm font-medium">Reason *</label>
+            <Input
+              value={unverifyReason}
+              onChange={(e) => setUnverifyReason(e.target.value)}
+              placeholder="Reason for unverifying this training record"
+              data-testid="unverify-reason-input"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setUnverifyDialogOpen(false);
+                setUnverifyItem(null);
+                setUnverifyReason('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={confirmUnverifyTraining}
+              disabled={unverifying || !unverifyReason.trim()}
+              data-testid="confirm-unverify-btn"
+            >
+              {unverifying ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Unverify
             </Button>
           </DialogFooter>
         </DialogContent>

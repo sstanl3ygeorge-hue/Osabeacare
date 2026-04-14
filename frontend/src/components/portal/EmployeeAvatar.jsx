@@ -56,9 +56,11 @@ export default function EmployeeAvatar({
           setPhotoUrl(blobUrl);
         }
       } catch (err) {
-        console.error('Failed to fetch profile photo:', err);
         if (mounted) {
-          setError(true);
+          if (err?.response?.status !== 404) {
+            console.error('Failed to fetch profile photo:', err);
+            setError(true);
+          }
           setPhotoUrl(null);
         }
       } finally {

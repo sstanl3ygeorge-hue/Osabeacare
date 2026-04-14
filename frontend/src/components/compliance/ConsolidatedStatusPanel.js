@@ -337,7 +337,7 @@ export default function ConsolidatedStatusPanel({
                   // Reference blockers
                   if (blocker.gate?.includes('reference')) {
                     return { 
-                      label: 'Review', 
+                      label: 'Open Reference', 
                       tab: 'references',
                       sectionId: 'section-references-root',
                       tooltip: 'Review and verify the reference response'
@@ -421,7 +421,7 @@ export default function ConsolidatedStatusPanel({
                       blocker.gate?.includes('right_to_work') || blocker.gate?.includes('identity') || 
                       blocker.gate?.includes('poa') || blocker.gate?.includes('proof_of_address')) {
                     return { 
-                      label: 'Verify with Evidence', 
+                      label: 'Open Verification Steps', 
                       tab: 'checklist',
                       sectionId: blocker.gate?.includes('dbs') ? 'section-dbs' :
                         blocker.gate?.includes('rtw') || blocker.gate?.includes('right_to_work') ? 'section-right_to_work' :
@@ -476,7 +476,11 @@ export default function ConsolidatedStatusPanel({
                         </div>
                         <p className="text-sm text-gray-500">
                           {severity === 'PENDING' 
-                            ? 'Uploaded - awaiting admin verification'
+                            ? blocker.gate?.includes('reference')
+                              ? 'Reference review still required'
+                              : blocker.gate?.includes('dbs') || blocker.gate?.includes('rtw') || blocker.gate?.includes('right_to_work')
+                                ? 'Evidence uploaded - verification steps still required'
+                                : 'Uploaded - awaiting admin verification'
                             : (gateData?.requirement || 'Required for promotion')
                           }
                         </p>
@@ -501,7 +505,7 @@ export default function ConsolidatedStatusPanel({
                               variant="outline"
                               onClick={() => {
                                 // If this is a verification action and callback is provided, use it
-                                if (action.label === 'Verify with Evidence' && onVerifyWithEvidence) {
+                                if (action.label === 'Open Verification Steps' && onVerifyWithEvidence) {
                                   onVerifyWithEvidence(blocker.gate, gateData);
                                 } else {
                                   if (onNavigateToItem) {

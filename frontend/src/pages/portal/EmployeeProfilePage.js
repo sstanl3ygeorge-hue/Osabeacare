@@ -96,6 +96,16 @@ const statusColors = {
   not_applicable: 'status-neutral'
 };
 
+const getDocumentKeyCandidates = (document) => [
+  document?.requirement_id,
+  document?.document_type,
+  document?.category,
+  document?.category_id,
+].filter(Boolean);
+
+const hasExactDocumentKey = (document, allowedKeys) =>
+  getDocumentKeyCandidates(document).some((key) => allowedKeys.includes(key));
+
 export default function EmployeeProfilePage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
@@ -152,6 +162,26 @@ export default function EmployeeProfilePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [rightToWorkState, setRightToWorkState] = useState({
+    documentTypeOverride: '',
+    expiryDateOverride: '',
+    verified: false,
+    verifiedBy: '',
+    verifiedAt: '',
+    invalid: false,
+  });
+  const [identityState, setIdentityState] = useState({
+    verified: false,
+    verifiedBy: '',
+    verifiedAt: '',
+    invalid: false,
+  });
+  const [proofOfAddressState, setProofOfAddressState] = useState({
+    verified: false,
+    verifiedBy: '',
+    verifiedAt: '',
+    invalid: false,
+  });
   const [importAppOpen, setImportAppOpen] = useState(false);
   const [importAppFile, setImportAppFile] = useState(null);
   const [importCvFile, setImportCvFile] = useState(null);
@@ -1376,6 +1406,30 @@ export default function EmployeeProfilePage() {
     setUploadDialogOpen(true);
   };
 
+  const openRightToWorkUpload = () => {
+    setSelectedRequirement('right_to_work_documents');
+    setSelectedDocType('right_to_work_documents');
+    setDocumentLabel('Right to Work Document');
+    setUploadFile(null);
+    setUploadDialogOpen(true);
+  };
+
+  const openIdentityUpload = () => {
+    setSelectedRequirement('id_document');
+    setSelectedDocType('id_document');
+    setDocumentLabel('Identity Document');
+    setUploadFile(null);
+    setUploadDialogOpen(true);
+  };
+
+  const openProofOfAddressUpload = () => {
+    setSelectedRequirement('proof_of_address');
+    setSelectedDocType('proof_of_address');
+    setDocumentLabel('Proof of Address Document');
+    setUploadFile(null);
+    setUploadDialogOpen(true);
+  };
+
   const handleUpdateDocumentStatus = async (docId, status) => {
     try {
       await axios.put(`${API}/employee-documents/${docId}`, { status }, {
@@ -1755,7 +1809,7 @@ export default function EmployeeProfilePage() {
   
   // Check if a requirement supports extraction
   const isExtractableRequirement = (requirementId) => {
-    return EXTRACTABLE_REQUIREMENTS.some(r => requirementId?.toLowerCase().includes(r.toLowerCase()));
+    return EXTRACTABLE_REQUIREMENTS.includes(String(requirementId || '').toLowerCase());
   };
   
   // Open document extraction review
@@ -3023,7 +3077,24 @@ export default function EmployeeProfilePage() {
     formSubmissions.find((submission) =>
       submission?.requirement_id === 'application_form' || submission?.form_type === 'application_form'
     ) || null;
+  const applicationRightToWork =
+    applicationSubmission?.form_data?.right_to_work ||
+    applicationSubmission?.data?.right_to_work ||
+    {};
   const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
+  const rightToWorkDocuments = documents.filter((document) =>
+    hasExactDocumentKey(document, ['right_to_work_documents', 'right_to_work'])
+  );
+  const identityDocuments = documents.filter((document) =>
+    hasExactDocumentKey(document, ['identity_documents', 'id_document', 'passport', 'driving_licence'])
+  );
+  const proofOfAddressDocuments = documents.filter((document) =>
+    hasExactDocumentKey(document, ['proof_of_address'])
+  );
+  const activeRightToWorkDocument = rightToWorkDocuments[0] || null;
+  const activeIdentityDocument = identityDocuments[0] || null;
+  const activeProofOfAddressDocument = proofOfAddressDocuments[0] || null;
+  const rtwSummary = complianceRequirements?.rtw_summary || {};
   const cvDocuments = documents.filter((document) => ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id));
   const activeCvDocument = cvDocuments.find((document) =>
     [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(employee?.cv_document_id)
@@ -3078,6 +3149,127 @@ export default function EmployeeProfilePage() {
     !employmentHistoryExists ? 'Add or extract employment history' : null,
     !allGapsResolved ? 'Review or resolve employment gaps' : null,
   ].filter(Boolean);
+  const rightToWorkHasDocument = Boolean(activeRightToWorkDocument);
+  const rightToWorkDocumentType =
+    rightToWorkState.documentTypeOverride ||
+    (applicationRightToWork?.share_code ? 'share_code' :
+      applicationRightToWork?.visa_type ? 'visa' :
+      rtwSummary.permission_type ||
+      activeRightToWorkDocument?.requirement_id ||
+      '');
+  const rightToWorkExpiryValue =
+    rightToWorkState.expiryDateOverride ||
+    rtwSummary.expiry_date ||
+    applicationRightToWork?.visa_expiry ||
+    '';
+  const rightToWorkExpiryDate = rightToWorkExpiryValue ? parseBackendDate(rightToWorkExpiryValue) : null;
+  const rightToWorkExpired = Boolean(
+    rightToWorkExpiryDate && rightToWorkExpiryDate < new Date(new Date().setHours(0, 0, 0, 0))
+  );
+  const rightToWorkVerified = Boolean(
+    rightToWorkHasDocument &&
+    rightToWorkState.verified === true &&
+    !rightToWorkExpired &&
+    !rightToWorkState.invalid
+  );
+  const rightToWorkStatusLabel = !rightToWorkHasDocument
+    ? 'Missing'
+    : rightToWorkExpired
+      ? 'Expired'
+      : rightToWorkState.invalid
+        ? 'Invalid'
+        : rightToWorkState.verified
+          ? 'Verified'
+          : 'Pending verification';
+  const rightToWorkStatusBadgeClass = rightToWorkVerified
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : rightToWorkExpired || rightToWorkState.invalid
+      ? 'bg-red-100 text-red-700 border-red-200'
+      : rightToWorkHasDocument
+        ? 'bg-amber-100 text-amber-700 border-amber-200'
+        : 'bg-gray-100 text-gray-600 border-gray-200';
+  const rightToWorkBlockers = [
+    !rightToWorkHasDocument ? 'Upload right to work document' : null,
+    rightToWorkHasDocument && rightToWorkState.invalid ? 'Upload valid right to work document' : null,
+    rightToWorkHasDocument && !rightToWorkState.invalid && !rightToWorkState.verified ? 'Verify right to work' : null,
+    rightToWorkExpired ? 'Upload current right to work document' : null,
+  ].filter(Boolean);
+  const identityHasDocument = Boolean(activeIdentityDocument);
+  const identityDocumentType = activeIdentityDocument?.requirement_id || '';
+  const identityVerified = Boolean(identityHasDocument && identityState.verified === true && !identityState.invalid);
+  const identityStatusLabel = !identityHasDocument
+    ? 'Missing'
+    : identityState.invalid
+      ? 'Invalid'
+    : identityVerified
+      ? 'Verified'
+      : 'Pending verification';
+  const identityStatusBadgeClass = identityVerified
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : identityState.invalid
+      ? 'bg-red-100 text-red-700 border-red-200'
+    : identityHasDocument
+      ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : 'bg-gray-100 text-gray-600 border-gray-200';
+  const identityBlockers = [
+    !identityHasDocument ? 'Upload identity document' : null,
+    identityHasDocument && identityState.invalid ? 'Upload valid identity document' : null,
+    identityHasDocument && !identityState.invalid && !identityState.verified ? 'Verify identity' : null,
+  ].filter(Boolean);
+  const proofOfAddressHasDocument = Boolean(activeProofOfAddressDocument);
+  const proofOfAddressDocumentType = activeProofOfAddressDocument?.requirement_id || '';
+  const proofOfAddressIssueDate =
+    activeProofOfAddressDocument?.issue_date ||
+    activeProofOfAddressDocument?.uploaded_at ||
+    activeProofOfAddressDocument?.created_at ||
+    '';
+  const proofOfAddressVerified = Boolean(proofOfAddressHasDocument && proofOfAddressState.verified === true && !proofOfAddressState.invalid);
+  const proofOfAddressStatusLabel = !proofOfAddressHasDocument
+    ? 'Missing'
+    : proofOfAddressState.invalid
+      ? 'Invalid'
+    : proofOfAddressVerified
+      ? 'Verified'
+      : 'Pending verification';
+  const proofOfAddressStatusBadgeClass = proofOfAddressVerified
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : proofOfAddressState.invalid
+      ? 'bg-red-100 text-red-700 border-red-200'
+    : proofOfAddressHasDocument
+      ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : 'bg-gray-100 text-gray-600 border-gray-200';
+  const proofOfAddressBlockers = [
+    !proofOfAddressHasDocument ? 'Upload proof of address' : null,
+    proofOfAddressHasDocument && proofOfAddressState.invalid ? 'Upload valid proof of address' : null,
+    proofOfAddressHasDocument && !proofOfAddressState.invalid && !proofOfAddressState.verified ? 'Verify proof of address' : null,
+  ].filter(Boolean);
+
+  useEffect(() => {
+    setRightToWorkState({
+      documentTypeOverride: '',
+      expiryDateOverride: '',
+      verified: Boolean(rtwSummary.is_verified),
+      verifiedBy: rtwSummary.verified_by || '',
+      verifiedAt: rtwSummary.verified_at || '',
+      invalid: false,
+    });
+  }, [employeeId, documents, complianceRequirements, applicationSubmission]);
+
+  useEffect(() => {
+    setIdentityState({
+      verified: Boolean(activeIdentityDocument?.verified || activeIdentityDocument?.status === 'verified'),
+      verifiedBy: activeIdentityDocument?.verified_by || '',
+      verifiedAt: activeIdentityDocument?.verified_at || '',
+      invalid: false,
+    });
+
+    setProofOfAddressState({
+      verified: Boolean(activeProofOfAddressDocument?.verified || activeProofOfAddressDocument?.status === 'verified'),
+      verifiedBy: activeProofOfAddressDocument?.verified_by || '',
+      verifiedAt: activeProofOfAddressDocument?.verified_at || '',
+      invalid: false,
+    });
+  }, [employeeId, documents]);
 
   return (
     <div className="space-y-6" data-testid="employee-profile">
@@ -4965,6 +5157,423 @@ export default function EmployeeProfilePage() {
                 <div className="space-y-6">
                   {/* Employment Gap Verification moved to Employment History tab only */}
 
+                  <div id="section-right_to_work" className="space-y-4">
+                    <div className={`rounded-xl border p-4 ${rightToWorkVerified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 ${rightToWorkVerified ? 'text-green-600' : 'text-amber-600'}`}>
+                            {rightToWorkVerified ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                          </div>
+                          <div>
+                            <p className={`font-medium ${rightToWorkVerified ? 'text-green-800' : 'text-amber-800'}`}>
+                              Right to Work: {rightToWorkVerified ? 'Verified' : 'Incomplete'}
+                            </p>
+                            {!rightToWorkVerified && rightToWorkBlockers.length > 0 && (
+                              <p className="mt-1 text-sm text-amber-700">
+                                Blockers: {rightToWorkBlockers.join(' · ')}
+                              </p>
+                            )}
+                            {rightToWorkVerified && (
+                              <p className="mt-1 text-sm text-green-700">
+                                Right to work evidence is present and marked verified.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={rightToWorkStatusBadgeClass}>
+                          {rightToWorkStatusLabel}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Document</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{rightToWorkHasDocument ? 'Uploaded' : 'Missing'}</p>
+                      </div>
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Type</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{rightToWorkDocumentType || 'Not set'}</p>
+                      </div>
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Expiry date</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">
+                          {rightToWorkExpiryValue ? formatBackendDate(rightToWorkExpiryValue) : 'Not set'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Verification</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{rightToWorkVerified ? 'Complete' : 'Required'}</p>
+                      </div>
+                    </div>
+
+                    <Card className="border-[#E4E8EB] shadow-sm">
+                      <CardHeader className="pb-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <CardTitle className="font-heading text-lg">Right to Work Verification</CardTitle>
+                            <p className="mt-1 text-xs text-text-muted">
+                              Upload the evidence, set the document type and expiry where needed, then verify before hiring.
+                            </p>
+                          </div>
+                          <Badge variant="outline" className={rightToWorkStatusBadgeClass}>
+                            {rightToWorkStatusLabel}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Document type</Label>
+                            <Select
+                              value={rightToWorkDocumentType || 'unset'}
+                              onValueChange={(value) => setRightToWorkState((currentState) => ({
+                                ...currentState,
+                                documentTypeOverride: value === 'unset' ? '' : value,
+                              }))}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select document type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="unset">Not set</SelectItem>
+                                <SelectItem value="passport">Passport</SelectItem>
+                                <SelectItem value="visa">Visa</SelectItem>
+                                <SelectItem value="share_code">Share code</SelectItem>
+                                <SelectItem value="brp">BRP</SelectItem>
+                                <SelectItem value="other">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>{rightToWorkExpiryValue ? 'Edit expiry date' : 'Set expiry date'}</Label>
+                            <Input
+                              type="date"
+                              value={rightToWorkExpiryValue ? String(rightToWorkExpiryValue).slice(0, 10) : ''}
+                              onChange={(event) => setRightToWorkState((currentState) => ({
+                                ...currentState,
+                                expiryDateOverride: event.target.value,
+                              }))}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="rounded-xl border border-[#E4E8EB] bg-gray-50 p-4">
+                          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">Current RTW status</p>
+                              <p className="mt-1 text-sm text-gray-600">
+                                {rightToWorkExpired
+                                  ? 'The recorded right to work permission has expired and must be replaced or rechecked.'
+                                  : rightToWorkState.invalid
+                                    ? 'The current right to work evidence has been marked invalid.'
+                                    : rightToWorkVerified
+                                      ? 'This right to work record is currently marked verified.'
+                                      : 'Right to work is not yet complete for hiring.'}
+                              </p>
+                              {rightToWorkState.verifiedBy && (
+                                <p className="mt-1 text-xs text-text-muted">
+                                  Verified by {rightToWorkState.verifiedBy}{rightToWorkState.verifiedAt ? ` on ${formatBackendDate(rightToWorkState.verifiedAt)}` : ''}
+                                </p>
+                              )}
+                            </div>
+                            <Badge variant="outline" className={rightToWorkStatusBadgeClass}>
+                              {rightToWorkStatusLabel}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" onClick={openRightToWorkUpload}>
+                            <Upload className="h-4 w-4 mr-1" />
+                            {rightToWorkHasDocument ? 'Replace Document' : 'Upload Document'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setRightToWorkState((currentState) => ({
+                              ...currentState,
+                              invalid: false,
+                              verified: true,
+                              verifiedBy: user?.name || user?.email || 'Admin',
+                              verifiedAt: new Date().toISOString(),
+                            }))}
+                            disabled={!rightToWorkHasDocument || rightToWorkExpired}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Mark as Verified
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setRightToWorkState((currentState) => ({
+                              ...currentState,
+                              verified: false,
+                              verifiedBy: '',
+                              verifiedAt: '',
+                              invalid: true,
+                            }))}
+                            disabled={!rightToWorkHasDocument}
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Mark as Invalid
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setRightToWorkState((currentState) => ({
+                              ...currentState,
+                              verified: false,
+                              verifiedBy: '',
+                              verifiedAt: '',
+                              invalid: false,
+                            }))}
+                            disabled={!rightToWorkHasDocument}
+                          >
+                            <RotateCcw className="h-4 w-4 mr-1" />
+                            Mark Incomplete
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div id="section-identity" className="space-y-4">
+                    <div className={`rounded-xl border p-4 ${identityVerified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 ${identityVerified ? 'text-green-600' : 'text-amber-600'}`}>
+                            {identityVerified ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                          </div>
+                          <div>
+                            <p className={`font-medium ${identityVerified ? 'text-green-800' : 'text-amber-800'}`}>
+                              Identity: {identityVerified ? 'Verified' : 'Incomplete'}
+                            </p>
+                            {!identityVerified && identityBlockers.length > 0 && (
+                              <p className="mt-1 text-sm text-amber-700">
+                                Blockers: {identityBlockers.join(' · ')}
+                              </p>
+                            )}
+                            {identityVerified && (
+                              <p className="mt-1 text-sm text-green-700">
+                                Identity evidence is present and marked verified.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={identityStatusBadgeClass}>
+                          {identityStatusLabel}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <Card className="border-[#E4E8EB] shadow-sm">
+                      <CardHeader className="pb-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <CardTitle className="font-heading text-lg">Identity Verification</CardTitle>
+                            <p className="mt-1 text-xs text-text-muted">
+                              Upload identity evidence and mark it verified before progressing the applicant.
+                            </p>
+                          </div>
+                          <Badge variant="outline" className={identityStatusBadgeClass}>
+                            {identityStatusLabel}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Document</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{identityHasDocument ? 'Uploaded' : 'Missing'}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Type</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{identityDocumentType || 'Not set'}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Verified by</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{identityState.verifiedBy || 'Not set'}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Verified at</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{identityState.verifiedAt ? formatBackendDate(identityState.verifiedAt) : 'Not set'}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" onClick={openIdentityUpload}>
+                            <Upload className="h-4 w-4 mr-1" />
+                            {identityHasDocument ? 'Replace Identity Document' : 'Upload Identity Document'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setIdentityState((currentState) => ({
+                              ...currentState,
+                              invalid: false,
+                              verified: true,
+                              verifiedBy: user?.name || user?.email || 'Admin',
+                              verifiedAt: new Date().toISOString(),
+                            }))}
+                            disabled={!identityHasDocument}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Verify Identity
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setIdentityState((currentState) => ({
+                              ...currentState,
+                              invalid: true,
+                              verified: false,
+                              verifiedBy: '',
+                              verifiedAt: '',
+                            }))}
+                            disabled={!identityHasDocument}
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Mark as Invalid
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setIdentityState((currentState) => ({
+                              ...currentState,
+                              invalid: false,
+                              verified: false,
+                              verifiedBy: '',
+                              verifiedAt: '',
+                            }))}
+                            disabled={!identityHasDocument}
+                          >
+                            <RotateCcw className="h-4 w-4 mr-1" />
+                            Mark Incomplete
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div id="section-proof_of_address" className="space-y-4">
+                    <div className={`rounded-xl border p-4 ${proofOfAddressVerified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 ${proofOfAddressVerified ? 'text-green-600' : 'text-amber-600'}`}>
+                            {proofOfAddressVerified ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                          </div>
+                          <div>
+                            <p className={`font-medium ${proofOfAddressVerified ? 'text-green-800' : 'text-amber-800'}`}>
+                              Proof of Address: {proofOfAddressVerified ? 'Verified' : 'Incomplete'}
+                            </p>
+                            {!proofOfAddressVerified && proofOfAddressBlockers.length > 0 && (
+                              <p className="mt-1 text-sm text-amber-700">
+                                Blockers: {proofOfAddressBlockers.join(' · ')}
+                              </p>
+                            )}
+                            {proofOfAddressVerified && (
+                              <p className="mt-1 text-sm text-green-700">
+                                Proof of address evidence is present and marked verified.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={proofOfAddressStatusBadgeClass}>
+                          {proofOfAddressStatusLabel}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <Card className="border-[#E4E8EB] shadow-sm">
+                      <CardHeader className="pb-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <CardTitle className="font-heading text-lg">Proof of Address Verification</CardTitle>
+                            <p className="mt-1 text-xs text-text-muted">
+                              Upload proof of address evidence and mark it verified before progressing the applicant.
+                            </p>
+                          </div>
+                          <Badge variant="outline" className={proofOfAddressStatusBadgeClass}>
+                            {proofOfAddressStatusLabel}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Document</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{proofOfAddressHasDocument ? 'Uploaded' : 'Missing'}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Type</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{proofOfAddressDocumentType || 'Not set'}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Issue / upload date</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{proofOfAddressIssueDate ? formatBackendDate(proofOfAddressIssueDate) : 'Not set'}</p>
+                          </div>
+                          <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                            <p className="text-xs text-text-muted">Verified by</p>
+                            <p className="mt-2 text-sm font-semibold text-gray-900">{proofOfAddressState.verifiedBy || 'Not set'}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" onClick={openProofOfAddressUpload}>
+                            <Upload className="h-4 w-4 mr-1" />
+                            {proofOfAddressHasDocument ? 'Replace Proof of Address' : 'Upload Proof of Address'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setProofOfAddressState((currentState) => ({
+                              ...currentState,
+                              invalid: false,
+                              verified: true,
+                              verifiedBy: user?.name || user?.email || 'Admin',
+                              verifiedAt: new Date().toISOString(),
+                            }))}
+                            disabled={!proofOfAddressHasDocument}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Verify Proof of Address
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setProofOfAddressState((currentState) => ({
+                              ...currentState,
+                              invalid: true,
+                              verified: false,
+                              verifiedBy: '',
+                              verifiedAt: '',
+                            }))}
+                            disabled={!proofOfAddressHasDocument}
+                          >
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Mark as Invalid
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setProofOfAddressState((currentState) => ({
+                              ...currentState,
+                              invalid: false,
+                              verified: false,
+                              verifiedBy: '',
+                              verifiedAt: '',
+                            }))}
+                            disabled={!proofOfAddressHasDocument}
+                          >
+                            <RotateCcw className="h-4 w-4 mr-1" />
+                            Mark Incomplete
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
                   {/* ============================================ */}
                   {/* DUAL-ROW COMPLIANCE SECTION (Phase 4A) */}
                   {/* Separates evidence from employer checks */}
@@ -5110,6 +5719,7 @@ export default function EmployeeProfilePage() {
           <ReferencesTabContent 
             key={`references-${employeeId}-${referencesTabRefreshKey}`}
             employeeId={employeeId}
+            employee={employee}
             onRefresh={() => {
               fetchComplianceFile();
               fetchRecruitmentStatus();

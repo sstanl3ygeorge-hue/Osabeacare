@@ -291,9 +291,6 @@ export default function RequirementFilesDrawer({
 
   // Remove verification stamp from a file
   const handleRemoveStamp = async (fileId) => {
-    if (!window.confirm('Are you sure you want to remove the CQC stamp from this document? This will revert to the original unstamped version.')) {
-      return;
-    }
     setIsSubmitting(true);
     try {
       await axios.delete(
@@ -582,7 +579,7 @@ export default function RequirementFilesDrawer({
                             onVerify={() => handleVerify(file.file_id)}
                             onReject={() => setActionDialog({ open: true, type: 'reject', file })}
                             onExtractReview={() => onExtractReview && onExtractReview(file.file_id)}
-                            onRemoveStamp={() => handleRemoveStamp(file.file_id)}
+                            onRemoveStamp={() => setActionDialog({ open: true, type: 'remove_stamp', file })}
                             onMarkUploadedInError={() => setActionDialog({ open: true, type: 'uploaded_in_error', file })}
                             onSupersede={() => setActionDialog({ open: true, type: 'supersede', file })}
                             onMoveCategory={() => setActionDialog({ open: true, type: 'move_category', file })}
@@ -769,6 +766,7 @@ export default function RequirementFilesDrawer({
               {actionDialog.type === 'supersede' && 'Supersede File'}
               {actionDialog.type === 'move_category' && 'Move to Different Category'}
               {actionDialog.type === 'reject' && 'Request Replacement'}
+              {actionDialog.type === 'remove_stamp' && 'Remove Verification Stamp'}
             </DialogTitle>
             <DialogDescription>
               {actionDialog.file?.file_name}
@@ -794,21 +792,23 @@ export default function RequirementFilesDrawer({
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label>Reason *</Label>
-              <Textarea
-                value={actionReason}
-                onChange={(e) => setActionReason(e.target.value)}
-                placeholder={
-                  actionDialog.type === 'uploaded_in_error' ? 'Why was this file uploaded in error?' :
-                  actionDialog.type === 'supersede' ? 'Why is this file being superseded?' :
-                  actionDialog.type === 'move_category' ? 'Why is this file being moved?' :
-                  actionDialog.type === 'reject' ? 'Why does this file need to be replaced? (Employee will be notified)' :
-                  'Enter reason...'
-                }
-                className="min-h-[80px]"
-              />
-            </div>
+            {actionDialog.type !== 'remove_stamp' && (
+              <div className="space-y-2">
+                <Label>Reason *</Label>
+                <Textarea
+                  value={actionReason}
+                  onChange={(e) => setActionReason(e.target.value)}
+                  placeholder={
+                    actionDialog.type === 'uploaded_in_error' ? 'Why was this file uploaded in error?' :
+                    actionDialog.type === 'supersede' ? 'Why is this file being superseded?' :
+                    actionDialog.type === 'move_category' ? 'Why is this file being moved?' :
+                    actionDialog.type === 'reject' ? 'Why does this file need to be replaced? (Employee will be notified)' :
+                    'Enter reason...'
+                  }
+                  className="min-h-[80px]"
+                />
+              </div>
+            )}
 
             {actionDialog.type === 'uploaded_in_error' && (
               <div className="p-3 bg-amber-50 rounded-lg">
@@ -836,6 +836,15 @@ export default function RequirementFilesDrawer({
                 </p>
               </div>
             )}
+
+            {actionDialog.type === 'remove_stamp' && (
+              <div className="p-3 bg-amber-50 rounded-lg">
+                <p className="text-xs text-amber-700">
+                  <AlertTriangle className="h-3 w-3 inline mr-1" />
+                  This will remove the CQC stamp and revert to the original unstamped version.
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2">
@@ -855,9 +864,15 @@ export default function RequirementFilesDrawer({
                   handleMoveCategory(actionDialog.file?.file_id);
                 } else if (actionDialog.type === 'reject') {
                   handleReject(actionDialog.file?.file_id);
+                } else if (actionDialog.type === 'remove_stamp') {
+                  handleRemoveStamp(actionDialog.file?.file_id);
                 }
               }}
-              disabled={isSubmitting || !actionReason.trim() || (actionDialog.type === 'move_category' && !newRequirementId)}
+              disabled={
+                isSubmitting ||
+                ((actionDialog.type !== 'remove_stamp') && !actionReason.trim()) ||
+                (actionDialog.type === 'move_category' && !newRequirementId)
+              }
               className={
                 actionDialog.type === 'reject' || actionDialog.type === 'uploaded_in_error'
                   ? 'bg-red-600 hover:bg-red-700 text-white'
@@ -871,6 +886,7 @@ export default function RequirementFilesDrawer({
               {actionDialog.type === 'supersede' && 'Supersede'}
               {actionDialog.type === 'move_category' && 'Move File'}
               {actionDialog.type === 'reject' && 'Request Replacement'}
+              {actionDialog.type === 'remove_stamp' && 'Remove Stamp'}
             </Button>
           </DialogFooter>
         </DialogContent>

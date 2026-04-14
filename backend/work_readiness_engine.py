@@ -256,21 +256,24 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     blockers = []
     completed = []
 
-    # Use the unified compliance engine as the single source of truth for
-    # document checks. This ensures can_sign_contract reflects the same
-    # computed state as the admin and worker compliance views.
-    from unified_compliance_engine import get_unified_employee_status
-    unified = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
-    live_checks = unified.get("checks", {})
+    unified_checks = {}
+    try:
+        from unified_compliance_engine import get_unified_employee_status
+        unified = await get_unified_employee_status(employee_id, db, user_role="admin", include_details=False)
+        if isinstance(unified, dict) and not unified.get("error"):
+            unified_checks = unified.get("checks") or {}
+    except Exception:
+        unified_checks = {}
 
     # ========== DOCUMENTS (from live computed state) ==========
     core_doc_checks = ["right_to_work", "dbs", "identity", "proof_of_address"]
     if "nurse" in job_role:
-        core_doc_checks.append("nmc_registration")
+        core_doc_checks.append("professional_registration")
 
     doc_completed = 0
     for doc_type in core_doc_checks:
-        is_verified = live_checks.get(doc_type, False)
+        has_unified_check = doc_type in unified_checks
+        is_verified = bool(unified_checks.get(doc_type)) if has_unified_check else False
         if is_verified:
             doc_completed += 1
             completed.append(f"{doc_type.replace('_', ' ').title()} verified")
@@ -279,15 +282,23 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     
     # ========== FORMS ==========
     required_forms = ["staff_health_questionnaire", "staff_personal_info", "hmrc_starter_checklist", "emergency_contacts"]
-    form_submissions = await db.form_submissions.find({
-        "employee_id": employee_id,
-        "status": {"$in": ["submitted", "verified"]}
-    }).to_list(20)
-    submitted_forms = {fs.get("form_type") for fs in form_submissions}
+    form_submissions = None
+    submitted_forms = set()
     
     form_completed = 0
     for form_id in required_forms:
-        if form_id in submitted_forms:
+        has_unified_check = form_id in unified_checks
+        is_complete = bool(unified_checks.get(form_id)) if has_unified_check else False
+        if not has_unified_check:
+            if form_submissions is None:
+                form_submissions = await db.form_submissions.find({
+                    "employee_id": employee_id,
+                    "status": {"$in": ["submitted", "verified"]}
+                }).to_list(20)
+                submitted_forms = {fs.get("form_type") for fs in form_submissions}
+            is_complete = form_id in submitted_forms
+
+        if is_complete:
             form_completed += 1
             completed.append(f"{form_id.replace('_', ' ').title()} submitted")
         else:
@@ -295,61 +306,86 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     
     # ========== TRAINING ==========
     mandatory_training = ["safeguarding", "manual_handling", "fire_safety", "health_safety", "bls", "infection_control"]
-    training_records = await db.training_records.find({
-        "employee_id": employee_id,
-        "record_status": {"$ne": "superseded"}
-    }).to_list(100)
-    
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
     training_completed = 0
-    
-    for training_id in mandatory_training:
-        is_done = False
-        for t in training_records:
-            t_name = (t.get("training_name") or "").lower()
-            if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
-                expiry_str = t.get("expiry_date")
-                if expiry_str:
-                    try:
-                        if isinstance(expiry_str, str):
-                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                        else:
-                            expiry = expiry_str
-                        if expiry >= now:
-                            is_done = True
-                    except:
-                        is_done = True
-                else:
-                    is_done = True
-                break
-        if is_done:
-            training_completed += 1
-            completed.append(f"{training_id.replace('_', ' ').title()} complete")
+    has_unified_training = "mandatory_training" in unified_checks
+    training_ok = bool(unified_checks.get("mandatory_training")) if has_unified_training else False
+    if has_unified_training:
+        if training_ok:
+            training_completed = len(mandatory_training)
+            for training_id in mandatory_training:
+                completed.append(f"{training_id.replace('_', ' ').title()} complete")
         else:
-            blockers.append(f"{training_id.replace('_', ' ').title()} required")
+            blockers.append("Mandatory training required")
+    else:
+        training_records = await db.training_records.find({
+            "employee_id": employee_id,
+            "record_status": {"$ne": "superseded"}
+        }).to_list(100)
+        
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        
+        for training_id in mandatory_training:
+            is_done = False
+            for t in training_records:
+                t_name = (t.get("training_name") or "").lower()
+                if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
+                    expiry_str = t.get("expiry_date")
+                    if expiry_str:
+                        try:
+                            if isinstance(expiry_str, str):
+                                expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                            else:
+                                expiry = expiry_str
+                            if expiry >= now:
+                                is_done = True
+                        except Exception:
+                            is_done = True
+                    else:
+                        is_done = True
+                    break
+            if is_done:
+                training_completed += 1
+                completed.append(f"{training_id.replace('_', ' ').title()} complete")
+            else:
+                blockers.append(f"{training_id.replace('_', ' ').title()} required")
     
     # ========== REFERENCES ==========
-    references = employee.get("references", [])
-    verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
-    ref_completed = min(len(verified_refs), 2)
-    
-    if len(verified_refs) >= 1:
-        completed.append("Reference 1 verified")
+    ref_completed = 0
+    has_unified_refs = "references" in unified_checks
+    refs_ok = bool(unified_checks.get("references")) if has_unified_refs else False
+    if has_unified_refs:
+        if refs_ok:
+            ref_completed = 2
+            completed.extend(["Reference 1 verified", "Reference 2 verified"])
+        else:
+            blockers.extend(["Reference 1 not verified", "Reference 2 not verified"])
     else:
-        blockers.append("Reference 1 not verified")
-    if len(verified_refs) >= 2:
-        completed.append("Reference 2 verified")
-    else:
-        blockers.append("Reference 2 not verified")
+        references = employee.get("references", [])
+        verified_refs = [r for r in references if r.get("verified") or r.get("status") == "verified"]
+        ref_completed = min(len(verified_refs), 2)
+        
+        if len(verified_refs) >= 1:
+            completed.append("Reference 1 verified")
+        else:
+            blockers.append("Reference 1 not verified")
+        if len(verified_refs) >= 2:
+            completed.append("Reference 2 verified")
+        else:
+            blockers.append("Reference 2 not verified")
     
     # ========== INDUCTION (15 items) ==========
-    induction_items = await db.induction_checklist.find({"employee_id": employee_id}).to_list(50)
     induction_completed = 0
     induction_total = 15  # Care Certificate Standards
     
-    if induction_items:
-        induction_completed = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+    has_unified_induction = "induction" in unified_checks
+    induction_ok = bool(unified_checks.get("induction")) if has_unified_induction else False
+    if has_unified_induction:
+        induction_completed = induction_total if induction_ok else 0
+    else:
+        induction_items = await db.induction_checklist.find({"employee_id": employee_id}).to_list(50)
+        if induction_items:
+            induction_completed = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
     
     if induction_completed >= 15:
         completed.append("Induction complete (15/15)")

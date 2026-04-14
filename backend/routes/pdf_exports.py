@@ -304,8 +304,13 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
     if form_type != "application_form" and not mapping_config:
         raise HTTPException(status_code=400, detail=f"No PDF mapping configured for form type: {form_type}")
     
-    # Prepare submission data with metadata
-    submission_data = submission.get("data", {}) or submission.get("form_data", {})
+    # Prepare submission data with metadata.
+    # Application forms store the richer structured source of truth in form_data,
+    # while older submissions may still rely on data or flatter legacy values.
+    if form_type == "application_form":
+        submission_data = submission.get("form_data", {}) or submission.get("data", {})
+    else:
+        submission_data = submission.get("data", {}) or submission.get("form_data", {})
     submission_data["_submitted_at"] = submission.get("submitted_at", "")
     submission_data["_verified"] = submission.get("verified", False)
     submission_data["_status"] = submission.get("status", "submitted")

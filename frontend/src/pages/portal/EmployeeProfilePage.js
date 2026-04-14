@@ -1295,6 +1295,14 @@ export default function EmployeeProfilePage() {
       toast.error('Please select a requirement and choose a file to upload');
       return;
     }
+
+    if (selectedRequirement === 'cv') {
+      const isPdfFile = uploadFile.type === 'application/pdf' || uploadFile.name?.toLowerCase().endsWith('.pdf');
+      if (!isPdfFile) {
+        toast.error('Only PDF CV files are supported. Please upload the CV as a PDF. Word documents (.doc, .docx) are not accepted.');
+        return;
+      }
+    }
     
     setIsUploading(true);
     
@@ -1358,6 +1366,14 @@ export default function EmployeeProfilePage() {
     } finally {
       setIsUploading(false);
     }
+  };
+
+  const openCvRecoveryUpload = () => {
+    setSelectedRequirement('cv');
+    setSelectedDocType('cv');
+    setDocumentLabel(cvFileExists ? 'Replacement PDF CV' : 'PDF CV');
+    setUploadFile(null);
+    setUploadDialogOpen(true);
   };
 
   const handleUpdateDocumentStatus = async (docId, status) => {
@@ -3008,18 +3024,44 @@ export default function EmployeeProfilePage() {
       submission?.requirement_id === 'application_form' || submission?.form_type === 'application_form'
     ) || null;
   const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
-  const cvDocument =
-    documents.find((document) => ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id)) || null;
+  const cvDocuments = documents.filter((document) => ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id));
+  const activeCvDocument = cvDocuments.find((document) =>
+    [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(employee?.cv_document_id)
+  ) || null;
+  const cvDocument = activeCvDocument || cvDocuments[0] || null;
   const employmentGapEvaluation = complianceFile?.sections?.employment_history?.rows?.[0]?.gap_evaluation || null;
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
-  const cvAvailable = Boolean(cvDocument);
-  const cvReviewReady = Boolean(employee?.cv_document_id && cvAvailable);
+  const cvFileExists = Boolean(cvDocument);
+  const cvDocumentName = cvDocument?.original_filename || cvDocument?.file_name || cvDocument?.file_url || '';
+  const cvDocumentMimeType = (cvDocument?.mime_type || cvDocument?.content_type || cvDocument?.file_type || '').toLowerCase();
+  const cvIsPdf = Boolean(
+    cvDocument && (cvDocumentMimeType === 'application/pdf' || /\.pdf(?:$|\?)/i.test(cvDocumentName))
+  );
+  const cvLinkedForReview = Boolean(employee?.cv_document_id && activeCvDocument);
+  const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
+  const cvStatusLabel = cvReviewReady
+    ? 'Ready for review'
+    : !cvFileExists
+      ? 'Missing'
+      : !cvIsPdf
+        ? 'Uploaded (unsupported format)'
+        : 'Uploaded (not linked for review)';
+  const cvStatusBadgeClass = cvReviewReady
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : cvFileExists
+      ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : 'bg-gray-100 text-gray-600 border-gray-200';
   const cvReviewStateLabel =
-    employee?.cv_status === 'approved'
+    cvReviewReady && employee?.cv_status === 'approved'
       ? 'CV has already been reviewed and approved.'
-      : employee?.cv_extraction_status === 'reviewed'
+      : cvReviewReady && employee?.cv_extraction_status === 'reviewed'
         ? 'CV has been reviewed and is awaiting approval.'
-        : 'Use the existing review action to inspect and process the current CV.';
+        : !cvFileExists
+          ? 'No CV file is currently available on this page.'
+          : !cvIsPdf
+            ? 'A CV file exists, but it is not in a reviewable PDF format.'
+            : 'A CV file exists, but it is not linked as the active reviewable CV yet.';
+  const cvRecoveryActionLabel = cvFileExists ? 'Replace with PDF' : 'Upload PDF CV';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
     ? (employmentGapEvaluation?.pending_count || 0) +
@@ -3027,6 +3069,15 @@ export default function EmployeeProfilePage() {
       (employmentGapEvaluation?.rejected_count || 0) +
       (employmentGapEvaluation?.needs_info_count || 0)
     : null;
+  const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
+  const allGapsResolved = employmentGapEvaluation ? Boolean(employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0) : true;
+  const employmentComplete = Boolean(applicationAvailable && cvReviewReady && employmentHistoryExists && allGapsResolved);
+  const employmentStatusBlockers = [
+    !applicationAvailable ? 'Upload or attach application form' : null,
+    !cvReviewReady ? 'Upload or link a PDF CV' : null,
+    !employmentHistoryExists ? 'Add or extract employment history' : null,
+    !allGapsResolved ? 'Review or resolve employment gaps' : null,
+  ].filter(Boolean);
 
   return (
     <div className="space-y-6" data-testid="employee-profile">
@@ -4492,6 +4543,28 @@ export default function EmployeeProfilePage() {
         {/* Employment history + gap verification + declarations */}
         <TabsContent value="employment">
           <div className="space-y-6">
+            <div className={`rounded-xl border p-4 ${employmentComplete ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+              <div className="flex items-start gap-3">
+                <div className={`mt-0.5 ${employmentComplete ? 'text-green-600' : 'text-amber-600'}`}>
+                  {employmentComplete ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                </div>
+                <div>
+                  <p className={`font-medium ${employmentComplete ? 'text-green-800' : 'text-amber-800'}`}>
+                    Employment Status: {employmentComplete ? 'Complete (gaps reviewed, subject to full 10-year verification)' : 'Incomplete'}
+                  </p>
+                  {employmentComplete && (
+                    <p className="mt-1 text-sm text-green-700">
+                      This indicates gaps are reviewed, not full employment verification.
+                    </p>
+                  )}
+                  {!employmentComplete && employmentStatusBlockers.length > 0 && (
+                    <p className="mt-1 text-sm text-amber-700">
+                      Blockers: {employmentStatusBlockers.join(' · ')}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="section-employment-summary-strip">
               <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                 <p className="text-xs text-text-muted">Application form</p>
@@ -4501,8 +4574,8 @@ export default function EmployeeProfilePage() {
               </div>
               <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                 <p className="text-xs text-text-muted">CV file</p>
-                <Badge variant="outline" className={`mt-2 ${cvAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                  {cvAvailable ? 'Available' : 'Missing'}
+                <Badge variant="outline" className={`mt-2 ${cvStatusBadgeClass}`}>
+                  {cvStatusLabel}
                 </Badge>
               </div>
               {employmentGapEvaluation?.is_complete !== undefined && (
@@ -4601,35 +4674,48 @@ export default function EmployeeProfilePage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="font-medium text-gray-800">CV / Resume</h4>
-                        <p className="mt-1 text-xs text-text-muted">CV presence and the existing review action already used on this page.</p>
+                        <p className="mt-1 text-xs text-text-muted">CV file status and the existing review action already used on this page.</p>
                       </div>
-                      <Badge variant="outline" className={cvAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}>
-                        {cvAvailable ? 'Available' : 'Missing'}
+                      <Badge variant="outline" className={cvStatusBadgeClass}>
+                        {cvStatusLabel}
                       </Badge>
                     </div>
 
-                    {cvAvailable ? (
+                    {cvFileExists ? (
                       <div className="mt-4 space-y-3">
                         <p className="text-sm text-gray-700">{cvReviewStateLabel}</p>
                         <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleReviewCv}
-                            disabled={cvReviewLoading || !cvReviewReady}
-                            className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
-                          >
-                            {cvReviewLoading ? (
-                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                            ) : (
-                              <FileSearch className="h-4 w-4 mr-1" />
-                            )}
-                            Review CV
-                          </Button>
+                          {cvReviewReady ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleReviewCv}
+                              disabled={cvReviewLoading || !cvReviewReady}
+                              className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                            >
+                              {cvReviewLoading ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <FileSearch className="h-4 w-4 mr-1" />
+                              )}
+                              Review CV
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={openCvRecoveryUpload}
+                            >
+                              <Upload className="h-4 w-4 mr-1" />
+                              {cvRecoveryActionLabel}
+                            </Button>
+                          )}
                         </div>
                         {!cvReviewReady && (
                           <p className="text-xs text-text-muted">
-                            CV review is unavailable until a linked PDF CV is on file.
+                            {cvIsPdf
+                              ? 'Upload a replacement PDF CV if the current file should become the active reviewable CV.'
+                              : 'Upload a PDF CV to restore the normal review path.'}
                           </p>
                         )}
                       </div>
@@ -4639,6 +4725,12 @@ export default function EmployeeProfilePage() {
                         <p className="mt-1 text-xs text-text-muted">
                           No original CV file is currently linked to this employee record.
                         </p>
+                        <div className="mt-3">
+                          <Button size="sm" variant="outline" onClick={openCvRecoveryUpload}>
+                            <Upload className="h-4 w-4 mr-1" />
+                            {cvRecoveryActionLabel}
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -7689,16 +7781,27 @@ export default function EmployeeProfilePage() {
                 File <span className="text-red-500">*</span>
               </Label>
               <FileUploaderInline
-                onFileSelect={(file) => setUploadFile(file)}
+                onFileSelect={(file) => {
+                  if (selectedRequirement === 'cv' && file) {
+                    const isPdfFile = file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf');
+                    if (!isPdfFile) {
+                      toast.error('Only PDF CV files are supported. Please upload the CV as a PDF. Word documents (.doc, .docx) are not accepted.');
+                      return;
+                    }
+                  }
+                  setUploadFile(file);
+                }}
                 selectedFile={uploadFile}
                 onClear={() => setUploadFile(null)}
-                acceptedTypes={['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp']}
+                acceptedTypes={selectedRequirement === 'cv' ? ['application/pdf'] : ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp']}
                 maxSizeBytes={10 * 1024 * 1024}
                 placeholder="Choose file or drag here"
                 className="border-2 border-dashed rounded-xl"
               />
               <p className="text-xs text-gray-500">
-                Accepted: PDF, JPG, PNG, WebP (max 10MB)
+                {selectedRequirement === 'cv'
+                  ? 'Accepted: PDF only (max 10MB)'
+                  : 'Accepted: PDF, JPG, PNG, WebP (max 10MB)'}
               </p>
             </div>
             

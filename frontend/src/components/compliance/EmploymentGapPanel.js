@@ -55,6 +55,16 @@ const GAP_STATUS_STYLES = {
   needs_more_info: { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-700', icon: HelpCircle, label: 'More Info Needed' }
 };
 
+const formatGapBoundary = (value) => {
+  if (!value) return 'Not available';
+  if (value === 'present') return 'Present';
+  return formatBackendDate(value, { format: 'medium' });
+};
+
+const getExplanationActionLabel = (gap) => (
+  gap?.status === 'pending' ? 'Submit Explanation' : 'Update Explanation'
+);
+
 /**
  * EmploymentGapPanel - Displays and manages employment gap verification
  * 
@@ -469,6 +479,7 @@ export default function EmploymentGapPanel({
                           onClick={() => {
                             setSelectedGap(gap);
                             setExplanation(gap.explanation || '');
+                            setGapReason(gap.reason_type || '');
                             setExplainDialogOpen(true);
                           }}
                           data-testid={`explain-gap-btn-${gap.gap_id}`}
@@ -533,14 +544,64 @@ export default function EmploymentGapPanel({
       <Dialog open={explainDialogOpen} onOpenChange={setExplainDialogOpen}>
         <DialogContent className="sm:max-w-lg" data-testid="explain-gap-dialog">
           <DialogHeader>
-            <DialogTitle>Explain Employment Gap</DialogTitle>
+            <DialogTitle>
+              {selectedGap?.status === 'pending' ? 'Explain Employment Gap' : 'Update Employment Gap Explanation'}
+            </DialogTitle>
             <DialogDescription>
-              Please provide an explanation for the {selectedGap?.duration_months} month gap in your employment history
-              ({selectedGap?.start_date && formatBackendDate(selectedGap.start_date, { format: 'short' })} - {selectedGap?.end_date && formatBackendDate(selectedGap.end_date, { format: 'short' })}).
+              Provide a clear explanation for the {selectedGap?.duration_months} month gap in employment history.
             </DialogDescription>
           </DialogHeader>
           
           <div className="py-4 space-y-4">
+            {selectedGap && (
+              <div className="space-y-3">
+                <div className="rounded-lg border bg-slate-50 p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Gap Period</p>
+                  <p className="mt-1 text-sm font-medium text-slate-900">
+                    {formatGapBoundary(selectedGap.gap_start)} {' -> '} {formatGapBoundary(selectedGap.gap_end)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {selectedGap.duration_months} month gap identified between recorded employments.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border bg-white p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Previous Employment</p>
+                    <p className="mt-1 text-sm font-medium text-gray-900">
+                      {selectedGap.previous_employment?.company || 'Not available'}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {selectedGap.previous_employment?.role || 'Role not recorded'}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Ended: {formatGapBoundary(selectedGap.previous_employment?.end_date)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border bg-white p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Next Employment</p>
+                    <p className="mt-1 text-sm font-medium text-gray-900">
+                      {selectedGap.next_employment?.company || 'Not available'}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      {selectedGap.next_employment?.role || 'Role not recorded'}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Started: {formatGapBoundary(selectedGap.next_employment?.start_date)}
+                    </p>
+                  </div>
+                </div>
+
+                {selectedGap.info_request_message && (
+                  <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+                    <p className="text-xs font-medium uppercase tracking-wide text-purple-700">Information Requested</p>
+                    <p className="mt-1 text-sm text-purple-900">{selectedGap.info_request_message}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Reason Dropdown */}
             <div>
               <label className="text-sm font-medium block mb-2">
@@ -579,7 +640,7 @@ export default function EmploymentGapPanel({
                 data-testid="gap-explanation-textarea"
               />
               <p className="text-xs text-gray-500 mt-2">
-                Be specific and honest. This will be reviewed by our recruitment team.
+                Explain what you were doing during this period and include enough detail for audit review.
               </p>
             </div>
             
@@ -613,7 +674,7 @@ export default function EmploymentGapPanel({
                 className="hidden"
               />
               <p className="text-xs text-gray-500 mt-1">
-                E.g., university enrollment letter, medical certificate, travel documents
+                Add evidence only if it supports this explanation, such as a study letter, medical note, travel record, or benefits/job-seeking document.
               </p>
             </div>
           </div>
@@ -635,7 +696,7 @@ export default function EmploymentGapPanel({
               ) : (
                 <MessageSquare className="h-4 w-4 mr-2" />
               )}
-              Submit Explanation
+              {getExplanationActionLabel(selectedGap)}
             </Button>
           </DialogFooter>
         </DialogContent>

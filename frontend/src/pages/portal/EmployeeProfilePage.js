@@ -108,6 +108,11 @@ export default function EmployeeProfilePage() {
   // Initialize active tab from URL for navigation state persistence
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'employment');
   const [employee, setEmployee] = useState(null);
+  const isActiveEmployee =
+    employee?.is_active_employee ||
+    employee?.employee_status === 'active_employee' ||
+    employee?.status === 'active_employee' ||
+    employee?.status === 'active';
   const [documents, setDocuments] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);
   const [policies, setPolicies] = useState([]);
@@ -1070,6 +1075,15 @@ export default function EmployeeProfilePage() {
       }
     }
   }, [searchParams, employee, setSearchParams]);
+
+  useEffect(() => {
+    if (!employee || activeTab !== 'spot_checks' || isActiveEmployee) {
+      return;
+    }
+
+    setActiveTab('employment');
+    setSearchParams({ tab: 'employment' }, { replace: true });
+  }, [activeTab, employee, isActiveEmployee, setSearchParams]);
 
   // Track email click event
   const trackEmailClick = async (requestId, emailToken) => {
@@ -3997,10 +4011,12 @@ export default function EmployeeProfilePage() {
             <ClipboardCheck className="h-4 w-4 mr-2" />
             Competencies
           </TabsTrigger>
-          <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <Eye className="h-4 w-4 mr-2" />
-            Spot Checks
-          </TabsTrigger>
+          {isActiveEmployee && (
+            <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+              <Eye className="h-4 w-4 mr-2" />
+              Spot Checks
+            </TabsTrigger>
+          )}
           <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <History className="h-4 w-4 mr-2" />
             Audit
@@ -4765,16 +4781,18 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* ========== TAB: SPOT CHECKS ========== */}
-        <TabsContent value="spot_checks" data-testid="section-spot-checks-root">
-          <SpotChecksPanel
-            employeeId={employeeId}
-            employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
-            onRefresh={() => {
-              fetchComplianceFile();
-              fetchRecruitmentStatus();
-            }}
-          />
-        </TabsContent>
+        {isActiveEmployee && (
+          <TabsContent value="spot_checks" data-testid="section-spot-checks-root">
+            <SpotChecksPanel
+              employeeId={employeeId}
+              employeeName={employee ? `${employee.first_name} ${employee.last_name}` : ''}
+              onRefresh={() => {
+                fetchComplianceFile();
+                fetchRecruitmentStatus();
+              }}
+            />
+          </TabsContent>
+        )}
 
         {/* References Tab - Extracted to ReferencesTabContent */}
         <TabsContent value="references" data-testid="section-references-root">

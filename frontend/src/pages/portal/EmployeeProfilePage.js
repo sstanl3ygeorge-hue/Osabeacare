@@ -3243,6 +3243,61 @@ export default function EmployeeProfilePage() {
     proofOfAddressHasDocument && proofOfAddressState.invalid ? 'Upload valid proof of address' : null,
     proofOfAddressHasDocument && !proofOfAddressState.invalid && !proofOfAddressState.verified ? 'Verify proof of address' : null,
   ].filter(Boolean);
+  const referenceEntries = Array.isArray(referenceStatus)
+    ? referenceStatus.map((reference) => {
+        const hasDeclared = Boolean(reference?.declared?.name || reference?.name);
+        const isRequested = ['sent', 'requested', 'awaiting_response'].includes(reference?.request_status);
+        const hasResponse = Boolean(reference?.response_received_at || reference?.response_data || reference?.returned?.name);
+        const isReviewed = Boolean(reference?.reviewed);
+        const isVerified = Boolean(reference?.verified);
+        const statusLabel = isVerified
+          ? 'Verified'
+          : isReviewed
+            ? 'Reviewed'
+            : hasResponse
+              ? 'Response received'
+              : isRequested
+                ? 'Requested'
+                : hasDeclared
+                  ? 'Ready to request'
+                  : 'Missing';
+        const statusBadgeClass = isVerified
+          ? 'bg-green-100 text-green-700 border-green-200'
+          : isReviewed || hasResponse
+            ? 'bg-blue-100 text-blue-700 border-blue-200'
+            : isRequested
+              ? 'bg-amber-100 text-amber-700 border-amber-200'
+              : hasDeclared
+                ? 'bg-gray-100 text-gray-600 border-gray-200'
+                : 'bg-red-100 text-red-700 border-red-200';
+
+        return {
+          ...reference,
+          hasDeclared,
+          isRequested,
+          hasResponse,
+          isReviewed,
+          isVerified,
+          statusLabel,
+          statusBadgeClass,
+        };
+      })
+    : [];
+  const declaredReferenceCount = referenceEntries.filter((reference) => reference.hasDeclared).length;
+  const requestedReferenceCount = referenceEntries.filter((reference) => reference.isRequested).length;
+  const reviewedReferenceCount = referenceEntries.filter((reference) => reference.isReviewed).length;
+  const verifiedReferenceCount = referenceEntries.filter((reference) => reference.isVerified).length;
+  const referencesComplete = declaredReferenceCount >= 2 && verifiedReferenceCount >= 2;
+  const referencesBlockers = [
+    declaredReferenceCount < 2 ? 'Add at least 2 references' : null,
+    ...referenceEntries.flatMap((reference) => {
+      if (!reference.hasDeclared || reference.isVerified) return [];
+      if (reference.isReviewed) return [`Verify Reference ${reference.reference_num}`];
+      if (reference.hasResponse) return [`Review Reference ${reference.reference_num} response`];
+      if (reference.isRequested) return [`Send or resend Reference ${reference.reference_num} request`];
+      return [`Request Reference ${reference.reference_num}`];
+    }),
+  ].filter(Boolean);
 
   useEffect(() => {
     setRightToWorkState({
@@ -5570,6 +5625,158 @@ export default function EmployeeProfilePage() {
                             Mark Incomplete
                           </Button>
                         </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <div id="section-references-checklist" className="space-y-4">
+                    <div className={`rounded-xl border p-4 ${referencesComplete ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 ${referencesComplete ? 'text-green-600' : 'text-amber-600'}`}>
+                            {referencesComplete ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                          </div>
+                          <div>
+                            <p className={`font-medium ${referencesComplete ? 'text-green-800' : 'text-amber-800'}`}>
+                              References: {referencesComplete ? 'Complete' : 'Incomplete'}
+                            </p>
+                            {!referencesComplete && referencesBlockers.length > 0 && (
+                              <p className="mt-1 text-sm text-amber-700">
+                                Blockers: {referencesBlockers.join(' · ')}
+                              </p>
+                            )}
+                            {referencesComplete && (
+                              <p className="mt-1 text-sm text-green-700">
+                                At least two references are present and verified.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className={referencesComplete ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}>
+                          {loadingReferenceStatus ? 'Refreshing' : referencesComplete ? 'Verified' : 'Needs action'}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Declared</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{declaredReferenceCount}</p>
+                      </div>
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Requested</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{requestedReferenceCount}</p>
+                      </div>
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Reviewed</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{reviewedReferenceCount}</p>
+                      </div>
+                      <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                        <p className="text-xs text-text-muted">Verified</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{verifiedReferenceCount}</p>
+                      </div>
+                    </div>
+
+                    <Card className="border-[#E4E8EB] shadow-sm">
+                      <CardHeader className="pb-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <CardTitle className="font-heading text-lg">References Verification</CardTitle>
+                            <p className="mt-1 text-xs text-text-muted">
+                              Request, review, and verify references using the existing references workflow on this page.
+                            </p>
+                          </div>
+                          <Button size="sm" variant="outline" onClick={() => navigateToTabSection('references', 'section-references-root')}>
+                            Open References Tab
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {referenceEntries.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center">
+                            <p className="font-medium text-gray-700">No references loaded yet</p>
+                            <p className="mt-1 text-sm text-gray-500">Open the references tab to add and manage referee details.</p>
+                          </div>
+                        ) : (
+                          referenceEntries.map((reference) => (
+                            <div key={reference.reference_num} className="rounded-xl border border-[#E4E8EB] bg-white p-4 shadow-sm">
+                              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-gray-900">Reference {reference.reference_num}</p>
+                                    <Badge variant="outline" className={reference.statusBadgeClass}>
+                                      {reference.statusLabel}
+                                    </Badge>
+                                  </div>
+                                  <p className="mt-1 text-sm text-gray-600">{reference.declared?.name || 'Not declared'}</p>
+                                  {(reference.declared?.email || reference.declared?.phone) && (
+                                    <p className="mt-1 text-xs text-text-muted">
+                                      {reference.declared?.email || reference.declared?.phone}
+                                    </p>
+                                  )}
+                                  {reference.reviewed && !reference.isVerified && (
+                                    <p className="mt-1 text-xs text-text-muted">
+                                      Reviewed {formatBackendDate(reference.reviewed_at)}{reference.reviewed_by ? ` by ${reference.reviewed_by}` : ''}
+                                    </p>
+                                  )}
+                                  {reference.verified && reference.verified_at && (
+                                    <p className="mt-1 text-xs text-text-muted">
+                                      Verified {formatBackendDate(reference.verified_at)}{reference.verified_by ? ` by ${reference.verified_by}` : ''}
+                                    </p>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  {!reference.hasDeclared && (
+                                    <Button size="sm" variant="outline" onClick={() => navigateToTabSection('references', 'section-references-root')}>
+                                      Open References Tab
+                                    </Button>
+                                  )}
+                                  {reference.hasDeclared && !reference.hasResponse && !reference.isReviewed && !reference.isVerified && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setSelectedRefForRequest(reference);
+                                        setReferenceRequestMessage('');
+                                        setRequestReferenceDialogOpen(true);
+                                      }}
+                                      disabled={!reference.declared?.email}
+                                    >
+                                      <Send className="h-4 w-4 mr-1" />
+                                      {reference.isRequested ? 'Resend Request' : 'Send Request'}
+                                    </Button>
+                                  )}
+                                  {reference.hasResponse && !reference.isReviewed && !reference.isVerified && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        setSelectedRefForReview(reference);
+                                        setReviewMismatchNotes('');
+                                        setReviewReferenceDialogOpen(true);
+                                      }}
+                                    >
+                                      <Eye className="h-4 w-4 mr-1" />
+                                      Review Response
+                                    </Button>
+                                  )}
+                                  {reference.isReviewed && reference.hasResponse && !reference.isVerified && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleVerifyReferenceStrict(reference.reference_num)}
+                                      disabled={isVerifyingReferenceStrict}
+                                    >
+                                      <CheckCircle className="h-4 w-4 mr-1" />
+                                      Verify Reference
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </CardContent>
                     </Card>
                   </div>

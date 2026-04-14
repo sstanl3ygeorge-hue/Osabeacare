@@ -21694,6 +21694,24 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
     )
     
     story = []
+
+    personal = submission_data.get('personal_details') or {}
+    contact = submission_data.get('contact_details') or {}
+    address_section = submission_data.get('address') or {}
+    role_availability = submission_data.get('role_availability') or {}
+    qualifications = submission_data.get('qualifications') or {}
+    emergency_contact = submission_data.get('emergency_contact') or {}
+
+    def get_value(primary: dict, key: str, *legacy_keys: str):
+        if isinstance(primary, dict):
+            value = primary.get(key)
+            if value not in (None, ''):
+                return value
+        for legacy_key in legacy_keys:
+            value = submission_data.get(legacy_key)
+            if value not in (None, ''):
+                return value
+        return None
     
     # Helper function to add a field row
     def add_field(label: str, value, story_list):
@@ -21733,36 +21751,36 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
     story.append(Spacer(1, 3*mm))
     
     full_name = ' '.join(filter(None, [
-        submission_data.get('title', ''),
-        submission_data.get('first_name', ''),
-        submission_data.get('middle_name', ''),
-        submission_data.get('last_name', '')
+        get_value(personal, 'title', 'title') or '',
+        get_value(personal, 'first_name', 'first_name') or '',
+        get_value(personal, 'middle_name', 'middle_name') or '',
+        get_value(personal, 'last_name', 'last_name') or ''
     ]))
     add_field('Full Name', full_name, story)
-    add_field('Preferred Name', submission_data.get('preferred_name'), story)
-    add_field('Date of Birth', submission_data.get('date_of_birth'), story)
-    add_field('National Insurance Number', submission_data.get('national_insurance'), story)
-    add_field('Email', submission_data.get('email'), story)
-    add_field('Phone', submission_data.get('phone'), story)
+    add_field('Preferred Name', get_value(personal, 'preferred_name', 'preferred_name'), story)
+    add_field('Date of Birth', get_value(personal, 'date_of_birth', 'date_of_birth'), story)
+    add_field('National Insurance Number', get_value(personal, 'national_insurance', 'national_insurance', 'ni_number'), story)
+    add_field('Email', get_value(contact, 'email', 'email'), story)
+    add_field('Phone', get_value(contact, 'phone', 'phone'), story)
     
     address_parts = [
-        submission_data.get('address_line_1', ''),
-        submission_data.get('address_line_2', ''),
-        submission_data.get('city', ''),
-        submission_data.get('county', ''),
-        submission_data.get('postcode', '')
+        get_value(address_section, 'address_line_1', 'address_line_1') or '',
+        get_value(address_section, 'address_line_2', 'address_line_2') or '',
+        get_value(address_section, 'city', 'city') or '',
+        get_value(address_section, 'county', 'county') or '',
+        get_value(address_section, 'postcode', 'postcode') or ''
     ]
     address = ', '.join(filter(None, address_parts))
     add_field('Address', address, story)
-    add_field('Years at Current Address', submission_data.get('years_at_current_address'), story)
+    add_field('Years at Current Address', get_value(address_section, 'years_at_current_address', 'years_at_current_address'), story)
     
     story.append(Spacer(1, 3*mm))
     story.append(Paragraph("Role & Availability", subsection_style))
-    add_field('Role Applied For', submission_data.get('role_applied'), story)
-    add_field('Availability', submission_data.get('availability'), story)
-    add_field('Earliest Start Date', submission_data.get('earliest_start_date'), story)
-    add_field('Has Driving Licence', submission_data.get('has_driving_licence'), story)
-    add_field('Has Own Transport', submission_data.get('has_own_transport'), story)
+    add_field('Role Applied For', get_value(role_availability, 'role_applied', 'role_applied'), story)
+    add_field('Availability', get_value(role_availability, 'availability', 'availability'), story)
+    add_field('Earliest Start Date', get_value(role_availability, 'earliest_start_date', 'earliest_start_date'), story)
+    add_field('Has Driving Licence', get_value(role_availability, 'has_driving_licence', 'has_driving_licence'), story)
+    add_field('Has Own Transport', get_value(role_availability, 'has_own_transport', 'has_own_transport'), story)
     
     # EMPLOYMENT HISTORY
     story.append(Paragraph("Employment History", section_style))
@@ -21808,6 +21826,14 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
             story.append(Spacer(1, 2*mm))
     else:
         story.append(Paragraph("No references provided", value_style))
+
+    if qualifications:
+        story.append(Paragraph("Qualifications & Training", section_style))
+        story.append(Spacer(1, 3*mm))
+        add_field('Highest Qualification', get_value(qualifications, 'highest_qualification', 'highest_qualification'), story)
+        add_field('Relevant Qualifications', get_value(qualifications, 'relevant_qualifications', 'relevant_qualifications'), story)
+        add_field('Care Certificate Completed', get_value(qualifications, 'care_certificate_completed', 'care_certificate_completed'), story)
+        add_field('Mandatory Training Completed', get_value(qualifications, 'mandatory_training_completed', 'mandatory_training_completed'), story)
     
     # DECLARATIONS
     story.append(Paragraph("Declarations & Consent", section_style))
@@ -21896,6 +21922,18 @@ async def generate_application_form_pdf(submission_data: dict, employee_data: di
         story.append(Spacer(1, 3*mm))
         add_field('How Heard About Us', submission_data.get('how_heard'), story)
         add_field('Additional Information', submission_data.get('additional_info'), story)
+
+    emergency_name = get_value(emergency_contact, 'name', 'emergency_contact_name')
+    emergency_phone = get_value(emergency_contact, 'phone', 'emergency_contact_phone')
+    emergency_relationship = get_value(emergency_contact, 'relationship', 'emergency_contact_relationship')
+    emergency_address = get_value(emergency_contact, 'address', 'emergency_contact_address')
+    if any([emergency_name, emergency_phone, emergency_relationship, emergency_address]):
+        story.append(Paragraph("Emergency Contact", section_style))
+        story.append(Spacer(1, 3*mm))
+        add_field('Name', emergency_name, story)
+        add_field('Phone', emergency_phone, story)
+        add_field('Relationship', emergency_relationship, story)
+        add_field('Address', emergency_address, story)
     
     # Footer
     story.append(Spacer(1, 10*mm))
@@ -25323,6 +25361,16 @@ async def submit_structured_application(form: StructuredApplicationForm):
             "criminal_declaration": form.criminal_declaration.model_dump(),
             "right_to_work": form.right_to_work.model_dump(),
             "declarations": form.declarations.model_dump(),
+            "emergency_contact": {
+                "name": form.emergency_contact_name,
+                "phone": form.emergency_contact_phone,
+                "relationship": form.emergency_contact_relationship,
+                "address": form.emergency_contact_address,
+            },
+            "emergency_contact_name": form.emergency_contact_name,
+            "emergency_contact_phone": form.emergency_contact_phone,
+            "emergency_contact_relationship": form.emergency_contact_relationship,
+            "emergency_contact_address": form.emergency_contact_address,
             "additional_info": form.additional_info,
             "how_heard": form.how_heard,
         },

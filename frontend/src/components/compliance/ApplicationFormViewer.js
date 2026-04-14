@@ -232,6 +232,15 @@ export default function ApplicationFormViewer({
   const criminalDecl = resolvedApplicationData?.criminal_declaration || {};
   const rtwDecl = resolvedApplicationData?.right_to_work || {};
   const declarations = resolvedApplicationData?.declarations || {};
+  const emergencyContact = resolvedApplicationData?.emergency_contact || {
+    name: resolvedApplicationData?.emergency_contact_name,
+    phone: resolvedApplicationData?.emergency_contact_phone,
+    relationship: resolvedApplicationData?.emergency_contact_relationship,
+    address: resolvedApplicationData?.emergency_contact_address,
+  };
+  const hasEmergencyContact = Boolean(
+    emergencyContact?.name || emergencyContact?.phone || emergencyContact?.relationship || emergencyContact?.address
+  );
   const gapExplanation = resolvedApplicationData?.employment_gap_explanation || resolvedApplicationData?.gap_explanation;
 
   return (
@@ -344,17 +353,28 @@ export default function ApplicationFormViewer({
                   </div>
                 </Section>
               </div>
+
+              {hasEmergencyContact && (
+                <Section title="Emergency Contact" icon={Phone}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Name" value={emergencyContact.name} />
+                    <Field label="Relationship" value={emergencyContact.relationship} />
+                    <Field label="Phone" value={emergencyContact.phone} />
+                    <Field label="Address" value={emergencyContact.address} className="col-span-2" />
+                  </div>
+                </Section>
+              )}
             </TabsContent>
 
             {/* Employment Tab */}
             <TabsContent value="employment" className="space-y-4">
-              {applicationData?.has_employment_gaps && (
+              {resolvedApplicationData?.has_employment_gaps && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
                   <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
                   <div>
                     <p className="text-sm font-medium text-amber-800">Employment Gaps Declared</p>
                     <p className="text-xs text-amber-700 mt-1">
-                      {applicationData.employment_gap_explanation || 'No explanation provided'}
+                      {gapExplanation || 'No explanation provided'}
                     </p>
                   </div>
                 </div>
@@ -379,16 +399,23 @@ export default function ApplicationFormViewer({
                         <Field label="Start Date" value={formatBackendDate(job.start_date)} />
                         <Field label="End Date" value={job.is_current ? 'Present' : formatBackendDate(job.end_date)} />
                       </div>
-                      {job.main_duties && (
+                      {job.duties && (
                         <div className="mt-2">
                           <p className="text-xs text-gray-500 mb-1">Main Duties</p>
-                          <p className="text-sm text-gray-700 bg-gray-50 p-2 rounded">{job.main_duties}</p>
+                          <p className="text-sm text-gray-700 bg-gray-50 p-2 rounded">{job.duties}</p>
                         </div>
                       )}
                       {job.reason_for_leaving && (
                         <div className="mt-2">
                           <p className="text-xs text-gray-500 mb-1">Reason for Leaving</p>
                           <p className="text-sm text-gray-700">{job.reason_for_leaving}</p>
+                        </div>
+                      )}
+                      {(job.employer_address || job.employer_phone || typeof job.can_contact === 'boolean') && (
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 mt-3 pt-3 border-t">
+                          <Field label="Employer Address" value={job.employer_address} />
+                          <Field label="Employer Phone" value={job.employer_phone} />
+                          <Field label="Can Contact Employer" value={typeof job.can_contact === 'boolean' ? (job.can_contact ? 'Yes' : 'No') : null} />
                         </div>
                       )}
                     </Section>
@@ -468,8 +495,14 @@ export default function ApplicationFormViewer({
                     details={criminalDecl.conviction_details}
                   />
                   <DeclarationItem 
-                    label="Has spent convictions" 
-                    value={criminalDecl.has_spent_convictions}
+                    label="Has pending charges or investigations" 
+                    value={criminalDecl.has_pending_charges}
+                    details={criminalDecl.pending_charges_details}
+                  />
+                  <DeclarationItem 
+                    label="Has cautions or warnings" 
+                    value={criminalDecl.has_cautions_warnings}
+                    details={criminalDecl.cautions_details}
                   />
                 </Section>
 
@@ -488,9 +521,26 @@ export default function ApplicationFormViewer({
                     value={healthDecl.has_mobility_issues}
                   />
                   <DeclarationItem 
-                    label="Has health conditions" 
-                    value={healthDecl.has_health_conditions}
-                    details={healthDecl.health_condition_details}
+                    label="Had recent infectious illness" 
+                    value={healthDecl.had_recent_infectious_illness}
+                    details={healthDecl.infectious_illness_details}
+                  />
+                  <DeclarationItem 
+                    label="Hepatitis B vaccinated" 
+                    value={healthDecl.hepatitis_b_vaccinated}
+                  />
+                  <DeclarationItem 
+                    label="Flu vaccinated" 
+                    value={healthDecl.flu_vaccinated}
+                  />
+                  <DeclarationItem 
+                    label="COVID-19 vaccinated" 
+                    value={healthDecl.covid_vaccinated}
+                  />
+                  <DeclarationItem 
+                    label="Has condition affecting work" 
+                    value={healthDecl.has_condition_affecting_work}
+                    details={healthDecl.condition_details}
                   />
                   <DeclarationItem 
                     label="Requires reasonable adjustments" 
@@ -525,6 +575,17 @@ export default function ApplicationFormViewer({
                     label="Consents to data processing" 
                     value={declarations.consents_to_data_processing}
                   />
+                  {declarations.has_professional_registration && (
+                    <>
+                      <DeclarationItem 
+                        label="Professional registration declared" 
+                        value={declarations.has_professional_registration}
+                      />
+                      <Field label="Registration Body" value={declarations.registration_body} className="mt-2" />
+                      <Field label="Registration Number" value={declarations.registration_number} className="mt-2" />
+                      <Field label="Registration Expiry" value={formatBackendDate(declarations.registration_expiry)} className="mt-2" />
+                    </>
+                  )}
                 </Section>
               </div>
             </TabsContent>
@@ -546,17 +607,17 @@ export default function ApplicationFormViewer({
                 </div>
               </Section>
 
-              {applicationData?.additional_info && (
+              {resolvedApplicationData?.additional_info && (
                 <Section title="Additional Information" icon={FileText}>
                   <p className="text-sm text-gray-700 whitespace-pre-wrap">
-                    {applicationData.additional_info}
+                    {resolvedApplicationData.additional_info}
                   </p>
                 </Section>
               )}
 
-              {applicationData?.how_heard && (
+              {resolvedApplicationData?.how_heard && (
                 <div className="text-sm text-gray-500">
-                  <span className="font-medium">How did they hear about us:</span> {applicationData.how_heard}
+                  <span className="font-medium">How did they hear about us:</span> {resolvedApplicationData.how_heard}
                 </div>
               )}
             </TabsContent>

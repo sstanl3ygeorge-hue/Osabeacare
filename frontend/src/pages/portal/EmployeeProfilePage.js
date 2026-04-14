@@ -614,7 +614,7 @@ export default function EmployeeProfilePage() {
       fetchRecruitmentStatus();
     } catch (err) {
       const detail = err.response?.data?.detail;
-      if (detail === "No CV document found for this employee") {
+      if (detail === 'No CV uploaded for this employee' || detail === 'No CV document found for this employee') {
         toast.error('No CV uploaded yet. Worker needs to upload their CV first.');
       } else {
         toast.error(detail || 'Failed to review CV');
@@ -3013,6 +3013,7 @@ export default function EmployeeProfilePage() {
   const employmentGapEvaluation = complianceFile?.sections?.employment_history?.rows?.[0]?.gap_evaluation || null;
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
   const cvAvailable = Boolean(cvDocument);
+  const cvReviewReady = Boolean(employee?.cv_document_id && cvAvailable);
   const cvReviewStateLabel =
     employee?.cv_status === 'approved'
       ? 'CV has already been reviewed and approved.'
@@ -3408,8 +3409,8 @@ export default function EmployeeProfilePage() {
                     
                     {/* Dynamic Status Display - No contradictions */}
                     {!rtwSummary.is_verified ? (
-                      // Not verified = MISSING
-                      <p className="text-sm font-semibold text-gray-700">MISSING</p>
+                      // Not verified = not yet verified
+                      <p className="text-sm font-semibold text-gray-700">Not yet verified</p>
                     ) : rtwSummary.status_band === 'expired' || rtwSummary.rtw_status_color === 'red' ? (
                       // Expired
                       <p className="text-sm font-semibold text-red-700">
@@ -4174,7 +4175,7 @@ export default function EmployeeProfilePage() {
                             ? 'bg-green-100 text-green-700 mt-1' 
                             : 'bg-amber-100 text-amber-700 mt-1'
                         }>
-                          {employee?.reference_1_status || (employee?.references?.[0]?.verified ? 'Verified' : 'Pending')}
+                          {employee?.reference_1_status || (employee?.references?.[0]?.verified ? 'Verified' : 'In progress')}
                         </Badge>
                       </>
                     ) : (
@@ -4193,7 +4194,7 @@ export default function EmployeeProfilePage() {
                             ? 'bg-green-100 text-green-700 mt-1' 
                             : 'bg-amber-100 text-amber-700 mt-1'
                         }>
-                          {employee?.reference_2_status || (employee?.references?.[1]?.verified ? 'Verified' : 'Pending')}
+                          {employee?.reference_2_status || (employee?.references?.[1]?.verified ? 'Verified' : 'In progress')}
                         </Badge>
                       </>
                     ) : (
@@ -4615,7 +4616,7 @@ export default function EmployeeProfilePage() {
                             size="sm"
                             variant="outline"
                             onClick={handleReviewCv}
-                            disabled={cvReviewLoading}
+                            disabled={cvReviewLoading || !cvReviewReady}
                             className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
                           >
                             {cvReviewLoading ? (
@@ -4626,6 +4627,11 @@ export default function EmployeeProfilePage() {
                             Review CV
                           </Button>
                         </div>
+                        {!cvReviewReady && (
+                          <p className="text-xs text-text-muted">
+                            CV review is unavailable until a linked PDF CV is on file.
+                          </p>
+                        )}
                       </div>
                     ) : (
                       <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
@@ -4653,7 +4659,7 @@ export default function EmployeeProfilePage() {
                     variant="outline" 
                     size="sm" 
                     onClick={handleReviewCv}
-                    disabled={cvReviewLoading}
+                    disabled={cvReviewLoading || !cvReviewReady}
                     className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
                     data-testid="review-cv-btn"
                   >

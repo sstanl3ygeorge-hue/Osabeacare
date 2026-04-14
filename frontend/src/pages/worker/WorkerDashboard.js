@@ -519,6 +519,12 @@ export default function WorkerDashboard() {
   // Handle CV file upload
   const handleCvUpload = async (file) => {
     if (!file) return;
+
+    const isPdfFile = file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf');
+    if (!isPdfFile) {
+      toast.error('Only PDF CV files are supported. Please upload your CV as a PDF. Word documents (.doc, .docx) are not accepted.');
+      return;
+    }
     
     setUploading('cv');
     const token = localStorage.getItem('workerToken');
@@ -556,7 +562,7 @@ export default function WorkerDashboard() {
   const triggerCvFileInput = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.pdf,.doc,.docx';
+    input.accept = '.pdf';
     input.onchange = (e) => {
       const file = e.target.files?.[0];
       if (file) handleCvUpload(file);
@@ -1419,8 +1425,36 @@ export default function WorkerDashboard() {
                     </Button>
                   </div>
                   <p className="text-xs text-slate-500 mt-3">
-                    Accepted formats: PDF, DOC, DOCX (max 10MB)
+                    Accepted format: PDF only (max 10MB)
                   </p>
+                </div>
+              )}
+
+              {/* CV Received - Awaiting Admin Review */}
+              {cvStatus?.has_cv && !cvStatus?.needs_verification && !cvStatus?.verified && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center">
+                        <FileText className="h-6 w-6 text-slate-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-slate-800">CV received</p>
+                        <p className="text-sm text-slate-600">
+                          Your CV is on file and is awaiting review before employment history extraction starts.
+                        </p>
+                        {cvStatus?.cv_document?.uploaded_at && (
+                          <p className="text-xs text-slate-500 mt-1">
+                            Received {formatDate(cvStatus.cv_document.uploaded_at)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <Badge className="bg-slate-100 text-slate-700">
+                      <Clock className="h-3 w-3 mr-1" />
+                      Awaiting review
+                    </Badge>
+                  </div>
                 </div>
               )}
 

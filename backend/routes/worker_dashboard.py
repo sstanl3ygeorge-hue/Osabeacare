@@ -1593,6 +1593,13 @@ async def worker_upload_document(
     is_valid, detected_type, error_msg = validate_file_content(contents, file.content_type)
     if not is_valid:
         raise HTTPException(status_code=400, detail=error_msg)
+
+    if requirement_id in ["cv", "resume", "curriculum_vitae"] or "cv" in requirement_id.lower():
+        if detected_type != "application/pdf":
+            raise HTTPException(
+                status_code=400,
+                detail="Only PDF CV files are supported. Please upload your CV as a PDF. Word documents (.doc, .docx) are not accepted."
+            )
     
     safe_filename = sanitize_filename(file.filename)
     safe_filename = f"{uuid.uuid4().hex[:8]}_{safe_filename}"

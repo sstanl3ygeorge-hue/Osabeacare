@@ -121,6 +121,12 @@ export default function ApplicationFormViewer({
 
   const handlePdfUpload = async (file) => {
     if (!file) return;
+
+    const isPdfFile = file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf');
+    if (!isPdfFile) {
+      toast.error('Only PDF application forms are supported here. Please upload a scanned or exported PDF version of the application form.');
+      return;
+    }
     
     try {
       setUploading(true);

@@ -18,7 +18,7 @@ Gap Record Structure:
     "explanation": "Travelling abroad...",
     "explanation_provided_at": "...",
     "evidence_document_id": null,
-    "status": "pending | verified | rejected | needs_more_info",
+    "status": "pending | explained | needs_more_info | verified | rejected | reopened",
     "verified_by": null,
     "verified_at": null,
     "rejection_reason": null,
@@ -41,6 +41,7 @@ MIN_GAP_DAYS = 30
 class GapStatus(str, Enum):
     PENDING = "pending"              # Gap detected, no explanation yet
     EXPLAINED = "explained"          # Explanation provided, awaiting verification
+    REOPENED = "reopened"            # Previously verified gap reopened by admin
     VERIFIED = "verified"            # Verified by admin
     REJECTED = "rejected"            # Explanation rejected, needs revision
     NEEDS_MORE_INFO = "needs_more_info"  # Admin requested more details
@@ -223,6 +224,7 @@ def evaluate_gaps_compliance(gaps: List[Dict]) -> Dict:
         "pending_count": 0,
         "rejected_count": 0,
         "needs_info_count": 0,
+        "reopened_count": 0,
         "all_verified": True,
         "is_complete": True,
         "blockers": [],
@@ -258,6 +260,14 @@ def evaluate_gaps_compliance(gaps: List[Dict]) -> Dict:
             result["blockers"].append({
                 "gap_id": gap.get("gap_id"),
                 "reason": f"Employment gap requires explanation ({gap.get('duration_months')} months)"
+            })
+        elif status == GapStatus.REOPENED.value:
+            result["reopened_count"] += 1
+            result["pending_count"] += 1
+            result["all_verified"] = False
+            result["blockers"].append({
+                "gap_id": gap.get("gap_id"),
+                "reason": f"Previously verified gap reopened and requires fresh review ({gap.get('duration_months')} months)"
             })
         elif status == GapStatus.REJECTED.value:
             result["rejected_count"] += 1
@@ -396,6 +406,7 @@ def format_gap_summary(gaps: List[Dict]) -> str:
             "verified": "✓",
             "explained": "○",
             "pending": "!",
+            "reopened": "!",
             "rejected": "✗",
             "needs_more_info": "?"
         }.get(status, "?")

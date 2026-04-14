@@ -113,6 +113,19 @@ export default function EmployeeProfilePage() {
     employee?.employee_status === 'active_employee' ||
     employee?.status === 'active_employee' ||
     employee?.status === 'active';
+  const isPreEmploymentEmployee =
+    !isActiveEmployee && (
+      employee?.person_stage === 'employee' ||
+      employee?.is_approved ||
+      employee?.recruitment_approved ||
+      employee?.employee_status === 'onboarding' ||
+      employee?.status === 'onboarding'
+    );
+  const lifecycleStage = isActiveEmployee
+    ? 'active'
+    : isPreEmploymentEmployee
+      ? 'pre_employment'
+      : 'recruitment';
   const [documents, setDocuments] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);
   const [policies, setPolicies] = useState([]);
@@ -3004,7 +3017,7 @@ export default function EmployeeProfilePage() {
       </button>
 
       {/* Recruitment Context Banner - Show when viewing applicant from recruitment */}
-      {isRecruitmentView && employee?.person_stage === 'applicant' && (
+      {isRecruitmentView && lifecycleStage === 'recruitment' && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -3929,7 +3942,7 @@ export default function EmployeeProfilePage() {
       </Card>
 
       {/* CONSOLIDATED STATUS PANEL - Single source of truth */}
-      <div className="mb-6">
+      <div className={`mb-6 ${lifecycleStage === 'recruitment' ? 'opacity-70' : ''}`}>
         <ConsolidatedStatusPanel
           employeeId={employee?.id}
           employeeName={`${employee?.first_name} ${employee?.last_name}`}
@@ -4011,7 +4024,7 @@ export default function EmployeeProfilePage() {
             <ClipboardCheck className="h-4 w-4 mr-2" />
             Competencies
           </TabsTrigger>
-          {isActiveEmployee && (
+          {lifecycleStage === 'active' && (
             <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
               <Eye className="h-4 w-4 mr-2" />
               Spot Checks
@@ -4781,7 +4794,7 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* ========== TAB: SPOT CHECKS ========== */}
-        {isActiveEmployee && (
+        {lifecycleStage === 'active' && (
           <TabsContent value="spot_checks" data-testid="section-spot-checks-root">
             <SpotChecksPanel
               employeeId={employeeId}

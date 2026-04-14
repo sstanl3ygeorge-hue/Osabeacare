@@ -1920,7 +1920,7 @@ export default function UploadRequirementCard({
                       <span className="text-gray-600">Photo verification ready</span>
                       <Badge className="bg-amber-100 text-amber-700 text-xs">
                         <Eye className="h-3 w-3 mr-1" />
-                        Needs Admin
+                        Awaiting admin review
                       </Badge>
                     </div>
                   </>

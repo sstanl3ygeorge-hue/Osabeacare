@@ -3048,25 +3048,6 @@ export default function EmployeeProfilePage() {
     return acc;
   }, {});
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
-
-  if (!employee) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-text-muted">{isRecruitmentView ? 'Applicant' : 'Employee'} not found</p>
-        <Link to={isRecruitmentView ? '/portal/recruitment' : '/portal/employees'}>
-          <Button className="mt-4">{isRecruitmentView ? 'Back to Recruitment Pipeline' : 'Back to Staff'}</Button>
-        </Link>
-      </div>
-    );
-  }
-
   const groupedDocs = documentTypes.reduce((acc, type) => {
     if (!acc[type.category]) acc[type.category] = [];
     const doc = documents.find(d => d.document_type_id === type.id);
@@ -3173,16 +3154,16 @@ export default function EmployeeProfilePage() {
     !rightToWorkState.invalid
   );
   const rightToWorkStatusLabel = !rightToWorkHasDocument
-    ? 'Missing'
+      ? 'Evidence missing'
     : rightToWorkExpired
-      ? 'Expired'
+        ? 'Expired evidence'
       : rightToWorkState.invalid
-        ? 'Invalid'
+          ? 'Marked invalid'
         : rightToWorkState.verified
-          ? 'Verified'
-          : 'Pending verification';
+            ? 'Admin review recorded'
+            : 'Awaiting admin review';
   const rightToWorkStatusBadgeClass = rightToWorkVerified
-    ? 'bg-green-100 text-green-700 border-green-200'
+      ? 'bg-blue-100 text-blue-700 border-blue-200'
     : rightToWorkExpired || rightToWorkState.invalid
       ? 'bg-red-100 text-red-700 border-red-200'
       : rightToWorkHasDocument
@@ -3198,14 +3179,14 @@ export default function EmployeeProfilePage() {
   const identityDocumentType = activeIdentityDocument?.requirement_id || '';
   const identityVerified = Boolean(identityHasDocument && identityState.verified === true && !identityState.invalid);
   const identityStatusLabel = !identityHasDocument
-    ? 'Missing'
+    ? 'Evidence missing'
     : identityState.invalid
-      ? 'Invalid'
+      ? 'Marked invalid'
     : identityVerified
-      ? 'Verified'
-      : 'Pending verification';
+      ? 'Admin review recorded'
+      : 'Awaiting admin review';
   const identityStatusBadgeClass = identityVerified
-    ? 'bg-green-100 text-green-700 border-green-200'
+    ? 'bg-blue-100 text-blue-700 border-blue-200'
     : identityState.invalid
       ? 'bg-red-100 text-red-700 border-red-200'
     : identityHasDocument
@@ -3225,14 +3206,14 @@ export default function EmployeeProfilePage() {
     '';
   const proofOfAddressVerified = Boolean(proofOfAddressHasDocument && proofOfAddressState.verified === true && !proofOfAddressState.invalid);
   const proofOfAddressStatusLabel = !proofOfAddressHasDocument
-    ? 'Missing'
+    ? 'Evidence missing'
     : proofOfAddressState.invalid
-      ? 'Invalid'
+      ? 'Marked invalid'
     : proofOfAddressVerified
-      ? 'Verified'
-      : 'Pending verification';
+      ? 'Admin review recorded'
+      : 'Awaiting admin review';
   const proofOfAddressStatusBadgeClass = proofOfAddressVerified
-    ? 'bg-green-100 text-green-700 border-green-200'
+    ? 'bg-blue-100 text-blue-700 border-blue-200'
     : proofOfAddressState.invalid
       ? 'bg-red-100 text-red-700 border-red-200'
     : proofOfAddressHasDocument
@@ -3300,6 +3281,8 @@ export default function EmployeeProfilePage() {
   ].filter(Boolean);
 
   useEffect(() => {
+    if (loading || !employee) return;
+
     setRightToWorkState({
       documentTypeOverride: '',
       expiryDateOverride: '',
@@ -3311,6 +3294,8 @@ export default function EmployeeProfilePage() {
   }, [employeeId, documents, complianceRequirements, applicationSubmission]);
 
   useEffect(() => {
+    if (loading || !employee) return;
+
     setIdentityState({
       verified: Boolean(activeIdentityDocument?.verified || activeIdentityDocument?.status === 'verified'),
       verifiedBy: activeIdentityDocument?.verified_by || '',
@@ -3325,6 +3310,25 @@ export default function EmployeeProfilePage() {
       invalid: false,
     });
   }, [employeeId, documents]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!employee) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-text-muted">{isRecruitmentView ? 'Applicant' : 'Employee'} not found</p>
+        <Link to={isRecruitmentView ? '/portal/recruitment' : '/portal/employees'}>
+          <Button className="mt-4">{isRecruitmentView ? 'Back to Recruitment Pipeline' : 'Back to Staff'}</Button>
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6" data-testid="employee-profile">
@@ -5213,15 +5217,15 @@ export default function EmployeeProfilePage() {
                   {/* Employment Gap Verification moved to Employment History tab only */}
 
                   <div id="section-right_to_work" className="space-y-4">
-                    <div className={`rounded-xl border p-4 ${rightToWorkVerified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className={`rounded-xl border p-4 ${rightToWorkVerified ? 'border-blue-200 bg-blue-50' : 'border-amber-200 bg-amber-50'}`}>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 ${rightToWorkVerified ? 'text-green-600' : 'text-amber-600'}`}>
+                          <div className={`mt-0.5 ${rightToWorkVerified ? 'text-blue-600' : 'text-amber-600'}`}>
                             {rightToWorkVerified ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                           </div>
                           <div>
-                            <p className={`font-medium ${rightToWorkVerified ? 'text-green-800' : 'text-amber-800'}`}>
-                              Right to Work: {rightToWorkVerified ? 'Verified' : 'Incomplete'}
+                            <p className={`font-medium ${rightToWorkVerified ? 'text-blue-800' : 'text-amber-800'}`}>
+                              Right to Work Evidence: {rightToWorkVerified ? 'Admin review recorded' : 'Action required'}
                             </p>
                             {!rightToWorkVerified && rightToWorkBlockers.length > 0 && (
                               <p className="mt-1 text-sm text-amber-700">
@@ -5229,8 +5233,8 @@ export default function EmployeeProfilePage() {
                               </p>
                             )}
                             {rightToWorkVerified && (
-                              <p className="mt-1 text-sm text-green-700">
-                                Right to work evidence is present and marked verified.
+                              <p className="mt-1 text-sm text-blue-700">
+                                Right to work evidence is present and an admin review has been recorded. Final requirement status is shown by the workflow card below.
                               </p>
                             )}
                           </div>
@@ -5257,8 +5261,8 @@ export default function EmployeeProfilePage() {
                         </p>
                       </div>
                       <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                        <p className="text-xs text-text-muted">Verification</p>
-                        <p className="mt-2 text-sm font-semibold text-gray-900">{rightToWorkVerified ? 'Complete' : 'Required'}</p>
+                        <p className="text-xs text-text-muted">Review state</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{rightToWorkVerified ? 'Admin review recorded' : 'Action required'}</p>
                       </div>
                     </div>
 
@@ -5266,9 +5270,9 @@ export default function EmployeeProfilePage() {
                       <CardHeader className="pb-4">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <CardTitle className="font-heading text-lg">Right to Work Verification</CardTitle>
+                            <CardTitle className="font-heading text-lg">Right to Work Evidence Review</CardTitle>
                             <p className="mt-1 text-xs text-text-muted">
-                              Upload the evidence, set the document type and expiry where needed, then verify before hiring.
+                              Upload the evidence, update document details where needed, and record the review action here. Final requirement status is shown by the workflow card below.
                             </p>
                           </div>
                           <Badge variant="outline" className={rightToWorkStatusBadgeClass}>
@@ -5323,12 +5327,12 @@ export default function EmployeeProfilePage() {
                                   : rightToWorkState.invalid
                                     ? 'The current right to work evidence has been marked invalid.'
                                     : rightToWorkVerified
-                                      ? 'This right to work record is currently marked verified.'
-                                      : 'Right to work is not yet complete for hiring.'}
+                                      ? 'An admin review is currently recorded for this right to work evidence.'
+                                      : 'Further admin action is still needed on this right to work evidence.'}
                               </p>
                               {rightToWorkState.verifiedBy && (
                                 <p className="mt-1 text-xs text-text-muted">
-                                  Verified by {rightToWorkState.verifiedBy}{rightToWorkState.verifiedAt ? ` on ${formatBackendDate(rightToWorkState.verifiedAt)}` : ''}
+                                  Reviewed by {rightToWorkState.verifiedBy}{rightToWorkState.verifiedAt ? ` on ${formatBackendDate(rightToWorkState.verifiedAt)}` : ''}
                                 </p>
                               )}
                             </div>
@@ -5394,15 +5398,15 @@ export default function EmployeeProfilePage() {
                   </div>
 
                   <div id="section-identity" className="space-y-4">
-                    <div className={`rounded-xl border p-4 ${identityVerified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className={`rounded-xl border p-4 ${identityVerified ? 'border-blue-200 bg-blue-50' : 'border-amber-200 bg-amber-50'}`}>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 ${identityVerified ? 'text-green-600' : 'text-amber-600'}`}>
+                          <div className={`mt-0.5 ${identityVerified ? 'text-blue-600' : 'text-amber-600'}`}>
                             {identityVerified ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                           </div>
                           <div>
-                            <p className={`font-medium ${identityVerified ? 'text-green-800' : 'text-amber-800'}`}>
-                              Identity: {identityVerified ? 'Verified' : 'Incomplete'}
+                            <p className={`font-medium ${identityVerified ? 'text-blue-800' : 'text-amber-800'}`}>
+                              Identity Evidence: {identityVerified ? 'Admin review recorded' : 'Action required'}
                             </p>
                             {!identityVerified && identityBlockers.length > 0 && (
                               <p className="mt-1 text-sm text-amber-700">
@@ -5410,8 +5414,8 @@ export default function EmployeeProfilePage() {
                               </p>
                             )}
                             {identityVerified && (
-                              <p className="mt-1 text-sm text-green-700">
-                                Identity evidence is present and marked verified.
+                              <p className="mt-1 text-sm text-blue-700">
+                                Identity evidence is present and an admin review has been recorded. Final requirement status is shown by the workflow card below.
                               </p>
                             )}
                           </div>
@@ -5426,9 +5430,9 @@ export default function EmployeeProfilePage() {
                       <CardHeader className="pb-4">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <CardTitle className="font-heading text-lg">Identity Verification</CardTitle>
+                            <CardTitle className="font-heading text-lg">Identity Evidence Review</CardTitle>
                             <p className="mt-1 text-xs text-text-muted">
-                              Upload identity evidence and mark it verified before progressing the applicant.
+                              Upload identity evidence and record the review action here. Final requirement status is shown by the workflow card below.
                             </p>
                           </div>
                           <Badge variant="outline" className={identityStatusBadgeClass}>
@@ -5447,11 +5451,11 @@ export default function EmployeeProfilePage() {
                             <p className="mt-2 text-sm font-semibold text-gray-900">{identityDocumentType || 'Not set'}</p>
                           </div>
                           <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                            <p className="text-xs text-text-muted">Verified by</p>
+                            <p className="text-xs text-text-muted">Reviewed by</p>
                             <p className="mt-2 text-sm font-semibold text-gray-900">{identityState.verifiedBy || 'Not set'}</p>
                           </div>
                           <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                            <p className="text-xs text-text-muted">Verified at</p>
+                            <p className="text-xs text-text-muted">Reviewed at</p>
                             <p className="mt-2 text-sm font-semibold text-gray-900">{identityState.verifiedAt ? formatBackendDate(identityState.verifiedAt) : 'Not set'}</p>
                           </div>
                         </div>
@@ -5512,15 +5516,15 @@ export default function EmployeeProfilePage() {
                   </div>
 
                   <div id="section-proof_of_address" className="space-y-4">
-                    <div className={`rounded-xl border p-4 ${proofOfAddressVerified ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className={`rounded-xl border p-4 ${proofOfAddressVerified ? 'border-blue-200 bg-blue-50' : 'border-amber-200 bg-amber-50'}`}>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 ${proofOfAddressVerified ? 'text-green-600' : 'text-amber-600'}`}>
+                          <div className={`mt-0.5 ${proofOfAddressVerified ? 'text-blue-600' : 'text-amber-600'}`}>
                             {proofOfAddressVerified ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                           </div>
                           <div>
-                            <p className={`font-medium ${proofOfAddressVerified ? 'text-green-800' : 'text-amber-800'}`}>
-                              Proof of Address: {proofOfAddressVerified ? 'Verified' : 'Incomplete'}
+                            <p className={`font-medium ${proofOfAddressVerified ? 'text-blue-800' : 'text-amber-800'}`}>
+                              Proof of Address Evidence: {proofOfAddressVerified ? 'Admin review recorded' : 'Action required'}
                             </p>
                             {!proofOfAddressVerified && proofOfAddressBlockers.length > 0 && (
                               <p className="mt-1 text-sm text-amber-700">
@@ -5528,8 +5532,8 @@ export default function EmployeeProfilePage() {
                               </p>
                             )}
                             {proofOfAddressVerified && (
-                              <p className="mt-1 text-sm text-green-700">
-                                Proof of address evidence is present and marked verified.
+                              <p className="mt-1 text-sm text-blue-700">
+                                Proof of address evidence is present and an admin review has been recorded. Final requirement status is shown by the workflow card below.
                               </p>
                             )}
                           </div>
@@ -5544,9 +5548,9 @@ export default function EmployeeProfilePage() {
                       <CardHeader className="pb-4">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <CardTitle className="font-heading text-lg">Proof of Address Verification</CardTitle>
+                            <CardTitle className="font-heading text-lg">Proof of Address Evidence Review</CardTitle>
                             <p className="mt-1 text-xs text-text-muted">
-                              Upload proof of address evidence and mark it verified before progressing the applicant.
+                              Upload proof of address evidence and record the review action here. Final requirement status is shown by the workflow card below.
                             </p>
                           </div>
                           <Badge variant="outline" className={proofOfAddressStatusBadgeClass}>
@@ -5569,7 +5573,7 @@ export default function EmployeeProfilePage() {
                             <p className="mt-2 text-sm font-semibold text-gray-900">{proofOfAddressIssueDate ? formatBackendDate(proofOfAddressIssueDate) : 'Not set'}</p>
                           </div>
                           <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
-                            <p className="text-xs text-text-muted">Verified by</p>
+                            <p className="text-xs text-text-muted">Reviewed by</p>
                             <p className="mt-2 text-sm font-semibold text-gray-900">{proofOfAddressState.verifiedBy || 'Not set'}</p>
                           </div>
                         </div>

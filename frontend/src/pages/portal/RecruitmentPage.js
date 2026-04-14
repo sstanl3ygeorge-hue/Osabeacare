@@ -247,10 +247,10 @@ export default function RecruitmentPage() {
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Recruitment Pipeline</h1>
           <p className="text-text-muted mt-1">
-            {pipeline?.summary?.total_applicants || 0} applicants awaiting review and approval
+            {pipeline?.summary?.total_applicants || 0} applicants awaiting review
           </p>
           <p className="text-xs text-text-muted/70 mt-0.5">
-            Review applicants before approving. Once approved, they move to Staff.
+            Review the applicant record, employment history, and interview evidence before approving to onboarding.
           </p>
         </div>
         <Button onClick={() => navigate('/portal/employees')} variant="outline">
@@ -339,7 +339,7 @@ export default function RecruitmentPage() {
             Recruitment Pipeline
           </CardTitle>
           <CardDescription>
-            Review each applicant's compliance status before approving for recruitment.
+            Review each applicant's record before approval, with employment history and interview checks completed first.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -417,7 +417,7 @@ export default function RecruitmentPage() {
                             ) : (
                               <span className="flex items-center gap-1.5 text-amber-600 font-medium">
                                 <AlertTriangle className="w-4 h-4" />
-                                Blocked by {approval.blockerCount} item{approval.blockerCount !== 1 ? 's' : ''}
+                                Review needed ({approval.blockerCount})
                               </span>
                             )}
                           </div>
@@ -446,7 +446,7 @@ export default function RecruitmentPage() {
                           data-testid={`review-applicant-btn-${applicant.id}`}
                         >
                           <Eye className="w-4 h-4 mr-2" />
-                          Review Applicant
+                          Review Applicant Record
                         </Button>
                         
                         {/* SECONDARY: Approve Recruitment - Only show when ready */}
@@ -463,7 +463,7 @@ export default function RecruitmentPage() {
                             ) : (
                               <CheckCircle className="w-4 h-4 mr-2" />
                             )}
-                            Approve Recruitment
+                            Approve to Onboarding
                           </Button>
                         )}
                         
@@ -476,7 +476,7 @@ export default function RecruitmentPage() {
                             data-testid={`view-blockers-btn-${applicant.id}`}
                           >
                             <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" />
-                            {approval.blockerCount} Blockers
+                            Review Before Approval ({approval.blockerCount})
                           </Button>
                         )}
                         
@@ -503,16 +503,22 @@ export default function RecruitmentPage() {
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem 
+                            onClick={() => navigate(`/portal/recruitment/${applicant.id}?tab=employment`)}
+                          >
+                            <Briefcase className="w-4 h-4 mr-2" />
+                            Review Employment History
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => navigate(`/portal/recruitment/${applicant.id}?tab=forms`)}
+                          >
+                            <UserCheck className="w-4 h-4 mr-2" />
+                            Review Interview & Forms
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
                             onClick={() => navigate(`/portal/recruitment/${applicant.id}?tab=checklist`)}
                           >
                             <FileText className="w-4 h-4 mr-2" />
-                            View Compliance File
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => navigate(`/portal/recruitment/${applicant.id}?tab=recruitment`)}
-                          >
-                            <Briefcase className="w-4 h-4 mr-2" />
-                            View Recruitment Record
+                            Review Verification File
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -531,11 +537,11 @@ export default function RecruitmentPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCheck className="h-5 w-5 text-emerald-600" />
-              Approve for Recruitment?
+              Approve to Staff Onboarding?
             </DialogTitle>
             <DialogDescription className="text-left">
               This will transition <strong>{selectedApplicant?.first_name} {selectedApplicant?.last_name}</strong> from 
-              Applicant to Employee status.
+              Applicant to Employee status after recruitment review is complete.
             </DialogDescription>
           </DialogHeader>
           
@@ -568,7 +574,7 @@ export default function RecruitmentPage() {
               <div className="space-y-2">
                 <label className="text-sm font-medium">Approval Notes (optional)</label>
                 <Textarea
-                  placeholder="Add any notes about this recruitment decision..."
+                  placeholder="Add any final notes from employment, interview, or recruitment review..."
                   value={approvalNotes}
                   onChange={(e) => setApprovalNotes(e.target.value)}
                   rows={3}
@@ -592,7 +598,7 @@ export default function RecruitmentPage() {
               ) : (
                 <CheckCircle className="w-4 h-4 mr-2" />
               )}
-              Approve Recruitment
+              Approve to Onboarding
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -662,7 +668,7 @@ export default function RecruitmentPage() {
               className="bg-primary hover:bg-primary-hover"
             >
               <Eye className="w-4 h-4 mr-2" />
-              Review Compliance
+              Review Applicant File
             </Button>
           </DialogFooter>
         </DialogContent>

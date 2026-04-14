@@ -106,7 +106,7 @@ export default function EmployeeProfilePage() {
   const isRecruitmentView = location.pathname.startsWith('/portal/recruitment/');
   
   // Initialize active tab from URL for navigation state persistence
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'work_readiness');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'employment');
   const [employee, setEmployee] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [documentTypes, setDocumentTypes] = useState([]);
@@ -2998,7 +2998,7 @@ export default function EmployeeProfilePage() {
             </div>
             <div>
               <p className="font-medium text-blue-800">Applicant Profile</p>
-              <p className="text-sm text-blue-600">Review this applicant's compliance status before approval</p>
+              <p className="text-sm text-blue-600">Start with employment history, interview, references, and verification before approving.</p>
             </div>
           </div>
           <Badge variant="outline" className="bg-blue-100 text-blue-700 border-blue-300">
@@ -3969,33 +3969,29 @@ export default function EmployeeProfilePage() {
       {/* Tabs - 7 Section Structure */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
         <TabsList className="bg-white border border-[#E4E8EB] p-1 rounded-xl flex-wrap">
-          <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <Shield className="h-4 w-4 mr-2" />
-            Work Readiness
-          </TabsTrigger>
-          <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Compliance
+          <TabsTrigger value="employment" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <Briefcase className="h-4 w-4 mr-2" />
+            Employment Review
           </TabsTrigger>
           <TabsTrigger value="forms" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <FileText className="h-4 w-4 mr-2" />
-            Forms
-          </TabsTrigger>
-          <TabsTrigger value="training" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <GraduationCap className="h-4 w-4 mr-2" />
-            Training
+            Forms & Interview
           </TabsTrigger>
           <TabsTrigger value="references" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <UserCheck className="h-4 w-4 mr-2" />
             References
           </TabsTrigger>
-          <TabsTrigger value="employment" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <Briefcase className="h-4 w-4 mr-2" />
-            Employment
+          <TabsTrigger value="checklist" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <CheckCircle className="h-4 w-4 mr-2" />
+            Verification & Compliance
           </TabsTrigger>
-          <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <History className="h-4 w-4 mr-2" />
-            Audit
+          <TabsTrigger value="training" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <GraduationCap className="h-4 w-4 mr-2" />
+            Training
+          </TabsTrigger>
+          <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <Shield className="h-4 w-4 mr-2" />
+            Readiness & Summary
           </TabsTrigger>
           <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <ClipboardCheck className="h-4 w-4 mr-2" />
@@ -4004,6 +4000,10 @@ export default function EmployeeProfilePage() {
           <TabsTrigger value="spot_checks" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <Eye className="h-4 w-4 mr-2" />
             Spot Checks
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
+            <History className="h-4 w-4 mr-2" />
+            Audit
           </TabsTrigger>
         </TabsList>
 
@@ -4165,9 +4165,30 @@ export default function EmployeeProfilePage() {
             />
           </div>
 
+          <div className="mb-6 rounded-xl border border-blue-200 bg-white p-4 shadow-sm" data-testid="section-forms-interview">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h4 className="font-medium text-gray-800">Interview Assessment</h4>
+                <p className="text-xs text-gray-500 mt-1">
+                  Place interview review early in the recruitment journey, before later-stage verification and readiness checks.
+                </p>
+              </div>
+              <Badge className="bg-blue-100 text-blue-700">Early Review</Badge>
+            </div>
+            <InterviewFormPanel 
+              employeeId={employeeId}
+              employeeName={`${employee?.first_name} ${employee?.last_name}`}
+              employeeRole={employee?.role || 'Healthcare Assistant'}
+              onComplete={() => {
+                fetchCompliance();
+                fetchFormSubmissions();
+              }}
+            />
+          </div>
+
           <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
             <CardHeader>
-              <CardTitle className="font-heading text-lg">Employee Forms</CardTitle>
+              <CardTitle className="font-heading text-lg">Worker Onboarding Forms</CardTitle>
               <p className="text-xs text-text-muted">
                 Required forms that worker must complete. View submissions, mark as reviewed, or send reminders.
               </p>
@@ -4332,21 +4353,6 @@ export default function EmployeeProfilePage() {
                 })}
               </div>
               
-              {/* Step 2: Interview Assessment Record - Admin only */}
-              <div className="mt-6 pt-6 border-t" data-testid="section-forms-interview">
-                <h4 className="font-medium text-gray-800 mb-1">Interview Assessment (Admin Only)</h4>
-                <p className="text-xs text-gray-500 mb-3">Step 2 after worker pre-screen questionnaire submission.</p>
-                <InterviewFormPanel 
-                  employeeId={employeeId}
-                  employeeName={`${employee?.first_name} ${employee?.last_name}`}
-                  employeeRole={employee?.role || 'Healthcare Assistant'}
-                  onComplete={() => {
-                    fetchCompliance();
-                    fetchFormSubmissions();
-                  }}
-                />
-              </div>
-
               <div className="mt-6 pt-6 border-t" data-testid="section-forms-declarations">
                 <h4 className="font-medium text-gray-800 mb-1">Applicant Declarations</h4>
                 <p className="text-xs text-gray-500 mb-3">

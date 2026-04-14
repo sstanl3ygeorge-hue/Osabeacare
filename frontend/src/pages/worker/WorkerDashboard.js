@@ -794,6 +794,7 @@ export default function WorkerDashboard() {
   const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks, agreements } = dashboard;
   
   const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
+  const showOnboardingContractSection = !isActiveEmployee && !contract_signed;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -2146,86 +2147,6 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* ========== SPOT CHECKS (P1: Worker Dashboard) ========== */}
-        {spot_checks && spot_checks.length > 0 && (
-          <Card className="shadow-md border-0" data-testid="spot-checks-section">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Eye className="h-5 w-5 text-indigo-500" />
-                    Spot Checks
-                  </CardTitle>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Your observation and supervision history
-                  </p>
-                </div>
-                <Badge className="bg-indigo-100 text-indigo-700">
-                  {spot_checks.length} Recorded
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {spot_checks.slice(0, 10).map((spot, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3 rounded-xl border ${
-                      spot.outcome === 'pass' ? 'bg-green-50 border-green-200' :
-                      spot.outcome === 'needs_improvement' ? 'bg-amber-50 border-amber-200' :
-                      spot.outcome === 'fail' ? 'bg-red-50 border-red-200' :
-                      'bg-slate-50 border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                          spot.outcome === 'pass' ? 'bg-green-100' :
-                          spot.outcome === 'needs_improvement' ? 'bg-amber-100' :
-                          spot.outcome === 'fail' ? 'bg-red-100' :
-                          'bg-slate-100'
-                        }`}>
-                          {spot.outcome === 'pass' ? (
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                          ) : spot.outcome === 'needs_improvement' ? (
-                            <AlertCircle className="h-4 w-4 text-amber-600" />
-                          ) : spot.outcome === 'fail' ? (
-                            <X className="h-4 w-4 text-red-600" />
-                          ) : (
-                            <Clock className="h-4 w-4 text-slate-400" />
-                          )}
-                        </div>
-                        <div>
-                          <span className="font-medium text-slate-700 text-sm">{spot.area || spot.type || 'Observation'}</span>
-                          {spot.date && <p className="text-xs text-slate-500">{formatDate(spot.date)}</p>}
-                        </div>
-                      </div>
-                      <Badge className={`text-xs ${
-                        spot.outcome === 'pass' ? 'bg-green-100 text-green-700' :
-                        spot.outcome === 'needs_improvement' ? 'bg-amber-100 text-amber-700' :
-                        spot.outcome === 'fail' ? 'bg-red-100 text-red-700' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {spot.outcome === 'pass' ? 'Pass' :
-                         spot.outcome === 'needs_improvement' ? 'Needs Work' :
-                         spot.outcome === 'fail' ? 'Fail' : 'Pending'}
-                      </Badge>
-                    </div>
-                    {spot.notes && (
-                      <p className="text-xs text-slate-600 mt-2 bg-white/50 p-2 rounded">{spot.notes}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-              {spot_checks.length > 10 && (
-                <p className="text-xs text-slate-400 mt-2 text-center">
-                  Showing 10 of {spot_checks.length} spot checks
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
         {/* ========== AGREEMENTS (P0: Contract & Handbook Status) ========== */}
         {/* Filter out contract_acceptance since it's covered by Employment Contract section below */}
         {agreements && agreements.filter(a => a.id !== 'contract_acceptance').length > 0 && (
@@ -2235,10 +2156,10 @@ export default function WorkerDashboard() {
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <PenTool className="h-5 w-5 text-purple-500" />
-                    Acknowledgements
+                    Agreements & Acknowledgements
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    Completed when you sign your employment contract
+                    Review handbook-related acknowledgements alongside your contract stage.
                   </p>
                 </div>
                 <Badge className={`${
@@ -2319,24 +2240,23 @@ export default function WorkerDashboard() {
         )}
 
         {/* Contract Status - Only for onboarding */}
-        {!isActiveEmployee && !contract_signed && (
+        {showOnboardingContractSection && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <FileText className="h-5 w-5 text-red-500" />
-                Employment Contract & Handbook
+                Contract Review & Signature
               </CardTitle>
               <p className="text-xs text-slate-500 mt-1">
-                Signing your contract also acknowledges the Employee Handbook
+                Contract signing is the last onboarding step before you are ready to start.
               </p>
             </CardHeader>
             <CardContent>
               {contractEligibility?.can_sign ? (
-                // CAN sign contract - all checks complete
                 <div className="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-200">
                   <div>
-                    <span className="font-medium text-green-800">Ready to Sign!</span>
-                    <p className="text-xs text-green-600">All compliance checks are complete. Please sign your contract to proceed.</p>
+                    <span className="font-medium text-green-800">Ready to Sign</span>
+                    <p className="text-xs text-green-600">Earlier onboarding checks are complete. You can now review and sign your contract.</p>
                   </div>
                   <Button 
                     onClick={() => setShowSignaturePad(true)}
@@ -2344,17 +2264,16 @@ export default function WorkerDashboard() {
                     data-testid="sign-contract-btn"
                   >
                     <PenTool className="h-4 w-4" />
-                    Sign Contract
+                    Review & Sign Contract
                   </Button>
                 </div>
               ) : (
-                // CANNOT sign contract - blockers remaining
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-4 bg-amber-50 rounded-xl border border-amber-200">
                     <div>
                       <span className="font-medium text-amber-800">Contract Locked</span>
                       <p className="text-xs text-amber-600">
-                        Contract signing is the final step. Complete all requirements below first.
+                        Contract signing stays locked until your forms, employment history, documents, references, and training are complete.
                       </p>
                     </div>
                     <Button 
@@ -2367,7 +2286,6 @@ export default function WorkerDashboard() {
                     </Button>
                   </div>
                   
-                  {/* Show remaining blockers */}
                   {contractEligibility?.blockers?.length > 0 && (
                     <div className="p-3 bg-gray-50 rounded-lg">
                       <p className="text-xs font-medium text-gray-600 mb-2">
@@ -2389,6 +2307,86 @@ export default function WorkerDashboard() {
                     </div>
                   )}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== SPOT CHECKS (P1: Worker Dashboard) ========== */}
+        {isActiveEmployee && spot_checks && spot_checks.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="spot-checks-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Eye className="h-5 w-5 text-indigo-500" />
+                    Spot Checks
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Your observation and supervision history
+                  </p>
+                </div>
+                <Badge className="bg-indigo-100 text-indigo-700">
+                  {spot_checks.length} Recorded
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {spot_checks.slice(0, 10).map((spot, idx) => (
+                  <div
+                    key={idx}
+                    className={`p-3 rounded-xl border ${
+                      spot.outcome === 'pass' ? 'bg-green-50 border-green-200' :
+                      spot.outcome === 'needs_improvement' ? 'bg-amber-50 border-amber-200' :
+                      spot.outcome === 'fail' ? 'bg-red-50 border-red-200' :
+                      'bg-slate-50 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          spot.outcome === 'pass' ? 'bg-green-100' :
+                          spot.outcome === 'needs_improvement' ? 'bg-amber-100' :
+                          spot.outcome === 'fail' ? 'bg-red-100' :
+                          'bg-slate-100'
+                        }`}>
+                          {spot.outcome === 'pass' ? (
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                          ) : spot.outcome === 'needs_improvement' ? (
+                            <AlertCircle className="h-4 w-4 text-amber-600" />
+                          ) : spot.outcome === 'fail' ? (
+                            <X className="h-4 w-4 text-red-600" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-medium text-slate-700 text-sm">{spot.area || spot.type || 'Observation'}</span>
+                          {spot.date && <p className="text-xs text-slate-500">{formatDate(spot.date)}</p>}
+                        </div>
+                      </div>
+                      <Badge className={`text-xs ${
+                        spot.outcome === 'pass' ? 'bg-green-100 text-green-700' :
+                        spot.outcome === 'needs_improvement' ? 'bg-amber-100 text-amber-700' :
+                        spot.outcome === 'fail' ? 'bg-red-100 text-red-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>
+                        {spot.outcome === 'pass' ? 'Pass' :
+                         spot.outcome === 'needs_improvement' ? 'Needs Work' :
+                         spot.outcome === 'fail' ? 'Fail' : 'Pending'}
+                      </Badge>
+                    </div>
+                    {spot.notes && (
+                      <p className="text-xs text-slate-600 mt-2 bg-white/50 p-2 rounded">{spot.notes}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {spot_checks.length > 10 && (
+                <p className="text-xs text-slate-400 mt-2 text-center">
+                  Showing 10 of {spot_checks.length} spot checks
+                </p>
               )}
             </CardContent>
           </Card>

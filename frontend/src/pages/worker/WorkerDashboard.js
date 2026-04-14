@@ -793,7 +793,26 @@ export default function WorkerDashboard() {
 
   const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks, agreements } = dashboard;
   
-  const isActiveEmployee = employee.is_active_employee || employee.employee_status === 'active_employee';
+  const isActiveEmployee =
+    employee?.is_active_employee ||
+    employee?.employee_status === 'active_employee' ||
+    employee?.status === 'active_employee' ||
+    employee?.status === 'active';
+  const isPreEmploymentEmployee =
+    !isActiveEmployee && (
+      employee?.person_stage === 'employee' ||
+      employee?.is_approved ||
+      employee?.recruitment_approved ||
+      employee?.employee_status === 'onboarding' ||
+      employee?.status === 'onboarding' ||
+      employee?.status === 'READY' ||
+      contract_signed
+    );
+  const lifecycleStage = isActiveEmployee
+    ? 'active'
+    : isPreEmploymentEmployee
+      ? 'pre_employment'
+      : 'recruitment';
   const showOnboardingContractSection = !isActiveEmployee && !contract_signed;
 
   return (
@@ -1022,6 +1041,18 @@ export default function WorkerDashboard() {
               </div>
             </div>
           </div>
+        ) : lifecycleStage === 'recruitment' ? (
+          <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-recruitment">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
+                <AlertCircle className="h-8 w-8" />
+              </div>
+              <div>
+                <h3 className="font-bold text-xl">Recruitment Details In Progress</h3>
+                <p className="text-amber-100">Start with your forms and employment history below. Later onboarding checks come after review.</p>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-onboarding">
             <div className="flex items-center gap-4">
@@ -1071,7 +1102,9 @@ export default function WorkerDashboard() {
           <Card className="shadow-md border-0">
             <CardContent className="pt-6">
               <div className="flex justify-between items-center mb-3">
-                <span className="text-sm font-medium text-slate-600">Your Compliance Progress</span>
+                <span className="text-sm font-medium text-slate-600">
+                  {lifecycleStage === 'recruitment' ? 'Your Recruitment Progress' : 'Your Onboarding Progress'}
+                </span>
                 <span className="text-3xl font-bold text-blue-600">{progress.percentage}%</span>
               </div>
               <Progress value={progress.percentage} className="h-3" />
@@ -1567,7 +1600,11 @@ export default function WorkerDashboard() {
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-lg">
                 <Upload className="h-5 w-5 text-red-500" />
-                {missing_documents.some(d => d.rejection) ? 'Action Required - Re-upload Documents' : 'Documents Needed'}
+                {missing_documents.some(d => d.rejection)
+                  ? 'Action Required - Re-upload Documents'
+                  : lifecycleStage === 'recruitment'
+                    ? 'Documents for Verification'
+                    : 'Documents Needed'}
               </CardTitle>
             </CardHeader>
             <CardContent>

@@ -222,6 +222,11 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    ref_doc = await db.references.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ) or {}
+
     rtw_check = await db.rtw_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0, "proof_document_id": 1})
     dbs_check = await db.dbs_checks.find_one({"employee_id": employee_id, "is_current": True}, {"_id": 0, "proof_document_id": 1})
     current_proof_doc_ids = {
@@ -1176,35 +1181,77 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # References status
     references_status = []
+    has_canonical_references = bool(ref_doc)
     for ref_num in [1, 2]:
         prefix = f"reference_{ref_num}_"
-        
-        referee_name = employee.get(f"{prefix}name", "")
-        referee_email = employee.get(f"{prefix}email", "")
-        is_declared = bool(referee_name and referee_email)
-        
-        request_sent_at = employee.get(f"{prefix}request_sent_at")
-        request_status = employee.get(f"{prefix}request_status")
-        request_token = employee.get(f"{prefix}request_token")
-        request_sent = bool(request_sent_at) or request_status in ["awaiting_response", "requested", "sent"] or bool(request_token)
-        
-        response_data = employee.get(f"{prefix}response_data")
-        response_received_at = employee.get(f"{prefix}response_received_at")
-        response_status = employee.get(f"{prefix}response_status")
-        response_received = bool(response_data) or bool(response_received_at) or response_status in ["received", "submitted"] or request_status == "response_received"
-        
-        is_verified = (
-            employee.get(f"{prefix}verified", False) == True or
-            employee.get(f"{prefix}status") == "verified" or
-            request_status == "verified"
-        )
-        verified_at = employee.get(f"{prefix}verified_at")
-        verified_by = employee.get(f"{prefix}verified_by")
-        
-        is_rejected = employee.get(f"{prefix}rejected", False) or request_status == "rejected"
-        rejection_reason = employee.get(f"{prefix}rejection_reason", "")
-        
-        data_cleared = is_rejected and not referee_name
+
+        if has_canonical_references:
+            ref_data = ref_doc.get(f"ref{ref_num}") or {}
+            declared_data = ref_data.get("declared") or {}
+            request_data = ref_data.get("request") or {}
+            response_data = ref_data.get("response") or {}
+            verification_data = ref_data.get("verification") or {}
+            mismatch_data = ref_data.get("mismatch") or {}
+
+            referee_name = declared_data.get("name", "")
+            referee_email = declared_data.get("email", "")
+            is_declared = bool(referee_name and referee_email)
+
+            request_sent_at = request_data.get("sent_at")
+            request_status = request_data.get("status")
+            request_token = request_data.get("token")
+            request_sent = bool(request_sent_at) or request_status in ["awaiting_response", "requested", "sent"] or bool(request_token)
+
+            response_received_at = response_data.get("received_at")
+            response_received = (
+                bool(response_data)
+                or bool(response_received_at)
+                or request_status in ["submitted", "awaiting_review", "verified", "rejected"]
+            )
+
+            is_verified = verification_data.get("status") == "verified"
+            verified_at = verification_data.get("verified_at")
+            verified_by = verification_data.get("verified_by")
+
+            is_rejected = verification_data.get("status") == "rejected" or request_status == "rejected"
+            rejection_reason = verification_data.get("rejection_reason", "")
+
+            data_cleared = is_rejected and not referee_name
+            mismatch_explanation = mismatch_data.get("reason") or mismatch_data.get("notes")
+            mismatch_explanation_status = "documented" if mismatch_data.get("documented") else "not_submitted"
+            mismatch_admin_decision = mismatch_data.get("detected")
+            referee_company = declared_data.get("organisation") or declared_data.get("company", "")
+        else:
+            referee_name = employee.get(f"{prefix}name", "")
+            referee_email = employee.get(f"{prefix}email", "")
+            is_declared = bool(referee_name and referee_email)
+
+            request_sent_at = employee.get(f"{prefix}request_sent_at")
+            request_status = employee.get(f"{prefix}request_status")
+            request_token = employee.get(f"{prefix}request_token")
+            request_sent = bool(request_sent_at) or request_status in ["awaiting_response", "requested", "sent"] or bool(request_token)
+
+            response_data = employee.get(f"{prefix}response_data")
+            response_received_at = employee.get(f"{prefix}response_received_at")
+            response_status = employee.get(f"{prefix}response_status")
+            response_received = bool(response_data) or bool(response_received_at) or response_status in ["received", "submitted"] or request_status == "response_received"
+
+            is_verified = (
+                employee.get(f"{prefix}verified", False) == True or
+                employee.get(f"{prefix}status") == "verified" or
+                request_status == "verified"
+            )
+            verified_at = employee.get(f"{prefix}verified_at")
+            verified_by = employee.get(f"{prefix}verified_by")
+
+            is_rejected = employee.get(f"{prefix}rejected", False) or request_status == "rejected"
+            rejection_reason = employee.get(f"{prefix}rejection_reason", "")
+
+            data_cleared = is_rejected and not referee_name
+            mismatch_explanation = employee.get(f"{prefix}mismatch_explanation")
+            mismatch_explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
+            mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
+            referee_company = employee.get(f"{prefix}company", "")
         
         if is_verified:
             ref_status = "verified"
@@ -1234,14 +1281,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             if admin_user:
                 verified_by_name = f"{admin_user.get('first_name', '')} {admin_user.get('last_name', '')}".strip()
         
-        mismatch_explanation = employee.get(f"{prefix}mismatch_explanation")
-        mismatch_explanation_status = employee.get(f"{prefix}mismatch_explanation_status", "not_submitted")
-        mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
-        
         references_status.append({
             "reference_number": ref_num,
             "referee_name": referee_name if is_declared else None,
-            "referee_company": employee.get(f"{prefix}company", "") if is_declared else None,
+            "referee_company": referee_company if is_declared else None,
             "status": ref_status,
             "status_label": status_label,
             "rejection_reason": rejection_reason if (is_rejected or data_cleared) else None,

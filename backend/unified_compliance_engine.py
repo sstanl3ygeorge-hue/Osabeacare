@@ -927,29 +927,30 @@ async def get_unified_employee_status(
     
     ref1_verified = False
     ref2_verified = False
-    
-    # Check from references array on employee
-    for idx, ref in enumerate(references[:2]):
-        is_verified = ref.get("verified") or ref.get("status") == "verified"
-        if idx == 0:
-            ref1_verified = is_verified
-        else:
-            ref2_verified = is_verified
-    
-    # Check from references collection
-    if ref_doc is not None:
-        ref1_data = ref_doc.get("ref1") or {}
-        ref2_data = ref_doc.get("ref2") or {}
-        if ref1_data.get("verification_status") == "verified":
+
+    if ref_doc:
+        ref1 = ref_doc.get("ref1", {})
+        ref2 = ref_doc.get("ref2", {})
+
+        ref1_verified = (
+            ref1.get("verification", {}).get("status") == "verified"
+        )
+        ref2_verified = (
+            ref2.get("verification", {}).get("status") == "verified"
+        )
+    else:
+        # Legacy fallback when canonical reference document does not exist.
+        for idx, ref in enumerate(references[:2]):
+            is_verified = ref.get("verified") or ref.get("status") == "verified"
+            if idx == 0:
+                ref1_verified = is_verified
+            else:
+                ref2_verified = is_verified
+
+        if employee.get("reference_1_verified"):
             ref1_verified = True
-        if ref2_data.get("verification_status") == "verified":
+        if employee.get("reference_2_verified"):
             ref2_verified = True
-    
-    # Also check employee-level flags
-    if employee.get("reference_1_verified"):
-        ref1_verified = True
-    if employee.get("reference_2_verified"):
-        ref2_verified = True
     
     checks["reference_1"] = ref1_verified
     checks["reference_2"] = ref2_verified

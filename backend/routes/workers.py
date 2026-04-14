@@ -335,22 +335,36 @@ async def get_profile_completion_status(worker: dict = Depends(get_current_worke
     sections["employment_history"]["complete"] = has_employment or has_cv
     
     # Check References
+    ref_doc = await db.references.find_one(
+        {"employee_id": employee_id},
+        {"_id": 0}
+    ) or {}
+
     ref_count = 0
-    refs = await db.employee_references.find({"employee_id": employee_id}, {"_id": 0}).to_list(10)
-    ref_count = len([r for r in refs if r.get("referee_name") or r.get("referee_email")])
-    
-    # Also check inline references (from application form - flat fields)
-    if employee.get("reference_1_name") or employee.get("reference_1_email"):
-        ref_count += 1
-    if employee.get("reference_2_name") or employee.get("reference_2_email"):
-        ref_count += 1
-    
-    # Check legacy nested format too
-    if ref_count < 2:
-        if employee.get("reference_1") and (employee.get("reference_1", {}).get("name") or employee.get("reference_1", {}).get("email")):
+    if ref_doc:
+        ref1 = (ref_doc.get("ref1") or {}).get("declared") or {}
+        ref2 = (ref_doc.get("ref2") or {}).get("declared") or {}
+        ref_count = sum(
+            1 for ref in [ref1, ref2]
+            if ref.get("name") or ref.get("email")
+        )
+    else:
+        # Legacy fallback when no canonical reference document exists.
+        refs = await db.employee_references.find({"employee_id": employee_id}, {"_id": 0}).to_list(10)
+        ref_count = len([r for r in refs if r.get("referee_name") or r.get("referee_email")])
+
+        # Also check inline references (from application form - flat fields)
+        if employee.get("reference_1_name") or employee.get("reference_1_email"):
             ref_count += 1
-        if employee.get("reference_2") and (employee.get("reference_2", {}).get("name") or employee.get("reference_2", {}).get("email")):
+        if employee.get("reference_2_name") or employee.get("reference_2_email"):
             ref_count += 1
+
+        # Check legacy nested format too
+        if ref_count < 2:
+            if employee.get("reference_1") and (employee.get("reference_1", {}).get("name") or employee.get("reference_1", {}).get("email")):
+                ref_count += 1
+            if employee.get("reference_2") and (employee.get("reference_2", {}).get("name") or employee.get("reference_2", {}).get("email")):
+                ref_count += 1
     
     if ref_count < 1:
         sections["references"]["missing_fields"].append("reference_1")

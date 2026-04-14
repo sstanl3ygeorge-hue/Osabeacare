@@ -3003,6 +3003,28 @@ export default function EmployeeProfilePage() {
     acc[type.category].push({ ...type, document: doc });
     return acc;
   }, {});
+  const applicationSubmission =
+    formSubmissions.find((submission) =>
+      submission?.requirement_id === 'application_form' || submission?.form_type === 'application_form'
+    ) || null;
+  const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
+  const cvDocument =
+    documents.find((document) => ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id)) || null;
+  const employmentGapEvaluation = complianceFile?.sections?.employment_history?.rows?.[0]?.gap_evaluation || null;
+  const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
+  const cvAvailable = Boolean(
+    cvDocument ||
+    employee?.cv_status ||
+    employee?.cv_extraction_status ||
+    employee?.cv_extracted_employment_history?.length
+  );
+  const gapVerifiedCount = employmentGapEvaluation?.verified_count;
+  const gapNeedsReviewCount = employmentGapEvaluation
+    ? (employmentGapEvaluation?.pending_count || 0) +
+      (employmentGapEvaluation?.explained_count || 0) +
+      (employmentGapEvaluation?.rejected_count || 0) +
+      (employmentGapEvaluation?.needs_info_count || 0)
+    : null;
 
   return (
     <div className="space-y-6" data-testid="employee-profile">
@@ -4451,42 +4473,199 @@ export default function EmployeeProfilePage() {
         {/* ========== TAB 6: EMPLOYMENT ========== */}
         {/* Employment history + gap verification + declarations */}
         <TabsContent value="employment">
-          <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-employment-cv">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="font-heading text-lg">Employment History</CardTitle>
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4" data-testid="section-employment-summary-strip">
+              <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                <p className="text-xs text-text-muted">Application form</p>
+                <Badge variant="outline" className={`mt-2 ${applicationAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                  {applicationAvailable ? 'Available' : 'Missing'}
+                </Badge>
+              </div>
+              <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                <p className="text-xs text-text-muted">CV file</p>
+                <Badge variant="outline" className={`mt-2 ${cvAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                  {cvAvailable ? 'Available' : 'Missing'}
+                </Badge>
+              </div>
+              {employmentGapEvaluation?.is_complete !== undefined && (
+                <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                  <p className="text-xs text-text-muted">10-year history</p>
+                  <Badge variant="outline" className={`mt-2 ${employmentGapEvaluation.is_complete ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                    {employmentGapEvaluation.is_complete ? 'Complete' : 'Needs review'}
+                  </Badge>
+                </div>
+              )}
+              {gapVerifiedCount !== undefined && gapNeedsReviewCount !== null && (
+                <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                  <p className="text-xs text-text-muted">Gap review</p>
+                  <p className="mt-2 text-sm font-medium text-gray-800">
+                    {gapVerifiedCount} verified / {gapNeedsReviewCount} needs review
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-employment-evidence">
+              <CardHeader>
+                <CardTitle className="font-heading text-lg">Application & CV Evidence</CardTitle>
                 <p className="text-xs text-text-muted">
-                  Work history, gap verification, and employment declarations.
+                  Source evidence available on this page for employment-history review.
                 </p>
-              </div>
-              <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleReviewCv}
-                  disabled={cvReviewLoading}
-                  className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
-                  data-testid="review-cv-btn"
-                >
-                  {cvReviewLoading ? (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  ) : (
-                    <FileSearch className="h-4 w-4 mr-1" />
-                  )}
-                  Review CV
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setEditEmploymentOpen(true)}
-                  data-testid="edit-employment-btn"
-                >
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit History
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-[#E4E8EB] bg-gray-50 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="font-medium text-gray-800">Application Record</h4>
+                        <p className="mt-1 text-xs text-text-muted">Application submission and PDF export where already available.</p>
+                      </div>
+                      <Badge variant="outline" className={applicationAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}>
+                        {applicationAvailable ? 'Available' : 'Missing'}
+                      </Badge>
+                    </div>
+
+                    {applicationAvailable ? (
+                      <div className="mt-4 space-y-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div>
+                            <p className="text-xs text-text-muted">Submitted</p>
+                            <p className="text-sm font-medium text-gray-800">
+                              {applicationSubmission?.submitted_at || applicationSubmission?.updated_at
+                                ? formatBackendDateTime(applicationSubmission?.submitted_at || applicationSubmission?.updated_at)
+                                : 'Date unavailable'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-text-muted">Source</p>
+                            <p className="text-sm font-medium text-gray-800">
+                              {applicationSubmission ? 'Online application' : applicationPdfDocument ? 'Uploaded PDF' : 'Unavailable'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {applicationSubmission?.id ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleViewFormPDF(applicationSubmission.id)}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View Application
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDownloadFormPDF(applicationSubmission.id)}
+                            >
+                              <Download className="h-4 w-4 mr-1" />
+                              Download PDF
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-text-muted">
+                            Detailed viewing remains available from Forms & Interview when a structured application submission is stored.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
+                        <p className="text-sm font-medium text-gray-700">No application form on file</p>
+                        <p className="mt-1 text-xs text-text-muted">
+                          This profile does not currently have a structured application record or uploaded application PDF.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-[#E4E8EB] bg-gray-50 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h4 className="font-medium text-gray-800">CV / Resume</h4>
+                        <p className="mt-1 text-xs text-text-muted">CV presence and the existing review action already used on this page.</p>
+                      </div>
+                      <Badge variant="outline" className={cvAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}>
+                        {cvAvailable ? 'Available' : 'Missing'}
+                      </Badge>
+                    </div>
+
+                    {cvAvailable ? (
+                      <div className="mt-4 space-y-3">
+                        <p className="text-sm text-gray-700">
+                          {employee?.cv_status === 'approved'
+                            ? 'CV has already been reviewed and approved.'
+                            : employee?.cv_extraction_status === 'reviewed'
+                              ? 'CV has been reviewed and is awaiting approval.'
+                              : 'Use the existing review action to inspect and process the current CV.'}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleReviewCv}
+                            disabled={cvReviewLoading}
+                            className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                          >
+                            {cvReviewLoading ? (
+                              <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            ) : (
+                              <FileSearch className="h-4 w-4 mr-1" />
+                            )}
+                            Review CV
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
+                        <p className="text-sm font-medium text-gray-700">CV missing</p>
+                        <p className="mt-1 text-xs text-text-muted">
+                          No original CV file is currently linked to this employee record.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-employment-cv">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="font-heading text-lg">Extracted Employment History</CardTitle>
+                  <p className="text-xs text-text-muted">
+                    Employment records below remain the current structured history used for review, alongside the source evidence above.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleReviewCv}
+                    disabled={cvReviewLoading}
+                    className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
+                    data-testid="review-cv-btn"
+                  >
+                    {cvReviewLoading ? (
+                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <FileSearch className="h-4 w-4 mr-1" />
+                    )}
+                    Review CV
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setEditEmploymentOpen(true)}
+                    data-testid="edit-employment-btn"
+                  >
+                    <Edit className="h-4 w-4 mr-1" />
+                    Edit History
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+
               {/* CV Status Banner */}
               {employee?.cv_status === 'rejected' && (
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
@@ -4539,6 +4718,12 @@ export default function EmployeeProfilePage() {
               {/* Employment Gap Panel */}
               {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
                 <div data-testid="section-employment-gaps">
+                  <div className="mb-3">
+                    <h4 className="font-medium text-gray-800">10-Year Gap Verification</h4>
+                    <p className="mt-1 text-xs text-text-muted">
+                      Gap statuses below come from the current employment-gap evaluation already stored on the compliance file.
+                    </p>
+                  </div>
                   <EmploymentGapPanel
                     employeeId={employeeId}
                     employeeName={`${employee?.first_name} ${employee?.last_name}`}
@@ -4560,6 +4745,9 @@ export default function EmployeeProfilePage() {
               {employee?.employment_history?.length > 0 && (
                 <div className="mt-6" data-testid="section-employment-history">
                   <h4 className="font-medium text-gray-800 mb-3">Employment Records</h4>
+                  <p className="mb-3 text-xs text-text-muted">
+                    Structured roles shown here are the current employment-history record on file.
+                  </p>
                   <div className="space-y-3">
                     {employee.employment_history.map((job, idx) => (
                       <div key={idx} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -4604,8 +4792,9 @@ export default function EmployeeProfilePage() {
                   <p>No employment history recorded</p>
                 </div>
               )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
         <TabsContent value="checklist">
           <Card className="border-[#E4E8EB] shadow-sm">

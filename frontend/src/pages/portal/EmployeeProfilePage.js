@@ -3012,12 +3012,13 @@ export default function EmployeeProfilePage() {
     documents.find((document) => ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id)) || null;
   const employmentGapEvaluation = complianceFile?.sections?.employment_history?.rows?.[0]?.gap_evaluation || null;
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
-  const cvAvailable = Boolean(
-    cvDocument ||
-    employee?.cv_status ||
-    employee?.cv_extraction_status ||
-    employee?.cv_extracted_employment_history?.length
-  );
+  const cvAvailable = Boolean(cvDocument);
+  const cvReviewStateLabel =
+    employee?.cv_status === 'approved'
+      ? 'CV has already been reviewed and approved.'
+      : employee?.cv_extraction_status === 'reviewed'
+        ? 'CV has been reviewed and is awaiting approval.'
+        : 'Use the existing review action to inspect and process the current CV.';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
     ? (employmentGapEvaluation?.pending_count || 0) +
@@ -4208,40 +4209,77 @@ export default function EmployeeProfilePage() {
         {/* ========== TAB 3: FORMS ========== */}
         {/* Health Questionnaire, Personal Info, HMRC, Emergency Contacts */}
         <TabsContent value="forms">
-          {/* Application Form Viewer - Shows original submitted application */}
-          <div className="mb-6" data-testid="section-forms-pre-screen">
-            <ApplicationFormViewer
-              employeeId={employeeId}
-              employeeName={`${employee?.first_name} ${employee?.last_name}`}
-            />
-          </div>
+          <Card className="mb-6 border-[#E4E8EB] shadow-sm" data-testid="section-forms-pre-screen">
+            <CardHeader>
+              <CardTitle className="font-heading text-lg">Application Record</CardTitle>
+              <p className="text-xs text-text-muted">
+                Original structured application submitted by the worker. Use this for recruitment review and audit traceability.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <ApplicationFormViewer
+                employeeId={employeeId}
+                employeeName={`${employee?.first_name} ${employee?.last_name}`}
+              />
 
-          <div className="mb-6 rounded-xl border border-blue-200 bg-white p-4 shadow-sm" data-testid="section-forms-interview">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h4 className="font-medium text-gray-800">Interview Assessment</h4>
-                <p className="text-xs text-gray-500 mt-1">
-                  Place interview review early in the recruitment journey, before later-stage verification and readiness checks.
+              <div className="border-t pt-6" data-testid="section-forms-declarations">
+                <h4 className="font-medium text-gray-800 mb-1">Applicant Declarations</h4>
+                <p className="text-xs text-gray-500 mb-3">
+                  Consent and declaration data from the original application intake. Use this section to review or amend declarations.
                 </p>
+                <div className="p-4 rounded-lg border bg-gray-50 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">Declarations & Consent</p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      Includes criminal/health declarations, DBS consent, right-to-work restrictions, and professional declarations.
+                    </p>
+                  </div>
+                  {!isAuditor() && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditDeclarationsOpen(true)}
+                      data-testid="open-declarations-review"
+                    >
+                      <Edit className="h-4 w-4 mr-1" />
+                      Review Declarations
+                    </Button>
+                  )}
+                </div>
               </div>
-              <Badge className="bg-blue-100 text-blue-700">Early Review</Badge>
-            </div>
-            <InterviewFormPanel 
-              employeeId={employeeId}
-              employeeName={`${employee?.first_name} ${employee?.last_name}`}
-              employeeRole={employee?.role || 'Healthcare Assistant'}
-              onComplete={() => {
-                fetchCompliance();
-                fetchFormSubmissions();
-              }}
-            />
-          </div>
+            </CardContent>
+          </Card>
+
+          <Card className="mb-6 border-[#E4E8EB] shadow-sm" data-testid="section-forms-interview">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="font-heading text-lg">Interview Assessment</CardTitle>
+                  <p className="text-xs text-text-muted mt-1">
+                    Complete and review the interview record before progressing to later onboarding checks.
+                  </p>
+                </div>
+                <Badge className="bg-blue-100 text-blue-700">Early Review</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <InterviewFormPanel 
+                employeeId={employeeId}
+                employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                employeeRole={employee?.role || 'Healthcare Assistant'}
+                onComplete={() => {
+                  fetchCompliance();
+                  fetchFormSubmissions();
+                }}
+              />
+            </CardContent>
+          </Card>
 
           <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
             <CardHeader>
               <CardTitle className="font-heading text-lg">Worker Onboarding Forms</CardTitle>
               <p className="text-xs text-text-muted">
-                Required forms that worker must complete. View submissions, mark as reviewed, or send reminders.
+                Forms submitted by the worker for onboarding and admin review.
               </p>
             </CardHeader>
             <CardContent>
@@ -4402,32 +4440,6 @@ export default function EmployeeProfilePage() {
                     </div>
                   );
                 })}
-              </div>
-              
-              <div className="mt-6 pt-6 border-t" data-testid="section-forms-declarations">
-                <h4 className="font-medium text-gray-800 mb-1">Applicant Declarations</h4>
-                <p className="text-xs text-gray-500 mb-3">
-                  Consent and declaration data from application intake. Use this section to review or amend declarations.
-                </p>
-                <div className="p-4 rounded-lg border bg-gray-50 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">Declarations & Consent</p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Includes criminal/health declarations, DBS consent, right-to-work restrictions, and professional declarations.
-                    </p>
-                  </div>
-                  {!isAuditor() && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEditDeclarationsOpen(true)}
-                      data-testid="open-declarations-review"
-                    >
-                      <Edit className="h-4 w-4 mr-1" />
-                      Review Declarations
-                    </Button>
-                  )}
-                </div>
               </div>
             </CardContent>
           </Card>
@@ -4592,13 +4604,7 @@ export default function EmployeeProfilePage() {
 
                     {cvAvailable ? (
                       <div className="mt-4 space-y-3">
-                        <p className="text-sm text-gray-700">
-                          {employee?.cv_status === 'approved'
-                            ? 'CV has already been reviewed and approved.'
-                            : employee?.cv_extraction_status === 'reviewed'
-                              ? 'CV has been reviewed and is awaiting approval.'
-                              : 'Use the existing review action to inspect and process the current CV.'}
-                        </p>
+                        <p className="text-sm text-gray-700">{cvReviewStateLabel}</p>
                         <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"

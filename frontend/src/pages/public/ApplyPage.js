@@ -279,9 +279,9 @@ export default function ApplyPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const allowedTypes = ['application/pdf'];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Please upload a PDF or Word document');
+      toast.error('Only PDF CV files are supported. Please upload your CV as a PDF.');
       return;
     }
     
@@ -723,7 +723,7 @@ export default function ApplyPage() {
             <label className="cursor-pointer">
               <input 
                 type="file" 
-                accept=".pdf,.doc,.docx" 
+                accept=".pdf"
                 onChange={handleCvUpload} 
                 className="hidden" 
               />
@@ -734,7 +734,7 @@ export default function ApplyPage() {
                   <Upload className="h-8 w-8 text-gray-400" />
                 )}
                 <p className="text-sm text-text-muted">
-                  {isUploadingCv ? 'Uploading...' : 'Click to upload your CV (PDF or Word, max 10MB)'}
+                  {isUploadingCv ? 'Uploading...' : 'Click to upload your CV (PDF, max 10MB)'}
                 </p>
               </div>
             </label>

@@ -25530,8 +25530,16 @@ async def submit_structured_application(form: StructuredApplicationForm):
             {"id": form.cv_file_id},
             {"$set": {
                 "employee_id": app_id,
+                "is_active": True,
                 "status": DocumentStatus.UPLOADED,
                 "verified": False,
+                "updated_at": now
+            }}
+        )
+        await db.employees.update_one(
+            {"id": app_id},
+            {"$set": {
+                "cv_document_id": form.cv_file_id,
                 "updated_at": now
             }}
         )
@@ -25849,10 +25857,10 @@ async def upload_application_cv(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="No file provided")
     
     # Validate file type
-    allowed_types = ['.pdf', '.doc', '.docx']
+    allowed_types = ['.pdf']
     file_ext = '.' + file.filename.split('.')[-1].lower() if '.' in file.filename else ''
     if file_ext not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"File type not allowed. Accepted: {', '.join(allowed_types)}")
+        raise HTTPException(status_code=400, detail="Only PDF CV files are supported")
     
     # Validate file size (max 10MB)
     content = await file.read()
@@ -36127,6 +36135,13 @@ async def get_compliance_file(
     
     # Evaluate gap compliance
     gap_evaluation = evaluate_gaps_compliance(gap_records)
+    gap_analysis_run = bool(
+        gap_records
+        or employee.get("cv_extraction_status") == "reviewed"
+        or employee.get("cv_reviewed_at")
+        or employee.get("cv_extracted_at")
+        or employee.get("employment_gaps_detected_at")
+    )
     
     # Build employment history verification section
     has_gaps = gap_evaluation.get("has_gaps", False)
@@ -36134,7 +36149,12 @@ async def get_compliance_file(
     is_complete = gap_evaluation.get("is_complete", True)
     
     # Determine status
-    if not has_gaps:
+    if not gap_analysis_run:
+        gap_status = "not_run"
+        gap_status_summary = "Gap analysis not yet run"
+        is_verified = False
+        blocker_text = "Employment history gap analysis has not been run"
+    elif not has_gaps:
         gap_status = "no_gaps"
         gap_status_summary = "No employment gaps detected"
         is_verified = True
@@ -36180,6 +36200,7 @@ async def get_compliance_file(
             "is_verified": is_verified,
             "status": gap_status,
             "status_summary": gap_status_summary,
+            "gap_analysis_run": gap_analysis_run,
             
             "gap_evaluation": gap_evaluation,
             "gaps": gap_records,

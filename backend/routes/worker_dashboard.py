@@ -1899,12 +1899,33 @@ async def worker_upload_document(
     
     # CV uploads
     if requirement_id in ["cv", "resume", "curriculum_vitae"] or "cv" in requirement_id.lower():
+        await db.employee_documents.update_many(
+            {
+                "employee_id": employee_id,
+                "id": {"$ne": doc_id},
+                "requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]},
+                "status": {"$nin": ["superseded", "archived", "deleted"]}
+            },
+            {"$set": {
+                "status": "superseded",
+                "is_active": False,
+                "superseded_at": now,
+                "updated_at": now
+            }}
+        )
         await db.employee_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "extraction_status": "pending_admin_review",
                 "document_subtype": "cv",
                 "requires_admin_extraction": True
+            }}
+        )
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "cv_document_id": doc_id,
+                "updated_at": now
             }}
         )
         

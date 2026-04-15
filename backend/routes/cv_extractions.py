@@ -541,7 +541,7 @@ async def admin_review_cv(
         raise
     except Exception as e:
         logger.error(f"CV extraction failed for {employee_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"CV extraction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="CV extraction failed")
 
 
 @router.post("/admin/employees/{employee_id}/cv/reject")

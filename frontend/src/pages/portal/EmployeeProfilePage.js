@@ -3130,6 +3130,7 @@ export default function EmployeeProfilePage() {
   const cvDocument = activeCvDocument || cvDocuments[0] || null;
   const employmentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
   const employmentGapEvaluation = employmentHistoryGapRow?.gap_evaluation || null;
+  const gapAnalysisRun = Boolean(employmentHistoryGapRow?.gap_analysis_run);
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
   const cvFileExists = Boolean(cvDocument);
   const cvDocumentName = cvDocument?.original_filename || cvDocument?.file_name || cvDocument?.file_url || '';
@@ -3171,7 +3172,7 @@ export default function EmployeeProfilePage() {
     : null;
   const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
   const allGapsResolved = employmentGapEvaluation
-    ? Boolean(employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
+    ? Boolean(gapAnalysisRun && employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
     : !employmentHistoryExists;
   // declarationsOnFile: true once EditDeclarationsDialog has been saved (dbs_consent_given is always written)
   const declarationsOnFile = Boolean(
@@ -3944,10 +3945,19 @@ export default function EmployeeProfilePage() {
                         CV / Resume <span className="text-text-muted">(optional)</span>
                       </Label>
                       <FileUploaderInline
-                        onFileSelect={(file) => setImportCvFile(file)}
+                        onFileSelect={(file) => {
+                          if (file) {
+                            const isPdfFile = file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf');
+                            if (!isPdfFile) {
+                              toast.error('Only PDF CV files are supported. Please upload the CV as a PDF.');
+                              return;
+                            }
+                          }
+                          setImportCvFile(file);
+                        }}
                         selectedFile={importCvFile}
                         onClear={() => setImportCvFile(null)}
-                        acceptedTypes={['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']}
+                        acceptedTypes={['application/pdf']}
                         placeholder="Drop CV here or click to browse"
                       />
                     </div>
@@ -4687,12 +4697,12 @@ export default function EmployeeProfilePage() {
               {employmentGapEvaluation?.is_complete !== undefined && (
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">10-year history</p>
-                  <Badge variant="outline" className={`mt-2 ${employmentGapEvaluation.is_complete ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {employmentGapEvaluation.is_complete ? 'Complete' : 'Needs review'}
+                  <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
+                    {gapAnalysisRun && employmentGapEvaluation.is_complete ? 'Complete' : 'Needs review'}
                   </Badge>
                 </div>
               )}
-              {gapVerifiedCount !== undefined && gapNeedsReviewCount !== null && (
+              {gapAnalysisRun && gapVerifiedCount !== undefined && gapNeedsReviewCount !== null && (
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">Gap review</p>
                   <p className="mt-2 text-sm font-medium text-gray-800">
@@ -4961,7 +4971,7 @@ export default function EmployeeProfilePage() {
               )}
               
               {/* Gap analysis empty state */}
-              {employmentHistoryExists && !complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && !employmentGapEvaluation && (
+              {employmentHistoryExists && employmentHistoryGapRow && !gapAnalysisRun && (
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
@@ -4971,7 +4981,7 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
-              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && (
+              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && gapAnalysisRun && (
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>

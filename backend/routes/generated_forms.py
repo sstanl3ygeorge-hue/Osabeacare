@@ -844,6 +844,9 @@ async def import_application_form(
     cv_file_url = None
     cv_doc_id = None
     if cv_file:
+        cv_file_ext = "." + cv_file.filename.split(".")[-1].lower() if cv_file.filename and "." in cv_file.filename else ""
+        if cv_file_ext != ".pdf":
+            raise HTTPException(status_code=400, detail="Only PDF CV files are supported")
         try:
             cv_content = await cv_file.read()
             cv_path = f"osabea-care/documents/{employee_id}/{str(uuid.uuid4())}/{cv_file.filename}"
@@ -868,6 +871,7 @@ async def import_application_form(
                     "file_url": cv_file_url,
                     "original_filename": cv_file.filename,
                     "status": "uploaded",
+                    "is_active": True,
                     "source_type": "imported",
                     "notes": "Imported with application form",
                     "uploaded_at": now,
@@ -891,6 +895,8 @@ async def import_application_form(
                             "file_url": cv_file_url,
                             "original_filename": cv_file.filename,
                             "version_number": cv_doc["version_number"],
+                            "status": "uploaded",
+                            "is_active": True,
                             "uploaded_at": now,
                             "updated_at": now
                         }}
@@ -898,6 +904,28 @@ async def import_application_form(
                     cv_doc_id = existing_cv["id"]
                 else:
                     await db.employee_documents.insert_one(cv_doc)
+                if cv_doc_id:
+                    await db.employee_documents.update_many(
+                        {
+                            "employee_id": employee_id,
+                            "id": {"$ne": cv_doc_id},
+                            "requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]},
+                            "status": {"$nin": ["superseded", "archived", "deleted"]}
+                        },
+                        {"$set": {
+                            "status": "superseded",
+                            "is_active": False,
+                            "superseded_at": now,
+                            "updated_at": now
+                        }}
+                    )
+                    await db.employees.update_one(
+                        {"id": employee_id},
+                        {"$set": {
+                            "cv_document_id": cv_doc_id,
+                            "updated_at": now
+                        }}
+                    )
         except Exception as e:
             logger.warning(f"Failed to upload CV: {str(e)}")
     

@@ -80,8 +80,8 @@ TRAINING_TO_INDUCTION_MAP = {
     # Training ID → Induction ID
     "safeguarding_adults": "safeguarding_adults",
     "safeguarding": "safeguarding_adults",
-    "manual_handling": "moving_handling",  # Maps to Moving & Handling if exists
-    "moving_handling": "moving_handling",
+    "manual_handling": None,  # No matching Care Certificate standard for manual handling
+    "moving_handling": None,  # No matching Care Certificate standard for manual handling
     "fire_safety": "fire_safety",
     "health_safety": "health_safety",
     "health_and_safety": "health_safety",
@@ -1128,11 +1128,17 @@ async def get_unified_employee_status(
     if induction_record and induction_record.get("items"):
         induction_items = induction_record.get("items", [])
     
-    # Build induction status map
+    # Build induction status map — supports both ID-keyed (UCE-created) and name-keyed (induction.py-created) items
     induction_status_map = {}
+    induction_name_map = {}
     for item in induction_items:
         item_id = item.get("id") or item.get("standard_id")
-        induction_status_map[item_id] = item.get("status") == "completed"
+        item_name = (item.get("name") or "").lower().strip()
+        is_item_complete = item.get("status") == "completed"
+        if item_id:
+            induction_status_map[item_id] = is_item_complete
+        if item_name:
+            induction_name_map[item_name] = is_item_complete
     
     induction_completed_count = 0
     
@@ -1141,8 +1147,10 @@ async def get_unified_employee_status(
         std_name = standard["name"]
         training_sync = standard.get("training_sync")
         
-        # Check if completed in induction record
+        # Check if completed in induction record (ID-based, then name-based fallback)
         is_completed = induction_status_map.get(std_id, False)
+        if not is_completed:
+            is_completed = induction_name_map.get(std_name.lower(), False)
         
         # AUTO-SYNC: If corresponding training is verified, mark induction as complete
         if training_sync and verified_training.get(training_sync):
@@ -1506,9 +1514,13 @@ async def get_unified_employee_status(
     # DETERMINE PROMOTION ELIGIBILITY
     # ==========================================================================
     
-    # Can promote = NO blockers
-    can_promote = len(blockers) == 0
+    # is_work_ready = all checks pass (applies to all statuses — ongoing compliance gate)
     is_work_ready = len(blockers) == 0
+    
+    # can_promote = all checks pass AND employee is still in the recruitment/onboarding pipeline.
+    # Active employees who are already promoted must NOT see "Ready for Promotion" again.
+    _promotable_statuses = {"applicant", "onboarding"}
+    can_promote = is_work_ready and (employee.get("status", "applicant") in _promotable_statuses)
     
     # ==========================================================================
     # BUILD RESPONSE

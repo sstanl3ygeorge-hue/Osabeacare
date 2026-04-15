@@ -11290,7 +11290,7 @@ async def auto_sync_induction_from_training(employee_id: str, training_name: str
             "id": str(uuid.uuid4()),
             "employee_id": employee_id,
             "employee_name": employee_name,
-            "items": [{"name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by": None, "completed_by_name": None, "notes": None} for item in DEFAULT_INDUCTION_ITEMS],
+            "items": [{"id": item["id"], "name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by": None, "completed_by_name": None, "notes": None} for item in DEFAULT_INDUCTION_ITEMS],
             "overall_status": "pending",
             "started_at": None,
             "completed_at": None,

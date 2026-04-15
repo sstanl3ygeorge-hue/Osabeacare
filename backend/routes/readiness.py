@@ -540,7 +540,37 @@ async def check_work_readiness(
         training_status=training_status,
         db=db
     )
-    
+
+    # Parity gate: UCE is the authoritative truth source for all readiness signals.
+    # If UCE marks the employee as NOT work-ready, we must downgrade the WRE result
+    # so the WorkReadinessPanel never shows green while the header banner shows red.
+    try:
+        get_unified_employee_status = get_unified_employee_status_func()
+        uce_status = await get_unified_employee_status(
+            employee_id, db, user_role="admin", include_details=False
+        )
+        if not uce_status.get("error"):
+            uce_is_work_ready = uce_status.get("is_work_ready", False)
+            if not uce_is_work_ready:
+                evaluation["can_work"] = False
+                evaluation["readiness_status"] = "NOT_READY"
+                # Merge UCE blockers not already represented by WRE keys
+                wre_keys = {b.get("requirement_key") for b in evaluation.get("blockers", [])}
+                for uce_blocker in uce_status.get("blockers", []):
+                    blocker_id = uce_blocker.get("id") or uce_blocker.get("gate") or ""
+                    if blocker_id and blocker_id not in wre_keys:
+                        evaluation.setdefault("blockers", []).append({
+                            "requirement_key": blocker_id,
+                            "label": uce_blocker.get("label", blocker_id.replace("_", " ").title()),
+                            "reason": uce_blocker.get("reason", "Requirement not met"),
+                            "category": uce_blocker.get("category", "compliance"),
+                            "section": "compliance",
+                        })
+                evaluation["blocker_count"] = len(evaluation.get("blockers", []))
+    except Exception:
+        # UCE parity is best-effort; WRE result stands if UCE is unavailable
+        pass
+
     return evaluation
 
 

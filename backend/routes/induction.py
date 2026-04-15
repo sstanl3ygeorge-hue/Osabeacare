@@ -8,16 +8,19 @@ This module handles:
 - Admin tools for reset and migration
 """
 
+import io
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .dependencies import (
     get_db, get_current_user, require_admin, require_manager_or_admin,
     log_audit_action
 )
+from services.pdf_service import generate_admin_form_pdf
 
 router = APIRouter(tags=["Induction Checklist"])
 
@@ -25,21 +28,21 @@ router = APIRouter(tags=["Induction Checklist"])
 # Default induction checklist items for all care roles
 # CQC Care Certificate 15 Standards for Adult Care
 DEFAULT_INDUCTION_ITEMS = [
-    {"name": "Understand Your Role", "mandatory": True, "order": 1, "training_link": None},
-    {"name": "Your Personal Development", "mandatory": True, "order": 2, "training_link": None},
-    {"name": "Duty of Care", "mandatory": True, "order": 3, "training_link": None},
-    {"name": "Equality and Diversity", "mandatory": True, "order": 4, "training_link": "equality_diversity"},
-    {"name": "Work in a Person-Centred Way", "mandatory": True, "order": 5, "training_link": None},
-    {"name": "Communication", "mandatory": True, "order": 6, "training_link": None},
-    {"name": "Privacy and Dignity", "mandatory": True, "order": 7, "training_link": None},
-    {"name": "Fluids and Nutrition", "mandatory": True, "order": 8, "training_link": "food_hygiene"},
-    {"name": "Awareness of Mental Health, Dementia and Learning Disabilities", "mandatory": True, "order": 9, "training_link": None},
-    {"name": "Safeguarding Adults", "mandatory": True, "order": 10, "training_link": "safeguarding"},
-    {"name": "Basic Life Support", "mandatory": True, "order": 11, "training_link": "bls"},
-    {"name": "Health and Safety", "mandatory": True, "order": 12, "training_link": "health_safety"},
-    {"name": "Handling Information", "mandatory": True, "order": 13, "training_link": "data_protection"},
-    {"name": "Infection Prevention and Control", "mandatory": True, "order": 14, "training_link": "infection_control"},
-    {"name": "Shadow Shift Completed", "mandatory": True, "order": 15, "training_link": None},
+    {"id": "understand_your_role",     "name": "Understand Your Role",                                                     "mandatory": True, "order": 1,  "training_link": None},
+    {"id": "personal_development",     "name": "Your Personal Development",                                                  "mandatory": True, "order": 2,  "training_link": None},
+    {"id": "duty_of_care",             "name": "Duty of Care",                                                               "mandatory": True, "order": 3,  "training_link": None},
+    {"id": "equality_diversity",       "name": "Equality and Diversity",                                                     "mandatory": True, "order": 4,  "training_link": "equality_diversity"},
+    {"id": "work_person_centred",      "name": "Work in a Person-Centred Way",                                               "mandatory": True, "order": 5,  "training_link": None},
+    {"id": "communication",            "name": "Communication",                                                              "mandatory": True, "order": 6,  "training_link": None},
+    {"id": "privacy_dignity",          "name": "Privacy and Dignity",                                                        "mandatory": True, "order": 7,  "training_link": None},
+    {"id": "fluids_nutrition",         "name": "Fluids and Nutrition",                                                       "mandatory": True, "order": 8,  "training_link": "food_hygiene"},
+    {"id": "awareness_mental_health",  "name": "Awareness of Mental Health, Dementia and Learning Disabilities",             "mandatory": True, "order": 9,  "training_link": None},
+    {"id": "safeguarding_adults",      "name": "Safeguarding Adults",                                                        "mandatory": True, "order": 10, "training_link": "safeguarding"},
+    {"id": "basic_life_support",       "name": "Basic Life Support",                                                         "mandatory": True, "order": 11, "training_link": "bls"},
+    {"id": "health_safety",            "name": "Health and Safety",                                                          "mandatory": True, "order": 12, "training_link": "health_safety"},
+    {"id": "handling_information",     "name": "Handling Information",                                                       "mandatory": True, "order": 13, "training_link": "data_protection"},
+    {"id": "infection_control",        "name": "Infection Prevention and Control",                                           "mandatory": True, "order": 14, "training_link": "infection_control"},
+    {"id": "shadow_shift",             "name": "Shadow Shift Completed",                                                     "mandatory": True, "order": 15, "training_link": None},
 ]
 
 # Mapping of induction items to training requirement codes for auto-completion
@@ -141,6 +144,7 @@ async def get_induction_checklist(
         for item_def in DEFAULT_INDUCTION_ITEMS:
             is_verified, training_info = is_training_verified(item_def["name"])
             items.append({
+                "id": item_def["id"],
                 "name": item_def["name"],
                 "mandatory": item_def["mandatory"],
                 "status": "completed" if is_verified else "pending",
@@ -244,7 +248,7 @@ async def update_induction_checklist(
             "id": str(uuid.uuid4()),
             "employee_id": employee_id,
             "employee_name": employee_name,
-            "items": [{"name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by": None, "completed_by_name": None, "notes": None} for item in DEFAULT_INDUCTION_ITEMS],
+            "items": [{"id": item["id"], "name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by": None, "completed_by_name": None, "notes": None} for item in DEFAULT_INDUCTION_ITEMS],
             "overall_status": "pending",
             "started_at": None,
             "completed_at": None,
@@ -252,6 +256,14 @@ async def update_induction_checklist(
             "updated_at": now
         }
     
+    # Enforce notes for Shadow Shift Completed manual sign-off
+    if payload.item_name == "Shadow Shift Completed" and payload.status == "completed":
+        if not payload.notes or not payload.notes.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="Shadow Shift sign-off requires a supervisor/witness note (notes field cannot be empty)."
+            )
+
     # Find and update the specific item
     item_found = False
     for item in checklist["items"]:
@@ -289,7 +301,7 @@ async def update_induction_checklist(
     if completed_count == 0:
         checklist["overall_status"] = "pending"
         checklist["started_at"] = None
-    elif mandatory_completed >= mandatory_total and completed_count >= len(checklist["items"]) * 0.8:
+    elif mandatory_completed >= mandatory_total:
         checklist["overall_status"] = "completed"
         checklist["completed_at"] = now
     else:
@@ -431,6 +443,7 @@ async def fix_induction_checklist(
             completed_count += 1
         
         new_items.append({
+            "id": item_def["id"],
             "name": item_name,
             "mandatory": item_def["mandatory"],
             "status": "completed" if is_complete else "pending",
@@ -527,3 +540,81 @@ async def migrate_all_induction_checklists(
         "skipped_count": skipped_count,
         "errors": errors[:10]  # Limit errors shown
     }
+
+
+@router.get("/employees/{employee_id}/induction-completion/download-pdf")
+async def download_induction_completion_pdf(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Generate and download an Induction Completion Certificate as PDF.
+
+    Only available when induction overall_status == 'completed'.
+    Uses the shared pdf_service with company branding and the Care Certificate item table.
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
+    if not checklist:
+        raise HTTPException(status_code=404, detail="No induction checklist found for this employee")
+
+    if checklist.get("overall_status") != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Induction is not yet completed (status: {checklist.get('overall_status', 'pending')})"
+        )
+
+    # Build form_data expected by generate_induction_pdf_content
+    items = checklist.get("items", [])
+    checklist_items = []
+    for item in items:
+        checklist_items.append({
+            "name": item.get("name", ""),
+            "completed": item.get("status") == "completed",
+            "completed_date": item.get("completed_at", "")[:10] if item.get("completed_at") else "-",
+            "completed_by": item.get("completed_by_name") or "",
+            "notes": item.get("notes") or "",
+        })
+
+    form_data = {
+        "start_date": checklist.get("started_at", "")[:10] if checklist.get("started_at") else "N/A",
+        "completion_date": checklist.get("completed_at", "")[:10] if checklist.get("completed_at") else "N/A",
+        "inductor_name": user.get("name") or user.get("email", "Admin"),
+        "checklist_items": checklist_items,
+        "notes": checklist.get("notes") or "",
+    }
+
+    employee_data = {
+        "first_name": employee.get("first_name", ""),
+        "last_name": employee.get("last_name", ""),
+        "employee_code": employee.get("employee_code") or employee.get("id", "")[:8],
+    }
+
+    admin_data = {
+        "name": user.get("name") or user.get("email", "System"),
+    }
+
+    try:
+        pdf_bytes = generate_admin_form_pdf("induction_checklist", form_data, employee_data, admin_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+
+    emp_name_safe = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(" ", "_")
+    filename = f"Induction_Certificate_{emp_name_safe}_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+    await log_audit_action(user["user_id"], "download_induction_pdf", "induction_checklist", employee_id, {
+        "filename": filename
+    })
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        }
+    )

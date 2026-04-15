@@ -40,13 +40,13 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
     }
   }, [employeeId]);
 
-  const updateItem = async (itemName, newStatus) => {
+  const updateItem = async (itemName, newStatus, notes = '') => {
     setUpdating(itemName);
     try {
       const token = localStorage.getItem('token');
       const response = await axios.put(
         `${API}/employees/${employeeId}/induction-checklist`,
-        { item_name: itemName, status: newStatus, notes: '' },
+        { item_name: itemName, status: newStatus, notes },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       toast.success(`${itemName} marked as ${newStatus}`);
@@ -258,7 +258,17 @@ export default function InductionChecklistPanel({ employeeId, employeeName, isAu
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => updateItem(item.name, 'completed')}
+                        onClick={() => {
+                          if (item.name === 'Shadow Shift Completed') {
+                            const witness = window.prompt(
+                              'Shadow Shift sign-off\n\nEnter supervisor / witness name and any relevant notes (required):'
+                            );
+                            if (!witness || !witness.trim()) return;
+                            updateItem(item.name, 'completed', witness.trim());
+                          } else {
+                            updateItem(item.name, 'completed');
+                          }
+                        }}
                         disabled={updating === item.name}
                         className="h-8 px-3 text-xs rounded-lg hover:bg-green-50 hover:text-green-700 hover:border-green-300"
                         data-testid={`complete-item-${idx}`}

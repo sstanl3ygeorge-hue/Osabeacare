@@ -210,6 +210,7 @@ async def create_interview_record(
         }
     
     # Create the submission record
+    is_draft = payload.get("is_draft", False)
     submission = {
         "id": record_id,
         "employee_id": employee_id,
@@ -217,7 +218,12 @@ async def create_interview_record(
         "form_type": "interview_record",
         "form_data": form_data,
         "data": form_data,
-        "status": "draft" if payload.get("is_draft") else "submitted",
+        # Admin-authored form: signing off on create removes the compliance-file blocker.
+        # Drafts stay as "draft"; anything else is treated as completed by the interviewer.
+        "status": "draft" if is_draft else "signed_off",
+        "verified": not is_draft,
+        "verified_by": user.get("user_id") if not is_draft else None,
+        "verified_at": now if not is_draft else None,
         "submitted_at": now,
         "submitted_by": user.get("user_id"),
         "created_at": now,

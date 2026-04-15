@@ -4537,7 +4537,8 @@ export default function EmployeeProfilePage() {
                   { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details' },
                   { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
                   { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details' },
-                  { key: 'pre_screen_questionnaire', name: 'Pre-Screen Questionnaire', description: 'Worker pre-screen/application intake responses', allowReminder: false }
+                  { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)' },
+                  { key: 'pre_interview_questionnaire', name: 'Pre-Screen Questionnaire', description: 'Worker pre-screen/application intake responses', allowReminder: false }
                 ].map((form) => {
                   // Find submission from form_submissions endpoint data
                   const submission = formSubmissions?.find(fs => 

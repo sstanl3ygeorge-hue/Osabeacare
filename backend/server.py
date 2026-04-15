@@ -35767,6 +35767,9 @@ async def get_compliance_file(
         "hmrc_starter_checklist": "employee_sendable",
         "equal_opportunities": "employee_sendable",
         "staff_personal_info": "employee_sendable",
+        "emergency_contacts": "employee_sendable",
+        "conflict_of_interest": "employee_sendable",
+        "fit_proper_persons": "employee_sendable",
         "interview_record": "admin_only",
         "recruitment_checklist": "admin_only",
         "induction": "admin_only",
@@ -35823,6 +35826,12 @@ async def get_compliance_file(
             "category": "admin_forms",
             "affects_readiness": False,
             "optional": True
+        },
+        "conflict_of_interest": {
+            "name": "Conflict of Interest Declaration",
+            "category": "admin_forms",
+            "affects_readiness": False,
+            "optional": False
         }
     }
     
@@ -36211,7 +36220,8 @@ async def get_compliance_file(
             "rows": [
                 build_form_row("staff_personal_info", FORM_REQUIREMENT_CONFIG["staff_personal_info"]),
                 build_form_row("hmrc_starter_checklist", FORM_REQUIREMENT_CONFIG["hmrc_starter_checklist"]),
-                build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"])
+                build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"]),
+                build_form_row("conflict_of_interest", FORM_REQUIREMENT_CONFIG["conflict_of_interest"])
             ]
         }
     }

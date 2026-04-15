@@ -26,11 +26,8 @@ from .dependencies import (
     log_audit_action,
 )
 
-# Import from work_readiness_engine
-from work_readiness_engine import (
-    can_promote_to_active_legacy as can_promote_to_active,
-    ROLE_REGISTRATION_REQUIREMENTS,
-)
+from work_readiness_engine import ROLE_REGISTRATION_REQUIREMENTS
+from unified_compliance_engine import get_unified_employee_status
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +195,15 @@ async def verify_professional_registration(
         }
     )
     
-    # Check if this enables auto-promotion
-    can_promote, checks = await can_promote_to_active(employee_id, db)
+    # Check if this enables promotion using the canonical readiness engine.
+    unified_status = await get_unified_employee_status(
+        employee_id,
+        db,
+        user_role="admin",
+        include_details=False
+    )
+    can_promote = unified_status.get("can_promote", False)
+    checks = unified_status.get("checks", {})
     
     return {
         "success": True,

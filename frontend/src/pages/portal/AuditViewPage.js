@@ -28,13 +28,27 @@ export default function AuditViewPage() {
       try {
         const [statsRes, empsRes, policiesRes, expiryRes, trainingRes] = await Promise.all([
           axios.get(`${API}/dashboard/stats`, { headers: { Authorization: `Bearer ${token}` } }),
-          axios.get(`${API}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+          axios.get(`${API}/staff/employees`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/policies`, { headers: { Authorization: `Bearer ${token}` } }),
           axios.get(`${API}/dashboard/expiry-alerts`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null })),
           axios.get(`${API}/audit/training/summary`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => ({ data: null }))
         ]);
+        const staffRows = empsRes.data?.employees || empsRes.data || [];
+        const employeeIds = staffRows.map((employee) => employee.id).filter(Boolean);
+        const readinessRes = employeeIds.length > 0
+          ? await axios.get(`${API}/employees/unified-progress-summary`, {
+              params: { employee_ids: employeeIds.join(',') },
+              headers: { Authorization: `Bearer ${token}` }
+            }).catch(() => ({ data: [] }))
+          : { data: [] };
+        const readinessByEmployeeId = new Map(
+          (readinessRes.data || []).map((summary) => [summary.employee_id, summary])
+        );
         setStats(statsRes.data);
-        setEmployees(empsRes.data);
+        setEmployees(staffRows.map((employee) => ({
+          ...employee,
+          canonical_readiness: readinessByEmployeeId.get(employee.id) || null
+        })));
         setPolicies(policiesRes.data);
         setExpiryAlerts(expiryRes.data);
         setTrainingAudit(trainingRes.data);
@@ -58,22 +72,19 @@ export default function AuditViewPage() {
 
   // Calculate workforce readiness
   const readyToWork = employees.filter(e => 
-    e.work_readiness?.status === 'work_ready' || e.work_readiness?.status === 'fully_compliant'
+    e.canonical_readiness?.is_work_ready === true
   ).length;
   const supervisedStart = employees.filter(e => 
-    e.work_readiness?.status === 'almost_ready' || e.work_readiness?.status === 'supervised_start'
+    e.canonical_readiness?.can_promote === true && e.canonical_readiness?.is_work_ready !== true
   ).length;
   const notReady = employees.filter(e => 
-    !e.work_readiness || 
-    (e.work_readiness?.status !== 'work_ready' && 
-     e.work_readiness?.status !== 'fully_compliant' && 
-     e.work_readiness?.status !== 'almost_ready' &&
-     e.work_readiness?.status !== 'supervised_start')
+    e.canonical_readiness?.is_work_ready !== true &&
+    e.canonical_readiness?.can_promote !== true
   ).length;
 
   const totalEmployees = employees.length;
   const avgCompletion = totalEmployees > 0 
-    ? Math.round(employees.reduce((sum, e) => sum + (e.completion_percentage || 0), 0) / totalEmployees)
+    ? Math.round(employees.reduce((sum, e) => sum + (e.canonical_readiness?.overall_percentage || 0), 0) / totalEmployees)
     : 0;
 
   // Policy compliance calculations
@@ -174,7 +185,7 @@ export default function AuditViewPage() {
               
               {/* Staff Not Ready → Employees filtered to not_ready */}
               <div 
-                onClick={() => notReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+                onClick={() => notReady > 0 && navigate('/portal/employees?is_work_ready=false')}
                 className={`p-4 rounded-xl transition-all ${notReady > 0 ? 'bg-red-100 border border-red-200 cursor-pointer hover:bg-red-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
                 title={notReady > 0 ? 'View affected staff' : ''}
                 data-testid="audit-card-not-ready"
@@ -224,7 +235,7 @@ export default function AuditViewPage() {
             
             {/* Ready to Work → Employees filtered */}
             <div 
-              onClick={() => readyToWork > 0 && navigate('/portal/employees?work_readiness=ready_to_work')}
+              onClick={() => readyToWork > 0 && navigate('/portal/employees?is_work_ready=true')}
               className={`p-4 bg-green-50 rounded-xl border border-green-200 transition-all ${readyToWork > 0 ? 'cursor-pointer hover:bg-green-100 hover:shadow-sm' : ''}`}
               title={readyToWork > 0 ? 'View ready staff' : ''}
               data-testid="audit-card-ready"
@@ -241,14 +252,14 @@ export default function AuditViewPage() {
             
             {/* Supervised Start → Employees filtered */}
             <div 
-              onClick={() => supervisedStart > 0 && navigate('/portal/employees?work_readiness=supervised_start')}
+              onClick={() => supervisedStart > 0 && navigate('/portal/employees?can_promote=true')}
               className={`p-4 bg-amber-50 rounded-xl border border-amber-200 transition-all ${supervisedStart > 0 ? 'cursor-pointer hover:bg-amber-100 hover:shadow-sm' : ''}`}
-              title={supervisedStart > 0 ? 'View staff on supervised start' : ''}
+              title={supervisedStart > 0 ? 'View staff eligible for promotion' : ''}
               data-testid="audit-card-supervised"
             >
               <div className="flex items-center gap-2 mb-1">
                 <AlertCircle className="h-4 w-4 text-amber-600" />
-                <p className="text-sm text-amber-600">Supervised Start</p>
+                <p className="text-sm text-amber-600">Promotion Eligible</p>
               </div>
               <div className="flex items-center justify-between">
                 <p className="text-3xl font-heading font-bold text-amber-700">{supervisedStart}</p>
@@ -258,7 +269,7 @@ export default function AuditViewPage() {
             
             {/* Not Ready → Employees filtered */}
             <div 
-              onClick={() => notReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+              onClick={() => notReady > 0 && navigate('/portal/employees?is_work_ready=false')}
               className={`p-4 bg-red-50 rounded-xl border border-red-200 transition-all ${notReady > 0 ? 'cursor-pointer hover:bg-red-100 hover:shadow-sm' : ''}`}
               title={notReady > 0 ? 'View affected staff' : ''}
               data-testid="audit-card-not-ready-workforce"
@@ -554,8 +565,9 @@ export default function AuditViewPage() {
               </thead>
               <tbody>
                 {employees.slice(0, 20).map((emp) => {
-                  const isReady = emp.work_readiness?.status === 'work_ready' || emp.work_readiness?.status === 'fully_compliant';
-                  const isSupervisedStart = emp.work_readiness?.status === 'almost_ready' || emp.work_readiness?.status === 'supervised_start';
+                  const readiness = emp.canonical_readiness || {};
+                  const isReady = readiness.is_work_ready === true;
+                  const isSupervisedStart = readiness.can_promote === true && readiness.is_work_ready !== true;
                   
                   return (
                     <tr key={emp.id} className="border-b border-[#E4E8EB]" data-testid={`audit-employee-row-${emp.id}`}>
@@ -570,13 +582,13 @@ export default function AuditViewPage() {
                           isSupervisedStart ? 'bg-amber-100 text-amber-700' :
                           'bg-red-100 text-red-700'
                         }`}>
-                          {isReady ? 'Ready to Work' : isSupervisedStart ? 'Supervised Start' : 'Not Ready'}
+                          {isReady ? 'Ready to Work' : isSupervisedStart ? 'Promotion Eligible' : 'Not Ready'}
                         </span>
                       </td>
                       <td className="p-4">
                         <div className="flex items-center gap-2">
-                          <Progress value={emp.completion_percentage || 0} className="w-20 h-2" />
-                          <span className="text-sm text-text-muted">{emp.completion_percentage || 0}%</span>
+                          <Progress value={readiness.overall_percentage || 0} className="w-20 h-2" />
+                          <span className="text-sm text-text-muted">{readiness.overall_percentage || 0}%</span>
                         </div>
                       </td>
                     </tr>

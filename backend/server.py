@@ -101,8 +101,7 @@ from work_readiness_engine import (
     evaluate_work_readiness,
     ROLE_WORK_REQUIREMENTS,
     get_work_readiness_label,
-    can_sign_contract,
-    can_promote_to_active_legacy as can_promote_to_active
+    can_sign_contract
 )
 from supabase_storage import (
     download_file_from_storage,
@@ -4023,13 +4022,13 @@ async def calculate_employee_compliance(employee_id: str, role: str) -> dict:
 
 async def get_employee_dbs_summary(employee_id: str) -> dict:
     """
-    SINGLE SOURCE OF TRUTH for DBS status across all views.
+    Summary view of DBS row truth across all views.
     
     SAFETY ENGINE: Computes blocking status for work readiness.
     
-    Derives DBS summary from existing evidence:
-    - DBS Certificate (requirement_id: dbs_certificate)
-    - DBS Update Service Check (requirement_id: dbs_check)
+    Derives DBS summary from canonical evidence/check sources:
+    - DBS Certificate evidence (canonical aliases: dbs, dbs_certificate, dbs_evidence, dbs_certificate_evidence)
+    - Current DBS check record (dbs_checks)
     
     Returns computed status, dates, review schedule, and blocking state.
     
@@ -4047,6 +4046,12 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     """
     DBS_REVIEW_INTERVAL_DAYS = 365  # 12 months for DBS Update Service checks
     DBS_BLOCKING_GRACE_DAYS = 14  # Grace period before overdue becomes blocking
+    DBS_EVIDENCE_REQUIREMENT_IDS = [
+        "dbs",
+        "dbs_certificate",
+        "dbs_evidence",
+        "dbs_certificate_evidence",
+    ]
     
     # Initialize summary with safety engine fields
     summary = {
@@ -4083,36 +4088,35 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
         "rule_applied": "no_evidence"
     }
     
-    # Get DBS Certificate record (most recent active)
+    # Get DBS Certificate evidence record (most recent active)
     dbs_cert = await db.employee_documents.find_one({
         "employee_id": employee_id,
-        "requirement_id": "dbs_certificate",
+        "requirement_id": {"$in": DBS_EVIDENCE_REQUIREMENT_IDS},
         "status": {"$nin": EXCLUDED_DOC_STATUSES},
-        "$or": [
-            {"active": {"$exists": False}},
-            {"active": True}
+        "active": {"$ne": False},
+        "is_active": {"$ne": False},
+        "file_url": {"$exists": True, "$ne": None},
+        "$nor": [
+            {"document_role": {"$in": ["proof", "verification_proof", "check_proof"]}},
+            {"source_type": {"$in": ["verification_proof", "check_proof"]}},
         ],
-        "file_url": {"$exists": True, "$ne": None}
     }, {"_id": 0}, sort=[("uploaded_at", -1)])
     
-    # Get DBS Update Service Check record (most recent active)
-    dbs_update = await db.employee_documents.find_one({
+    # Get current DBS check record from the canonical check store.
+    dbs_update = await db.dbs_checks.find_one({
         "employee_id": employee_id,
-        "requirement_id": "dbs_check",
-        "status": {"$nin": EXCLUDED_DOC_STATUSES},
-        "$or": [
-            {"active": {"$exists": False}},
-            {"active": True}
-        ],
-        "file_url": {"$exists": True, "$ne": None}
-    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+        "is_current": True,
+    }, {"_id": 0}, sort=[("checked_at", -1), ("created_at", -1)])
     
     now = datetime.now(timezone.utc)
     
     # Process DBS Certificate
     if dbs_cert:
         summary["certificate_on_file"] = True
-        summary["certificate_verified"] = dbs_cert.get("verified", False)
+        summary["certificate_verified"] = (
+            dbs_cert.get("verified") is True
+            or dbs_cert.get("status") in ["verified", "approved", "accepted"]
+        )
         
         # Use issue_date if available, else uploaded_at
         cert_date = dbs_cert.get("issue_date") or dbs_cert.get("uploaded_at")
@@ -4129,10 +4133,20 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
     # Process DBS Update Service Check
     if dbs_update:
         summary["update_service_active"] = True
-        summary["update_service_verified"] = dbs_update.get("verified", False)
+        summary["update_service_verified"] = (
+            dbs_update.get("outcome") == "verified"
+            or dbs_update.get("status") == "verified"
+            or dbs_update.get("verified") is True
+        )
         
-        # Use uploaded_at or issue_date as the check date
-        check_date = dbs_update.get("uploaded_at") or dbs_update.get("issue_date")
+        # Use checked_at first because dbs_checks stores the actual check date there.
+        check_date = (
+            dbs_update.get("checked_at")
+            or dbs_update.get("last_status_check_date")
+            or dbs_update.get("uploaded_at")
+            or dbs_update.get("issue_date")
+            or dbs_update.get("created_at")
+        )
         if isinstance(check_date, str):
             try:
                 check_date = datetime.fromisoformat(check_date.replace('Z', '+00:00'))
@@ -4987,11 +5001,17 @@ async def derive_onboarding_status(employee_id: str, role: str, current_status: 
     if current_status == OnboardingStatus.ARCHIVED:
         return OnboardingStatus.ARCHIVED
     
-    compliance = await calculate_employee_compliance(employee_id, role)
-    
     # Get employee record to check recruitment approval
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     recruitment_approved = employee.get("recruitment_approved", False) if employee else False
+    unified_status = await get_unified_employee_status(
+        employee_id,
+        db,
+        user_role="admin",
+        include_details=False
+    )
+    progress = unified_status.get("progress", {}) if not unified_status.get("error") else {}
+    can_promote = unified_status.get("can_promote", False)
     
     # Check for any activity
     forms_count = await db.generated_forms.count_documents({"employee_id": employee_id})
@@ -5003,23 +5023,16 @@ async def derive_onboarding_status(employee_id: str, role: str, current_status: 
     if total_activity == 0:
         return OnboardingStatus.NEW
     
-    # All mandatory items complete and verified
-    if compliance["complete_count"] == compliance["total_items"]:
-        if compliance["verified_count"] == compliance["total_items"]:
-            # RECRUITMENT APPROVAL GATE: Cannot go ACTIVE without approval
-            if current_status == OnboardingStatus.ACTIVE:
-                # Already active - check if approval was revoked
-                if not recruitment_approved:
-                    logger.warning(f"Employee {employee_id} is ACTIVE but recruitment_approved=False")
-                return OnboardingStatus.ACTIVE
-            
-            # Not yet active - require recruitment approval to activate
-            if recruitment_approved:
-                return OnboardingStatus.READY_FOR_PLACEMENT  # Still need manual activation
-            else:
-                return OnboardingStatus.READY_FOR_PLACEMENT  # Waiting for approval
-        else:
-            return OnboardingStatus.UNDER_REVIEW
+    # Unified can_promote is the canonical progression gate.
+    if can_promote:
+        if current_status == OnboardingStatus.ACTIVE:
+            if not recruitment_approved:
+                logger.warning(f"Employee {employee_id} is ACTIVE but recruitment_approved=False")
+            return OnboardingStatus.ACTIVE
+        return OnboardingStatus.READY_FOR_PLACEMENT
+
+    if progress.get("percentage", 0) >= 100:
+        return OnboardingStatus.UNDER_REVIEW
     
     # Has activity but items still missing
     return OnboardingStatus.DOCUMENTS_PENDING
@@ -9573,6 +9586,58 @@ async def get_employees(
     return [EmployeeResponse(**emp) for emp in employees]
 
 
+@api_router.get("/employees/unified-progress-summary")
+async def get_employees_unified_progress_summary(
+    employee_ids: Optional[str] = None,
+    include_archived: bool = False,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Bulk canonical readiness summary for dashboard/list surfaces.
+
+    Uses get_unified_employee_status() for the same readiness authority as
+    /employees/{employee_id}/unified-progress, but returns only summary fields.
+    """
+    query = {}
+    if employee_ids:
+        ids = [emp_id.strip() for emp_id in employee_ids.split(",") if emp_id.strip()]
+        query["id"] = {"$in": ids}
+    elif not include_archived:
+        query["status"] = {"$ne": EmployeeStatus.ARCHIVED}
+
+    employees = await db.employees.find(query, {"_id": 0, "id": 1}).to_list(1000)
+
+    async def build_summary(employee_id: str) -> dict:
+        unified_status = await get_unified_employee_status(
+            employee_id,
+            db,
+            user_role="admin",
+            include_details=False
+        )
+
+        if unified_status.get("error"):
+            return {
+                "employee_id": employee_id,
+                "overall_percentage": 0,
+                "is_work_ready": False,
+                "can_promote": False,
+                "blockers": [unified_status["error"]],
+                "blocker_count": 1,
+            }
+
+        blockers = [blocker.get("reason") for blocker in unified_status.get("blockers", []) if blocker.get("reason")]
+        return {
+            "employee_id": employee_id,
+            "overall_percentage": unified_status.get("progress", {}).get("percentage", 0),
+            "is_work_ready": unified_status.get("is_work_ready", False),
+            "can_promote": unified_status.get("can_promote", False),
+            "blockers": blockers,
+            "blocker_count": len(blockers),
+        }
+
+    return await asyncio.gather(*(build_summary(emp["id"]) for emp in employees if emp.get("id")))
+
+
 # ==================== RECRUITMENT PIPELINE ENDPOINTS ====================
 
 # MOVED TO routes/recruitment.py: /recruitment/applicants
@@ -10323,15 +10388,6 @@ async def permanent_delete_employee(employee_id: str, user: dict = Depends(requi
 # Two-status model: Recruitment (onboarding) → Active Employee
 # ============================================================================
 
-# NOTE: can_promote_to_active_legacy is imported at the top of the file (line 105)
-from work_readiness_engine import (
-    check_professional_registration,
-    ROLE_REGISTRATION_REQUIREMENTS,
-    EMPLOYEE_STATUS_APPLICANT,
-    EMPLOYEE_STATUS_ONBOARDING,
-    EMPLOYEE_STATUS_ACTIVE
-)
-
 class ProfessionalRegistrationRequest(BaseModel):
     body: str  # NMC, GMC, HCPC, Social Work England
     registration_number: str
@@ -10580,9 +10636,7 @@ async def try_auto_promote_worker(employee_id: str):
     Called automatically after document uploads, form submissions, etc.
     Does not require user auth - runs as system background task.
     
-    Auto-promotion triggers when:
-    1. Unified progress reaches 100% OR
-    2. All individual checks pass (can_promote_to_active)
+    Auto-promotion triggers when unified can_promote is true.
     """
     try:
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -10591,52 +10645,22 @@ async def try_auto_promote_worker(employee_id: str):
         
         current_status = employee.get("status", "applicant")
         
-        # Don't promote if already active
-        if current_status == EMPLOYEE_STATUS_ACTIVE:
+        # Don't promote if already active.
+        if current_status in (EmployeeStatus.ACTIVE, "active_employee"):
             return
         
-        # Check unified progress first (primary method)
-        try:
-            unified_progress = await compute_unified_progress_internal(employee_id, employee)
-            progress_pct = unified_progress.get("overall_percentage", 0)
-            blockers = unified_progress.get("blockers", [])
-            
-            # If progress is 100% with no blockers, promote
-            if progress_pct >= 100 and len(blockers) == 0:
-                now = datetime.now(timezone.utc).isoformat()
-                update_data = {
-                    "status": EMPLOYEE_STATUS_ACTIVE,
-                    "promoted_at": now,
-                    "promoted_via": "auto_unified_progress",
-                    "updated_at": now
-                }
-                
-                await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-                
-                # Audit log
-                await log_audit_action(
-                    "system",
-                    "auto_promoted_to_active",
-                    "employee",
-                    employee_id,
-                    {
-                        "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
-                        "previous_status": current_status,
-                        "new_status": EMPLOYEE_STATUS_ACTIVE,
-                        "progress_percentage": progress_pct,
-                        "triggered_by": "unified_progress_100"
-                    }
-                )
-                
-                # Send promotion email
-                await send_promotion_email(employee)
-                logger.info(f"Employee {employee_id} auto-promoted to active_employee (100% progress)")
-                return
-        except Exception as e:
-            logger.warning(f"Unified progress check failed, falling back to legacy: {e}")
+        unified_status = await get_unified_employee_status(
+            employee_id,
+            db,
+            user_role="admin",
+            include_details=False
+        )
+        if unified_status.get("error"):
+            logger.warning(f"Unified promotion check failed for {employee_id}: {unified_status['error']}")
+            return
         
-        # Fallback: Check using legacy method
-        can_promote, checks = await can_promote_to_active(employee_id, db)
+        can_promote = unified_status.get("can_promote", False)
+        checks = unified_status.get("checks", {})
         
         if not can_promote:
             return  # Not ready yet
@@ -10644,9 +10668,9 @@ async def try_auto_promote_worker(employee_id: str):
         # Promote to active
         now = datetime.now(timezone.utc).isoformat()
         update_data = {
-            "status": EMPLOYEE_STATUS_ACTIVE,
+            "status": EmployeeStatus.ACTIVE,
             "promoted_at": now,
-            "promoted_via": "auto_system_legacy",
+            "promoted_via": "auto_unified_can_promote",
             "updated_at": now
         }
         
@@ -10661,16 +10685,16 @@ async def try_auto_promote_worker(employee_id: str):
             {
                 "employee_name": f"{employee.get('first_name')} {employee.get('last_name')}",
                 "previous_status": current_status,
-                "new_status": EMPLOYEE_STATUS_ACTIVE,
+                "new_status": EmployeeStatus.ACTIVE,
                 "checks_passed": [k for k, v in checks.items() if v is True],
-                "triggered_by": "system_auto_legacy"
+                "triggered_by": "unified_can_promote"
             }
         )
         
         # Send promotion email
         await send_promotion_email(employee)
         
-        logger.info(f"Employee {employee_id} auto-promoted to active_employee (legacy checks)")
+        logger.info(f"Employee {employee_id} auto-promoted to active via unified can_promote")
         
     except Exception as e:
         logger.error(f"Auto-promotion check failed for {employee_id}: {e}")
@@ -21098,7 +21122,7 @@ async def create_test_employee(
     - Contract signed
     - Induction complete
     - Health declaration complete
-    - Status: active_employee (READY_TO_WORK)
+    - Status: active (READY_TO_WORK)
     """
     import random
     
@@ -21122,7 +21146,7 @@ async def create_test_employee(
         "last_name": last_name,
         "email": email,
         "phone": f"07{random.randint(100000000, 999999999)}",
-        "status": "active_employee",  # NHS status
+        "status": EmployeeStatus.ACTIVE,
         "work_readiness_status": "READY_TO_WORK",
         "recruitment_approved": True,
         "recruitment_approved_at": now,
@@ -21327,7 +21351,7 @@ async def create_test_employee(
             "employee_code": emp_code,
             "name": f"{first_name} {last_name}",
             "email": email,
-            "status": "active_employee",
+            "status": EmployeeStatus.ACTIVE,
             "work_readiness_status": "READY_TO_WORK",
             "profile_url": f"/portal/employees/{emp_id}"
         },
@@ -35307,34 +35331,79 @@ async def get_compliance_file(
     # =========================================================================
     # HELPER: Build Reference Row
     # =========================================================================
+    def reference_is_verified(reference: dict) -> bool:
+        """Match unified-progress reference verification semantics."""
+        if not isinstance(reference, dict):
+            return False
+
+        verification = reference.get("verification")
+        if not isinstance(verification, dict):
+            verification = {}
+
+        return (
+            verification.get("status") == "verified"
+            or reference.get("verification_status") == "verified"
+            or reference.get("verified") is True
+            or reference.get("status") == "verified"
+        )
+
+    def get_canonical_reference(ref_num: int) -> dict:
+        if not isinstance(refs, dict):
+            return {}
+        reference = refs.get(f"ref{ref_num}") or {}
+        return reference if isinstance(reference, dict) else {}
+
+    def reference_verified_for_compliance_file(ref_num: int) -> bool:
+        reference = get_canonical_reference(ref_num)
+        if reference:
+            return reference_is_verified(reference)
+        return bool(employee.get(f"reference_{ref_num}_verified"))
+
     def build_reference_row(ref_num: int) -> dict:
         """Build a reference requirement row with full lifecycle data."""
         prefix = f"reference_{ref_num}_"
+        canonical_ref = get_canonical_reference(ref_num)
+        declared = canonical_ref.get("declared") if isinstance(canonical_ref.get("declared"), dict) else {}
+        request = canonical_ref.get("request") if isinstance(canonical_ref.get("request"), dict) else {}
+        response = canonical_ref.get("response") if isinstance(canonical_ref.get("response"), dict) else {}
         
         # Declared referee details
         declared_referee = {
-            "name": employee.get(f"{prefix}name"),
-            "company": employee.get(f"{prefix}company"),
-            "email": employee.get(f"{prefix}email"),
-            "phone": employee.get(f"{prefix}phone"),
-            "job_title": employee.get(f"{prefix}job_title"),
-            "relationship": employee.get(f"{prefix}relationship"),
-            "start_date": employee.get(f"{prefix}start_date"),
-            "end_date": employee.get(f"{prefix}end_date"),
-            "from_cv": employee.get(f"{prefix}from_cv"),
-            "override_reason": employee.get(f"{prefix}override_reason")
+            "name": declared.get("name") or employee.get(f"{prefix}name"),
+            "company": declared.get("company") or declared.get("organisation") or employee.get(f"{prefix}company"),
+            "email": declared.get("email") or employee.get(f"{prefix}email"),
+            "phone": declared.get("phone") or employee.get(f"{prefix}phone"),
+            "job_title": declared.get("job_title") or employee.get(f"{prefix}job_title"),
+            "relationship": declared.get("relationship") or employee.get(f"{prefix}relationship"),
+            "start_date": declared.get("start_date") or employee.get(f"{prefix}start_date"),
+            "end_date": declared.get("end_date") or employee.get(f"{prefix}end_date"),
+            "from_cv": declared.get("from_cv") if declared.get("from_cv") is not None else employee.get(f"{prefix}from_cv"),
+            "override_reason": declared.get("override_reason") or employee.get(f"{prefix}override_reason")
         }
         has_declared = bool(declared_referee.get("name") or declared_referee.get("email"))
         
         # Request status
-        request_status = employee.get(f"{prefix}request_status")  # None, "requested", "awaiting_response", "submitted", etc.
-        request_sent_at = employee.get(f"{prefix}request_sent_at")
-        request_token = employee.get(f"{prefix}request_token")
+        request_status = (
+            request.get("status")
+            or canonical_ref.get("request_status")
+            or employee.get(f"{prefix}request_status")
+        )  # None, "requested", "awaiting_response", "submitted", etc.
+        request_sent_at = request.get("sent_at") or canonical_ref.get("request_sent_at") or employee.get(f"{prefix}request_sent_at")
+        request_token = request.get("token") or canonical_ref.get("request_token") or employee.get(f"{prefix}request_token")
         
         # Response data
-        response_received_at = employee.get(f"{prefix}response_received_at")
-        response_data = employee.get(f"{prefix}response_data") or {}
-        has_response = bool(response_data) and bool(response_received_at)
+        response_received_at = (
+            response.get("received_at")
+            or response.get("submitted_at")
+            or canonical_ref.get("response_received_at")
+            or employee.get(f"{prefix}response_received_at")
+        )
+        response_data = response or employee.get(f"{prefix}response_data") or {}
+        has_response = bool(response_data) and bool(
+            response_received_at
+            or response.get("submitted_at")
+            or response.get("received_at")
+        )
         
         # Response referee details (from form submission)
         returned_referee = {
@@ -35351,14 +35420,14 @@ async def get_compliance_file(
         mismatch_notes = employee.get(f"{prefix}mismatch_notes")
         
         # Review status
-        reviewed = employee.get(f"{prefix}reviewed", False)
-        reviewed_by = employee.get(f"{prefix}reviewed_by")
-        reviewed_at = employee.get(f"{prefix}reviewed_at")
+        reviewed = canonical_ref.get("reviewed") if canonical_ref.get("reviewed") is not None else employee.get(f"{prefix}reviewed", False)
+        reviewed_by = canonical_ref.get("reviewed_by") or employee.get(f"{prefix}reviewed_by")
+        reviewed_at = canonical_ref.get("reviewed_at") or employee.get(f"{prefix}reviewed_at")
         
         # Verification status
-        verified = employee.get(f"{prefix}verified", False)
-        verified_by = employee.get(f"{prefix}verified_by")
-        verified_at = employee.get(f"{prefix}verified_at")
+        verified = reference_verified_for_compliance_file(ref_num)
+        verified_by = canonical_ref.get("verified_by") or employee.get(f"{prefix}verified_by")
+        verified_at = canonical_ref.get("verified_at") or employee.get(f"{prefix}verified_at")
         
         # Determine overall lifecycle status
         if verified:
@@ -35933,8 +36002,8 @@ async def get_compliance_file(
                 build_reference_row(2)
             ],
             "valid_count": sum([
-                1 if employee.get("reference_1_verified") else 0,
-                1 if employee.get("reference_2_verified") else 0
+                1 if reference_verified_for_compliance_file(1) else 0,
+                1 if reference_verified_for_compliance_file(2) else 0
             ]),
             "required_count": 2
         },

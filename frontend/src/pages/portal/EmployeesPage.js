@@ -19,6 +19,27 @@ import { StageIdentityBadge } from '../../components/compliance';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
+const getInitialReadinessFilter = (searchParams) => {
+  if (searchParams.get('is_work_ready') === 'true') return 'READY_TO_WORK';
+  if (searchParams.get('is_work_ready') === 'false') return 'NOT_READY';
+  if (searchParams.get('can_promote') === 'true') return 'CAN_PROMOTE';
+
+  const legacy = searchParams.get('work_readiness');
+  if (legacy === 'ready_to_work' || legacy === 'READY_TO_WORK') return 'READY_TO_WORK';
+  if (legacy === 'not_ready' || legacy === 'NOT_READY') return 'NOT_READY';
+  if (legacy === 'supervised_start' || legacy === 'READY_WITH_CONDITIONS') return 'CAN_PROMOTE';
+  return '';
+};
+
+const matchesReadinessFilter = (employee, filter) => {
+  const readiness = employee.canonical_readiness;
+  if (!filter) return true;
+  if (filter === 'READY_TO_WORK') return readiness?.is_work_ready === true;
+  if (filter === 'CAN_PROMOTE') return readiness?.can_promote === true && readiness?.is_work_ready !== true;
+  if (filter === 'NOT_READY') return readiness?.is_work_ready !== true && readiness?.can_promote !== true;
+  return true;
+};
+
 const statusColors = {
   new: 'status-info',
   screening: 'status-info',
@@ -40,7 +61,7 @@ export default function EmployeesPage() {
   const [search, setSearch] = useState(searchParams.get('q') || '');
   const [statusFilter, setStatusFilter] = useState(searchParams.get('status') || '');
   const [onboardingStatusFilter, setOnboardingStatusFilter] = useState(searchParams.get('onboarding') || '');
-  const [workReadinessFilter, setWorkReadinessFilter] = useState(searchParams.get('work_readiness') || '');
+  const [workReadinessFilter, setWorkReadinessFilter] = useState(getInitialReadinessFilter(searchParams));
   const [requirementFilter, setRequirementFilter] = useState(searchParams.get('requirement') || '');
   const [showArchived, setShowArchived] = useState(searchParams.get('archived') === 'true');
   const [onboardingStatuses, setOnboardingStatuses] = useState([]);
@@ -70,7 +91,9 @@ export default function EmployeesPage() {
     if (search) newParams.set('q', search);
     if (statusFilter) newParams.set('status', statusFilter);
     if (onboardingStatusFilter) newParams.set('onboarding', onboardingStatusFilter);
-    if (workReadinessFilter) newParams.set('work_readiness', workReadinessFilter);
+    if (workReadinessFilter === 'READY_TO_WORK') newParams.set('is_work_ready', 'true');
+    if (workReadinessFilter === 'NOT_READY') newParams.set('is_work_ready', 'false');
+    if (workReadinessFilter === 'CAN_PROMOTE') newParams.set('can_promote', 'true');
     if (requirementFilter) newParams.set('requirement', requirementFilter);
     if (showArchived) newParams.set('archived', 'true');
     
@@ -116,7 +139,21 @@ export default function EmployeesPage() {
       const response = await axios.get(`${endpoint}?${params}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setEmployees(response.data);
+      const employeeRows = response.data || [];
+      const employeeIds = employeeRows.map((employee) => employee.id).filter(Boolean);
+      const readinessRes = employeeIds.length > 0
+        ? await axios.get(`${API}/employees/unified-progress-summary`, {
+            params: { employee_ids: employeeIds.join(',') },
+            headers: { Authorization: `Bearer ${token}` }
+          }).catch(() => ({ data: [] }))
+        : { data: [] };
+      const readinessByEmployeeId = new Map(
+        (readinessRes.data || []).map((summary) => [summary.employee_id, summary])
+      );
+      setEmployees(employeeRows.map((employee) => ({
+        ...employee,
+        canonical_readiness: readinessByEmployeeId.get(employee.id) || null
+      })));
     } catch (error) {
       console.error('Failed to fetch employees:', error);
     } finally {
@@ -274,7 +311,7 @@ export default function EmployeesPage() {
   // Helper to get filtered employees list
   const getFilteredEmployees = () => {
     let filtered = workReadinessFilter 
-      ? employees.filter(emp => emp.work_readiness_3tier?.status === workReadinessFilter)
+      ? employees.filter(emp => matchesReadinessFilter(emp, workReadinessFilter))
       : employees;
     
     if (requirementFilter) {
@@ -559,10 +596,10 @@ export default function EmployeesPage() {
                     Ready to Work
                   </span>
                 </SelectItem>
-                <SelectItem value="READY_WITH_CONDITIONS">
+                <SelectItem value="CAN_PROMOTE">
                   <span className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning"></span>
-                    Ready with Conditions
+                    Promotion Eligible
                   </span>
                 </SelectItem>
                 <SelectItem value="NOT_READY">
@@ -624,11 +661,7 @@ export default function EmployeesPage() {
               {/* Filter employees by work readiness (3-tier) and requirement */}
               {(() => {
                 let filteredEmployees = workReadinessFilter 
-                  ? employees.filter(emp => {
-                      // Use 3-tier status from API
-                      const status3tier = emp.work_readiness_3tier?.status;
-                      return status3tier === workReadinessFilter;
-                    })
+                  ? employees.filter(emp => matchesReadinessFilter(emp, workReadinessFilter))
                   : employees;
                 
                 // Additional filter by requirement type (DBS, RTW, References)
@@ -710,18 +743,21 @@ export default function EmployeesPage() {
                 </thead>
                 <tbody>
                   {filteredEmployees.map((emp) => {
-                    // Use 3-tier work readiness from API (new model)
-                    const workReadiness3tier = emp.work_readiness_3tier || {};
-                    const status3tier = workReadiness3tier.status;
-                    
-                    // Determine display based on 3-tier status
-                    let statusLabel = workReadiness3tier.label || 'Unknown';
-                    let statusColor = workReadiness3tier.color === 'success' ? 'bg-success/10 text-success' :
-                                      workReadiness3tier.color === 'warning' ? 'bg-warning/10 text-warning' :
+                    const readiness = emp.canonical_readiness || {};
+                    const status3tier = readiness.is_work_ready === true
+                      ? 'READY_TO_WORK'
+                      : readiness.can_promote === true
+                        ? 'CAN_PROMOTE'
+                        : 'NOT_READY';
+                    const statusLabel = readiness.is_work_ready === true
+                      ? 'Ready to Work'
+                      : readiness.can_promote === true
+                        ? 'Promotion Eligible'
+                        : 'Not Ready';
+                    const statusColor = readiness.is_work_ready === true ? 'bg-success/10 text-success' :
+                                      readiness.can_promote === true ? 'bg-warning/10 text-warning' :
                                       'bg-error/10 text-error';
-                    
-                    // Get first reason for display
-                    const firstReason = workReadiness3tier.reasons?.[0]?.message;
+                    const firstReason = readiness.blockers?.[0];
                     
                     return (
                     <tr 
@@ -765,7 +801,7 @@ export default function EmployeesPage() {
                         <span className="text-text-primary">{emp.role}</span>
                       </td>
                       <td className="p-4">
-                        {/* 3-Tier Work Readiness Badge */}
+                        {/* Canonical Work Readiness Badge */}
                         <div 
                           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${statusColor}`}
                           title={firstReason || statusLabel}
@@ -773,14 +809,14 @@ export default function EmployeesPage() {
                         >
                           {status3tier === 'READY_TO_WORK' ? (
                             <Shield className="h-3.5 w-3.5" />
-                          ) : status3tier === 'READY_WITH_CONDITIONS' ? (
+                          ) : status3tier === 'CAN_PROMOTE' ? (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           ) : (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           )}
                           {statusLabel}
                         </div>
-                        {/* Show first reason on separate line if NOT_READY or conditional */}
+                        {/* Show first canonical blocker on separate line if not ready */}
                         {firstReason && status3tier !== 'READY_TO_WORK' && (
                           <p className={`text-[10px] mt-0.5 max-w-[150px] truncate ${status3tier === 'NOT_READY' ? 'text-red-600' : 'text-amber-600'}`} title={firstReason}>
                             {firstReason}
@@ -800,11 +836,11 @@ export default function EmployeesPage() {
                         <div className="flex items-center gap-2">
                           <div className="w-20 h-2 bg-[#E4E8EB] rounded-full overflow-hidden">
                             <div 
-                              className={`h-full rounded-full ${emp.completion_percentage >= 80 ? 'bg-success' : emp.completion_percentage >= 50 ? 'bg-warning' : 'bg-error'}`}
-                              style={{ width: `${emp.completion_percentage}%` }}
+                              className={`h-full rounded-full ${(readiness.overall_percentage ?? 0) >= 80 ? 'bg-success' : (readiness.overall_percentage ?? 0) >= 50 ? 'bg-warning' : 'bg-error'}`}
+                              style={{ width: `${readiness.overall_percentage ?? 0}%` }}
                             ></div>
                           </div>
-                          <span className="text-sm text-text-muted">{emp.completion_percentage}% Complete</span>
+                          <span className="text-sm text-text-muted">{readiness.overall_percentage ?? 0}% Complete</span>
                           {/* Expiry Alert Indicator */}
                           {emp.expiry_alerts?.has_alerts && (
                             <span 

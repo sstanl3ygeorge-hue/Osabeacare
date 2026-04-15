@@ -96,6 +96,92 @@ const statusColors = {
   not_applicable: 'status-neutral'
 };
 
+const getComplianceFileWorkflowStatus = (complianceFile, sectionKey) => {
+  const section = complianceFile?.sections?.[sectionKey];
+  if (!section) return null;
+
+  const evidenceRow = section.rows?.find((row) => row.row_type === 'evidence');
+  const checkRow = section.rows?.find((row) => row.row_type === 'check');
+  const evidenceFiles = evidenceRow?.documents_preview || [];
+  const checkRecord = checkRow?.check_data || null;
+  const acceptedFiles = evidenceFiles.filter((file) =>
+    file.verified ||
+    file.status === 'verified' ||
+    file.status === 'approved' ||
+    file.status === 'accepted'
+  );
+  const hasEvidence = evidenceFiles.length > 0;
+  const hasAcceptedEvidence = acceptedFiles.length > 0;
+  const hasCheck = !!checkRecord;
+  const checkVerified = checkRecord?.outcome === 'verified';
+  const checkFailed = checkRecord?.outcome === 'failed';
+  const proofDocumentId = checkRecord?.proof_document_id || checkRecord?.evidence_document_id || null;
+  const isDbs = sectionKey === 'dbs';
+  const isRtw = sectionKey === 'right_to_work';
+  const proofRequired = isRtw || (isDbs && ['dbs_update_service_check', 'update_service_check', 'dbs_update_service'].includes(checkRecord?.method));
+  const reviewDueAt = checkRecord?.review_due_at || checkRecord?.next_recheck_date || null;
+  const reviewDueDate = reviewDueAt ? parseBackendDate(reviewDueAt) : null;
+  const isDbsOverdue = isDbs && reviewDueDate && reviewDueDate < new Date();
+  const permissionEndDate = checkRecord?.permission_end_date || null;
+  const permissionDate = permissionEndDate ? parseBackendDate(permissionEndDate) : null;
+  const isRtwExpired = isRtw && permissionDate && permissionDate < new Date();
+
+  if (!hasEvidence) {
+    return { label: 'No evidence', tone: 'gray', isBlocking: true };
+  }
+  if (!hasAcceptedEvidence) {
+    return { label: 'Awaiting evidence review', tone: 'amber', isBlocking: true };
+  }
+  if (!hasCheck) {
+    return { label: 'Check required', tone: 'amber', isBlocking: true };
+  }
+  if (checkFailed) {
+    return { label: 'Check failed', tone: 'red', isBlocking: true };
+  }
+  if (!checkVerified) {
+    return { label: 'Check in progress', tone: 'amber', isBlocking: true };
+  }
+  if (proofRequired && !proofDocumentId) {
+    return { label: 'Proof required', tone: 'amber', isBlocking: true };
+  }
+  if (isDbsOverdue) {
+    return { label: 'Recheck overdue', tone: 'red', isBlocking: true, reviewDueAt };
+  }
+  if (isRtwExpired) {
+    return { label: 'Expired', tone: 'red', isBlocking: true, permissionEndDate };
+  }
+
+  return { label: 'Verified', tone: 'green', isBlocking: false, reviewDueAt, permissionEndDate };
+};
+
+const quickViewToneClasses = {
+  red: {
+    card: 'border-red-200 bg-red-50',
+    icon: 'text-red-600',
+    text: 'text-red-700'
+  },
+  amber: {
+    card: 'border-amber-200 bg-amber-50',
+    icon: 'text-amber-600',
+    text: 'text-amber-700'
+  },
+  green: {
+    card: 'border-green-200 bg-green-50',
+    icon: 'text-green-600',
+    text: 'text-green-700'
+  },
+  gray: {
+    card: 'border-gray-200 bg-gray-50',
+    icon: 'text-gray-500',
+    text: 'text-gray-700'
+  },
+  blue: {
+    card: 'border-blue-200 bg-blue-50',
+    icon: 'text-blue-600',
+    text: 'text-blue-700'
+  }
+};
+
 export default function EmployeeProfilePage() {
   const { employeeId } = useParams();
   const navigate = useNavigate();
@@ -157,6 +243,7 @@ export default function EmployeeProfilePage() {
   const [importCvFile, setImportCvFile] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
   const [complianceRequirements, setComplianceRequirements] = useState(null);
+  const [unifiedProgress, setUnifiedProgress] = useState(null);
   const [selectedRequirement, setSelectedRequirement] = useState('');
   const [documentLabel, setDocumentLabel] = useState('');
   
@@ -958,11 +1045,12 @@ export default function EmployeeProfilePage() {
       axios.get(`${API}/audit-logs?entity_id=${employeeId}&compliance_only=true`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/generated-forms?employee_id=${employeeId}`, { headers: { Authorization: `Bearer ${token}` } }),
       axios.get(`${API}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
-      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } })
+      axios.get(`${API}/employees/${employeeId}/compliance-requirements`, { headers: { Authorization: `Bearer ${token}` } }),
+      axios.get(`${API}/employees/${employeeId}/unified-progress`, { headers: { Authorization: `Bearer ${token}` } })
     ]);
     
     // Process results - extract data or use defaults
-    const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes] = results;
+    const [empRes, docsRes, typesRes, policiesRes, trainingRes, logsRes, formsRes, templatesRes, compReqRes, unifiedProgressRes] = results;
     
     let hasError = false;
     
@@ -983,6 +1071,7 @@ export default function EmployeeProfilePage() {
     setGeneratedForms(formsRes.status === 'fulfilled' ? formsRes.value.data : []);
     setTemplates(templatesRes.status === 'fulfilled' ? templatesRes.value.data : []);
     setComplianceRequirements(compReqRes.status === 'fulfilled' ? compReqRes.value.data : {});
+    setUnifiedProgress(unifiedProgressRes.status === 'fulfilled' ? unifiedProgressRes.value.data : null);
     
     if (hasError) {
       toast.error('Failed to load employee data');
@@ -3080,6 +3169,22 @@ export default function EmployeeProfilePage() {
     );
   }
 
+  const canonicalProgress = unifiedProgress || complianceRequirements?.unified_progress || null;
+  const canonicalProgressPct = canonicalProgress?.overall_percentage ?? 0;
+  const canonicalBlockers = canonicalProgress?.blockers || [];
+  const canonicalBlockerDetails = canonicalProgress?.blocker_details || [];
+  const canonicalIsWorkReady = canonicalProgress?.is_work_ready === true;
+  const canonicalCanPromote = canonicalProgress?.can_promote === true;
+  const canonicalReadinessLabel = canonicalIsWorkReady
+    ? 'Work Ready'
+    : canonicalCanPromote
+      ? 'Ready for Promotion'
+      : 'Not Work Ready';
+  const canonicalReadinessClass = canonicalIsWorkReady || canonicalCanPromote
+    ? 'bg-green-100 text-green-800'
+    : 'bg-red-100 text-red-800';
+  const canonicalProgressComplete = canonicalProgressPct === 100;
+
   return (
     <div className="space-y-6" data-testid="employee-profile">
       {/* Back Link - Returns to correct section based on route context */}
@@ -3189,11 +3294,6 @@ export default function EmployeeProfilePage() {
                   </span>
                   {/* Simplified Status Flow: Awaiting Approval → Ready → Active Employee */}
                   {(() => {
-                    // Get progress percentage from unified progress
-                    const progressPct = complianceRequirements?.unified_progress?.overall_percentage || 
-                                       complianceRequirements?.progress?.percentage || 0;
-                    const isComplete = progressPct === 100;
-                    
                     // Active Employee - already promoted
                     if (employee.status === 'active_employee') {
                       return (
@@ -3202,11 +3302,17 @@ export default function EmployeeProfilePage() {
                         </span>
                       );
                     }
-                    // Progress complete - 100% complete, pending promotion
-                    if (isComplete) {
+                    if (canonicalCanPromote) {
                       return (
                         <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
-                          Progress complete
+                          Ready for promotion
+                        </span>
+                      );
+                    }
+                    if (canonicalProgressComplete && canonicalIsWorkReady) {
+                      return (
+                        <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
+                          Work ready
                         </span>
                       );
                     }
@@ -3217,34 +3323,30 @@ export default function EmployeeProfilePage() {
                       </span>
                     );
                   })()}
-                  {/* 3-Tier Work Readiness Status Badge */}
+                  {/* Canonical Work Readiness Status Badge */}
                   {employee.person_stage === 'employee' && (() => {
-                    const workReadiness3tier = complianceRequirements?.work_readiness_3tier || {};
-                    const status = workReadiness3tier.status;
-                    const statusLabel = workReadiness3tier.label || 'Unknown';
-                    const statusColor = workReadiness3tier.color === 'success' ? 'bg-success/10 text-success' : 
-                                       workReadiness3tier.color === 'warning' ? 'bg-warning/10 text-warning' : 
-                                       'bg-error/10 text-error';
-                    const reasons = workReadiness3tier.reasons || [];
+                    const reasons = canonicalBlockerDetails.length > 0
+                      ? canonicalBlockerDetails.map((blocker) => blocker.reason || blocker.message || blocker.label).filter(Boolean)
+                      : canonicalBlockers;
                     
                     return (
                       <div className="flex flex-col items-start gap-1">
-                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${statusColor}`} data-testid="work-readiness-badge">
-                          {status === 'READY_TO_WORK' ? (
+                        <span className={`px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1.5 ${canonicalReadinessClass}`} data-testid="work-readiness-badge">
+                          {canonicalIsWorkReady || canonicalCanPromote ? (
                             <Shield className="h-3.5 w-3.5" />
                           ) : (
                             <AlertTriangle className="h-3.5 w-3.5" />
                           )}
-                          {statusLabel}
+                          {canonicalReadinessLabel}
                         </span>
-                        {reasons.length > 0 && status !== 'READY_TO_WORK' && (
+                        {reasons.length > 0 && !canonicalIsWorkReady && !canonicalCanPromote && (
                           <div className="flex flex-wrap gap-1 max-w-md">
                             {reasons.slice(0, 3).map((reason, idx) => (
                               <span 
                                 key={idx} 
-                                className={`text-[10px] px-1.5 py-0.5 rounded ${reason.type === 'hard_block' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700"
                               >
-                                {reason.message}
+                                {reason}
                               </span>
                             ))}
                             {reasons.length > 3 && (
@@ -3263,12 +3365,11 @@ export default function EmployeeProfilePage() {
               <div className="flex items-center gap-3">
                 <div className="text-right">
                   <p className="text-sm text-text-muted">Overall Compliance</p>
-                  {/* Use single source of truth from complianceRequirements */}
                   <p className="text-3xl font-heading font-bold text-text-primary">
-                    {complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0}% Complete
+                    {canonicalProgressPct}% Complete
                   </p>
                   <p className="text-xs text-text-muted mt-0.5">
-                    {complianceRequirements?.statuses?.overall_compliance?.complete ?? 0} of {complianceRequirements?.statuses?.overall_compliance?.total ?? 0} requirements
+                    {canonicalProgress?.completed_requirements ?? 0} of {canonicalProgress?.total_requirements ?? 0} requirements
                   </p>
                 </div>
                 {!isAuditor() && (
@@ -3332,7 +3433,7 @@ export default function EmployeeProfilePage() {
                 )}
               </div>
               <Progress 
-                value={complianceRequirements?.statuses?.overall_compliance?.percentage ?? employee.completion_percentage ?? 0} 
+                value={canonicalProgressPct}
                 className="w-32 h-2" 
               />
             </div>
@@ -3355,19 +3456,33 @@ export default function EmployeeProfilePage() {
             // Calculate pending review (has evidence but not verified)
             const pendingReview = reqs.filter(r => r.has_evidence && !r.verified).length;
             
-            // Safety engine blocking status
-            const isBlocking = safetyStatus.is_safe_to_deploy === false;
-            const blockingReasons = complianceRequirements?.statuses?.safety_blocking_reasons || [];
+            // Canonical readiness blocking status
+            const isBlocking = canonicalProgress ? !canonicalIsWorkReady && !canonicalCanPromote : safetyStatus.is_safe_to_deploy === false;
+            const blockingReasons = canonicalBlockers.length > 0 ? canonicalBlockers : (complianceRequirements?.statuses?.safety_blocking_reasons || []);
             
             // DBS info from safety engine
             const dbsExpiry = dbsSummary.review_due_date || dbsSummary.next_dbs_review_due;
             const dbsExpiryDays = dbsSummary.days_remaining;
-            const dbsBlocking = dbsSummary.is_blocking;
+            const dbsWorkflowStatus = getComplianceFileWorkflowStatus(complianceFile, 'dbs');
+            const dbsTone = dbsWorkflowStatus?.tone || (
+              dbsSummary.is_blocking || dbsSummary.dbs_status_color === 'red' ? 'red' :
+              dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'amber' :
+              dbsSummary.dbs_status_color === 'green' ? 'green' : 'blue'
+            );
+            const dbsClasses = quickViewToneClasses[dbsTone] || quickViewToneClasses.blue;
+            const dbsBlocking = dbsWorkflowStatus ? dbsWorkflowStatus.isBlocking : dbsSummary.is_blocking;
             
             // RTW info from safety engine
             const rtwExpiry = rtwSummary.expiry_date;
             const rtwExpiryDays = rtwSummary.days_remaining;
-            const rtwBlocking = rtwSummary.is_blocking;
+            const rtwWorkflowStatus = getComplianceFileWorkflowStatus(complianceFile, 'right_to_work');
+            const rtwTone = rtwWorkflowStatus?.tone || (
+              rtwSummary.rtw_status_color === 'red' || rtwSummary.status_band === 'expired' ? 'red' :
+              rtwSummary.rtw_status_color === 'amber' || rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'amber' :
+              rtwSummary.rtw_status_color === 'green' ? 'green' :
+              rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'gray' : 'blue'
+            );
+            const rtwClasses = quickViewToneClasses[rtwTone] || quickViewToneClasses.blue;
             
             // Training info from safety engine
             const trainingBlocking = trainingSummary.is_blocking;
@@ -3405,27 +3520,20 @@ export default function EmployeeProfilePage() {
                 {/* Quick Status Cards - 4 cards */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="audit-quick-view">
                   {/* DBS Status with Expiry */}
-                  <div className={`p-3 rounded-xl border ${
-                    dbsBlocking || dbsSummary.dbs_status_color === 'red' ? 'border-red-200 bg-red-50' :
-                    dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'border-amber-200 bg-amber-50' :
-                    dbsSummary.dbs_status_color === 'green' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'
-                  }`} data-testid="dbs-status-card">
+                  <div className={`p-3 rounded-xl border ${dbsClasses.card}`} data-testid="dbs-status-card">
                     <div className="flex items-center gap-2 mb-1">
-                      <Shield className={`h-4 w-4 ${
-                        dbsBlocking || dbsSummary.dbs_status_color === 'red' ? 'text-red-600' :
-                        dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'text-amber-600' :
-                        dbsSummary.dbs_status_color === 'green' ? 'text-green-600' : 'text-blue-600'
-                      }`} />
+                      <Shield className={`h-4 w-4 ${dbsClasses.icon}`} />
                       <span className="text-xs font-semibold text-text-primary">DBS</span>
-                      {dbsBlocking && <span className="text-xs px-1 py-0.5 bg-red-600 text-white rounded">BLOCKED</span>}
+                      {dbsBlocking && <span className="text-xs px-1 py-0.5 bg-red-600 text-white rounded">ACTION</span>}
                     </div>
-                    <p className={`text-sm font-medium ${
-                      dbsBlocking || dbsSummary.dbs_status_color === 'red' ? 'text-red-700' :
-                      dbsSummary.status_band === 'urgent' || dbsSummary.status_band === 'due_soon' ? 'text-amber-700' :
-                      dbsSummary.dbs_status_color === 'green' ? 'text-green-700' : 'text-blue-700'
-                    }`}>
-                      {dbsSummary.dbs_status_label || 'Unknown'}
+                    <p className={`text-sm font-medium ${dbsClasses.text}`}>
+                      {dbsWorkflowStatus?.label || dbsSummary.dbs_status_label || 'Unknown'}
                     </p>
+                    {dbsWorkflowStatus ? (
+                      <p className="text-[10px] mt-0.5 text-text-muted">From Compliance File row</p>
+                    ) : (
+                      <p className="text-[10px] mt-0.5 text-text-muted">Legacy DBS summary</p>
+                    )}
                     {dbsExpiry && (
                       <p className={`text-xs mt-1 ${
                         dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'text-red-600 font-medium' :
@@ -3441,26 +3549,20 @@ export default function EmployeeProfilePage() {
                   </div>
                   
                   {/* RTW Status with Expiry - Dynamic logic based on verification + expiry */}
-                  <div className={`p-3 rounded-xl border ${
-                    rtwSummary.rtw_status_color === 'red' || rtwSummary.status_band === 'expired' ? 'border-red-200 bg-red-50' :
-                    rtwSummary.rtw_status_color === 'amber' || rtwSummary.status_band === 'urgent' || rtwSummary.status_band === 'due_soon' ? 'border-amber-200 bg-amber-50' :
-                    rtwSummary.rtw_status_color === 'green' ? 'border-green-200 bg-green-50' : 
-                    rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'border-gray-200 bg-gray-50' : 
-                    'border-blue-200 bg-blue-50'
-                  }`} data-testid="rtw-status-card">
+                  <div className={`p-3 rounded-xl border ${rtwClasses.card}`} data-testid="rtw-status-card">
                     <div className="flex items-center gap-2 mb-1">
-                      <FileCheck className={`h-4 w-4 ${
-                        rtwSummary.rtw_status_color === 'red' || rtwSummary.status_band === 'expired' ? 'text-red-600' :
-                        rtwSummary.rtw_status_color === 'amber' ? 'text-amber-600' :
-                        rtwSummary.rtw_status_color === 'green' ? 'text-green-600' : 
-                        rtwSummary.rtw_status_color === 'gray' || !rtwSummary.is_verified ? 'text-gray-500' :
-                        'text-blue-600'
-                      }`} />
+                      <FileCheck className={`h-4 w-4 ${rtwClasses.icon}`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
                     </div>
                     
-                    {/* Dynamic Status Display - No contradictions */}
-                    {!rtwSummary.is_verified ? (
+                    {rtwWorkflowStatus ? (
+                      <>
+                        <p className={`text-sm font-semibold ${rtwClasses.text}`}>
+                          {rtwWorkflowStatus.label}
+                        </p>
+                        <p className="text-[10px] mt-0.5 text-text-muted">From Compliance File row</p>
+                      </>
+                    ) : !rtwSummary.is_verified ? (
                       // Not verified = not yet verified
                       <p className="text-sm font-semibold text-gray-700">Not yet verified</p>
                     ) : rtwSummary.status_band === 'expired' || rtwSummary.rtw_status_color === 'red' ? (
@@ -3483,6 +3585,9 @@ export default function EmployeeProfilePage() {
                     ) : (
                       // Verified but no expiry info
                       <p className="text-sm font-semibold text-green-700">VERIFIED</p>
+                    )}
+                    {!rtwWorkflowStatus && (
+                      <p className="text-[10px] mt-0.5 text-text-muted">Legacy RTW summary</p>
                     )}
                     
                     {/* Days countdown for expiring */}
@@ -3532,8 +3637,10 @@ export default function EmployeeProfilePage() {
                           <p className="text-xs text-amber-700">{pendingReview} pending</p>
                         )}
                       </div>
-                    ) : (
+                    ) : canonicalIsWorkReady || canonicalCanPromote ? (
                       <p className="text-sm font-medium text-green-700">Work Ready</p>
+                    ) : (
+                      <p className="text-sm font-medium text-red-700">Not Work Ready</p>
                     )}
                   </div>
                   
@@ -3648,22 +3755,6 @@ export default function EmployeeProfilePage() {
               return null;
             })()}
             
-            {/* All Clear badge if no issues */}
-            {(() => {
-              const reqs = complianceRequirements?.requirements || [];
-              const missing = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
-              const pending = reqs.filter(r => r.has_evidence && !r.verified).length;
-              
-              if (missing === 0 && pending === 0) {
-                return (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 rounded-lg">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    <span className="text-sm font-medium text-green-700">All Verified</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
           </div>
 
           {/* Note: Global Upload Document button removed. */}
@@ -4916,18 +5007,14 @@ export default function EmployeeProfilePage() {
                     Operational workflow for compliance. Upload evidence, verify checks, manage agreements.
                   </p>
                 </div>
-                {complianceRequirements?.work_readiness_3tier && (
-                  <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${
-                    complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? 'bg-green-100 text-green-800' :
-                    complianceRequirements.work_readiness_3tier.status === 'READY_WITH_CONDITIONS' ? 'bg-amber-100 text-amber-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {complianceRequirements.work_readiness_3tier.status === 'READY_TO_WORK' ? (
+                {canonicalProgress && (
+                  <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-xl font-medium ${canonicalReadinessClass}`}>
+                    {canonicalIsWorkReady || canonicalCanPromote ? (
                       <Shield className="h-4 w-4" />
                     ) : (
                       <AlertTriangle className="h-4 w-4" />
                     )}
-                    {complianceRequirements.work_readiness_3tier.label}
+                    {canonicalReadinessLabel}
                   </div>
                 )}
               </div>

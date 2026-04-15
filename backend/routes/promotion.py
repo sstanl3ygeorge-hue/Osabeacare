@@ -25,11 +25,22 @@ from .dependencies import (
     log_audit_action,
 )
 
-# Import from work_readiness_engine
-from work_readiness_engine import (
-    can_promote_to_active_legacy as can_promote_to_active,
-    EMPLOYEE_STATUS_ACTIVE,
-)
+from unified_compliance_engine import get_unified_employee_status
+
+EMPLOYEE_STATUS_ACTIVE = "active"
+LEGACY_EMPLOYEE_STATUS_ACTIVE = "active_employee"
+
+
+async def get_canonical_promotion_status(employee_id: str, db) -> tuple[bool, dict]:
+    unified_status = await get_unified_employee_status(
+        employee_id,
+        db,
+        user_role="admin",
+        include_details=False
+    )
+    if unified_status.get("error"):
+        raise HTTPException(status_code=404, detail=unified_status["error"])
+    return unified_status.get("can_promote", False), unified_status.get("checks", {})
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +63,7 @@ async def get_promotion_status(
     user: dict = Depends(get_current_user)
 ):
     """
-    Check if employee is ready for automatic promotion to active_employee.
+    Check if employee is ready for automatic promotion to active.
     Returns detailed check status for each requirement.
     """
     db = get_db()
@@ -60,7 +71,7 @@ async def get_promotion_status(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    can_promote, checks = await can_promote_to_active(employee_id, db)
+    can_promote, checks = await get_canonical_promotion_status(employee_id, db)
     
     # Get current status
     current_status = employee.get("status", "applicant")
@@ -91,7 +102,7 @@ async def auto_promote_to_active(
     user: dict = Depends(require_manager_or_admin)
 ):
     """
-    Automatically promote employee to active_employee if all checks pass.
+    Automatically promote employee to active if all checks pass.
     This endpoint should be called after significant compliance changes.
     """
     db = get_db()
@@ -102,7 +113,7 @@ async def auto_promote_to_active(
     current_status = employee.get("status", "applicant")
     
     # Already active
-    if current_status == EMPLOYEE_STATUS_ACTIVE:
+    if current_status in (EMPLOYEE_STATUS_ACTIVE, LEGACY_EMPLOYEE_STATUS_ACTIVE):
         return {
             "success": True,
             "message": "Employee is already active",
@@ -111,7 +122,7 @@ async def auto_promote_to_active(
         }
     
     # Check if can promote
-    can_promote, checks = await can_promote_to_active(employee_id, db)
+    can_promote, checks = await get_canonical_promotion_status(employee_id, db)
     
     if not can_promote:
         missing = [k for k, v in checks.items() if v is False]
@@ -178,14 +189,14 @@ async def force_promote_to_active(
     
     current_status = employee.get("status", "applicant")
     
-    if current_status == EMPLOYEE_STATUS_ACTIVE:
+    if current_status in (EMPLOYEE_STATUS_ACTIVE, LEGACY_EMPLOYEE_STATUS_ACTIVE):
         raise HTTPException(status_code=400, detail="Employee is already active")
     
     if len(request.reason) < 10:
         raise HTTPException(status_code=400, detail="Reason must be at least 10 characters")
     
     # Get missing checks for audit
-    can_promote, checks = await can_promote_to_active(employee_id, db)
+    can_promote, checks = await get_canonical_promotion_status(employee_id, db)
     missing_checks = [k for k, v in checks.items() if v is False]
     
     now = datetime.now(timezone.utc).isoformat()

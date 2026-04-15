@@ -238,7 +238,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # Determine if active employee or still onboarding
     employee_status = employee.get("status", "onboarding")
-    is_active_employee = employee_status == "active_employee"
+    is_active_employee = employee_status == "active"
     
     # Get documents - Import the global constant from server.py for single source of truth.
     # Also exclude amendment_requested and invalidated: those docs are not live evidence.

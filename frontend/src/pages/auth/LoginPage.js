@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -13,6 +13,12 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  const from = location.state?.from;
+  const redirectPath = from
+    ? `${from.pathname || '/portal/dashboard'}${from.search || ''}${from.hash || ''}`
+    : '/portal/dashboard';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -21,7 +27,7 @@ export default function LoginPage() {
     try {
       await login(email, password);
       toast.success('Welcome back!');
-      navigate('/portal/dashboard');
+      navigate(redirectPath, { replace: true });
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Invalid credentials');
     } finally {
@@ -30,6 +36,9 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
+    if (redirectPath.startsWith('/portal/')) {
+      sessionStorage.setItem('postAuthRedirect', redirectPath);
+    }
     loginWithGoogle();
   };
 

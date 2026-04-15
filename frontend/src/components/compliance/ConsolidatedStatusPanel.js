@@ -133,9 +133,12 @@ export default function ConsolidatedStatusPanel({
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
 
   const fetchStatus = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       // Fetch unified progress and pre-employment gates
       const [progressRes, gatesRes] = await Promise.all([
@@ -153,6 +156,8 @@ export default function ConsolidatedStatusPanel({
       });
     } catch (error) {
       console.error('Failed to fetch status:', error);
+      setData(null);
+      setLoadError(error.response?.data?.detail || error.message || 'Unable to load readiness status');
     } finally {
       setLoading(false);
     }
@@ -224,21 +229,77 @@ export default function ConsolidatedStatusPanel({
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="space-y-4" data-testid="consolidated-status-panel">
+        <Card className="border-2 border-gray-300 bg-gray-50/40">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                  <AlertTriangle className="h-6 w-6 text-gray-600" />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-gray-800">
+                    Readiness status unavailable
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {employeeName} • {role} • Canonical readiness could not be loaded
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchStatus}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border border-gray-200 shadow-sm">
+          <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
+            <CardTitle className="text-base font-semibold text-gray-700">
+              PRE-EMPLOYMENT PROGRESS: unavailable
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="py-4">
+            <p className="text-sm text-gray-600">
+              Readiness, blockers, and promotion actions are hidden until canonical status loads.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const progress = data?.progress || {};
   const gates = data?.gates || {};
-  const blockers = gates.blockers || [];
-  const canPromote = gates.can_promote;
-  const gatesPassed = gates.gates_passed || 0;
-  const totalGates = gates.total_gates || 12;
+  const progressBlockerDetails = Array.isArray(progress.blocker_details) ? progress.blocker_details : [];
+  const progressBlockerStrings = Array.isArray(progress.blockers)
+    ? progress.blockers.map((blocker) => (
+        typeof blocker === 'string'
+          ? { gate: '', label: blocker, reason: blocker, severity: 'critical' }
+          : blocker
+      ))
+    : [];
+  const gateBlockers = Array.isArray(gates.blockers) ? gates.blockers : [];
+  const blockers = progressBlockerDetails.length > 0
+    ? progressBlockerDetails
+    : progressBlockerStrings.length > 0
+      ? progressBlockerStrings
+      : gateBlockers;
+  const canPromote = progress.can_promote;
+  const gatesPassed = gates.summary?.passed || gates.gates_passed || 0;
+  const totalGates = gates.summary?.total || gates.total_gates || 12;
   
-  // Calculate percentage from gates (pre-employment gates are the real promotion blockers)
-  const gatesPercentage = totalGates > 0 ? Math.round((gatesPassed / totalGates) * 100) : 0;
+  // Canonical readiness/progression percentage comes from unified-progress.
+  const progressPercentage = progress.overall_percentage ?? 0;
   
   // Use categories breakdown from unified-progress for the detailed grid
   const breakdown = progress.categories || {};
 
   // Determine overall status
-  const isBlocked = blockers.length > 0;
+  const isBlocked = blockers.length > 0 || (progress.is_work_ready === false && progress.can_promote === false);
   const isApplicant = personStage === 'applicant';
   const isEmployee = personStage === 'employee' || recruitmentApproved;
 
@@ -545,7 +606,7 @@ export default function ConsolidatedStatusPanel({
         <CardHeader className="py-3 px-4 bg-gray-50/50 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-base font-semibold text-gray-700">
-              PRE-EMPLOYMENT PROGRESS: {gatesPassed}/{totalGates} requirements complete ({gatesPercentage}%)
+              PRE-EMPLOYMENT PROGRESS: {progress.completed_requirements ?? gatesPassed}/{progress.total_requirements ?? totalGates} requirements complete ({progressPercentage}%)
             </CardTitle>
             <Button variant="ghost" size="sm" onClick={fetchStatus}>
               <RefreshCw className="h-4 w-4" />
@@ -553,7 +614,7 @@ export default function ConsolidatedStatusPanel({
           </div>
         </CardHeader>
         <CardContent className="py-4">
-          <Progress value={gatesPercentage} className="h-3 mb-4" />
+          <Progress value={progressPercentage} className="h-3 mb-4" />
           
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
             {[

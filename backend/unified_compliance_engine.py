@@ -814,19 +814,27 @@ async def get_unified_employee_status(
 
         # ---------------------------------------------------------------------------
         # PROOF-OF-CHECK REQUIREMENT (single source of truth)
-        # DBS Update Service check requires proof_document_id on the check record.
+        # DBS Update Service check requires proof evidence on the check record.
         # RTW always requires proof_document_id on the check record.
         # If proof is required but absent the requirement is NOT complete.
         # ---------------------------------------------------------------------------
+        _dbs_update_service_methods = {
+            "update_service_check",
+            "dbs_update_service",
+            "dbs_update_service_check",
+        }
         _dbs_proof_required = (
             req_id == "dbs"
             and dbs_check is not None
-            and dbs_check.get("method", "") in ("update_service_check", "dbs_update_service")
+            and dbs_check.get("method", "") in _dbs_update_service_methods
         )
         _rtw_proof_required = req_id == "right_to_work" and rtw_check is not None
         _proof_satisfied = True
         if _dbs_proof_required:
-            _proof_satisfied = bool(dbs_check.get("proof_document_id"))
+            _proof_satisfied = bool(
+                dbs_check.get("proof_document_id")
+                or dbs_check.get("evidence_document_id")
+            )
         elif _rtw_proof_required:
             _proof_satisfied = bool(rtw_check.get("proof_document_id"))
 
@@ -925,23 +933,33 @@ async def get_unified_employee_status(
     # CHECK 2: REFERENCES (2 required)
     # ==========================================================================
     
+    def reference_is_verified(reference: Any) -> bool:
+        """Return verified status for canonical or legacy reference shapes."""
+        if not isinstance(reference, dict):
+            return False
+
+        verification = reference.get("verification")
+        if not isinstance(verification, dict):
+            verification = {}
+
+        return (
+            verification.get("status") == "verified"
+            or reference.get("verification_status") == "verified"
+            or reference.get("verified") is True
+            or reference.get("status") == "verified"
+        )
+
     ref1_verified = False
     ref2_verified = False
 
     if ref_doc:
-        ref1 = ref_doc.get("ref1", {})
-        ref2 = ref_doc.get("ref2", {})
-
-        ref1_verified = (
-            ref1.get("verification", {}).get("status") == "verified"
-        )
-        ref2_verified = (
-            ref2.get("verification", {}).get("status") == "verified"
-        )
+        ref1_verified = reference_is_verified(ref_doc.get("ref1"))
+        ref2_verified = reference_is_verified(ref_doc.get("ref2"))
     else:
         # Legacy fallback when canonical reference document does not exist.
-        for idx, ref in enumerate(references[:2]):
-            is_verified = ref.get("verified") or ref.get("status") == "verified"
+        legacy_references = references if isinstance(references, list) else []
+        for idx, ref in enumerate(legacy_references[:2]):
+            is_verified = reference_is_verified(ref)
             if idx == 0:
                 ref1_verified = is_verified
             else:

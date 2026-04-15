@@ -158,6 +158,7 @@ export default function ComplianceCentrePage() {
   
   // Inspection Pack generation state
   const [generatingPack, setGeneratingPack] = useState(false);
+  const [canonicalStaffReadiness, setCanonicalStaffReadiness] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -181,7 +182,25 @@ export default function ComplianceCentrePage() {
       setPolicies(policiesRes.data);
       setInsurance(insuranceRes.data);
       setIncidents(incidentsRes.data);
-      setEmployees(employeesRes.data.filter(e => e.status !== 'archived'));
+      const activeEmployees = employeesRes.data.filter(e => e.status !== 'archived');
+      setEmployees(activeEmployees);
+      const staffForReadiness = activeEmployees.filter(e =>
+        e.person_stage === 'employee' ||
+        ['onboarding', 'active', 'inactive', 'active_employee'].includes(e.status)
+      );
+      const employeeIds = staffForReadiness.map((employee) => employee.id).filter(Boolean);
+      const readinessRes = employeeIds.length > 0
+        ? await axios.get(`${API}/employees/unified-progress-summary`, {
+            params: { employee_ids: employeeIds.join(',') },
+            headers: { Authorization: `Bearer ${token}` }
+          }).catch(() => ({ data: [] }))
+        : { data: [] };
+      const workReady = (readinessRes.data || []).filter((summary) => summary.is_work_ready === true).length;
+      setCanonicalStaffReadiness({
+        total: staffForReadiness.length,
+        workReady,
+        notReady: staffForReadiness.length - workReady
+      });
       setPolicyAssignments(assignmentsRes.data);
     } catch (error) {
       console.error('Failed to fetch compliance data:', error);
@@ -1556,18 +1575,18 @@ export default function ComplianceCentrePage() {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-text-muted">Total Active Staff</span>
-                        <span className="font-bold">{centreSummary.staff_compliance.total}</span>
+                        <span className="font-bold">{canonicalStaffReadiness?.total ?? centreSummary.staff_compliance.total}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-text-muted">Work Ready</span>
-                        <span className="font-bold text-success">{dashboard.staff?.work_ready || 0}</span>
+                        <span className="font-bold text-success">{canonicalStaffReadiness?.workReady ?? dashboard.staff?.work_ready ?? 0}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-sm text-text-muted">Not Yet Compliant</span>
                         <span className={`font-bold ${
-                          (dashboard.staff?.pending_compliance || 0) > 0 ? 'text-warning' : 'text-success'
+                          ((canonicalStaffReadiness?.notReady ?? dashboard.staff?.pending_compliance ?? 0) > 0) ? 'text-warning' : 'text-success'
                         }`}>
-                          {dashboard.staff?.pending_compliance || (centreSummary.staff_compliance.total - (dashboard.staff?.work_ready || 0))}
+                          {canonicalStaffReadiness?.notReady ?? dashboard.staff?.pending_compliance ?? (centreSummary.staff_compliance.total - (dashboard.staff?.work_ready || 0))}
                         </span>
                       </div>
                       <div className="pt-2 border-t">

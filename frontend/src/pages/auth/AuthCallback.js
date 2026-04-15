@@ -29,9 +29,14 @@ export default function AuthCallback() {
       try {
         const user = await handleOAuthCallback(sessionId);
         toast.success(`Welcome, ${user.name}!`);
+        const savedRedirect = sessionStorage.getItem('postAuthRedirect');
+        sessionStorage.removeItem('postAuthRedirect');
+        const redirectPath = savedRedirect?.startsWith('/portal/')
+          ? savedRedirect
+          : '/portal/dashboard';
         // Clear the hash from URL and navigate to dashboard
-        window.history.replaceState(null, '', '/portal/dashboard');
-        navigate('/portal/dashboard', { state: { user }, replace: true });
+        window.history.replaceState(null, '', redirectPath);
+        navigate(redirectPath, { state: { user }, replace: true });
       } catch (error) {
         console.error('OAuth callback error:', error);
         toast.error('Authentication failed. Please try again.');

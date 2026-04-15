@@ -48,7 +48,21 @@ export default function DashboardPage() {
         // Ensure we only have employee-status records (staff, not applicants)
         const staffOnly = (employeesRes.data?.employees || employeesRes.data || [])
           .filter(e => ['onboarding', 'active', 'inactive'].includes(e.status));
-        setEmployees(staffOnly);
+        const employeeIds = staffOnly.map((emp) => emp.id).filter(Boolean);
+        const readinessRes = employeeIds.length > 0
+          ? await axios.get(`${API}/employees/unified-progress-summary`, {
+              params: { employee_ids: employeeIds.join(',') },
+              headers: { Authorization: `Bearer ${token}` }
+            }).catch(() => ({ data: [] }))
+          : { data: [] };
+        const readinessByEmployeeId = new Map(
+          (readinessRes.data || []).map((summary) => [summary.employee_id, summary])
+        );
+        const staffWithCanonicalReadiness = staffOnly.map((emp) => ({
+          ...emp,
+          canonical_readiness: readinessByEmployeeId.get(emp.id) || null
+        }));
+        setEmployees(staffWithCanonicalReadiness);
         // Store applicants separately
         setApplicants(applicantsRes.data?.applicants || applicantsRes.data || []);
         setExpiryAlerts(expiryRes.data);
@@ -184,35 +198,34 @@ export default function DashboardPage() {
 
   // ========== NORMAL DASHBOARD (employees/applicants exist) ==========
   
-  // Combine employees and applicants for workforce stats
-  const allPeople = [...employees, ...applicants];
-  
-  // Calculate workforce readiness counts using 3-tier system (authoritative)
-  // For employees: use work_readiness_3tier
-  // For applicants: use unified progress or assume NOT_READY
+  // Calculate workforce readiness counts from canonical unified-progress.
   const readyToWork = employees.filter(e => 
-    e.work_readiness_3tier?.status === 'READY_TO_WORK'
+    e.canonical_readiness?.is_work_ready === true
   ).length;
   const supervisedStart = employees.filter(e => 
-    e.work_readiness_3tier?.status === 'READY_WITH_CONDITIONS'
+    e.canonical_readiness?.can_promote === true && e.canonical_readiness?.is_work_ready !== true
   ).length;
   
-  // Not Ready includes employees without readiness AND all applicants (since they're not yet ready)
+  // Not Ready includes employees without canonical readiness.
   const employeesNotReady = employees.filter(e => 
-    e.work_readiness_3tier?.status === 'NOT_READY' ||
-    !e.work_readiness_3tier
+    e.canonical_readiness?.is_work_ready !== true &&
+    e.canonical_readiness?.can_promote !== true
   ).length;
-  // Use stats from API for applicants not ready count
-  const notReady = (stats?.applicants_not_ready || 0) + employeesNotReady;
+  const notReady = employeesNotReady;
 
   // Calculate onboarding stats - include applicants
   const onboarding = (stats?.onboarding_in_progress || 0) + applicants.length;
   
-  // Average completion - use API stat which includes applicants
-  const avgCompletion = stats?.average_onboarding_progress || 
-    (allPeople.length > 0 
-      ? Math.round(allPeople.reduce((sum, e) => sum + (e.completion_percentage || 0), 0) / allPeople.length)
-      : 0);
+  // Average readiness progress from canonical unified-progress for employees.
+  const employeesWithCanonicalProgress = employees.filter(e => e.canonical_readiness);
+  const avgCompletion = employeesWithCanonicalProgress.length > 0
+    ? Math.round(
+        employeesWithCanonicalProgress.reduce(
+          (sum, e) => sum + (e.canonical_readiness?.overall_percentage ?? 0),
+          0
+        ) / employeesWithCanonicalProgress.length
+      )
+    : (stats?.average_onboarding_progress || 0);
 
   // Calculate attention items from expiry alerts API
   const expiredDocs = expiryAlerts?.expired?.total_items || 0;
@@ -222,8 +235,8 @@ export default function DashboardPage() {
   // Pending verifications from stats (includes applicants)
   const pendingVerifications = stats?.pending_verifications || 0;
   
-  // Calculate staff not ready to work
-  const staffNotReady = notReady;
+  // Calculate staff not ready to work from canonical employee readiness only.
+  const staffNotReady = employeesNotReady;
   
   const needsAttentionTotal = expiredDocs + expiringSoon + policiesNotAcknowledged + staffNotReady + pendingVerifications;
 
@@ -309,7 +322,7 @@ export default function DashboardPage() {
               
               {/* Staff Not Ready → Employees filtered to not_ready */}
               <div 
-                onClick={() => staffNotReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+                onClick={() => staffNotReady > 0 && navigate('/portal/employees?is_work_ready=false')}
                 className={`p-4 rounded-xl transition-all ${staffNotReady > 0 ? 'bg-red-100 border border-red-200 cursor-pointer hover:bg-red-150 hover:shadow-md' : 'bg-white border border-gray-200'}`}
                 title={staffNotReady > 0 ? 'View affected staff' : ''}
                 data-testid="card-not-ready"
@@ -393,7 +406,7 @@ export default function DashboardPage() {
             <div className="space-y-4">
               {/* Ready to Work → Employees filtered to ready_to_work */}
               <div 
-                onClick={() => readyToWork > 0 && navigate('/portal/employees?work_readiness=ready_to_work')}
+                onClick={() => readyToWork > 0 && navigate('/portal/employees?is_work_ready=true')}
                 className={`flex items-center justify-between p-3 bg-green-50 rounded-xl border border-green-200 transition-all ${readyToWork > 0 ? 'cursor-pointer hover:bg-green-100 hover:shadow-sm' : ''}`}
                 title={readyToWork > 0 ? 'View ready staff' : ''}
                 data-testid="card-ready-to-work"
@@ -410,14 +423,14 @@ export default function DashboardPage() {
               
               {/* Supervised Start → Employees filtered to supervised_start */}
               <div 
-                onClick={() => supervisedStart > 0 && navigate('/portal/employees?work_readiness=supervised_start')}
+                onClick={() => supervisedStart > 0 && navigate('/portal/employees?can_promote=true')}
                 className={`flex items-center justify-between p-3 bg-amber-50 rounded-xl border border-amber-200 transition-all ${supervisedStart > 0 ? 'cursor-pointer hover:bg-amber-100 hover:shadow-sm' : ''}`}
-                title={supervisedStart > 0 ? 'View staff on supervised start' : ''}
+                title={supervisedStart > 0 ? 'View staff eligible for promotion' : ''}
                 data-testid="card-supervised-start"
               >
                 <div className="flex items-center gap-3">
                   <AlertCircle className="h-5 w-5 text-amber-600" />
-                  <span className="font-medium text-amber-700">Supervised Start</span>
+                  <span className="font-medium text-amber-700">Promotion Eligible</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-2xl font-heading font-bold text-amber-700">{supervisedStart}</span>
@@ -427,7 +440,7 @@ export default function DashboardPage() {
               
               {/* Not Ready → Employees filtered to not_ready */}
               <div 
-                onClick={() => notReady > 0 && navigate('/portal/employees?work_readiness=not_ready')}
+                onClick={() => notReady > 0 && navigate('/portal/employees?is_work_ready=false')}
                 className={`flex items-center justify-between p-3 bg-red-50 rounded-xl border border-red-200 transition-all ${notReady > 0 ? 'cursor-pointer hover:bg-red-100 hover:shadow-sm' : ''}`}
                 title={notReady > 0 ? 'View affected staff' : ''}
                 data-testid="card-not-ready-workforce"
@@ -688,9 +701,10 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-3">
                 {employees.slice(0, 5).map((emp) => {
-                  const isReady = emp.work_readiness?.status === 'work_ready' || emp.work_readiness?.status === 'fully_compliant';
-                  const isSupervisedStart = emp.work_readiness?.status === 'almost_ready' || emp.work_readiness?.status === 'supervised_start';
-                  const notReadyReason = emp.work_readiness?.reason;
+                  const readiness = emp.canonical_readiness || {};
+                  const isReady = readiness.is_work_ready === true;
+                  const isSupervisedStart = readiness.can_promote === true && readiness.is_work_ready !== true;
+                  const notReadyReason = readiness.blockers?.[0] || readiness.blocker_details?.[0]?.reason;
                   
                   return (
                     <Link
@@ -715,8 +729,8 @@ export default function DashboardPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right hidden sm:block">
-                          <p className="text-sm font-medium text-text-primary">{emp.completion_percentage}%</p>
-                          <p className="text-xs text-text-muted">Compliance</p>
+                          <p className="text-sm font-medium text-text-primary">{readiness.overall_percentage ?? 0}%</p>
+                          <p className="text-xs text-text-muted">Readiness</p>
                         </div>
                         <div className="text-right">
                           <span 
@@ -725,9 +739,9 @@ export default function DashboardPage() {
                               isSupervisedStart ? 'bg-amber-100 text-amber-700' :
                               'bg-red-100 text-red-700'
                             }`}
-                            title={notReadyReason || (isReady ? 'All mandatory requirements verified' : 'Some requirements missing')}
+                            title={notReadyReason || (isReady ? 'Canonical unified readiness complete' : 'Canonical unified readiness blockers remain')}
                           >
-                            {isReady ? 'Ready to Work' : isSupervisedStart ? 'Supervised Start' : 'Not Ready'}
+                            {isReady ? 'Ready to Work' : isSupervisedStart ? 'Promotion Eligible' : 'Not Ready'}
                           </span>
                           {/* UI INTEGRITY: Show WHY someone is Not Ready */}
                           {!isReady && !isSupervisedStart && notReadyReason && (

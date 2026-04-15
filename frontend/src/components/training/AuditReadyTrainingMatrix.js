@@ -159,7 +159,7 @@ export default function AuditReadyTrainingMatrix({
       const allItems = matrixData.items || [];
       const additionalFromMatrix = matrixData.additional_items || [];
       
-      // All items from the main matrix endpoint are mandatory (6 core items)
+      // All items from the main matrix endpoint are mandatory (8 mandatory items)
       // They may have blocker=true/false but are all required
       setMandatoryTraining(allItems);
       setAdditionalTraining(additionalFromMatrix);
@@ -490,7 +490,7 @@ export default function AuditReadyTrainingMatrix({
                     Mandatory Training Requirements
                   </CardTitle>
                   <CardDescription>
-                    These 6 baseline training items are required for work readiness
+                    These 8 mandatory training items are required for work readiness
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">

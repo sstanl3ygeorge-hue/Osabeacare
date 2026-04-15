@@ -1274,34 +1274,34 @@ MANDATORY_ITEMS = {
         {"id": "fire_safety", "name": "Fire Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Fire Safety",
          "allow_multiple_files": True,
-         "priority": "secondary", "priority_order": 44,
-         "status_group": "other",
+         "priority": "start_required", "priority_order": 9,
+         "status_group": "start_status",
          "description": "Fire safety certificate",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "health_safety", "name": "Health & Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Health & Safety",
          "allow_multiple_files": True,
-         "priority": "secondary", "priority_order": 45,
-         "status_group": "other",
+         "priority": "start_required", "priority_order": 10,
+         "status_group": "start_status",
          "description": "Health & Safety certificate",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "information_governance", "name": "Information Governance / GDPR Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Information Governance",
          "allow_multiple_files": True,
-         "priority": "secondary", "priority_order": 46,
-         "status_group": "other",
+         "priority": "start_required", "priority_order": 11,
+         "status_group": "start_status",
          "description": "IG / GDPR / Data Protection certificate",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required before employee can start work"},
         
         {"id": "prevent", "name": "Prevent Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Prevent",
          "allow_multiple_files": True,
-         "priority": "secondary", "priority_order": 47,
-         "status_group": "other",
+         "priority": "start_required", "priority_order": 12,
+         "status_group": "start_status",
          "description": "Counter-terrorism awareness certificate",
-         "work_ready_hint": "Complete after employee starts"},
+         "work_ready_hint": "Required before employee can start work"},
         
         # ======== CQC STANDARD TRAINING (Added for Matrix Compliance) ========
         {"id": "induction", "name": "Induction Training", "category": "2_Core_Training",
@@ -6793,28 +6793,46 @@ TRAINING_BLOCKER_CONFIG = {
         "reason_message": "Medication training required"
     },
     "infection_control": {
-        "blocker_for_work": False,  # Warning only, not blocking
+        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
         "evidence_required": True,
         "reason_code": "infection_control_training_missing",
-        "reason_message": "Infection Control training recommended"
+        "reason_message": "Infection Control training required"
     },
     "bls": {
-        "blocker_for_work": False,  # Warning only
+        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
         "evidence_required": True,
         "reason_code": "bls_training_missing",
-        "reason_message": "Basic Life Support training recommended"
+        "reason_message": "Basic Life Support training required"
+    },
+    "basic_life_support": {
+        "blocker_for_work": True,
+        "evidence_required": True,
+        "reason_code": "bls_training_missing",
+        "reason_message": "Basic Life Support training required"
     },
     "fire_safety": {
-        "blocker_for_work": False,  # Warning only
+        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
         "evidence_required": True,
         "reason_code": "fire_safety_training_missing",
-        "reason_message": "Fire Safety training recommended"
+        "reason_message": "Fire Safety training required"
     },
     "health_safety": {
-        "blocker_for_work": False,  # Warning only
+        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
         "evidence_required": True,
         "reason_code": "health_safety_training_missing",
-        "reason_message": "Health & Safety training recommended"
+        "reason_message": "Health & Safety training required"
+    },
+    "information_governance": {
+        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
+        "evidence_required": True,
+        "reason_code": "information_governance_training_missing",
+        "reason_message": "Information Governance / GDPR training required"
+    },
+    "prevent": {
+        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
+        "evidence_required": True,
+        "reason_code": "prevent_training_missing",
+        "reason_message": "Prevent (Counter-Terrorism Awareness) training required"
     },
 }
 
@@ -10932,9 +10950,10 @@ async def get_employee_training_matrix(
     records_by_req = {}
     additional_records = []  # Non-mandatory training records
     
-    # Define mandatory training codes
+    # Define mandatory training codes (must match MANDATORY_TRAINING_HCA in unified_compliance_engine.py)
     mandatory_codes = {'safeguarding', 'manual_handling', 'infection_control', 
                       'basic_life_support', 'bls', 'fire_safety', 'health_safety',
+                      'information_governance', 'prevent',
                       'safeguarding_adults', 'safeguarding_children', 'moving_handling'}
     
     for r in training_records:

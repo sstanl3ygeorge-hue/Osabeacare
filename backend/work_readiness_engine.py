@@ -306,7 +306,11 @@ async def can_sign_contract(db, employee_id: str) -> dict:
             blockers.append(f"{form_id.replace('_', ' ').title()} required")
     
     # ========== TRAINING ==========
-    mandatory_training = ["safeguarding", "manual_handling", "fire_safety", "health_safety", "bls", "infection_control"]
+    # 8 items — must match MANDATORY_TRAINING_HCA in unified_compliance_engine.py
+    mandatory_training = [
+        "safeguarding", "manual_handling", "fire_safety", "health_safety",
+        "bls", "infection_control", "information_governance", "prevent",
+    ]
     training_completed = 0
     has_unified_training = "mandatory_training" in unified_checks
     training_ok = bool(unified_checks.get("mandatory_training")) if has_unified_training else False
@@ -322,15 +326,23 @@ async def can_sign_contract(db, employee_id: str) -> dict:
             "employee_id": employee_id,
             "record_status": {"$ne": "superseded"}
         }).to_list(100)
-        
+
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
-        
+
         for training_id in mandatory_training:
             is_done = False
             for t in training_records:
                 t_name = (t.get("training_name") or "").lower()
                 if training_id.replace("_", " ") in t_name or training_id.replace("_", "") in t_name:
+                    # Must be verified (matches UCE is_training_valid requirement)
+                    is_verified = (
+                        t.get("verified") is True
+                        or t.get("status") == "verified"
+                        or t.get("computed_status") == "verified"
+                    )
+                    if not is_verified:
+                        break  # Found record but not verified — counts as not done
                     expiry_str = t.get("expiry_date")
                     if expiry_str:
                         try:
@@ -375,10 +387,31 @@ async def can_sign_contract(db, employee_id: str) -> dict:
         else:
             blockers.append("Reference 2 not verified")
     
+    # ========== HANDBOOK ==========
+    has_unified_handbook = "handbook" in unified_checks
+    handbook_ok = bool(unified_checks.get("handbook")) if has_unified_handbook else False
+    if not has_unified_handbook:
+        # Direct DB read — legacy ack first, then template submission
+        _hb_ack = await db.agreement_acknowledgements.find_one({
+            "employee_id": employee_id,
+            "agreement_type": {"$regex": "handbook", "$options": "i"},
+            "status": {"$in": ["acknowledged", "signed", "submitted"]},
+        })
+        if not _hb_ack:
+            _hb_ack = await db.agreement_submissions.find_one({
+                "employee_id": employee_id,
+                "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+            })
+        handbook_ok = bool(_hb_ack)
+    if handbook_ok:
+        completed.append("Employee Handbook acknowledged")
+    else:
+        blockers.append("Employee Handbook not acknowledged")
+
     # ========== INDUCTION (15 items) ==========
     induction_completed = 0
     induction_total = 15  # Care Certificate Standards
-    
+
     has_unified_induction = "induction" in unified_checks
     induction_ok = bool(unified_checks.get("induction")) if has_unified_induction else False
     if has_unified_induction:
@@ -394,11 +427,11 @@ async def can_sign_contract(db, employee_id: str) -> dict:
         blockers.append(f"Induction incomplete ({induction_completed}/15)")
     
     # ========== CALCULATE TOTAL (excluding contract) ==========
-    total_requirements = len(core_doc_checks) + len(required_forms) + len(mandatory_training) + 2 + 1  # +2 refs, +1 induction
-    total_completed = doc_completed + form_completed + training_completed + ref_completed + (1 if induction_completed >= 15 else 0)
-    
+    total_requirements = len(core_doc_checks) + len(required_forms) + len(mandatory_training) + 2 + 1 + 1  # +2 refs, +1 induction, +1 handbook
+    total_completed = doc_completed + form_completed + training_completed + ref_completed + (1 if induction_completed >= 15 else 0) + (1 if handbook_ok else 0)
+
     progress_percentage = round((total_completed / total_requirements) * 100) if total_requirements > 0 else 0
-    
+
     # Contract can only be signed when progress is 100%
     can_sign = progress_percentage >= 100
     
@@ -427,14 +460,30 @@ async def can_promote_to_active(db, employee_id: str) -> dict:
             "blockers": contract_check["blockers"]
         }
     
-    # Check contract signed
-    agreements = await db.agreements.find({
+    # Check contract signed — mirrors UCE CHECK 6 logic
+    _CONTRACT_TEMPLATE_IDS = {
+        "ZERO_HOUR_CONTRACT_V1",
+        "EMPLOYMENT_CONTRACT_V1",
+        "CASUAL_WORKER_CONTRACT_V1",
+    }
+    contract_ack = await db.agreement_acknowledgements.find_one({
         "employee_id": employee_id,
-        "type": "employment_contract",
-        "status": "signed"
-    }).to_list(1)
-    
-    if not agreements:
+        "agreement_type": {"$regex": "contract", "$options": "i"},
+        "status": {"$in": ["signed", "submitted", "verified"]},
+    })
+    if not contract_ack:
+        contract_ack = await db.agreement_submissions.find_one({
+            "employee_id": employee_id,
+            "template_id": {"$in": list(_CONTRACT_TEMPLATE_IDS)},
+        })
+
+    # Also accept legacy flat field on employee record
+    if not contract_ack:
+        emp_record = await db.employees.find_one({"id": employee_id}, {"contract_signed": 1})
+        if emp_record and emp_record.get("contract_signed"):
+            contract_ack = {"source": "legacy_flat"}
+
+    if not contract_ack:
         return {
             "can_promote": False,
             "reason": "Contract not signed",
@@ -630,14 +679,14 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
     rtw_stamped = any(d.get("verification_stamp") and d.get("verification_stamp") != "not_verified" for d in rtw_docs)
     rtw_check = await db.rtw_checks.find_one({
         "employee_id": emp_id_str,
-        "status": "verified"
+        "outcome": "verified"
     })
     checks["right_to_work"] = bool(rtw_check and rtw_stamped)
     
     # 2. DBS - verified
     dbs_check = await db.dbs_checks.find_one({
         "employee_id": emp_id_str,
-        "status": "verified"
+        "outcome": "verified"
     })
     checks["dbs"] = bool(dbs_check)
     
@@ -702,7 +751,20 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
         "status": {"$in": ["submitted", "signed"]}
     })
     checks["contract"] = bool(contract_ack)
-    
+
+    # 7b. Handbook acknowledged
+    handbook_ack_legacy = await db.agreement_acknowledgements.find_one({
+        "employee_id": emp_id_str,
+        "agreement_type": {"$regex": "handbook", "$options": "i"},
+        "status": {"$in": ["acknowledged", "signed", "submitted"]},
+    })
+    if not handbook_ack_legacy:
+        handbook_ack_legacy = await db.agreement_submissions.find_one({
+            "employee_id": emp_id_str,
+            "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+        })
+    checks["handbook"] = bool(handbook_ack_legacy)
+
     # 8. Induction complete (15 Care Certificate standards)
     induction = await db.induction_checklists.find_one({
         "employee_id": emp_id_str,

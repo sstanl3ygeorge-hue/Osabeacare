@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # NHS Employment Check Standards + CQC Requirements
 MANDATORY_TRAINING_HCA = [
     {"id": "safeguarding_adults", "name": "Safeguarding Adults", "induction_sync": "safeguarding_adults"},
-    {"id": "manual_handling", "name": "Manual Handling / Moving & Handling", "induction_sync": "moving_handling"},
+    {"id": "manual_handling", "name": "Manual Handling / Moving & Handling", "induction_sync": None},  # No matching Care Certificate standard for moving & handling
     {"id": "fire_safety", "name": "Fire Safety", "induction_sync": "fire_safety"},
     {"id": "health_safety", "name": "Health & Safety", "induction_sync": "health_safety"},
     {"id": "basic_life_support", "name": "Basic Life Support (BLS)", "induction_sync": "basic_life_support"},
@@ -252,9 +252,9 @@ def is_document_verified_with_stamp(doc: dict) -> bool:
     if not isinstance(status, str):
         status = str(status) if status else ""
     
-    # Must have a valid stamp
+    # Must have a valid stamp — only canonical values accepted
     valid_stamps = ["original_seen", "copy_verified", "certified_copy", "online_check", "verified"]
-    has_valid_stamp = stamp and stamp.lower() not in ["", "not_verified", "pending", "none"]
+    has_valid_stamp = bool(stamp) and stamp.lower() in valid_stamps
     
     # Check if stamp was actually burned into document (best for CQC)
     has_burned_stamp = bool(stamped_file_url)
@@ -1287,6 +1287,7 @@ async def get_unified_employee_status(
     checks["contract"] = contract_signed
     
     # Handbook
+    # Check legacy acknowledgements first, then template-based submissions.
     handbook_ack = None
     for ack in agreements:
         ack_type = (ack.get("agreement_type") or "").lower()
@@ -1294,16 +1295,28 @@ async def get_unified_employee_status(
             if ack.get("status") in ["acknowledged", "signed", "submitted"]:
                 handbook_ack = ack
                 break
-    
+
+    # Fallback: EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1 template submission
+    if not handbook_ack:
+        _handbook_sub = await db.agreement_submissions.find_one(
+            {
+                "employee_id": emp_id,
+                "template_id": "EMPLOYEE_HANDBOOK_ACKNOWLEDGEMENT_V1",
+            },
+            {"_id": 0},
+        )
+        if _handbook_sub:
+            handbook_ack = _handbook_sub
+
     handbook_acknowledged = bool(handbook_ack)
     checks["handbook"] = handbook_acknowledged
-    
+
     categories["agreements"]["items"] = [
         {"id": "contract", "name": "Employment Contract", "completed": contract_signed},
         {"id": "handbook", "name": "Employee Handbook", "completed": handbook_acknowledged},
     ]
     categories["agreements"]["completed"] = (1 if contract_signed else 0) + (1 if handbook_acknowledged else 0)
-    
+
     if not contract_signed:
         blockers.append({
             "id": "contract",
@@ -1313,7 +1326,15 @@ async def get_unified_employee_status(
             "category": "agreements",
             "severity": "critical"
         })
-    # Note: Handbook may be optional, don't add to blockers
+    if not handbook_acknowledged:
+        blockers.append({
+            "id": "handbook",
+            "gate": "handbook_acknowledged",
+            "label": "Employee Handbook",
+            "reason": "Employee Handbook: Not acknowledged by worker",
+            "category": "agreements",
+            "severity": "required"
+        })
     
     # ==========================================================================
     # CHECK 7: EMPLOYMENT GAPS (if applicable)

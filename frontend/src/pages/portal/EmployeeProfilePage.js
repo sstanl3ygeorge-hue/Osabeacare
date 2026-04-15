@@ -3165,8 +3165,12 @@ export default function EmployeeProfilePage() {
   const allGapsResolved = employmentGapEvaluation
     ? Boolean(employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
     : !employmentHistoryExists;
+  // declarationsOnFile: true once EditDeclarationsDialog has been saved (dbs_consent_given is always written)
+  const declarationsOnFile = Boolean(
+    employee?.declarations && 'dbs_consent_given' in employee.declarations
+  );
   // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
-  const employmentReadyForSignOff = Boolean(applicationAvailable && employmentHistoryExists && allGapsResolved);
+  const employmentReadyForSignOff = Boolean(applicationAvailable && declarationsOnFile && employmentHistoryExists && allGapsResolved);
   // Persisted sign-off: only true once an admin has explicitly signed off via the backend
   const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
@@ -3176,6 +3180,7 @@ export default function EmployeeProfilePage() {
   const employmentComplete = employmentSignedOff;
   const employmentStatusBlockers = [
     !applicationAvailable    ? 'Upload or attach application form' : null,
+    !declarationsOnFile      ? 'Record applicant declarations before sign-off' : null,
     !employmentHistoryExists ? 'Add or extract employment history' : null,
     !allGapsResolved         ? 'Review or resolve employment gaps' : null,
   ].filter(Boolean);
@@ -4647,7 +4652,7 @@ export default function EmployeeProfilePage() {
                           : <CheckCircle className="h-4 w-4 mr-1" />}
                         Sign off employment review
                       </Button>
-                      <p className="text-xs text-amber-700">Creates a dated audit entry.</p>
+                      <p className="text-xs text-amber-700">Confirms application, declarations, and employment history have been reviewed.</p>
                     </div>
                   )}
                   {!employmentReadyForSignOff && !employmentSignedOff && employmentStatusBlockers.length > 0 && (

@@ -15604,7 +15604,7 @@ async def upload_requirement_evidence(
             )
             await db.employees.update_one(
                 {"id": employee_id},
-                {"$set": {"cv_document_id": doc_id, "updated_at": now}}
+                {"$set": {"cv_document_id": doc_id, "cv_status": "uploaded", "updated_at": now}}
             )
             refreshed_employee = await db.employees.find_one(
                 {"id": employee_id},
@@ -34625,6 +34625,9 @@ async def get_compliance_file(
     # Get reference integrity
     ref1 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 1)
     ref2 = await ReferenceIntegrityService.get_reference_integrity(employee_id, 2)
+    
+    # Raw references document — used by build_reference_row closure helpers
+    refs = await db.references.find_one({"employee_id": employee_id}, {"_id": 0}) or {}
     
     # Group documents by requirement
     docs_by_requirement = {}

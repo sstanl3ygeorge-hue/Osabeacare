@@ -229,16 +229,9 @@ export default function WorkerDashboard() {
   const [viewerDocument, setViewerDocument] = useState(null);
   const [documentBlobUrl, setDocumentBlobUrl] = useState(null);
   const [documentLoading, setDocumentLoading] = useState(false);
-  // CV Extraction states
+  // CV lifecycle states (upload CTA and status only — review/verification is admin-only)
   const [cvStatus, setCvStatus] = useState(null);
   const [cvStatusLoading, setCvStatusLoading] = useState(false);
-  const [showCvVerificationModal, setShowCvVerificationModal] = useState(false);
-  const [cvPreview, setCvPreview] = useState(null);
-  const [cvPreviewLoading, setCvPreviewLoading] = useState(false);
-  const [cvVerifying, setCvVerifying] = useState(false);
-  const [cvEditMode, setCvEditMode] = useState(false);
-  const [editedEmploymentHistory, setEditedEmploymentHistory] = useState([]);
-  const [confirmCvAccuracy, setConfirmCvAccuracy] = useState(false);
   // Reference mismatch explanation states
   const [referenceMismatches, setReferenceMismatches] = useState(null);
   const [showMismatchExplanationModal, setShowMismatchExplanationModal] = useState(false);
@@ -458,63 +451,7 @@ export default function WorkerDashboard() {
   };
 
   // Fetch CV preview for verification
-  const fetchCvPreview = async () => {
-    setCvPreviewLoading(true);
-    try {
-      const token = localStorage.getItem('workerToken');
-      const response = await axios.get(`${API}/worker/cv-extraction-preview`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setCvPreview(response.data);
-      if (response.data.extraction_preview?.employment_history) {
-        setEditedEmploymentHistory(response.data.extraction_preview.employment_history);
-      }
-    } catch (error) {
-      console.error('Failed to fetch CV preview:', error);
-      toast.error('Failed to load CV extraction preview');
-    } finally {
-      setCvPreviewLoading(false);
-    }
-  };
-
-  // Open CV verification modal
-  const openCvVerificationModal = () => {
-    setShowCvVerificationModal(true);
-    setConfirmCvAccuracy(false);
-    setCvEditMode(false);
-    fetchCvPreview();
-  };
-
-  // Verify CV extraction
-  const handleVerifyCvExtraction = async () => {
-    if (!confirmCvAccuracy) {
-      toast.error('Please confirm the information is accurate');
-      return;
-    }
-    
-    setCvVerifying(true);
-    try {
-      const token = localStorage.getItem('workerToken');
-      await axios.post(`${API}/worker/cv-extraction-verify`, {
-        employment_history: editedEmploymentHistory,
-        education: cvPreview?.extraction_preview?.education || [],
-        skills: cvPreview?.extraction_preview?.skills || [],
-        confirm_accurate: true
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      toast.success('CV data verified! Your 10-year employment history form has been pre-filled.');
-      setShowCvVerificationModal(false);
-      fetchCvStatus();
-      fetchDashboard();
-    } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to verify CV extraction';
-      toast.error(message);
-    } finally {
-      setCvVerifying(false);
-    }
-  };
+  // CV extraction review/verify is admin-only. No worker-side handlers needed.
 
   // Handle CV file upload
   const handleCvUpload = async (file) => {
@@ -1395,8 +1332,8 @@ export default function WorkerDashboard() {
               </div>
             </CardHeader>
             <CardContent>
-              {/* No CV Uploaded */}
-              {!cvStatus?.has_cv && (
+              {/* No CV / replacement required — show upload CTA */}
+              {cvStatus?.can_upload_cv && (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -1455,59 +1392,6 @@ export default function WorkerDashboard() {
                       Awaiting review
                     </Badge>
                   </div>
-                </div>
-              )}
-
-              {/* CV Uploaded - Needs Verification */}
-              {cvStatus?.has_cv && cvStatus?.needs_verification && !cvStatus?.verified && (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <Sparkles className="h-6 w-6 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-blue-800">Review Your Extracted Data</p>
-                        <p className="text-sm text-blue-700">
-                          AI found {cvStatus?.employment_history?.jobs_found || 0} jobs in your CV. Please verify the data.
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      onClick={openCvVerificationModal}
-                      className="gap-2 bg-blue-600 hover:bg-blue-700"
-                      data-testid="review-cv-extraction-btn"
-                    >
-                      <Eye className="h-4 w-4" />
-                      Review & Verify
-                    </Button>
-                  </div>
-                  
-                  {/* Preview summary */}
-                  <div className="grid grid-cols-3 gap-3 mt-3">
-                    <div className="bg-white rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-blue-600">{cvStatus?.employment_history?.jobs_found || 0}</p>
-                      <p className="text-xs text-slate-500">Jobs Found</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-amber-600">{cvStatus?.gaps?.total || 0}</p>
-                      <p className="text-xs text-slate-500">Gaps Detected</p>
-                    </div>
-                    <div className="bg-white rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-red-600">{cvStatus?.overlaps?.total || 0}</p>
-                      <p className="text-xs text-slate-500">Overlaps</p>
-                    </div>
-                  </div>
-                  
-                  {(cvStatus?.overlaps?.total > 0 || cvStatus?.gaps?.unexplained > 0) && (
-                    <div className="mt-3 p-3 bg-amber-100 rounded-lg">
-                      <p className="text-sm text-amber-800 flex items-center gap-2">
-                        <AlertTriangle className="h-4 w-4" />
-                        {cvStatus?.overlaps?.total > 0 && `${cvStatus.overlaps.total} date overlap(s) detected. `}
-                        {cvStatus?.gaps?.unexplained > 0 && `${cvStatus.gaps.unexplained} gap(s) need explanation.`}
-                      </p>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -2729,17 +2613,11 @@ export default function WorkerDashboard() {
         </DialogContent>
       </Dialog>
 
-      {/* CV Extraction Verification Modal */}
-      <Dialog open={showCvVerificationModal} onOpenChange={setShowCvVerificationModal}>
+      {/* CV Extraction Verification Modal — removed. CV review is admin-only. */}
+      {false && <Dialog open={false} onOpenChange={() => {}}>
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-blue-600" />
-              Review Your CV Extraction
-            </DialogTitle>
-            <p className="text-sm text-slate-500">
-              Please review the information extracted from your CV. You can edit any incorrect data before confirming.
-            </p>
+            <DialogTitle></DialogTitle>
           </DialogHeader>
 
           {cvPreviewLoading ? (
@@ -2975,7 +2853,7 @@ export default function WorkerDashboard() {
             )}
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>}
 
       {/* Reference Mismatch Explanation Modal */}
       <Dialog open={showMismatchExplanationModal} onOpenChange={setShowMismatchExplanationModal}>

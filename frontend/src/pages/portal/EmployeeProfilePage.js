@@ -717,6 +717,23 @@ export default function EmployeeProfilePage() {
       setCvReviewLoading(false);
     }
   };
+
+  // Open the active CV PDF in a new browser tab (admin view)
+  const handleViewCv = async () => {
+    if (!cvDocument?.id) return;
+    try {
+      const response = await axios.get(
+        `${API}/employees/${employeeId}/requirements/cv/evidence/${cvDocument.id}/view`,
+        { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
+      );
+      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      toast.error('Failed to open CV file');
+    }
+  };
   
   // Admin approves CV after review
   const handleApproveCv = async () => {
@@ -3198,7 +3215,10 @@ export default function EmployeeProfilePage() {
   };
   const cvDocuments = documents.filter(isCvLikeDocument);
   const activeCvDocument = cvDocuments.find(isLinkedActiveCvDocument) || null;
-  const cvDocument = activeCvDocument || cvDocuments[0] || null;
+  // If cv_document_id is set but no document matches, do NOT fall back to cvDocuments[0].
+  // Opening the wrong file would silently mismatch what the backend's Review CV operates on.
+  const cvDocumentIdIsSet = Boolean(employee?.cv_document_id);
+  const cvDocument = activeCvDocument || (cvDocumentIdIsSet ? null : cvDocuments[0] || null);
   const employmentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
   const employmentGapEvaluation = employmentHistoryGapRow?.gap_evaluation || null;
   const gapAnalysisRun = Boolean(employmentHistoryGapRow?.gap_analysis_run);
@@ -4917,6 +4937,17 @@ export default function EmployeeProfilePage() {
                       <div className="mt-4 space-y-3">
                         <p className="text-sm text-gray-700">{cvReviewStateLabel}</p>
                         <div className="flex flex-wrap gap-2">
+                          {cvFileExists && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleViewCv}
+                              data-testid="view-cv-btn"
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View CV
+                            </Button>
+                          )}
                           {cvReviewReady ? (
                             <Button
                               size="sm"

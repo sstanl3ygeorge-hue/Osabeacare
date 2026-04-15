@@ -599,7 +599,7 @@ async def sign_off_employment_review(
     # ── Guard 4: all gaps must be resolved ───────────────────────────────────
     unresolved = await db.employment_gaps.find({
         "employee_id": employee_id,
-        "status": {"$in": ["pending", "needs_info", "rejected", "explained"]}
+        "status": {"$in": ["pending", "needs_more_info", "reopened", "rejected", "explained"]}
     }).to_list(10)
 
     if unresolved:

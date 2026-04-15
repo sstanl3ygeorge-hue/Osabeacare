@@ -1925,6 +1925,7 @@ async def worker_upload_document(
             {"id": employee_id},
             {"$set": {
                 "cv_document_id": doc_id,
+                "cv_status": "uploaded",
                 "updated_at": now
             }}
         )

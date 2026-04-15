@@ -40,6 +40,11 @@ def _get_detect_cv_gaps():
     from server import detect_cv_gaps
     return detect_cv_gaps
 
+def _get_put_object():
+    """Lazy import of put_object from server.py"""
+    from server import put_object
+    return put_object
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Employment Gaps"])
@@ -321,19 +326,15 @@ async def upload_gap_document(
     # Read file content
     content = await file.read()
     
-    # Create uploads directory
-    upload_dir = Path("/app/uploads/gap_documents") / employee_id
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    put_object = _get_put_object()
     
-    # Generate safe filename
+    # Generate safe filename and upload to object storage
     safe_filename = f"{gap_id}_{uuid.uuid4().hex[:8]}_{file.filename}"
-    file_path = upload_dir / safe_filename
+    storage_path = f"gap_documents/{employee_id}/{safe_filename}"
+    content_type = file.content_type or "application/octet-stream"
+    put_object(storage_path, content, content_type)
     
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(content)
-    
-    file_url = f"/uploads/gap_documents/{employee_id}/{safe_filename}"
+    file_url = storage_path
     
     # Store document reference
     now = datetime.now(timezone.utc).isoformat()

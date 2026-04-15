@@ -241,6 +241,13 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_user)
         }
     
     cv_document_id = employee.get("cv_document_id")
+    cv_status = (employee.get("cv_status") or "").lower()
+    replacement_required = cv_status in {
+        "rejected",
+        "replacement_requested",
+        "missing",
+        "replacement_required",
+    }
     cv_extracted_history = employee.get("cv_extracted_employment_history", [])
     cv_gaps = employee.get("cv_gaps_detected", [])
     cv_education = employee.get("cv_extracted_education", [])
@@ -253,24 +260,42 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_user)
         return {
             "has_cv": False,
             "extraction_status": "no_cv_uploaded",
-            "needs_verification": False
+            "needs_verification": False,
+            "replacement_required": False,
+            "can_upload_cv": True,
+            "cv_status": "missing",
         }
     
     # Get CV document info
     cv_doc = await db.employee_documents.find_one({"id": cv_document_id}, {"_id": 0})
-    
-    # Check if extraction is pending verification
-    cv_extraction = cv_doc.get("cv_extraction") if cv_doc else None
-    needs_verification = cv_extraction is not None and not cv_verified
+    active_cv_exists = bool(
+        cv_doc
+        and cv_doc.get("file_url")
+        and cv_doc.get("status") not in ["superseded", "archived", "deleted", "rejected", "invalidated"]
+        and cv_doc.get("is_active") is not False
+    )
+    if not active_cv_exists:
+        return {
+            "has_cv": False,
+            "extraction_status": "no_active_cv",
+            "needs_verification": False,
+            "replacement_required": True,
+            "can_upload_cv": True,
+            "cv_status": "missing",
+        }
     
     # Count gaps needing explanation
     unexplained_gaps = [g for g in cv_gaps if not g.get("explanation") and g.get("needs_explanation", True)]
     
     return {
-        "has_cv": True,
-        "extraction_status": "verified" if cv_verified else ("pending_verification" if cv_extraction else "pending"),
-        "needs_verification": needs_verification,
-        "verified": cv_verified,
+        "has_cv": not replacement_required,
+        "extraction_status": "approved" if cv_status == "approved" else ("replacement_required" if replacement_required else "awaiting_admin_review"),
+        "needs_verification": False,
+        "replacement_required": replacement_required,
+        "can_upload_cv": replacement_required,
+        "cv_status": cv_status or "uploaded",
+        # verified means admin-approved only — cv_status = "approved" is set exclusively by the admin approve endpoint
+        "verified": cv_status == "approved",
         "verified_at": employee.get("cv_extraction_verified_at"),
         "cv_document": {
             "id": cv_document_id,
@@ -304,6 +329,8 @@ async def get_worker_cv_extraction_preview(user: dict = Depends(get_current_user
     """
     Get preview of CV extraction for worker to review before confirming.
     """
+    raise HTTPException(status_code=403, detail="CV extraction review is completed by admin")
+
     db = get_db()
     
     employee_id = user.get("employee_id")
@@ -349,6 +376,8 @@ async def worker_verify_cv_extraction(
     """
     Worker confirms that CV extraction is accurate (or provides corrections).
     """
+    raise HTTPException(status_code=403, detail="CV extraction verification is completed by admin")
+
     db = get_db()
     detect_cv_gaps = get_detect_cv_gaps()
     
@@ -458,6 +487,7 @@ async def admin_review_cv(
                 "cv_extracted_education": extraction_result.get("education", []),
                 "cv_extracted_skills": extraction_result.get("skills", []),
                 "cv_gaps_detected": gaps_detected,
+                "cv_status": "under_review",
                 "cv_extraction_status": "reviewed",
                 "cv_reviewed_at": now,
                 "cv_reviewed_by": user.get("user_id"),
@@ -520,6 +550,7 @@ async def admin_review_cv(
                 "cv_extracted_education": extraction_result.get("education", []),
                 "cv_extracted_skills": extraction_result.get("skills", []),
                 "cv_gaps_detected": gaps_detected,
+                "cv_status": "under_review",
                 "cv_extraction_status": "reviewed",
                 "cv_reviewed_at": now,
                 "cv_reviewed_by": user.get("user_id"),
@@ -638,14 +669,10 @@ async def admin_approve_cv(
     
     # Update document status
     from server import EXCLUDED_DOC_STATUSES
-    cv_doc = await db.employee_documents.find_one({
-        "employee_id": employee_id,
-        "$or": [
-            {"requirement_id": {"$in": ["cv", "resume", "curriculum_vitae"]}},
-            {"document_subtype": "cv"}
-        ],
-        "status": {"$nin": EXCLUDED_DOC_STATUSES}
-    }, {"_id": 0}, sort=[("uploaded_at", -1)])
+    cv_doc = await db.employee_documents.find_one(
+        {"id": employee.get("cv_document_id"), "employee_id": employee_id},
+        {"_id": 0}
+    )
     
     if cv_doc:
         await db.employee_documents.update_one(

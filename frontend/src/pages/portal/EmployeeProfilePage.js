@@ -700,8 +700,12 @@ export default function EmployeeProfilePage() {
       }
       
       // Refresh data
-      fetchEmployee();
-      fetchRecruitmentStatus();
+      await Promise.all([
+        fetchEmployee(),
+        fetchRecruitmentStatus(),
+        fetchCompliance(),
+        fetchComplianceFile()
+      ]);
     } catch (err) {
       const detail = err.response?.data?.detail;
       if (detail === 'No CV uploaded for this employee' || detail === 'No CV document found for this employee') {
@@ -1469,8 +1473,11 @@ export default function EmployeeProfilePage() {
       setSelectedDocType('');
       setDocumentLabel('');
       setUploadFile(null);
-      fetchData();
-      fetchCompliance();
+      await Promise.all([
+        fetchData(),
+        fetchCompliance(),
+        fetchComplianceFile()
+      ]);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Upload failed — please try again');
     } finally {
@@ -3121,7 +3128,8 @@ export default function EmployeeProfilePage() {
     [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(employee?.cv_document_id)
   ) || null;
   const cvDocument = activeCvDocument || cvDocuments[0] || null;
-  const employmentGapEvaluation = complianceFile?.sections?.employment_history?.rows?.[0]?.gap_evaluation || null;
+  const employmentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
+  const employmentGapEvaluation = employmentHistoryGapRow?.gap_evaluation || null;
   const applicationAvailable = Boolean(applicationSubmission || applicationPdfDocument);
   const cvFileExists = Boolean(cvDocument);
   const cvDocumentName = cvDocument?.original_filename || cvDocument?.file_name || cvDocument?.file_url || '';
@@ -4963,8 +4971,18 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
 
+              {employmentHistoryExists && employmentHistoryGapRow && !employmentHistoryGapRow.has_gaps && employmentGapEvaluation && (
+                <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+                  <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No employment gaps detected'}</p>
+                    <p className="text-sm text-green-600 mt-1">Gap analysis has run for the current employment history.</p>
+                  </div>
+                </div>
+              )}
+
               {/* Employment Gap Panel */}
-              {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
+              {employmentHistoryGapRow?.has_gaps && (
                 <div data-testid="section-employment-gaps">
                   <div className="mb-3">
                     <h4 className="font-medium text-gray-800">10-Year Gap Verification</h4>
@@ -4977,8 +4995,8 @@ export default function EmployeeProfilePage() {
                     employeeName={`${employee?.first_name} ${employee?.last_name}`}
                     initialData={{
                       has_gaps: true,
-                      gaps: complianceFile.sections.employment_history.rows[0].gaps,
-                      evaluation: complianceFile.sections.employment_history.rows[0].gap_evaluation
+                      gaps: employmentHistoryGapRow.gaps,
+                      evaluation: employmentHistoryGapRow.gap_evaluation
                     }}
                     isAdmin={!isAuditor() && (user?.role === 'admin' || user?.role === 'super_admin')}
                     onGapUpdate={() => {

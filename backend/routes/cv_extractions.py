@@ -92,6 +92,83 @@ def get_detect_cv_gaps():
     return detect_cv_gaps
 
 
+def get_storage_object():
+    """Lazy import of get_object from server.py."""
+    from server import get_object
+    return get_object
+
+
+def get_create_gap_record():
+    """Lazy import of create_gap_record from employment_gap_engine."""
+    from employment_gap_engine import create_gap_record
+    return create_gap_record
+
+
+async def persist_cv_gap_records(db, employee_id: str, gaps: list, created_by: str) -> int:
+    """Persist CV-detected gaps into the canonical employment_gaps store."""
+    create_gap_record = get_create_gap_record()
+    new_gaps = 0
+
+    for gap in gaps or []:
+        existing_gap = await db.employment_gaps.find_one({
+            "employee_id": employee_id,
+            "gap_start": gap.get("gap_start"),
+            "gap_end": gap.get("gap_end"),
+        })
+        if existing_gap:
+            continue
+
+        gap_record = create_gap_record(employee_id, gap, created_by=created_by)
+        gap_record["source"] = "cv_review"
+        await db.employment_gaps.update_one(
+            {"id": gap_record["id"]},
+            {"$setOnInsert": gap_record},
+            upsert=True
+        )
+        new_gaps += 1
+
+    return new_gaps
+
+
+async def read_cv_file_bytes(file_url: str) -> bytes:
+    """Read CV bytes from either a storage path or an absolute URL."""
+    if file_url.startswith(("http://", "https://")):
+        import httpx
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(file_url)
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail="Failed to download CV file")
+            return response.content
+
+    get_object = get_storage_object()
+    file_content, _ = get_object(file_url)
+    return file_content
+
+
+def build_cv_review_extraction_response(extraction_result: dict, employment_history: list, gaps_detected: list) -> dict:
+    """Return the response shape expected by the Employment Review dialog."""
+    education = extraction_result.get("education", []) or []
+    skills = extraction_result.get("skills", []) or []
+
+    return {
+        **extraction_result,
+        "employment_history": employment_history,
+        "jobs_found": extraction_result.get("jobs_found") or extraction_result.get("total_jobs_found") or len(employment_history),
+        "education_found": extraction_result.get("education_found") or len(education),
+        "skills_found": extraction_result.get("skills_found") or len(skills),
+        "gaps_detected": len(gaps_detected),
+        "gaps": [
+            {
+                **gap,
+                "start_date": gap.get("gap_start"),
+                "end_date": gap.get("gap_end"),
+                "message": f"Employment gap requires explanation ({gap.get('duration_months')} months)",
+            }
+            for gap in gaps_detected
+        ],
+    }
+
+
 async def get_10yr_form_status(employee_id: str) -> dict:
     """
     Get status of the 10-Year Employment History form for an employee.
@@ -345,8 +422,6 @@ async def admin_review_cv(
     """
     Admin triggers AI extraction on a worker's uploaded CV.
     """
-    import httpx
-    
     db = get_db()
     extract_cv_employment_history = get_cv_extraction_service()
     detect_cv_gaps = get_detect_cv_gaps()
@@ -365,10 +440,38 @@ async def admin_review_cv(
     
     # Check if already extracted
     if cv_doc.get("cv_extraction"):
+        extraction_result = cv_doc.get("cv_extraction") or {}
+        employment_history = extraction_result.get("employment_history", [])
+        gaps_detected = detect_cv_gaps(employment_history) if employment_history else []
+        new_gap_count = await persist_cv_gap_records(
+            db,
+            employee_id,
+            gaps_detected,
+            created_by=user.get("user_id") or "admin"
+        )
+
+        now = datetime.now(timezone.utc).isoformat()
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                "cv_extracted_employment_history": employment_history,
+                "cv_extracted_education": extraction_result.get("education", []),
+                "cv_extracted_skills": extraction_result.get("skills", []),
+                "cv_gaps_detected": gaps_detected,
+                "cv_extraction_status": "reviewed",
+                "cv_reviewed_at": now,
+                "cv_reviewed_by": user.get("user_id"),
+                "updated_at": now
+            }}
+        )
+
         return {
             "success": True,
             "message": "CV already extracted",
-            "extraction": cv_doc.get("cv_extraction"),
+            "extraction": build_cv_review_extraction_response(extraction_result, employment_history, gaps_detected),
+            "gaps_detected": len(gaps_detected),
+            "new_gap_records": new_gap_count,
+            "requires_action": len(gaps_detected) > 0,
             "already_extracted": True
         }
     
@@ -378,12 +481,8 @@ async def admin_review_cv(
         raise HTTPException(status_code=400, detail="CV has no file URL")
     
     try:
-        # Download file
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(file_url)
-            if response.status_code != 200:
-                raise HTTPException(status_code=500, detail="Failed to download CV file")
-            file_content = response.content
+        # Download file from the same storage shape used by evidence uploads.
+        file_content = await read_cv_file_bytes(file_url)
         
         filename = cv_doc.get("file_name", "cv.pdf")
         
@@ -407,6 +506,12 @@ async def admin_review_cv(
         # Update employee with extracted data
         employment_history = extraction_result.get("employment_history", [])
         gaps_detected = detect_cv_gaps(employment_history) if employment_history else []
+        new_gap_count = await persist_cv_gap_records(
+            db,
+            employee_id,
+            gaps_detected,
+            created_by=user.get("user_id") or "admin"
+        )
         
         await db.employees.update_one(
             {"id": employee_id},
@@ -415,6 +520,9 @@ async def admin_review_cv(
                 "cv_extracted_education": extraction_result.get("education", []),
                 "cv_extracted_skills": extraction_result.get("skills", []),
                 "cv_gaps_detected": gaps_detected,
+                "cv_extraction_status": "reviewed",
+                "cv_reviewed_at": now,
+                "cv_reviewed_by": user.get("user_id"),
                 "cv_extracted_at": now,
                 "updated_at": now
             }}
@@ -423,8 +531,10 @@ async def admin_review_cv(
         return {
             "success": True,
             "message": "CV extraction complete",
-            "extraction": extraction_result,
+            "extraction": build_cv_review_extraction_response(extraction_result, employment_history, gaps_detected),
             "gaps_detected": len(gaps_detected),
+            "new_gap_records": new_gap_count,
+            "requires_action": len(gaps_detected) > 0,
             "already_extracted": False
         }
     except HTTPException:

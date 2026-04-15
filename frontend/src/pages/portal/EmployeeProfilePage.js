@@ -1097,6 +1097,37 @@ export default function EmployeeProfilePage() {
     setTemplates(templatesRes.status === 'fulfilled' ? templatesRes.value.data : []);
     setComplianceRequirements(compReqRes.status === 'fulfilled' ? compReqRes.value.data : {});
     setUnifiedProgress(unifiedProgressRes.status === 'fulfilled' ? unifiedProgressRes.value.data : null);
+    if (empRes.status === 'fulfilled' && docsRes.status === 'fulfilled') {
+      const refreshedEmployee = empRes.value.data || {};
+      const refreshedDocuments = docsRes.value.data || [];
+      const cvLikeDocuments = refreshedDocuments.filter((document) => {
+        const label = [
+          document?.requirement_name,
+          document?.document_type_name,
+          document?.document_label,
+          document?.original_filename,
+          document?.file_name
+        ].filter(Boolean).join(' ').toLowerCase();
+        return (
+          ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id) ||
+          [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(refreshedEmployee?.cv_document_id) ||
+          /\b(cv|resume|curriculum vitae)\b/.test(label)
+        );
+      });
+      console.debug('CV_LINK_DIAGNOSTIC profile_refresh', {
+        employeeId,
+        cv_document_id: refreshedEmployee?.cv_document_id,
+        cv_documents: cvLikeDocuments.map((document) => ({
+          id: document?.id,
+          file_id: document?.file_id,
+          document_id: document?.document_id,
+          requirement_id: document?.requirement_id,
+          document_type_name: document?.document_type_name,
+          requirement_name: document?.requirement_name,
+          status: document?.status
+        }))
+      });
+    }
     
     if (hasError) {
       toast.error('Failed to load employee data');
@@ -1464,12 +1495,19 @@ export default function EmployeeProfilePage() {
         }
       } else {
         // Use the unified evidence upload endpoint for other documents
-        await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
+        const uploadResponse = await axios.post(`${API}/employees/${employeeId}/requirements/${selectedRequirement}/evidence`, formData, {
           headers: { 
             Authorization: `Bearer ${token}`,
             'Content-Type': 'multipart/form-data'
           }
         });
+        if (selectedRequirement === 'cv') {
+          console.debug('CV_LINK_DIAGNOSTIC upload_response', {
+            employeeId,
+            requirement_id: selectedRequirement,
+            response: uploadResponse.data
+          });
+        }
         
         // POST-UPLOAD FEEDBACK - Clear guidance on next step
         toast.success('Document uploaded — please review and approve', {

@@ -5278,6 +5278,12 @@ class EmployeeResponse(BaseModel):
     employment_history: Optional[List[dict]] = None  # List of employment records with gap analysis
     cv_gaps_detected: Optional[List[dict]] = None  # Detected gaps requiring explanation
     cv_gaps_all_explained: Optional[bool] = None  # True if all gaps have explanations
+    cv_document_id: Optional[str] = None  # Canonical active CV document link
+    cv_status: Optional[str] = None
+    cv_extraction_status: Optional[str] = None
+    cv_extracted_employment_history: Optional[List[dict]] = None
+    cv_reviewed_at: Optional[str] = None
+    cv_extracted_at: Optional[str] = None
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
@@ -15570,6 +15576,7 @@ async def upload_requirement_evidence(
         # reviewable CV so cv_document_id is set and Review CV becomes available immediately.
         CV_REQUIREMENT_IDS = {"cv", "resume", "curriculum_vitae"}
         if requirement_id in CV_REQUIREMENT_IDS:
+            previous_cv_document_id = employee.get("cv_document_id")
             await db.employee_documents.update_many(
                 {
                     "employee_id": employee_id,
@@ -15598,6 +15605,24 @@ async def upload_requirement_evidence(
             await db.employees.update_one(
                 {"id": employee_id},
                 {"$set": {"cv_document_id": doc_id, "updated_at": now}}
+            )
+            refreshed_employee = await db.employees.find_one(
+                {"id": employee_id},
+                {"_id": 0, "cv_document_id": 1}
+            )
+            refreshed_cv_doc = await db.employee_documents.find_one(
+                {"id": doc_id},
+                {"_id": 0, "id": 1, "requirement_id": 1, "document_subtype": 1, "status": 1, "is_active": 1}
+            )
+            logger.info(
+                "CV_LINK_DIAGNOSTIC admin_upload employee=%s requirement=%s doc_id=%s previous_cv_document_id=%s "
+                "after_cv_document_id=%s refreshed_doc=%s",
+                employee_id,
+                requirement_id,
+                doc_id,
+                previous_cv_document_id,
+                (refreshed_employee or {}).get("cv_document_id"),
+                refreshed_cv_doc
             )
             await log_audit_action(
                 user['user_id'],

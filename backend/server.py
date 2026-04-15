@@ -15564,7 +15564,23 @@ async def upload_requirement_evidence(
         
         await log_audit_action(user['user_id'], "upload_evidence", "employee_document", doc_id,
                                {"requirement_id": requirement_id, "filename": file.filename})
-    
+
+        # When a CV or resume is uploaded by an admin, automatically link it as the active
+        # reviewable CV so cv_document_id is set and Review CV becomes available immediately.
+        CV_REQUIREMENT_IDS = {"cv", "resume", "curriculum_vitae"}
+        if requirement_id in CV_REQUIREMENT_IDS:
+            await db.employees.update_one(
+                {"id": employee_id},
+                {"$set": {"cv_document_id": doc_id, "updated_at": now}}
+            )
+            await log_audit_action(
+                user['user_id'],
+                "cv_document_linked",
+                "employee",
+                employee_id,
+                {"doc_id": doc_id, "requirement_id": requirement_id, "filename": file.filename}
+            )
+
     # Update employee compliance
     await update_employee_compliance(employee_id)
     

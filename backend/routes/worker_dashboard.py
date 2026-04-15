@@ -2267,6 +2267,11 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
             "has_own_vehicle": "Yes" if employee.get("has_own_vehicle") else ("No" if employee.get("has_own_vehicle") == False else None),
             "vehicle_registration": employee.get("vehicle_registration"),
             "today": datetime.now(timezone.utc).strftime('%Y-%m-%d'),
+            # Health data from application form (safe auto-fill fields)
+            "flu_vaccination_date": employee.get("flu_vaccination_date"),
+            "influenza_vaccine_status": employee.get("influenza_vaccine_status"),
+            # health_issues_disability from application → maps to medical_problems_affecting_work in staff_health_questionnaire
+            "health_issues_disability": employee.get("health_issues_disability"),
         }
         
         for section in form_def_with_sections.get("sections", []):

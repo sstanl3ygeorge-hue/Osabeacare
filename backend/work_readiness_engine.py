@@ -466,9 +466,19 @@ def normalize_role_for_work(role: str) -> str:
         "health care assistant": "healthcare_assistant",
         "carer": "healthcare_assistant",
         "care assistant": "healthcare_assistant",
+        # Nurse variants (must all map to "nurse" for ROLE_REGISTRATION_REQUIREMENTS lookup)
         "registered nurse": "nurse",
+        "nurse (registered)": "nurse",  # apply form dropdown value
+        "senior nurse": "nurse",         # apply form dropdown value
+        "senior_nurse": "nurse",
+        "staff nurse": "nurse",
+        "staff_nurse": "nurse",
+        "district nurse": "nurse",
+        "community nurse": "nurse",
+        "practice nurse": "nurse",
         "rn": "nurse",
         "rgn": "nurse",
+        # HCA variants
         "senior carer": "senior_carer",
         "senior care assistant": "senior_carer",
         "support worker": "support_worker",

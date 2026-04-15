@@ -4679,7 +4679,7 @@ export default function EmployeeProfilePage() {
                             )}
                             {!isSubmitted && form.allowReminder === false && (
                               <Badge className="bg-slate-100 text-slate-700">
-                                Managed via Application Form
+                                Worker completes via Dashboard
                               </Badge>
                             )}
                           </div>

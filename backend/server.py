@@ -337,6 +337,17 @@ SYSTEM_ROLE_MAP = {
     "nurse": SystemRole.NURSE,
     "registered nurse": SystemRole.NURSE,
     "registered_nurse": SystemRole.NURSE,
+    "nurse (registered)": SystemRole.NURSE,  # matches apply form dropdown value
+    "senior nurse": SystemRole.NURSE,         # matches apply form dropdown value
+    "senior_nurse": SystemRole.NURSE,
+    "staff nurse": SystemRole.NURSE,
+    "staff_nurse": SystemRole.NURSE,
+    "district nurse": SystemRole.NURSE,
+    "district_nurse": SystemRole.NURSE,
+    "community nurse": SystemRole.NURSE,
+    "community_nurse": SystemRole.NURSE,
+    "practice nurse": SystemRole.NURSE,
+    "practice_nurse": SystemRole.NURSE,
 }
 
 # Roles that should NOT automatically inherit HCA compliance
@@ -7409,6 +7420,12 @@ class ApplicationDeclarations(BaseModel):
     consents_to_reference_checks: bool  # Must be True
     consents_to_background_checks: bool  # Must be True
     consents_to_data_processing: bool  # Must be True - GDPR
+
+    # Professional registration (regulated roles: nurses, social workers, etc.)
+    has_professional_registration: bool = False
+    registration_body: Optional[str] = None        # NMC, GMC, HCPC, Social Work England
+    registration_number: Optional[str] = None
+    registration_expiry: Optional[str] = None
 
 
 # ==================== DBS CHECK MODELS ====================

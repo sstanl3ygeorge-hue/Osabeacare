@@ -908,7 +908,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "id": "contract_acceptance",
         "name": "Contract Acceptance",
         "type": "contract_acceptance",
-        "signed": bool(contract_ack and contract_ack.get("acknowledged")),
+        "signed": bool(contract_ack and (
+            contract_ack.get("acknowledged")
+            or contract_ack.get("status") in ("signed", "submitted", "verified")
+        )),
         "signed_at": contract_ack.get("acknowledged_at") if contract_ack else None,
         "verified": bool(contract_ack and contract_ack.get("verification_status") == "verified"),
         "verified_at": contract_ack.get("verified_at") if contract_ack else None,

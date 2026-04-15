@@ -213,8 +213,8 @@ export default function DashboardPage() {
   ).length;
   const notReady = employeesNotReady;
 
-  // Calculate onboarding stats - include applicants
-  const onboarding = (stats?.onboarding_in_progress || 0) + applicants.length;
+  // Count employees in onboarding stage only — applicants are a separate population
+  const onboarding = employees.filter(e => e.status === 'onboarding').length;
   
   // Average readiness progress from canonical unified-progress for employees.
   const employeesWithCanonicalProgress = employees.filter(e => e.canonical_readiness);

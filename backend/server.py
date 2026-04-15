@@ -9095,6 +9095,8 @@ async def sign_contract(
         },
         {
             "$set": {
+                "acknowledged": True,
+                "acknowledged_at": now.isoformat(),
                 "status": "signed",
                 "signed_document_url": contract_url,
                 "signed_at": now.isoformat(),
@@ -23065,33 +23067,10 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     total_applicants = await db.employees.count_documents({**assignment_filter, "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, EmployeeStatus.COMPLIANCE_REVIEW]}})
     onboarding = await db.employees.count_documents({**assignment_filter, "status": EmployeeStatus.ONBOARDING})
     
-    # Count fully verified employees (all requirements have evidence AND are verified)
-    fully_verified_count = 0
-    active_employees = await db.employees.find(
-        {**assignment_filter, "status": {"$in": [EmployeeStatus.ACTIVE, EmployeeStatus.ONBOARDING]}},
-        {"_id": 0, "id": 1}
-    ).to_list(500)
-    
-    for emp in active_employees:
-        emp_doc = await db.employee_documents.find_one(
-            {"employee_id": emp["id"], "requirement_type": "evidence_store"},
-            {"_id": 0}
-        )
-        if emp_doc:
-            evidence_store = emp_doc.get("evidence_store", {})
-            if evidence_store:
-                all_verified = True
-                has_any_evidence = False
-                for req_id, evidence in evidence_store.items():
-                    files = evidence.get("evidence_files", [])
-                    if files:
-                        has_any_evidence = True
-                        # Check if all files are verified
-                        if not all(f.get("verified", False) for f in files):
-                            all_verified = False
-                            break
-                if has_any_evidence and all_verified:
-                    fully_verified_count += 1
+    # Count active employees — UCE promotion guarantees all compliance gates were passed
+    fully_verified_count = await db.employees.count_documents(
+        {**assignment_filter, "status": EmployeeStatus.ACTIVE}
+    )
     
     # Get DBS document type
     dbs_type = await db.document_types.find_one({"name": {"$regex": "DBS", "$options": "i"}}, {"_id": 0})
@@ -23149,8 +23128,8 @@ async def get_dashboard_stats(user: dict = Depends(require_manager_or_admin)):
     # Get all applicants (includes all non-active statuses)
     all_applicants = await db.employees.find({
         **assignment_filter,
-        "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW, 
-                         EmployeeStatus.COMPLIANCE_REVIEW, EmployeeStatus.ONBOARDING, "applicant"]}
+        "status": {"$in": [EmployeeStatus.NEW, EmployeeStatus.SCREENING, EmployeeStatus.INTERVIEW,
+                         EmployeeStatus.COMPLIANCE_REVIEW, EmployeeStatus.ONBOARDING]}
     }, {"_id": 0, "id": 1, "status": 1, "first_name": 1, "last_name": 1}).to_list(500)
     
     # Pending verifications - documents from applicants waiting for admin review

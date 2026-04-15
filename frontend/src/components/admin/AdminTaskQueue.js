@@ -48,76 +48,49 @@ export default function AdminTaskQueue() {
 
   const taskItems = [
     {
-      key: 'documents_pending_verification',
+      key: 'pending_verifications',
       label: 'Documents pending verification',
       icon: FileText,
       color: 'blue',
-      count: tasks?.documents_pending_verification || 0,
+      count: tasks?.summary?.pending_verifications || 0,
       link: '/portal/employees',
       priority: 'high'
     },
     {
-      key: 'references_pending_response',
-      label: 'References awaiting response',
+      key: 'pending_references',
+      label: 'References awaiting review',
       icon: Mail,
       color: 'purple',
-      count: tasks?.references_pending_response || 0,
+      count: tasks?.summary?.pending_references || 0,
       link: '/portal/recruitment',
       priority: 'medium'
     },
     {
-      key: 'dbs_expiring_30_days',
-      label: 'DBS checks expiring in 30 days',
-      icon: Shield,
-      color: 'red',
-      count: tasks?.dbs_expiring_30_days || 0,
-      link: '/portal/dbs-register',
-      priority: 'high'
-    },
-    {
-      key: 'rtw_expiring_30_days',
-      label: 'Right to Work expiring in 30 days',
+      key: 'expiring_documents',
+      label: 'Documents expiring in 30 days',
       icon: Calendar,
       color: 'red',
-      count: tasks?.rtw_expiring_30_days || 0,
+      count: tasks?.summary?.expiring_documents || 0,
       link: '/portal/employees',
       priority: 'high'
     },
     {
-      key: 'spot_checks_due_this_week',
-      label: 'Spot checks due this week',
+      key: 'scheduled_tasks',
+      label: 'Assessments / spot checks due this week',
       icon: ClipboardCheck,
       color: 'amber',
-      count: tasks?.spot_checks_due_this_week || 0,
+      count: tasks?.summary?.scheduled_tasks || 0,
       link: '/portal/employees',
       priority: 'medium'
     },
     {
-      key: 'supervision_due_this_week',
-      label: 'Supervision due this week',
-      icon: Users,
-      color: 'amber',
-      count: tasks?.supervision_due_this_week || 0,
+      key: 'overdue_followups',
+      label: 'Follow-ups overdue',
+      icon: Shield,
+      color: 'red',
+      count: tasks?.summary?.overdue_followups || 0,
       link: '/portal/employees',
-      priority: 'medium'
-    },
-    {
-      key: 'induction_incomplete',
-      label: 'Induction checklists incomplete',
-      icon: ClipboardCheck,
-      color: 'orange',
-      count: tasks?.induction_incomplete || 0,
-      link: '/portal/recruitment',
-      priority: 'medium'
-    },
-    {
-      key: 'interviews_pending',
-      label: 'Interviews/approvals pending',
-      icon: Users,
-      color: 'blue',
-      count: tasks?.interviews_pending || 0,
-      link: '/portal/recruitment',
-      priority: 'low'
+      priority: 'high'
     }
   ];
 

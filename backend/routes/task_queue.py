@@ -83,23 +83,32 @@ async def get_admin_task_queue(
                 "priority": "critical" if days_until <= 7 else "high" if days_until <= 14 else "medium"
             })
     
-    # 3. References awaiting review
-    employees_with_refs = await db.employees.find({
+    # 3. References awaiting review — query canonical db.references collection
+    refs_docs = await db.references.find({
         "$or": [
-            {"reference_1_request_status": "submitted"},
-            {"reference_2_request_status": "submitted"}
+            {"ref1.verification.status": {"$nin": ["verified", "rejected"]}},
+            {"ref2.verification.status": {"$nin": ["verified", "rejected"]}}
         ]
-    }, {"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "reference_1_request_status": 1, "reference_2_request_status": 1}).to_list(20)
-    
+    }, {"_id": 0, "employee_id": 1, "ref1": 1, "ref2": 1}).to_list(50)
+
     pending_references = []
-    for emp in employees_with_refs:
-        for ref_num in [1, 2]:
-            if emp.get(f"reference_{ref_num}_request_status") == "submitted":
+    for ref_doc in refs_docs:
+        emp = await db.employees.find_one(
+            {"id": ref_doc.get("employee_id")},
+            {"_id": 0, "first_name": 1, "last_name": 1}
+        )
+        if not emp:
+            continue
+        emp_name = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()
+        for ref_num, ref_key in [(1, "ref1"), (2, "ref2")]:
+            ref_data = ref_doc.get(ref_key) or {}
+            verif_status = ref_data.get("verification", {}).get("status")
+            if ref_data and verif_status not in ("verified", "rejected"):
                 pending_references.append({
                     "type": "reference",
-                    "id": f"{emp['id']}_ref{ref_num}",
-                    "employee_id": emp['id'],
-                    "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+                    "id": f"{ref_doc.get('employee_id')}_ref{ref_num}",
+                    "employee_id": ref_doc.get("employee_id"),
+                    "employee_name": emp_name,
                     "reference_num": ref_num,
                     "priority": "high"
                 })

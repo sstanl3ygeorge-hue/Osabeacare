@@ -102,29 +102,26 @@ export default function ActionableTaskQueue() {
     );
   }
 
-  const pendingVerifications = tasks?.pending_verifications || [];
-  const referencesToSend = tasks?.references_to_send || [];
-  const referencesToReview = tasks?.references_to_review || [];
-  const expiringSoon = tasks?.expiring_soon || [];
-  const stuckWorkers = tasks?.stuck_workers || [];
-  
-  // Additional counts from API
-  const inductionIncomplete = tasks?.induction_incomplete || 0;
-  const interviewsPending = tasks?.interviews_pending || 0;
-  const spotChecksDue = tasks?.spot_checks_due_this_week || 0;
-  const supervisionDue = tasks?.supervision_due_this_week || 0;
+  const allTasks = tasks?.tasks || [];
+  const pendingVerifications = allTasks.filter(t => t.type === 'verification');
+  const pendingReferences    = allTasks.filter(t => t.type === 'reference');
+  const expiringSoon         = allTasks.filter(t => t.type === 'expiring');
+  const scheduledTasks       = allTasks.filter(t => t.type === 'spot_check' || t.type === 'competency_assessment');
+  const overdueFollowups     = allTasks.filter(t => t.type === 'followup');
 
-  const totalActionable = pendingVerifications.length + referencesToSend.length + 
-    referencesToReview.length + expiringSoon.length + stuckWorkers.length;
+  // These categories have no backend data yet — sections stay hidden until backend provides them
+  const inductionIncomplete = 0;
+  const interviewsPending = 0;
+  const stuckWorkers = [];
 
-  // Category counts for tabs
+  // Category counts — 'all' uses backend canonical total so "All Tasks Complete" is never false-positive
   const categoryCounts = {
-    all: totalActionable + inductionIncomplete + interviewsPending,
+    all:          tasks?.total_tasks || 0,
     verification: pendingVerifications.length,
-    references: referencesToSend.length + referencesToReview.length,
-    onboarding: stuckWorkers.length + inductionIncomplete + interviewsPending,
-    expiring: expiringSoon.length,
-    recurring: spotChecksDue + supervisionDue
+    references:   pendingReferences.length,
+    onboarding:   0,
+    expiring:     expiringSoon.length,
+    recurring:    scheduledTasks.length + overdueFollowups.length
   };
 
   if (categoryCounts.all === 0) {
@@ -168,10 +165,12 @@ export default function ActionableTaskQueue() {
                 <Mail className="h-3 w-3 mr-1" />
                 Refs ({categoryCounts.references})
               </TabsTrigger>
-              <TabsTrigger value="onboarding" className="text-xs px-2 py-1 h-6">
-                <Users className="h-3 w-3 mr-1" />
-                Onboarding ({categoryCounts.onboarding})
-              </TabsTrigger>
+              {categoryCounts.onboarding > 0 && (
+                <TabsTrigger value="onboarding" className="text-xs px-2 py-1 h-6">
+                  <Users className="h-3 w-3 mr-1" />
+                  Onboarding ({categoryCounts.onboarding})
+                </TabsTrigger>
+              )}
               {categoryCounts.expiring > 0 && (
                 <TabsTrigger value="expiring" className="text-xs px-2 py-1 h-6">
                   <Clock className="h-3 w-3 mr-1" />
@@ -194,7 +193,7 @@ export default function ActionableTaskQueue() {
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <FileCheck className="h-4 w-4 text-blue-600" />
                 PENDING VERIFICATIONS
-                <Badge className="bg-blue-600 text-white ml-1">{tasks.documents_pending_verification}</Badge>
+                <Badge className="bg-blue-600 text-white ml-1">{tasks?.summary?.pending_verifications ?? pendingVerifications.length}</Badge>
               </CardTitle>
               <Button 
                 variant="link" 
@@ -238,21 +237,21 @@ export default function ActionableTaskQueue() {
         </Card>
       )}
 
-      {/* References to Send */}
-      {showSection('references') && referencesToSend.length > 0 && (
+      {/* Pending References */}
+      {showSection('references') && pendingReferences.length > 0 && (
         <Card className="border border-purple-200 shadow-sm overflow-hidden">
           <CardHeader className="py-3 px-4 bg-gradient-to-r from-purple-50 to-purple-100/50">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Mail className="h-4 w-4 text-purple-600" />
-                REFERENCES TO SEND
-                <Badge className="bg-purple-600 text-white ml-1">{referencesToSend.length}</Badge>
+                PENDING REFERENCES
+                <Badge className="bg-purple-600 text-white ml-1">{pendingReferences.length}</Badge>
               </CardTitle>
             </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-gray-100">
-              {referencesToSend.map((ref, idx) => (
+              {pendingReferences.map((ref, idx) => (
                 <div key={idx} className="flex items-center justify-between px-4 py-3 hover:bg-purple-50/30 transition-colors">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -260,56 +259,11 @@ export default function ActionableTaskQueue() {
                       <span className="text-gray-400">•</span>
                       <span className="text-gray-600 truncate">{ref.employee_name}</span>
                     </div>
-                    <span className="text-xs text-gray-400">Referee: {ref.referee_name}</span>
                   </div>
-                  <Button 
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleSendReferenceRequest(ref.employee_id, ref.reference_num)}
-                    disabled={actionLoading === `ref-${ref.employee_id}-${ref.reference_num}`}
-                    className="text-purple-600 border-purple-200 hover:bg-purple-50 shrink-0 ml-2"
-                  >
-                    {actionLoading === `ref-${ref.employee_id}-${ref.reference_num}` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <>
-                        <Send className="h-3.5 w-3.5 mr-1" />
-                        Send
-                      </>
-                    )}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Reference Responses to Review */}
-      {showSection('references') && referencesToReview.length > 0 && (
-        <Card className="border border-teal-200 shadow-sm overflow-hidden">
-          <CardHeader className="py-3 px-4 bg-gradient-to-r from-teal-50 to-teal-100/50">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-teal-600" />
-                REFERENCE RESPONSES TO REVIEW
-                <Badge className="bg-teal-600 text-white ml-1">{referencesToReview.length}</Badge>
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y divide-gray-100">
-              {referencesToReview.map((ref, idx) => (
-                <div key={idx} className="flex items-center justify-between px-4 py-3 hover:bg-teal-50/30 transition-colors">
-                  <div className="flex-1">
-                    <span className="font-medium text-gray-800">Reference {ref.reference_num}</span>
-                    <span className="mx-2 text-gray-400">•</span>
-                    <span className="text-gray-600">{ref.employee_name}</span>
-                  </div>
-                  <Button 
+                  <Button
                     size="sm"
                     onClick={() => navigate(`/portal/recruitment/${ref.employee_id}?tab=references`)}
-                    className="bg-teal-600 hover:bg-teal-700"
+                    className="bg-purple-600 hover:bg-purple-700 shrink-0 ml-2"
                   >
                     <Eye className="h-3.5 w-3.5 mr-1" />
                     Review
@@ -396,18 +350,18 @@ export default function ActionableTaskQueue() {
                 <div key={idx} className="flex items-center justify-between px-4 py-3 hover:bg-amber-50/30 transition-colors">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-gray-800 truncate">{item.item_name}</span>
+                      <span className="font-medium text-gray-800 truncate">{(item.document_type || '').replace(/_/g, ' ')}</span>
                       <Badge variant="outline" className="text-xs shrink-0">
                         {item.employee_name?.split(' ')[0]}
                       </Badge>
                     </div>
                     <Badge className={cn(
                       "text-xs mt-1",
-                      item.days_left <= 14 ? "bg-red-100 text-red-700" :
-                      item.days_left <= 30 ? "bg-amber-100 text-amber-700" :
+                      item.days_until <= 14 ? "bg-red-100 text-red-700" :
+                      item.days_until <= 30 ? "bg-amber-100 text-amber-700" :
                       "bg-blue-100 text-blue-700"
                     )}>
-                      {item.days_left} days left
+                      {item.days_until} days left
                     </Badge>
                   </div>
                   <Button 
@@ -433,8 +387,8 @@ export default function ActionableTaskQueue() {
         </Card>
       )}
 
-      {/* Spot Checks & Supervision Due */}
-      {showSection('recurring') && (spotChecksDue > 0 || supervisionDue > 0) && (
+      {/* Scheduled Checks & Overdue Follow-ups */}
+      {showSection('recurring') && (scheduledTasks.length > 0 || overdueFollowups.length > 0) && (
         <Card className="border border-cyan-200 shadow-sm overflow-hidden">
           <CardHeader className="py-3 px-4 bg-gradient-to-r from-cyan-50 to-cyan-100/50">
             <div className="flex items-center justify-between">
@@ -442,9 +396,9 @@ export default function ActionableTaskQueue() {
                 <GraduationCap className="h-4 w-4 text-cyan-600" />
                 RECURRING COMPLIANCE DUE THIS WEEK
               </CardTitle>
-              <Button 
-                variant="link" 
-                size="sm" 
+              <Button
+                variant="link"
+                size="sm"
                 className="text-cyan-600 p-0 h-auto"
                 onClick={() => navigate('/portal/compliance-centre')}
               >
@@ -454,16 +408,16 @@ export default function ActionableTaskQueue() {
           </CardHeader>
           <CardContent className="p-3">
             <div className="flex gap-4">
-              {spotChecksDue > 0 && (
+              {scheduledTasks.length > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border">
                   <ClipboardList className="h-4 w-4 text-cyan-600" />
-                  <span className="text-sm"><strong>{spotChecksDue}</strong> Spot Checks</span>
+                  <span className="text-sm"><strong>{scheduledTasks.length}</strong> Checks Due</span>
                 </div>
               )}
-              {supervisionDue > 0 && (
+              {overdueFollowups.length > 0 && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border">
-                  <Users className="h-4 w-4 text-cyan-600" />
-                  <span className="text-sm"><strong>{supervisionDue}</strong> Supervisions</span>
+                  <AlertTriangle className="h-4 w-4 text-cyan-600" />
+                  <span className="text-sm"><strong>{overdueFollowups.length}</strong> Overdue Follow-ups</span>
                 </div>
               )}
             </div>

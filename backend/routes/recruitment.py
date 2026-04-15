@@ -36,6 +36,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from role_normalization import get_role_label, normalize_role
+from stageGates import StageGateService
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ class OnboardingStatus:
 
 class RecruitmentApprovalRequest(BaseModel):
     notes: Optional[str] = None
+    force: bool = False  # Admin bypass of compliance gate (logged in audit)
 
 
 class EmploymentReviewSignOffRequest(BaseModel):
@@ -382,6 +384,19 @@ async def approve_recruitment(
             "recruitment_approved_at": employee.get("recruitment_approved_at"),
             "recruitment_approved_by": employee.get("recruitment_approved_by")
         }
+
+    # ── Compliance gate ────────────────────────────────────────────────────────
+    stage_gate = StageGateService(db)
+    can_approve, gate_blockers = await stage_gate.can_approve_recruitment(employee_id)
+    if not can_approve and not approval.force:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Cannot approve: compliance requirements not met",
+                "blockers": gate_blockers,
+                "hint": "Set force=true to override (requires admin; logged in audit)"
+            }
+        )
     
     now = datetime.now(timezone.utc).isoformat()
     
@@ -419,6 +434,9 @@ async def approve_recruitment(
         employee_id,
         {
             "notes": approval.notes,
+            "compliance_gate_passed": can_approve,
+            "compliance_gate_bypassed": approval.force and not can_approve,
+            "compliance_gate_blockers": gate_blockers if approval.force and not can_approve else [],
             "employee_code_assigned": employee_code if not employee.get("employee_code") else None,
             "status_changed_from": current_status if current_status in APPLICANT_STATUSES else None,
             "status_changed_to": EmployeeStatus.ONBOARDING if current_status in APPLICANT_STATUSES else None

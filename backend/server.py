@@ -9505,6 +9505,7 @@ async def create_employee(employee: EmployeeCreate, user: dict = Depends(require
     employee_doc = {
         "id": employee_id,
         **employee.model_dump(),
+        "application_source": "internal",
         "completion_percentage": 0,
         "created_at": now,
         "updated_at": now

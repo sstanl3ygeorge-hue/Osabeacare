@@ -3306,7 +3306,8 @@ export default function EmployeeProfilePage() {
     );
   }
 
-  const canonicalProgress = unifiedProgress || complianceRequirements?.unified_progress || null;
+  // UCE is the ONLY source of readiness truth. No fallback to the embedded copy.
+  const canonicalProgress = unifiedProgress || null;
   const canonicalProgressPct = canonicalProgress?.overall_percentage ?? 0;
   const canonicalBlockers = canonicalProgress?.blockers || [];
   const canonicalBlockerDetails = canonicalProgress?.blocker_details || [];
@@ -3442,14 +3443,14 @@ export default function EmployeeProfilePage() {
                     if (canonicalCanPromote) {
                       return (
                         <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
-                          Ready for promotion
+                          Ready for Promotion
                         </span>
                       );
                     }
                     if (canonicalProgressComplete && canonicalIsWorkReady) {
                       return (
                         <span className="px-2 py-1 rounded-lg text-xs font-medium bg-green-100 text-green-800" data-testid="ready-badge">
-                          Work ready
+                          Work Ready
                         </span>
                       );
                     }
@@ -3594,8 +3595,8 @@ export default function EmployeeProfilePage() {
             // Pending review — per-row backend flags are authoritative; count is display-only.
             const pendingReview = reqs.filter(r => r.has_evidence && !r.verified).length;
             
-            // Canonical readiness blocking status
-            const isBlocking = canonicalProgress ? !canonicalIsWorkReady && !canonicalCanPromote : safetyStatus.is_safe_to_deploy === false;
+            // Canonical readiness blocking status — UCE only, no safetyStatus fallback.
+            const isBlocking = !canonicalIsWorkReady && !canonicalCanPromote;
             const blockingReasons = canonicalBlockers.length > 0 ? canonicalBlockers : (complianceRequirements?.statuses?.safety_blocking_reasons || []);
             
             // DBS info from safety engine
@@ -3659,7 +3660,12 @@ export default function EmployeeProfilePage() {
                 <div className="overflow-x-auto -mx-1 px-1 pb-2" data-testid="audit-quick-view">
                   <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
                   {/* DBS Status with Expiry */}
-                  <div className={`p-3 rounded-xl border w-52 shrink-0 ${dbsClasses.card}`} data-testid="dbs-status-card">
+                  <div
+                    className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${dbsClasses.card}`}
+                    data-testid="dbs-status-card"
+                    onClick={() => setActiveTab('checklist')}
+                    title="Go to Verification & Compliance"
+                  >
                     <div className="flex items-center gap-2 mb-1">
                       <Shield className={`h-4 w-4 ${dbsClasses.icon}`} />
                       <span className="text-xs font-semibold text-text-primary">DBS</span>
@@ -3683,7 +3689,12 @@ export default function EmployeeProfilePage() {
                   </div>
                   
                   {/* RTW Status with Expiry - Dynamic logic based on verification + expiry */}
-                  <div className={`p-3 rounded-xl border w-52 shrink-0 ${rtwClasses.card}`} data-testid="rtw-status-card">
+                  <div
+                    className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${rtwClasses.card}`}
+                    data-testid="rtw-status-card"
+                    onClick={() => setActiveTab('checklist')}
+                    title="Go to Verification & Compliance"
+                  >
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${rtwClasses.icon}`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
@@ -3738,11 +3749,16 @@ export default function EmployeeProfilePage() {
                   </div>
                   
                   {/* Alerts Card - Show blocking status prominently */}
-                  <div className={`p-3 rounded-xl border w-52 shrink-0 ${
-                    isBlocking ? 'border-red-200 bg-red-50' :
-                    (missingItems > 0 || pendingReview > 0) ? 'border-amber-200 bg-amber-50' : 
-                    'border-green-200 bg-green-50'
-                  }`} data-testid="alerts-card">
+                  <div
+                    className={`p-3 rounded-xl border w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow ${
+                      isBlocking ? 'border-red-200 bg-red-50' :
+                      (missingItems > 0 || pendingReview > 0) ? 'border-amber-200 bg-amber-50' : 
+                      'border-green-200 bg-green-50'
+                    }`}
+                    data-testid="alerts-card"
+                    onClick={() => setActiveTab(isBlocking || missingItems > 0 || pendingReview > 0 ? 'checklist' : 'training')}
+                    title={isBlocking || missingItems > 0 || pendingReview > 0 ? 'Go to Verification & Compliance' : 'Go to Training'}
+                  >
                     <div className="flex items-center gap-2 mb-1">
                       <AlertTriangle className={`h-4 w-4 ${
                         isBlocking ? 'text-red-600' :
@@ -3778,7 +3794,12 @@ export default function EmployeeProfilePage() {
                   </div>
                   
                   {/* Compliance Breakdown Card */}
-                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-52 shrink-0" data-testid="compliance-breakdown-card">
+                  <div
+                    className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-52 shrink-0 cursor-pointer hover:shadow-md transition-shadow"
+                    data-testid="compliance-breakdown-card"
+                    onClick={() => setActiveTab('checklist')}
+                    title="Go to Verification & Compliance"
+                  >
                     <div className="flex items-center gap-2 mb-2">
                       <ClipboardList className="h-4 w-4 text-slate-600" />
                       <span className="text-xs font-semibold text-text-primary">Breakdown</span>
@@ -3803,6 +3824,7 @@ export default function EmployeeProfilePage() {
                   </div>
                 </div>{/* end flex row */}
               </div>{/* end overflow-x-auto */}
+            </div>{/* end audit quick view outer wrapper */}
             );
           })()}
 

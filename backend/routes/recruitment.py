@@ -32,6 +32,11 @@ from .dependencies import (
     SENDER_EMAIL,
 )
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from role_normalization import get_role_label, normalize_role
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Recruitment Pipeline"])
@@ -171,7 +176,11 @@ async def get_applicants(
         query["status"] = status
     
     if role:
-        query["role"] = role
+        # Normalize filter — stored values may be snake_case keys or human-readable labels;
+        # query both canonical key and its human-readable label variant
+        canonical_role = normalize_role(role)
+        role_label = get_role_label(canonical_role)
+        query["role"] = {"$in": [canonical_role, role_label, role]}
     
     if search:
         query["$or"] = [
@@ -194,7 +203,7 @@ async def get_applicants(
             "last_name": app["last_name"],
             "email": app["email"],
             "phone": app.get("phone"),
-            "role": app.get("role"),
+            "role": get_role_label(app.get("role", "") or ""),
             "status": app["status"],
             "person_stage": PersonStage.APPLICANT,
             "recruitment_approved": app.get("recruitment_approved", False),
@@ -236,7 +245,7 @@ async def get_recruitment_pipeline(user: dict = Depends(get_current_user)):
                 "applicant_reference": app.get("applicant_reference"),
                 "name": f"{app.get('first_name', '')} {app.get('last_name', '')}".strip(),
                 "email": app.get("email"),
-                "role": app.get("role"),
+                "role": get_role_label(app.get("role", "") or ""),
                 "created_at": app.get("created_at"),
                 "recruitment_approved": app.get("recruitment_approved", False)
             })

@@ -161,6 +161,19 @@ REQUIREMENT_DEFINITIONS = {
         "policy": {}
     },
     
+    # ----- PROFESSIONAL REGISTRATION DOCUMENTS -----
+    "professional_indemnity": {
+        "key": "professional_indemnity",
+        "label": "Professional Indemnity Insurance",
+        "type": "document",
+        "category": "Professional Registration",
+        "blocking": True,
+        "supports_files": True,
+        "supports_requests": False,
+        "expiry_tracked": True,
+        "policy": {}
+    },
+
     # ----- COMPETENCY & INDUCTION -----
     "clinical_competency": {
         "key": "clinical_competency",
@@ -172,7 +185,30 @@ REQUIREMENT_DEFINITIONS = {
         "supports_requests": False,
         "policy": {}
     },
-    
+
+    "medication_competency": {
+        "key": "medication_competency",
+        "label": "Medication Administration Competency",
+        "type": "document",
+        "category": "Competency",
+        "blocking": True,
+        "supports_files": True,
+        "supports_requests": False,
+        "policy": {}
+    },
+
+    # ----- MANAGEMENT / CQC -----
+    "fit_proper_persons": {
+        "key": "fit_proper_persons",
+        "label": "Fit and Proper Persons Declaration",
+        "type": "form",
+        "category": "Compliance",
+        "blocking": True,
+        "supports_files": False,
+        "supports_requests": False,
+        "policy": {}
+    },
+
     "induction": {
         "key": "induction",
         "label": "Induction",

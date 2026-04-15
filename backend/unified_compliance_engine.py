@@ -623,9 +623,11 @@ async def get_unified_employee_status(
     }, {"_id": 0}).to_list(100)
     
     # Get form submissions
+    # NOTE: "signed_off" is included — compliance-file endpoint treats it as admin-verified
+    # and it must not remain a blocker when the summary already shows it as done.
     all_forms = await db.form_submissions.find({
         "employee_id": emp_id,
-        "status": {"$in": ["submitted", "verified", "approved"]}
+        "status": {"$in": ["submitted", "verified", "approved", "signed_off"]}
     }, {"_id": 0}).to_list(50)
     
     # Get induction checklist
@@ -802,7 +804,24 @@ async def get_unified_employee_status(
             _active_check = dbs_check if req_id == "dbs" else rtw_check
             _check_verified = bool(_active_check and (_active_check.get("outcome") == "verified"))
             _has_live_evidence = len(matching_docs) > 0
-            verified_count = 1 if (_has_live_evidence and _check_verified) else 0
+            # Legacy path: when no formal check record exists at all, accept an
+            # admin-verified document (doc.verified=True or status approved/verified).
+            # This aligns with the /compliance-file endpoint evidence-row logic.
+            # If ANY check record is present (even unverified), it takes priority.
+            _dbs_rtw_reject_set = frozenset((
+                "rejected", "amendment_requested", "invalidated",
+                "deleted", "superseded", "uploaded_in_error",
+            ))
+            _legacy_doc_verified = (
+                _active_check is None
+                and any(
+                    (doc.get("verified") is True or doc.get("status") in ("approved", "verified"))
+                    and (doc.get("status") or "").lower() not in _dbs_rtw_reject_set
+                    and (doc.get("review_status") or "").lower() not in _dbs_rtw_reject_set
+                    for doc in matching_docs
+                )
+            )
+            verified_count = 1 if (_has_live_evidence and (_check_verified or _legacy_doc_verified)) else 0
         else:
             verified_count = 0
             for doc in matching_docs:
@@ -865,6 +884,10 @@ async def get_unified_employee_status(
             _check_verified = bool(_active_check and (_active_check.get("outcome") == "verified"))
             if not matching_docs:
                 verification_status = "reupload_required" if has_reupload_signal(req_id) else "missing"
+            elif _active_check is None and _legacy_doc_verified:
+                # Admin verified the document directly; no formal check record yet.
+                # Align with compliance-file evidence-row display.
+                verification_status = "verified"
             elif _active_check is None:
                 verification_status = "check_required"
             elif not _check_verified:
@@ -1178,10 +1201,11 @@ async def get_unified_employee_status(
         for form in all_forms:
             form_type = (form.get("form_type") or "").lower()
             if form_id in form_type or form_type in form_id:
-                # Track verified forms separately
-                if form.get("verified") == True:
+                # "signed_off" means the admin has processed and closed the form —
+                # the compliance-file endpoint treats this as admin-verified, so align here.
+                if form.get("verified") == True or form.get("status") == "signed_off":
                     verified_form = form
-                elif form.get("status") in ["submitted", "verified"]:
+                elif form.get("status") in ["submitted", "verified", "approved"]:
                     if submitted_form is None:  # Keep first submitted
                         submitted_form = form
         
@@ -1189,9 +1213,12 @@ async def get_unified_employee_status(
         matched_form = verified_form or submitted_form
         
         # P0 FIX: Form is complete ONLY if verified by admin (not just submitted)
-        # This ensures progress % only increases after admin verification
-        is_verified = matched_form is not None and matched_form.get("verified") == True
-        is_submitted = matched_form is not None and matched_form.get("status") in ["submitted", "verified"]
+        # Also treat signed_off as admin-verified to align with compliance-file endpoint.
+        is_verified = matched_form is not None and (
+            matched_form.get("verified") == True
+            or matched_form.get("status") == "signed_off"
+        )
+        is_submitted = matched_form is not None and matched_form.get("status") in ["submitted", "verified", "signed_off"]
         
         checks[form_id] = is_verified
         
@@ -1228,6 +1255,7 @@ async def get_unified_employee_status(
     # ==========================================================================
     
     # Contract
+    # Check old-format acknowledgements first (agreement_acknowledgements collection)
     contract_ack = None
     for ack in agreements:
         ack_type = (ack.get("agreement_type") or "").lower()
@@ -1235,7 +1263,26 @@ async def get_unified_employee_status(
             if ack.get("status") in ["signed", "submitted", "verified"]:
                 contract_ack = ack
                 break
-    
+
+    # Fallback: check new-format template submissions (agreement_submissions collection).
+    # The compliance-file endpoint reads from this collection; if a contract was
+    # completed via the template system it only exists here, not in acknowledgements.
+    _CONTRACT_TEMPLATE_IDS = {
+        "ZERO_HOUR_CONTRACT_V1",
+        "EMPLOYMENT_CONTRACT_V1",
+        "CASUAL_WORKER_CONTRACT_V1",
+    }
+    if not contract_ack:
+        _contract_sub = await db.agreement_submissions.find_one(
+            {
+                "employee_id": emp_id,
+                "template_id": {"$in": list(_CONTRACT_TEMPLATE_IDS)},
+            },
+            {"_id": 0},
+        )
+        if _contract_sub:
+            contract_ack = _contract_sub  # treat as signed
+
     contract_signed = bool(contract_ack) or employee.get("contract_signed", False)
     checks["contract"] = contract_signed
     
@@ -1373,6 +1420,44 @@ async def get_unified_employee_status(
                 "category": "professional",
                 "severity": "critical"
             })
+
+        # Medication Administration Competency (nurse-specific gate)
+        med_comp_docs = find_docs_for_requirement("medication_competency")
+        med_comp_complete = any(
+            d.get("status") in ("complete", "verified", "approved")
+            or is_document_verified_with_stamp(d)
+            for d in med_comp_docs
+        )
+        checks["medication_competency"] = med_comp_complete
+
+        if not med_comp_complete:
+            blockers.append({
+                "id": "medication_competency",
+                "gate": "medication_competency",
+                "label": "Medication Administration Competency",
+                "reason": "Medication Administration Competency: Not completed or verified",
+                "category": "competency",
+                "severity": "critical"
+            })
+
+        # Clinical Competency Assessment (nurse-specific gate)
+        clin_comp_docs = find_docs_for_requirement("clinical_competency")
+        clin_comp_complete = any(
+            d.get("status") in ("complete", "verified", "approved")
+            or is_document_verified_with_stamp(d)
+            for d in clin_comp_docs
+        )
+        checks["clinical_competency"] = clin_comp_complete
+
+        if not clin_comp_complete:
+            blockers.append({
+                "id": "clinical_competency",
+                "gate": "clinical_competency",
+                "label": "Clinical Competency Assessment",
+                "reason": "Clinical Competency Assessment: Not completed or verified",
+                "category": "competency",
+                "severity": "critical"
+            })
     
     # ==========================================================================
     # CALCULATE OVERALL PROGRESS
@@ -1382,10 +1467,16 @@ async def get_unified_employee_status(
     completed_requirements = sum(cat["completed"] for cat in categories.values())
     
     # Add nurse-specific requirements to total
-    # P0 FIX: Nurse = 33 base + 1 (NMC) = 34 requirements
+    # Nurse = 33 base + 1 (NMC) + 1 (medication_competency) + 1 (clinical_competency) = 36 requirements
     if is_nurse:
-        total_requirements += 1  # NMC Registration only
+        total_requirements += 1  # NMC Registration
         if checks.get("professional_registration"):
+            completed_requirements += 1
+        total_requirements += 1  # Medication Administration Competency
+        if checks.get("medication_competency"):
+            completed_requirements += 1
+        total_requirements += 1  # Clinical Competency Assessment
+        if checks.get("clinical_competency"):
             completed_requirements += 1
     
     overall_percentage = round((completed_requirements / total_requirements) * 100) if total_requirements > 0 else 0
@@ -1454,7 +1545,7 @@ async def get_unified_employee_status(
             "employment_gaps": {"passed": checks.get("employment_gaps_explained", True), "label": "Employment Gaps Explained"},
         },
         "gates_passed": sum(1 for g in checks.values() if g is True),
-        "total_gates": 12 + (2 if is_nurse else 0),
+        "total_gates": 12 + (4 if is_nurse else 0),  # +NMC +indemnity +medication_competency +clinical_competency
     }
     
     # Include detailed items if requested

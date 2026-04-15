@@ -52,8 +52,10 @@ ROLE_PACK_NURSE = {
         "proof_of_address",
         "dbs",
         "nmc_registration",
+        "professional_indemnity",
         "training_scan",
         "clinical_competency",
+        "medication_competency",
         "induction"
     ],
     
@@ -63,6 +65,34 @@ ROLE_PACK_NURSE = {
         "poa_min_files": 2,
         "min_references": 2,
         "nmc_required": True
+    }
+}
+
+ROLE_PACK_MANAGER = {
+    "role": "manager",
+    "label": "Manager / Director",
+
+    "requirements": [
+        "cv",
+        "application_form",
+        "equal_opportunities",
+        "reference_1",
+        "reference_2",
+        "right_to_work",
+        "identity",
+        "proof_of_address",
+        "dbs",
+        "training_scan",
+        "fit_proper_persons",
+        "induction"
+    ],
+
+    "policies": {
+        "dbs_required_before_approval": True,
+        "poa_validity_months": 12,
+        "poa_min_files": 2,
+        "min_references": 2,
+        "fit_proper_persons_required": True
     }
 }
 
@@ -155,6 +185,12 @@ ROLE_PACKS = {
     "care_assistant": ROLE_PACK_CARE_ASSISTANT,
     "senior_care_assistant": ROLE_PACK_SENIOR_CARE_ASSISTANT,
     "support_worker": ROLE_PACK_SUPPORT_WORKER,
+    # Manager / director variants — all get fit_proper_persons slot at intake
+    "manager": ROLE_PACK_MANAGER,
+    "registered_manager": ROLE_PACK_MANAGER,
+    "director": ROLE_PACK_MANAGER,
+    "nursing_director": ROLE_PACK_MANAGER,
+    "operations_manager": ROLE_PACK_MANAGER,
 }
 
 

@@ -63,14 +63,15 @@ ROLE_WORK_REQUIREMENTS = {
             "staff_health_questionnaire",
         ],
         "competencies": [
-            "clinical_competency",  # Nurse-specific clinical competency
+            "clinical_competency",        # Nurse-specific clinical competency
+            "medication_competency",       # Medication administration competency
         ],
         "critical_documents": [
             "right_to_work",
             "dbs",
             "identity",
-            "nmc_registration",  # Nurse-specific
-            "professional_indemnity",  # Annual insurance certificate
+            "nmc_registration",            # Nurse-specific
+            "professional_indemnity",      # Annual insurance certificate
         ],
         "training_blockers": True,
     },

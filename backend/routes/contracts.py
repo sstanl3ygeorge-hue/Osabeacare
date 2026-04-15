@@ -97,8 +97,11 @@ async def check_can_sign_contract(
         "employee_id": employee_id,
         "can_sign": result.get("can_sign", False),
         "reason": result.get("reason"),
-        "missing_requirements": result.get("missing_requirements", []),
-        "completed_requirements": result.get("completed_requirements", [])
+        "blockers": result.get("blockers", []),
+        "completed": result.get("completed", []),
+        "progress_percentage": result.get("progress_percentage", 0),
+        "total_requirements": result.get("total_requirements", 0),
+        "completed_count": result.get("completed_count", 0),
     }
 
 

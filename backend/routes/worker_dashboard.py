@@ -1477,7 +1477,9 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "status": status,
             "employee_status": employee_status,
             "is_active_employee": is_active_employee,
-            "job_role": employee.get("job_role", "")
+            "job_role": employee.get("job_role", ""),
+            "person_stage": "employee" if employee_status in ("onboarding", "active", "inactive", "archived") else "applicant",
+            "recruitment_approved": employee.get("recruitment_approved", False),
         },
         "progress": {
             "percentage": progress_percentage,

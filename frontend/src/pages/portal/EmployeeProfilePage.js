@@ -3587,10 +3587,11 @@ export default function EmployeeProfilePage() {
             const trainingSummary = complianceRequirements?.training_summary || {};
             const safetyStatus = complianceRequirements?.safety_status || {};
             
-            // Calculate missing items (no evidence)
-            const missingItems = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
+            // Missing items — use backend-computed count (summary.missing is server-authoritative).
+            // Avoid re-deriving from per-row flags on the client.
+            const missingItems = complianceRequirements?.summary?.missing ?? reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
             
-            // Calculate pending review (has evidence but not verified)
+            // Pending review — per-row backend flags are authoritative; count is display-only.
             const pendingReview = reqs.filter(r => r.has_evidence && !r.verified).length;
             
             // Canonical readiness blocking status
@@ -3817,7 +3818,7 @@ export default function EmployeeProfilePage() {
             {/* Missing Items */}
             {(() => {
               const reqs = complianceRequirements?.requirements || [];
-              const missing = reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
+              const missing = complianceRequirements?.summary?.missing ?? reqs.filter(r => !r.has_evidence && r.requirement_type !== 'conditional').length;
               if (missing > 0) {
                 return (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-red-100 rounded-lg">
@@ -3829,7 +3830,7 @@ export default function EmployeeProfilePage() {
               return null;
             })()}
             
-            {/* Pending Review */}
+            {/* Pending Review — per-row has_evidence/verified are backend-set fields */}
             {(() => {
               const reqs = complianceRequirements?.requirements || [];
               const pending = reqs.filter(r => r.has_evidence && !r.verified).length;
@@ -3866,10 +3867,10 @@ export default function EmployeeProfilePage() {
                 }
               }
               
-              // Check DBS expiry - HARDENING: Use backend-provided days if available
-              if (dbsSummary.next_dbs_review_due) {
-                // Prefer backend-computed days_until_review, fallback to safe local calc
-                const days = dbsSummary.days_until_review ?? Math.ceil((parseBackendDate(dbsSummary.next_dbs_review_due) - new Date()) / (1000 * 60 * 60 * 24));
+              // Check DBS expiry — use only backend-computed days_until_review (safety engine).
+              // No local date arithmetic: if backend doesn't supply days_until_review, skip rendering.
+              if (dbsSummary.next_dbs_review_due && dbsSummary.days_until_review != null) {
+                const days = dbsSummary.days_until_review;
                 if (days <= 30) {
                   return (
                     <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${

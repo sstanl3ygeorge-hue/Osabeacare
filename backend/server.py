@@ -15528,6 +15528,7 @@ async def upload_requirement_evidence(
                     "original_filename": file.filename,
                     "uploaded_at": now,
                     "status": "uploaded",
+                    "is_active": True,
                     "updated_at": now,
                     "expiry_date": expiry_date
                 }}
@@ -15569,6 +15570,31 @@ async def upload_requirement_evidence(
         # reviewable CV so cv_document_id is set and Review CV becomes available immediately.
         CV_REQUIREMENT_IDS = {"cv", "resume", "curriculum_vitae"}
         if requirement_id in CV_REQUIREMENT_IDS:
+            await db.employee_documents.update_many(
+                {
+                    "employee_id": employee_id,
+                    "id": {"$ne": doc_id},
+                    "requirement_id": {"$in": list(CV_REQUIREMENT_IDS)},
+                    "status": {"$nin": ["superseded", "archived", "deleted"]}
+                },
+                {"$set": {
+                    "status": "superseded",
+                    "is_active": False,
+                    "superseded_at": now,
+                    "updated_at": now
+                }}
+            )
+            await db.employee_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "requirement_id": "cv",
+                    "requirement_name": "CV / Resume",
+                    "document_subtype": "cv",
+                    "is_active": True,
+                    "status": "uploaded",
+                    "updated_at": now
+                }}
+            )
             await db.employees.update_one(
                 {"id": employee_id},
                 {"$set": {"cv_document_id": doc_id, "updated_at": now}}
@@ -25530,6 +25556,9 @@ async def submit_structured_application(form: StructuredApplicationForm):
             {"id": form.cv_file_id},
             {"$set": {
                 "employee_id": app_id,
+                "requirement_id": "cv",
+                "requirement_name": "CV / Resume",
+                "document_subtype": "cv",
                 "is_active": True,
                 "status": DocumentStatus.UPLOADED,
                 "verified": False,
@@ -25910,6 +25939,9 @@ async def upload_application_cv(file: UploadFile = File(...)):
         "document_type_id": None,
         "document_type_name": "CV / Resume",
         "category": "Application Documents",
+        "requirement_id": "cv",
+        "requirement_name": "CV / Resume",
+        "document_subtype": "cv",
         "file_name": file.filename,
         "original_filename": file.filename,
         "file_url": file_url,

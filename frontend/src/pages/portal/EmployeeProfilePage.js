@@ -3138,10 +3138,28 @@ export default function EmployeeProfilePage() {
     ) || null;
   const applicationPdfDocument = documents.find((document) => document?.requirement_id === 'application_form_pdf') || null;
   const rtwSummary = complianceRequirements?.rtw_summary || {};
-  const cvDocuments = documents.filter((document) => ['cv', 'resume', 'curriculum_vitae'].includes(document?.requirement_id));
-  const activeCvDocument = cvDocuments.find((document) =>
-    [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(employee?.cv_document_id)
-  ) || null;
+  const isLinkedActiveCvDocument = (document) => Boolean(
+    employee?.cv_document_id &&
+    [document?.id, document?.file_id, document?.document_id].filter(Boolean).includes(employee.cv_document_id)
+  );
+  const isCvLikeDocument = (document) => {
+    const cvRequirementIds = ['cv', 'resume', 'curriculum_vitae'];
+    const label = [
+      document?.requirement_name,
+      document?.document_type_name,
+      document?.document_label,
+      document?.original_filename,
+      document?.file_name
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return (
+      cvRequirementIds.includes(document?.requirement_id) ||
+      isLinkedActiveCvDocument(document) ||
+      /\b(cv|resume|curriculum vitae)\b/.test(label)
+    );
+  };
+  const cvDocuments = documents.filter(isCvLikeDocument);
+  const activeCvDocument = cvDocuments.find(isLinkedActiveCvDocument) || null;
   const cvDocument = activeCvDocument || cvDocuments[0] || null;
   const employmentHistoryGapRow = complianceFile?.sections?.employment_history?.rows?.[0] || null;
   const employmentGapEvaluation = employmentHistoryGapRow?.gap_evaluation || null;

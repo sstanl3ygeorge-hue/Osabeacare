@@ -34146,6 +34146,38 @@ async def invalidate_rtw_check(
 # POST /employees/{id}/employment-gaps/{id}/request-info, POST /employees/{id}/detect-employment-gaps
 
 
+def _normalise_gap_records_for_compliance_file(raw_gaps, employee_id: str, source: str) -> list:
+    """Return dict-only gap records safe for compliance-file evaluation."""
+    if not raw_gaps:
+        return []
+
+    if not isinstance(raw_gaps, list):
+        logger.warning(
+            "Compliance file skipped malformed employment gaps for employee %s from %s: expected list, got %s",
+            employee_id,
+            source,
+            type(raw_gaps).__name__,
+        )
+        return []
+
+    gap_records = []
+    for gap in raw_gaps:
+        if not isinstance(gap, dict):
+            logger.warning(
+                "Compliance file skipped malformed employment gap for employee %s from %s: expected dict, got %s",
+                employee_id,
+                source,
+                type(gap).__name__,
+            )
+            continue
+
+        cleaned_gap = dict(gap)
+        cleaned_gap.pop("_id", None)
+        gap_records.append(cleaned_gap)
+
+    return gap_records
+
+
 async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     """
     Internal helper to get compliance file data for approval evaluation.
@@ -34388,17 +34420,22 @@ async def get_compliance_file_data(employee_id: str, employee: dict) -> dict:
     
     # ---- Employment History Verification ----
     # Get gap records from database
-    gap_records = await db.employment_gaps.find(
+    raw_gap_records = await db.employment_gaps.find(
         {"employee_id": employee_id}
     ).to_list(50)
-    
-    # Remove _id
-    for gap in gap_records:
-        gap.pop("_id", None)
+    gap_records = _normalise_gap_records_for_compliance_file(
+        raw_gap_records,
+        employee_id,
+        "employment_gaps",
+    )
     
     # If no records, check employee.employment_gaps
     if not gap_records and employee.get("employment_gaps"):
-        gap_records = employee.get("employment_gaps", [])
+        gap_records = _normalise_gap_records_for_compliance_file(
+            employee.get("employment_gaps", []),
+            employee_id,
+            "employee.employment_gaps",
+        )
     
     # Evaluate
     gap_evaluation = evaluate_gaps_compliance(gap_records)
@@ -34464,7 +34501,8 @@ async def get_compliance_file(
     public_upload_docs = [d for d in documents if d.get('source_type') == 'email_upload_link']
     logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Found {len(public_upload_docs)} public upload documents")
     for doc in public_upload_docs:
-        logger.info(f"  Public upload doc: id={doc.get('id')[:12]}..., requirement_id={doc.get('requirement_id')}, status={doc.get('status')}")
+        doc_id_preview = str(doc.get('id') or '')[:12]
+        logger.info(f"  Public upload doc: id={doc_id_preview}..., requirement_id={doc.get('requirement_id')}, status={doc.get('status')}")
     
     # Log requirement_id distribution
     req_counts = {}
@@ -34474,14 +34512,14 @@ async def get_compliance_file(
     logger.info(f"COMPLIANCE_READ_DIAGNOSTIC: Documents by requirement_id: {req_counts}")
     
     # Get extraction statuses
-    doc_ids = [d["id"] for d in documents]
+    doc_ids = [d.get("id") for d in documents if d.get("id")]
     extractions = {}
     if doc_ids:
         ext_list = await db.document_extractions.find(
             {"document_id": {"$in": doc_ids}},
             {"_id": 0}
         ).to_list(len(doc_ids))
-        extractions = {e["document_id"]: e for e in ext_list}
+        extractions = {e["document_id"]: e for e in ext_list if e.get("document_id")}
     
     # Get pending requests
     requests = await db.email_requests.find(
@@ -34610,7 +34648,7 @@ async def get_compliance_file(
         config: dict = None
     ) -> dict:
         """Build an evidence row (supporting files only)."""
-        config = config or RequirementConfig.get_dual_row_config(key) or RequirementConfig.get(key)
+        config = config or RequirementConfig.get_dual_row_config(key) or RequirementConfig.get(key) or {}
         
         # Collect documents from multiple requirement keys
         all_docs = []
@@ -34681,7 +34719,7 @@ async def get_compliance_file(
         # Check extraction status
         awaiting_extraction = 0
         for doc in active_docs:
-            ext = extractions.get(doc["id"])
+            ext = extractions.get(doc.get("id"))
             if ext and ext.get("review_status") == "awaiting_review":
                 awaiting_extraction += 1
         
@@ -34735,9 +34773,9 @@ async def get_compliance_file(
         }
         
         if current_request:
-            events = current_request.get("events", [])
-            clicked_at = next((e.get("timestamp") for e in events if e.get("event_type") == "clicked"), None)
-            submitted_at = next((e.get("timestamp") for e in events if e.get("event_type") == "submitted"), None)
+            events = current_request.get("events") or []
+            clicked_at = next((e.get("timestamp") for e in events if isinstance(e, dict) and e.get("event_type") == "clicked"), None)
+            submitted_at = next((e.get("timestamp") for e in events if isinstance(e, dict) and e.get("event_type") == "submitted"), None)
             
             # Determine status from events
             if submitted_at:
@@ -34796,7 +34834,7 @@ async def get_compliance_file(
             # Count files uploaded since last request
             last_request_date = all_requests[0].get("created_at") if all_requests else None
             if last_request_date:
-                files_submitted = len([d for d in active_docs if d.get("uploaded_at", d.get("created_at", "")) >= last_request_date])
+                files_submitted = len([d for d in active_docs if (d.get("uploaded_at") or d.get("created_at") or "") >= last_request_date])
                 request_lifecycle["files_submitted"] = files_submitted
             request_lifecycle["files_needed"] = max(0, (config.get("required_count", 2)) - active_count)
         
@@ -34875,7 +34913,7 @@ async def get_compliance_file(
                     "verified_by": d.get("verified_by"),
                     "verified_by_name": d.get("verified_by_name"),
                     "verified_at": d.get("verified_at"),
-                    "extraction_status": {"status": extractions.get(d["id"], {}).get("review_status")} if d["id"] in extractions else None,
+                    "extraction_status": {"status": extractions.get(d.get("id"), {}).get("review_status")} if d.get("id") in extractions else None,
                     # Verification stamp fields
                     "verification_stamp": d.get("verification_stamp"),
                     "verification_stamp_label": d.get("verification_stamp_label"),
@@ -36121,17 +36159,22 @@ async def get_compliance_file(
     # =========================================================================
     # ADD EMPLOYMENT GAP VERIFICATION SECTION
     # =========================================================================
-    gap_records = await db.employment_gaps.find(
+    raw_gap_records = await db.employment_gaps.find(
         {"employee_id": employee_id}
     ).sort("gap_start", 1).to_list(50)
-    
-    # Remove _id from records
-    for gap in gap_records:
-        gap.pop("_id", None)
+    gap_records = _normalise_gap_records_for_compliance_file(
+        raw_gap_records,
+        employee_id,
+        "employment_gaps",
+    )
     
     # If no gap records but employee has employment_gaps field, use that
     if not gap_records and employee.get("employment_gaps"):
-        gap_records = employee.get("employment_gaps", [])
+        gap_records = _normalise_gap_records_for_compliance_file(
+            employee.get("employment_gaps", []),
+            employee_id,
+            "employee.employment_gaps",
+        )
     
     # Evaluate gap compliance
     gap_evaluation = evaluate_gaps_compliance(gap_records)

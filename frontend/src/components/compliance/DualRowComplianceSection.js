@@ -162,7 +162,10 @@ export default function DualRowComplianceSection({
 
   // Fetch compliance file data
   const fetchComplianceFile = async () => {
-    if (!employeeId) return;
+    if (!employeeId || !token) {
+      console.debug('Skipping dual-row compliance-file fetch until employeeId and auth token are available');
+      return;
+    }
     
     setLoading(true);
     setError(null);

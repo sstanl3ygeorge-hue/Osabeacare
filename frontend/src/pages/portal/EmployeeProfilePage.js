@@ -1128,6 +1128,11 @@ export default function EmployeeProfilePage() {
   };
 
   const fetchComplianceFile = async () => {
+    if (!employeeId || !token) {
+      console.debug('Skipping compliance-file fetch until employeeId and auth token are available');
+      return;
+    }
+
     try {
       const response = await axios.get(`${API}/employees/${employeeId}/compliance-file`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -1139,6 +1144,11 @@ export default function EmployeeProfilePage() {
   };
 
   useEffect(() => {
+    if (!employeeId || !token) {
+      console.debug('Skipping employee profile protected fetches until employeeId and auth token are available');
+      return;
+    }
+
     fetchData();
     fetchCompliance();
     fetchComplianceFile();
@@ -1473,11 +1483,16 @@ export default function EmployeeProfilePage() {
       setSelectedDocType('');
       setDocumentLabel('');
       setUploadFile(null);
-      await Promise.all([
+      const refreshTasks = [
         fetchData(),
-        fetchCompliance(),
-        fetchComplianceFile()
-      ]);
+        fetchCompliance()
+      ];
+      if (token) {
+        refreshTasks.push(fetchComplianceFile());
+      } else {
+        console.debug('Skipping post-upload compliance-file refresh because auth token is not available');
+      }
+      await Promise.all(refreshTasks);
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Upload failed — please try again');
     } finally {

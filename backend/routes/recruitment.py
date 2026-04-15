@@ -557,7 +557,38 @@ async def sign_off_employment_review(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    # ── Guard 1: employment history must exist ───────────────────────────────
+    # ── Guard 1: application record must exist ──────────────────────────────
+    # Accept structured submission OR uploaded application PDF document —
+    # same sources the UI uses for applicationAvailable.
+    application_submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"requirement_id": "application_form"},
+            {"form_type": "application_form"},
+        ],
+    }, {"_id": 0, "id": 1})
+    application_pdf = await db.employee_documents.find_one({
+        "employee_id": employee_id,
+        "requirement_id": "application_form_pdf",
+        "status": {"$nin": ["deleted", "superseded", "archived"]},
+    }, {"_id": 0, "id": 1})
+    if not application_submission and not application_pdf:
+        raise HTTPException(
+            status_code=400,
+            detail="An application record must be on file before signing off Employment Review."
+        )
+
+    # ── Guard 2: declarations must be on file ────────────────────────────────
+    # Declarations are on file once the declarations sub-object has been saved
+    # (EditDeclarationsDialog always writes dbs_consent_given).
+    declarations = employee.get("declarations") or {}
+    if "dbs_consent_given" not in declarations:
+        raise HTTPException(
+            status_code=400,
+            detail="Applicant declarations must be recorded before signing off Employment Review."
+        )
+
+    # ── Guard 3: employment history must exist ───────────────────────────────
     employment_history = employee.get("employment_history") or []
     if not employment_history:
         raise HTTPException(
@@ -565,7 +596,7 @@ async def sign_off_employment_review(
             detail="Employment history is required before signing off Employment Review."
         )
 
-    # ── Guard 2: all gaps must be resolved ───────────────────────────────────
+    # ── Guard 4: all gaps must be resolved ───────────────────────────────────
     unresolved = await db.employment_gaps.find({
         "employee_id": employee_id,
         "status": {"$in": ["pending", "needs_info", "rejected", "explained"]}

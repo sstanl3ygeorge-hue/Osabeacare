@@ -440,7 +440,24 @@ async def verify_employment_gap(
         {"employee_id": employee_id, "id": gap["id"]},
         {"$set": update_data}
     )
-    
+
+    # Invalidate employment review sign-off when a gap is rejected or needs more info
+    if status != "verified" and employee.get("employment_review_signed_off"):
+        await db.employees.update_one({"id": employee_id}, {"$unset": {
+            "employment_review_signed_off": "",
+            "employment_review_signed_off_by": "",
+            "employment_review_signed_off_by_name": "",
+            "employment_review_signed_off_at": "",
+            "employment_review_notes": "",
+        }})
+        await log_audit_action(
+            user.get("user_id"),
+            "employment_review_sign_off_invalidated",
+            "employee",
+            employee_id,
+            {"reason": "gap_status_changed", "triggered_by": "verify_employment_gap", "new_gap_status": status}
+        )
+
     await log_audit_action(
         user.get("user_id"),
         f"employment_gap_{status}",
@@ -499,7 +516,24 @@ async def request_gap_info(
             **_build_gap_compatibility_fields(canonical_status),
         }}
     )
-    
+
+    # Invalidate employment review sign-off — requesting info means review is incomplete
+    if employee.get("employment_review_signed_off"):
+        await db.employees.update_one({"id": employee_id}, {"$unset": {
+            "employment_review_signed_off": "",
+            "employment_review_signed_off_by": "",
+            "employment_review_signed_off_by_name": "",
+            "employment_review_signed_off_at": "",
+            "employment_review_notes": "",
+        }})
+        await log_audit_action(
+            user.get("user_id"),
+            "employment_review_sign_off_invalidated",
+            "employee",
+            employee_id,
+            {"reason": "gap_info_requested", "triggered_by": "request_gap_info", "gap_id": gap["id"]}
+        )
+
     # Create notification for employee
     notification_id = str(uuid.uuid4())
     await db.worker_notifications.insert_one({
@@ -587,6 +621,23 @@ async def reopen_employment_gap(
             "reason": request.reason.strip(),
         }
     )
+
+    # Invalidate employment review sign-off — reopening a gap means the review is incomplete
+    if employee.get("employment_review_signed_off"):
+        await db.employees.update_one({"id": employee_id}, {"$unset": {
+            "employment_review_signed_off": "",
+            "employment_review_signed_off_by": "",
+            "employment_review_signed_off_by_name": "",
+            "employment_review_signed_off_at": "",
+            "employment_review_notes": "",
+        }})
+        await log_audit_action(
+            user.get("user_id"),
+            "employment_review_sign_off_invalidated",
+            "employee",
+            employee_id,
+            {"reason": "gap_reopened", "triggered_by": "reopen_employment_gap", "gap_id": gap["id"], "previous_status": previous_status}
+        )
 
     updated_gap = await db.employment_gaps.find_one(
         {"employee_id": employee_id, "id": gap["id"]},

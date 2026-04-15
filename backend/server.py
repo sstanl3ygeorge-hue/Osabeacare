@@ -10209,7 +10209,24 @@ async def update_declarations(
     }
     
     await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
+
+    # Invalidate employment review sign-off if declarations changed after sign-off
+    if employee.get("employment_review_signed_off"):
+        await db.employees.update_one({"id": employee_id}, {"$unset": {
+            "employment_review_signed_off": "",
+            "employment_review_signed_off_by": "",
+            "employment_review_signed_off_by_name": "",
+            "employment_review_signed_off_at": "",
+            "employment_review_notes": "",
+        }})
+        await log_audit_action(
+            user['user_id'],
+            "employment_review_sign_off_invalidated",
+            "employee",
+            employee_id,
+            {"reason": "declarations_edited", "triggered_by": "update_declarations"}
+        )
+
     # Log audit with reason
     await log_audit_action(
         user['user_id'],
@@ -12643,7 +12660,24 @@ async def update_employment_history(
     }
     
     await db.employees.update_one({"id": employee_id}, {"$set": update_data})
-    
+
+    # Invalidate employment review sign-off if history changed after sign-off
+    if employee.get("employment_review_signed_off"):
+        await db.employees.update_one({"id": employee_id}, {"$unset": {
+            "employment_review_signed_off": "",
+            "employment_review_signed_off_by": "",
+            "employment_review_signed_off_by_name": "",
+            "employment_review_signed_off_at": "",
+            "employment_review_notes": "",
+        }})
+        await log_audit_action(
+            user['user_id'],
+            "employment_review_sign_off_invalidated",
+            "employee",
+            employee_id,
+            {"reason": "employment_history_edited", "triggered_by": "update_employment_history"}
+        )
+
     await log_audit_action(
         user['user_id'],
         "update_employment_history",

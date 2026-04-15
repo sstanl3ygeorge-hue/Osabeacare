@@ -4791,6 +4791,25 @@ export default function EmployeeProfilePage() {
                           </Button>
                         )}
                       </div>
+                      {declarationsOnFile ? (
+                        <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs">
+                          {[
+                            ['Criminal convictions', employee.declarations?.has_criminal_convictions],
+                            ['Health conditions', employee.declarations?.has_health_conditions],
+                            ['DBS consent', employee.declarations?.dbs_consent_given],
+                            ['RTW restrictions', employee.declarations?.has_rtw_restrictions],
+                          ].map(([label, val]) => (
+                            <div key={label} className="flex items-center justify-between py-0.5 border-b border-gray-100">
+                              <span className="text-gray-500">{label}</span>
+                              <span className={val ? 'text-amber-700 font-medium' : 'text-green-700'}>
+                                {val ? 'Declared' : 'None declared'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-gray-400 italic">Declarations not yet recorded.</p>
+                      )}
                     </div>
                   </div>
 
@@ -4874,21 +4893,6 @@ export default function EmployeeProfilePage() {
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    onClick={handleReviewCv}
-                    disabled={cvReviewLoading || !cvReviewReady}
-                    className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
-                    data-testid="review-cv-btn"
-                  >
-                    {cvReviewLoading ? (
-                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                    ) : (
-                      <FileSearch className="h-4 w-4 mr-1" />
-                    )}
-                    Review CV
-                  </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
                     onClick={() => setEditEmploymentOpen(true)}
                     data-testid="edit-employment-btn"
                   >
@@ -4948,6 +4952,17 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               
+              {/* Gap analysis empty state */}
+              {employmentHistoryExists && !complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && !employmentGapEvaluation && (
+                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-amber-800">Gap analysis not yet run</p>
+                    <p className="text-sm text-amber-600 mt-1">10-year employment gap analysis has not been generated for this profile. Use "Review CV" in the CV section above to trigger gap detection, or the analysis may not have been run yet.</p>
+                  </div>
+                </div>
+              )}
+
               {/* Employment Gap Panel */}
               {complianceFile?.sections?.employment_history?.rows?.[0]?.has_gaps && (
                 <div data-testid="section-employment-gaps">

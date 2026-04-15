@@ -55,7 +55,7 @@ import {
   MoreHorizontal, MoreVertical, Edit, Archive, Trash2, RotateCcw, FileDown, Save,
   Download, RefreshCw, FileArchive, FileSpreadsheet, Printer, FileSearch,
   Camera, Replace, FileX, ClipboardCheck, FormInput, ChevronRight,
-  Briefcase, UserCheck, FileWarning, CalendarClock, Send
+  Briefcase, UserCheck, FileWarning, CalendarClock, Send, ExternalLink
 } from 'lucide-react';
 import { FileUploaderInline } from '../../components/ui/file-uploader';
 import { formatBackendDate, formatBackendDateTime, parseBackendDate } from '../../lib/dateUtils';
@@ -277,6 +277,7 @@ export default function EmployeeProfilePage() {
   
   // Form submissions state
   const [formSubmissions, setFormSubmissions] = useState([]);
+  const [formSubmissionsError, setFormSubmissionsError] = useState(false);
   const [viewFormSubmission, setViewFormSubmission] = useState(null);
   const [isVerifyingTraining, setIsVerifyingTraining] = useState(false);
   
@@ -1212,6 +1213,7 @@ export default function EmployeeProfilePage() {
   // Fetch form submissions for the Forms tab
   const fetchFormSubmissions = async () => {
     try {
+      setFormSubmissionsError(false);
       const response = await axios.get(
         `${API}/form-submissions`,
         {
@@ -1221,8 +1223,8 @@ export default function EmployeeProfilePage() {
       );
       setFormSubmissions(response.data.forms || response.data || []);
     } catch {
-      // Optional data for the tab; fail quietly to avoid noisy console output.
       setFormSubmissions([]);
+      setFormSubmissionsError(true);
     }
   };
 
@@ -4530,165 +4532,247 @@ export default function EmployeeProfilePage() {
               </p>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {/* Form status cards with proper data from form_submissions */}
-                {[
-                  { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations' },
-                  { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details' },
-                  { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
-                  { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details' },
-                  { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)' },
-                  { key: 'pre_interview_questionnaire', name: 'Pre-Screen Questionnaire', description: 'Worker pre-screen/application intake responses', allowReminder: false }
-                ].map((form) => {
-                  // Find submission from form_submissions endpoint data
-                  const submission = formSubmissions?.find(fs => 
-                    fs.form_type === form.key || 
-                    fs.requirement_id === form.key ||
-                    (fs.form_type || '').toLowerCase().includes(form.key.split('_')[0])
-                  );
-                  
-                  // Determine status
-                  const status = submission?.status || 'not_started';
-                  const isSubmitted = status === 'submitted' || status === 'verified';
-                  const isInProgress = status === 'draft' || status === 'in_progress';
-                  const isVerified = status === 'verified';
-                  const submittedDate = submission?.submitted_at || submission?.updated_at;
-                  
-                  return (
-                    <div 
-                      key={form.key} 
-                      className={`p-4 rounded-lg border ${
-                        isVerified ? 'bg-green-50 border-green-200' :
-                        isSubmitted ? 'bg-blue-50 border-blue-200' :
-                        isInProgress ? 'bg-amber-50 border-amber-200' :
-                        'bg-gray-50 border-gray-200'
-                      }`}
-                      data-testid={`form-card-${form.key}`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {isVerified ? (
-                            <CheckCircle className="h-5 w-5 text-green-600" />
-                          ) : isSubmitted ? (
-                            <FileText className="h-5 w-5 text-blue-600" />
-                          ) : isInProgress ? (
-                            <Clock className="h-5 w-5 text-amber-500" />
-                          ) : (
-                            <AlertCircle className="h-5 w-5 text-gray-400" />
-                          )}
-                          <div>
-                            <p className="font-medium text-gray-800">{form.name}</p>
-                            <p className="text-xs text-gray-500">{form.description}</p>
-                            {submittedDate && isSubmitted && (
-                              <p className="text-xs text-blue-600 mt-1">
-                                Submitted: {new Date(submittedDate).toLocaleDateString('en-GB', { 
-                                  day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-                                })}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
-                          {/* Status Badge */}
-                          <Badge className={
-                            isVerified ? 'bg-green-100 text-green-700' :
-                            isSubmitted ? 'bg-blue-100 text-blue-700' :
-                            isInProgress ? 'bg-amber-100 text-amber-700' :
-                            'bg-gray-100 text-gray-600'
-                          }>
-                            {isVerified ? 'Reviewed' : 
-                             isSubmitted ? 'Submitted' : 
-                             isInProgress ? 'In Progress' : 
-                             'Not Started'}
-                          </Badge>
-                          
-                          {/* Action Buttons */}
-                          <div className="flex gap-1">
-                            {/* View Submission - only if submitted */}
-                            {isSubmitted && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  setViewFormSubmission({
-                                    isOpen: true,
-                                    formType: form.key,
-                                    formName: form.name,
-                                    submissionId: submission?.id,
-                                    data: submission?.data || submission?.form_data
-                                  });
-                                }}
-                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                                data-testid={`view-submission-${form.key}`}
+              {/* Error state with retry */}
+              {formSubmissionsError && (
+                <div className="flex items-center justify-between p-3 mb-4 rounded-lg border border-red-200 bg-red-50 text-red-700">
+                  <div className="flex items-center gap-2 text-sm">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    Unable to load form status
+                  </div>
+                  <Button size="sm" variant="outline" onClick={fetchFormSubmissions}
+                    className="text-red-600 border-red-200 hover:bg-red-50">
+                    <RefreshCw className="h-3 w-3 mr-1" /> Retry
+                  </Button>
+                </div>
+              )}
+
+              {/* Helper: derive robust form status */}
+              {(() => {
+                const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', {
+                  day: 'numeric', month: 'short', year: 'numeric'
+                }) : null;
+
+                // Form groups: label + forms in order
+                const FORM_GROUPS = [
+                  {
+                    label: 'Pre-Employment Checks',
+                    forms: [
+                      { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations', prefill: true },
+                      { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
+                      { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
+                      { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details', prefill: true },
+                    ]
+                  },
+                  {
+                    label: 'Declarations',
+                    forms: [
+                      { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)' },
+                    ]
+                  },
+                  {
+                    label: 'Screening',
+                    forms: [
+                      { key: 'pre_interview_questionnaire', name: 'Pre-Screen Questionnaire', description: 'Worker pre-screen/application intake responses', infoOnly: true },
+                    ]
+                  },
+                ];
+
+                return (
+                  <div className="space-y-5">
+                    {FORM_GROUPS.map(group => (
+                      <div key={group.label}>
+                        {/* Group label */}
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
+                          {group.label}
+                        </p>
+                        <div className="space-y-2">
+                          {group.forms.map((form) => {
+                            const submission = formSubmissions?.find(fs =>
+                              fs.form_type === form.key ||
+                              fs.requirement_id === form.key ||
+                              (fs.form_type || '').toLowerCase().includes(form.key.split('_')[0])
+                            );
+
+                            // Status — align with compliance-file: signed_off = verified
+                            const rawStatus = submission?.status || 'not_started';
+                            const isVerified = rawStatus === 'verified' || rawStatus === 'signed_off' || submission?.verified === true;
+                            const isRejected = rawStatus === 'rejected';
+                            const isAwaiting = !isVerified && !isRejected && (rawStatus === 'submitted' || rawStatus === 'approved');
+                            const isInProgress = !isVerified && !isRejected && !isAwaiting && (rawStatus === 'draft' || rawStatus === 'in_progress');
+                            const hasSubmission = !!submission;
+
+                            const statusLabel = isVerified ? 'Verified'
+                              : isRejected ? 'Rejected – Action Required'
+                              : isAwaiting ? 'Submitted – Awaiting Review'
+                              : isInProgress ? 'In Progress'
+                              : 'Not Started';
+
+                            const statusColor = isVerified ? 'bg-green-100 text-green-700'
+                              : isRejected ? 'bg-red-100 text-red-700'
+                              : isAwaiting ? 'bg-blue-100 text-blue-700'
+                              : isInProgress ? 'bg-amber-100 text-amber-700'
+                              : 'bg-gray-100 text-gray-600';
+
+                            const cardBorder = isVerified ? 'bg-green-50 border-green-200'
+                              : isRejected ? 'bg-red-50 border-red-200'
+                              : isAwaiting ? 'bg-blue-50 border-blue-200'
+                              : isInProgress ? 'bg-amber-50 border-amber-200'
+                              : 'bg-gray-50 border-gray-200';
+
+                            const IconEl = isVerified ? CheckCircle
+                              : isRejected ? XCircle
+                              : isAwaiting ? FileText
+                              : isInProgress ? Clock
+                              : AlertCircle;
+
+                            const iconColor = isVerified ? 'text-green-600'
+                              : isRejected ? 'text-red-500'
+                              : isAwaiting ? 'text-blue-500'
+                              : isInProgress ? 'text-amber-500'
+                              : 'text-gray-400';
+
+                            // Audit trail dates
+                            const submittedAt = fmtDate(submission?.submitted_at);
+                            const reviewedAt = fmtDate(submission?.verified_at || submission?.signed_off_at);
+                            const reviewedBy = submission?.verified_by_name || submission?.signed_off_by_name || submission?.verified_by;
+
+                            return (
+                              <div
+                                key={form.key}
+                                className={`p-4 rounded-lg border ${cardBorder}`}
+                                data-testid={`form-card-${form.key}`}
                               >
-                                <Eye className="h-4 w-4 mr-1" />
-                                View
-                              </Button>
-                            )}
-                            
-                            {/* Mark as Reviewed - only if submitted but not verified */}
-                            {isSubmitted && !isVerified && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={async () => {
-                                  try {
-                                    await axios.post(
-                                      `${API}/form-submissions/${submission.id}/verify`,
-                                      {},
-                                      { headers: { Authorization: `Bearer ${token}` } }
-                                    );
-                                    toast.success('Form marked as reviewed');
-                                    fetchFormSubmissions();
-                                  } catch (err) {
-                                    toast.error('Failed to mark as reviewed');
-                                  }
-                                }}
-                                className="text-green-600 border-green-200 hover:bg-green-50"
-                                data-testid={`mark-reviewed-${form.key}`}
-                              >
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Mark Reviewed
-                              </Button>
-                            )}
-                            
-                            {/* Send Reminder - only if not submitted */}
-                            {!isSubmitted && form.allowReminder !== false && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={async () => {
-                                  try {
-                                    await axios.post(
-                                      `${API}/employees/${employeeId}/forms/${form.key}/remind`,
-                                      {},
-                                      { headers: { Authorization: `Bearer ${token}` } }
-                                    );
-                                    toast.success(`Reminder sent for ${form.name}`);
-                                  } catch (err) {
-                                    toast.error('Failed to send reminder');
-                                  }
-                                }}
-                                className="text-amber-600 border-amber-200 hover:bg-amber-50"
-                                data-testid={`send-reminder-${form.key}`}
-                              >
-                                <Send className="h-4 w-4 mr-1" />
-                                Send Reminder
-                              </Button>
-                            )}
-                            {!isSubmitted && form.allowReminder === false && (
-                              <Badge className="bg-slate-100 text-slate-700">
-                                Worker completes via Dashboard
-                              </Badge>
-                            )}
-                          </div>
+                                <div className="flex items-start justify-between gap-3">
+                                  {/* Left: icon + text */}
+                                  <div className="flex items-start gap-3 min-w-0">
+                                    <IconEl className={`h-5 w-5 mt-0.5 shrink-0 ${iconColor}`} />
+                                    <div className="min-w-0">
+                                      <p className="font-medium text-gray-800 text-sm">{form.name}</p>
+                                      <p className="text-xs text-gray-500">{form.description}</p>
+                                      {form.prefill && (
+                                        <p className="text-xs text-indigo-500 mt-0.5 italic">
+                                          Pre-filled from application where available
+                                        </p>
+                                      )}
+                                      {/* Audit trail */}
+                                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                                        {submittedAt && (
+                                          <span className="text-gray-400">
+                                            Submitted: <span className="text-gray-600">{submittedAt}</span>
+                                          </span>
+                                        )}
+                                        {reviewedAt ? (
+                                          <span className="text-gray-400">
+                                            Reviewed: <span className="text-gray-600">{reviewedAt}</span>
+                                            {reviewedBy && <span className="text-gray-600"> by {reviewedBy}</span>}
+                                          </span>
+                                        ) : isAwaiting ? (
+                                          <span className="text-gray-400 italic">Not yet reviewed</span>
+                                        ) : null}
+                                        {isRejected && submission?.rejection_reason && (
+                                          <span className="text-red-600">
+                                            Reason: {submission.rejection_reason}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Right: badge + actions */}
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <Badge className={statusColor}>{statusLabel}</Badge>
+
+                                    {/* Info-only forms (Pre-Screen): no action button */}
+                                    {form.infoOnly ? (
+                                      <Badge className="bg-slate-100 text-slate-600 text-xs">
+                                        Worker completes via Dashboard
+                                      </Badge>
+                                    ) : (
+                                      <div className="flex gap-1">
+                                        {/* Verified → View */}
+                                        {isVerified && hasSubmission && (
+                                          <Button size="sm" variant="outline"
+                                            onClick={() => setViewFormSubmission({
+                                              isOpen: true, formType: form.key, formName: form.name,
+                                              submissionId: submission?.id,
+                                              data: submission?.data || submission?.form_data
+                                            })}
+                                            className="text-green-700 border-green-200 hover:bg-green-50"
+                                            data-testid={`view-submission-${form.key}`}>
+                                            <Eye className="h-3.5 w-3.5 mr-1" />View
+                                          </Button>
+                                        )}
+
+                                        {/* Awaiting → Review Submission + Mark Reviewed */}
+                                        {isAwaiting && (
+                                          <>
+                                            <Button size="sm" variant="outline"
+                                              onClick={() => setViewFormSubmission({
+                                                isOpen: true, formType: form.key, formName: form.name,
+                                                submissionId: submission?.id,
+                                                data: submission?.data || submission?.form_data
+                                              })}
+                                              className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                              data-testid={`review-submission-${form.key}`}>
+                                              <Eye className="h-3.5 w-3.5 mr-1" />Review Submission
+                                            </Button>
+                                            <Button size="sm" variant="outline"
+                                              onClick={async () => {
+                                                try {
+                                                  await axios.post(
+                                                    `${API}/form-submissions/${submission.id}/verify`, {},
+                                                    { headers: { Authorization: `Bearer ${token}` } }
+                                                  );
+                                                  toast.success('Form marked as reviewed');
+                                                  fetchFormSubmissions();
+                                                } catch { toast.error('Failed to mark as reviewed'); }
+                                              }}
+                                              className="text-green-600 border-green-200 hover:bg-green-50"
+                                              data-testid={`mark-reviewed-${form.key}`}>
+                                              <CheckCircle className="h-3.5 w-3.5 mr-1" />Mark Reviewed
+                                            </Button>
+                                          </>
+                                        )}
+
+                                        {/* Not started / in progress → Open in Worker Dashboard */}
+                                        {!isVerified && !isAwaiting && !isRejected && (
+                                          <a
+                                            href="/worker/dashboard"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                                            data-testid={`open-dashboard-${form.key}`}
+                                          >
+                                            <ExternalLink className="h-3.5 w-3.5" />
+                                            Open in Worker Dashboard
+                                          </a>
+                                        )}
+
+                                        {/* Rejected → also let admin view original + open dashboard */}
+                                        {isRejected && hasSubmission && (
+                                          <Button size="sm" variant="outline"
+                                            onClick={() => setViewFormSubmission({
+                                              isOpen: true, formType: form.key, formName: form.name,
+                                              submissionId: submission?.id,
+                                              data: submission?.data || submission?.form_data
+                                            })}
+                                            className="text-red-600 border-red-200 hover:bg-red-50">
+                                            <Eye className="h-3.5 w-3.5 mr-1" />View
+                                          </Button>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
           

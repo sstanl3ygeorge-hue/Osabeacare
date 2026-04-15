@@ -456,10 +456,16 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
       </CardHeader>
       <CardContent>
         {interviews.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <ClipboardList className="h-10 w-10 mx-auto mb-3 text-gray-300" />
-            <p>No interview records on file</p>
-            <p className="text-xs mt-1">Click "Record Interview" to create one</p>
+          <div className="rounded-lg border-2 border-dashed border-red-200 bg-red-50 p-6 text-center"
+            data-testid="interview-required-banner">
+            <AlertTriangle className="h-9 w-9 mx-auto mb-3 text-red-400" />
+            <p className="font-semibold text-red-700">Interview Not Conducted</p>
+            <p className="text-sm text-red-600 mt-1">
+              CQC safer recruitment requires a documented interview before progressing.
+            </p>
+            <p className="text-xs text-red-400 mt-1">
+              Record the interview to clear this blocker.
+            </p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -510,10 +516,15 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {decision && (
+                      {/* Outcome status badge (CQC clarity) */}
+                      {decision ? (
                         <Badge className={`${decisionConfig.color} flex items-center gap-1`}>
                           <DecisionIcon className="h-3 w-3" />
                           {decision}
+                        </Badge>
+                      ) : (
+                        <Badge className={score >= passScore ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
+                          {score >= passScore ? 'Completed – Passed' : 'Completed – Failed'}
                         </Badge>
                       )}
                       <Button

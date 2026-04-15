@@ -35801,10 +35801,15 @@ async def get_compliance_file(
             "affects_readiness": True,
             "optional": False
         },
+        # NOTE: The authoritative induction gate is the 15 Care Certificate Standards
+        # tracked in db.induction_checklists and evaluated by unified_compliance_engine
+        # CHECK 4. This form card is an admin record only — it does NOT satisfy the 15
+        # standards gate on its own. affects_readiness is False here to avoid emitting
+        # a duplicate/misleading blocker_text independent of the unified engine blocker.
         "induction": {
-            "name": "Induction & Competency Assessment",
+            "name": "Induction Record (see Induction Checklist for readiness gate)",
             "category": "health_competency",
-            "affects_readiness": True,
+            "affects_readiness": False,
             "optional": False
         },
         "interview_record": {
@@ -35846,6 +35851,14 @@ async def get_compliance_file(
         },
         "conflict_of_interest": {
             "name": "Conflict of Interest Declaration",
+            "category": "admin_forms",
+            "affects_readiness": False,
+            "optional": False
+        },
+        # Emergency Contacts: required by unified compliance engine (REQUIRED_FORMS).
+        # Not optional — must be submitted and verified before work readiness is granted.
+        "emergency_contacts": {
+            "name": "Emergency Contacts",
             "category": "admin_forms",
             "affects_readiness": False,
             "optional": False
@@ -36237,6 +36250,7 @@ async def get_compliance_file(
             "rows": [
                 build_form_row("staff_personal_info", FORM_REQUIREMENT_CONFIG["staff_personal_info"]),
                 build_form_row("hmrc_starter_checklist", FORM_REQUIREMENT_CONFIG["hmrc_starter_checklist"]),
+                build_form_row("emergency_contacts", FORM_REQUIREMENT_CONFIG["emergency_contacts"]),
                 build_form_row("equal_opportunities", FORM_REQUIREMENT_CONFIG["equal_opportunities"]),
                 build_form_row("conflict_of_interest", FORM_REQUIREMENT_CONFIG["conflict_of_interest"])
             ]

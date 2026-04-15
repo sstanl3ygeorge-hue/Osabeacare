@@ -68,6 +68,12 @@ const getExplanationActionLabel = (gap) => (
 
 const getGapId = (gap) => gap?.id || gap?.gap_id;
 
+const getGapSourceLabel = (gap) => {
+  if (gap?.source === 'cv_review') return 'CV review';
+  if (gap?.source) return gap.source.replace(/_/g, ' ');
+  return 'Employment history';
+};
+
 /**
  * EmploymentGapPanel - Displays and manages employment gap verification
  * 
@@ -438,6 +444,9 @@ export default function EmploymentGapPanel({
                     <Badge variant="outline" className={cn(style.bg, style.text, style.border)}>
                       {style.label}
                     </Badge>
+                    <Badge variant="outline" className="bg-white text-gray-600 border-gray-200">
+                      Source: {getGapSourceLabel(gap)}
+                    </Badge>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -484,6 +493,27 @@ export default function EmploymentGapPanel({
                         {gap.explanation_provided_at && (
                           <p className="text-xs text-gray-500 mt-2">
                             Provided: {formatBackendDate(gap.explanation_provided_at, { format: 'medium' })}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {(gap.evidence_document_id || gap.verification_notes || gap.verified_at) && (
+                      <div className="p-3 bg-white rounded border">
+                        <p className="text-gray-500 text-xs mb-1">Decision Trail</p>
+                        {gap.evidence_document_id && (
+                          <p className="text-sm text-gray-800">
+                            Evidence attached: {gap.evidence_document_id}
+                          </p>
+                        )}
+                        {gap.verification_notes && (
+                          <p className="text-sm text-gray-800">
+                            Verification notes: {gap.verification_notes}
+                          </p>
+                        )}
+                        {gap.verified_at && (
+                          <p className="text-xs text-gray-500 mt-2">
+                            Verified by {gap.verified_by_name || 'admin'} on {formatBackendDate(gap.verified_at, { format: 'medium' })}
                           </p>
                         )}
                       </div>

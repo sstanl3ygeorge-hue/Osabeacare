@@ -1272,43 +1272,48 @@ async def get_unified_employee_status(
     # CHECK 7: EMPLOYMENT GAPS (if applicable)
     # ==========================================================================
     
-    gaps = employee.get("employment_gaps", [])
-    gaps_explained = True
-    unexplained_gaps = []
-    
-    for gap in gaps:
-        duration_months = gap.get("duration_months", 0)
-        if duration_months >= 1:
-            if not gap.get("explanation") or gap.get("status") in ["not_explained", "needs_info"]:
-                gaps_explained = False
-                unexplained_gaps.append(gap)
-    
-    # Also check employment_gaps collection
-    gap_docs = await db.employment_gaps.find({
-        "employee_id": emp_id,
-        "duration_months": {"$gte": 1},
-        "$or": [
-            {"explanation": {"$exists": False}},
-            {"explanation": None},
-            {"explanation": ""},
-            {"status": {"$in": ["not_explained", "needs_info"]}}
+    from employment_gap_engine import evaluate_gaps_compliance
+
+    gap_records = await db.employment_gaps.find(
+        {"employee_id": emp_id, "duration_months": {"$gte": 1}},
+        {"_id": 0}
+    ).to_list(50)
+    if not gap_records:
+        gap_records = [
+            gap for gap in employee.get("employment_gaps", [])
+            if gap.get("duration_months", 0) >= 1
         ]
-    }).to_list(20)
-    
-    if gap_docs:
-        gaps_explained = False
-    
-    checks["employment_gaps_explained"] = gaps_explained
-    
-    if not gaps_explained:
-        gap_count = len(unexplained_gaps) + len(gap_docs)
+
+    for gap in gap_records:
+        if gap.get("status") == "needs_info":
+            gap["status"] = "needs_more_info"
+        elif gap.get("status") == "not_explained":
+            gap["status"] = "pending"
+
+    gap_evaluation = evaluate_gaps_compliance(gap_records)
+    gaps_verified = not gap_evaluation.get("has_gaps", False) or gap_evaluation.get("is_complete", False)
+
+    checks["employment_gaps_explained"] = gaps_verified
+
+    if not gaps_verified:
+        gap_count = gap_evaluation.get("total_gaps", len(gap_records))
+        blocker_reason = "Employment gaps require verification"
+        if gap_evaluation.get("pending_count", 0) > 0:
+            blocker_reason = f"{gap_evaluation.get('pending_count')} employment gap(s) require explanation"
+        elif gap_evaluation.get("explained_count", 0) > 0:
+            blocker_reason = f"{gap_evaluation.get('explained_count')} employment gap explanation(s) awaiting admin verification"
+        elif gap_evaluation.get("rejected_count", 0) > 0:
+            blocker_reason = f"{gap_evaluation.get('rejected_count')} employment gap explanation(s) rejected"
+        elif gap_evaluation.get("needs_info_count", 0) > 0:
+            blocker_reason = f"More information requested for {gap_evaluation.get('needs_info_count')} employment gap(s)"
         blockers.append({
             "id": "employment_gaps",
             "gate": "employment_gaps",
             "label": "Employment Gaps",
-            "reason": f"Employment Gaps: {gap_count} gap(s) need explanation",
+            "reason": f"Employment Gaps: {blocker_reason}",
             "category": "other",
-            "severity": "pending"
+            "severity": "pending",
+            "count": gap_count
         })
     
     # ==========================================================================

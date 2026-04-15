@@ -615,39 +615,68 @@ async def explain_cv_gap(
 
 # ==================== REFERENCE MISMATCH EXPLANATIONS ====================
 
+_MISMATCH_EXPLANATION_TYPES = [
+    {"value": "earlier_employment", "label": "Referee is from an earlier employer"},
+    {"value": "agency_placement", "label": "I was placed by an agency – referee is from the agency"},
+    {"value": "name_change", "label": "The organisation changed its name"},
+    {"value": "recent_employer_not_required", "label": "My most recent employer cannot provide a reference"},
+    {"value": "other", "label": "Other (please explain below)"},
+]
+
 @router.get("/reference-mismatches")
 async def get_reference_mismatches(worker: dict = Depends(get_current_worker)):
     """
     Get any reference mismatches that need worker explanation.
+    Reads from db.employees flat fields (canonical source for mismatch state).
     """
     db = get_db()
     employee_id = worker.get("employee_id")
-    
-    # Check employee_references for any mismatches needing explanation
-    refs = await db.employee_references.find(
-        {
-            "employee_id": employee_id,
-            "$or": [
-                {"mismatch_detected": True, "mismatch_explained": {"$ne": True}},
-                {"verification_status": "mismatch"}
-            ]
-        },
-        {"_id": 0}
-    ).to_list(10)
-    
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        return {"mismatches": [], "has_mismatches": False, "mismatch_count": 0,
+                "needs_action": False, "explanation_types": _MISMATCH_EXPLANATION_TYPES}
+
     mismatches = []
-    for ref in refs:
-        if ref.get("mismatch_details"):
-            mismatches.append({
-                "reference_number": ref.get("reference_number"),
-                "referee_name": ref.get("referee_name"),
-                "mismatch_details": ref.get("mismatch_details"),
-                "needs_explanation": not ref.get("mismatch_explained", False)
-            })
-    
+    for ref_num in [1, 2]:
+        prefix = f"reference_{ref_num}_"
+        mismatch_detected = employee.get(f"{prefix}mismatch_detected", False)
+        if not mismatch_detected:
+            continue
+
+        already_explained = bool(employee.get(f"{prefix}mismatch_explained"))
+        admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
+
+        existing_explanation = None
+        explanation_text = employee.get(f"{prefix}mismatch_explanation")
+        if explanation_text:
+            existing_explanation = {
+                "text": explanation_text,
+                "type": employee.get(f"{prefix}mismatch_explanation_type"),
+                "submitted_at": employee.get(f"{prefix}mismatch_explained_at"),
+            }
+
+        mismatches.append({
+            "reference_number": ref_num,
+            "referee_name": employee.get(f"{prefix}name") or f"Reference {ref_num}",
+            "referee_company": employee.get(f"{prefix}company") or employee.get(f"{prefix}organisation") or "",
+            "mismatch_details": employee.get(f"{prefix}mismatch_notes") or "Reference discrepancy detected – please provide an explanation.",
+            "message": employee.get(f"{prefix}mismatch_notes") or "Reference discrepancy detected – please provide an explanation.",
+            "needs_explanation": not already_explained,
+            "explanation_status": "submitted" if already_explained else "pending",
+            "existing_explanation": existing_explanation,
+            "mismatch_admin_decision": admin_decision,
+            "admin_notes": employee.get(f"{prefix}mismatch_admin_notes"),
+        })
+
+    needs_action = any(m["needs_explanation"] for m in mismatches)
+
     return {
         "mismatches": mismatches,
-        "needs_action": len([m for m in mismatches if m["needs_explanation"]]) > 0
+        "has_mismatches": len(mismatches) > 0,
+        "mismatch_count": len(mismatches),
+        "needs_action": needs_action,
+        "explanation_types": _MISMATCH_EXPLANATION_TYPES,
     }
 
 

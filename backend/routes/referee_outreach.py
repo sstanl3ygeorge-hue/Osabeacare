@@ -476,6 +476,18 @@ async def submit_referee_form(token: str, form_data: dict):
     
     await db.employee_documents.insert_one(doc_record)
 
+    # Sync employee flat fields so ReferenceIntegrityService (work_readiness) can read the response.
+    # The canonical store is db.references, but work_readiness reads from db.employees flat fields.
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"reference_{ref_num}_response_data": response_doc,
+            f"reference_{ref_num}_response_received_at": now,
+            f"reference_{ref_num}_evidence_source": "referee_response",
+            f"reference_{ref_num}_request_status": "submitted",
+        }}
+    )
+
     await log_audit_action("system", "reference_response_received", "employee", employee['id'], {
         "reference_num": ref_num,
         "requirement_id": requirement_id,
@@ -646,6 +658,18 @@ async def verify_or_reject_reference(
                 "verified_by": user['user_id'],
                 "verified_at": now,
                 "status": "verified"
+            }}
+        )
+
+        # Sync employee flat fields so ReferenceIntegrityService (work_readiness) can see verified.
+        # Canonical store is db.references, but work_readiness HARD BLOCK C reads db.employees.
+        prefix = f"reference_{reference_num}_"
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {
+                f"{prefix}verified": True,
+                f"{prefix}verified_at": now,
+                f"{prefix}verified_by": user['user_id'],
             }}
         )
 
@@ -906,3 +930,108 @@ async def get_reference_status(
         references.append(ref_status)
 
     return {"references": references}
+
+
+class AdminRecordReferenceRequest(BaseModel):
+    """Admin manually records a reference received outside the secure email form."""
+    referee_name: str
+    referee_organisation: str
+    referee_job_title: Optional[str] = None
+    received_via: str  # email, letter, phone, fax
+    received_at: str   # ISO date string
+    performance_summary: Optional[str] = None
+    safeguarding_concerns: Optional[str] = None
+    would_re_employ: Optional[str] = None
+    admin_notes: Optional[str] = None
+
+
+@router.post("/employees/{employee_id}/references/{ref_num}/admin-record-response")
+async def admin_record_reference_response(
+    employee_id: str,
+    ref_num: int,
+    body: AdminRecordReferenceRequest,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Admin records a reference received outside the secure email form
+    (e.g. posted letter, emailed PDF, phone call confirmed in writing).
+
+    Sets evidence_source = 'admin_uploaded_on_behalf' so that
+    ReferenceIntegrityService.counts_toward_readiness() accepts it.
+    Admin must then use the normal verify endpoint to complete the process.
+    """
+    db = get_db()
+
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
+    if body.received_via not in ["email", "letter", "phone", "fax", "other"]:
+        raise HTTPException(status_code=400, detail="received_via must be email, letter, phone, fax, or other")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Ensure a reference record exists first
+    references_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    ref_key = f"ref{ref_num}"
+    ref_data = (references_doc or {}).get(ref_key) or {}
+
+    # Guard: don't overwrite an already-verified reference
+    if (ref_data.get("verification") or {}).get("verified"):
+        raise HTTPException(status_code=400, detail="Reference is already verified. Reset it before recording a new response.")
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Build a synthetic response document in the same shape as a secure-form submission
+    response_doc = {
+        "referee_full_name": body.referee_name,
+        "referee_organisation": body.referee_organisation,
+        "referee_job_title": body.referee_job_title,
+        "performance_rating": body.performance_summary,
+        "safeguarding_concerns": body.safeguarding_concerns or "No concerns",
+        "would_re_employ": body.would_re_employ,
+        "admin_notes": body.admin_notes,
+        "received_via": body.received_via,
+        "received_at": body.received_at,
+        "recorded_at": now,
+        "recorded_by": user['user_id'],
+        "source": "admin_uploaded_on_behalf",
+    }
+
+    # Write to canonical db.references
+    await db.references.update_one(
+        {"employee_id": employee_id},
+        {"$set": {
+            f"{ref_key}.response": response_doc,
+            f"{ref_key}.request.status": "submitted",
+        }},
+        upsert=True
+    )
+
+    # Sync employee flat fields so ReferenceIntegrityService reads the correct source
+    prefix = f"reference_{ref_num}_"
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}response_data": response_doc,
+            f"{prefix}response_received_at": body.received_at,
+            f"{prefix}evidence_source": "admin_uploaded_on_behalf",
+            f"{prefix}request_status": "submitted",
+        }}
+    )
+
+    await log_audit_action(user['user_id'], "admin_record_reference_response", "employee", employee_id, {
+        "reference_num": ref_num,
+        "referee_name": body.referee_name,
+        "received_via": body.received_via,
+        "received_at": body.received_at,
+    })
+
+    return {
+        "status": "success",
+        "message": f"Reference {ref_num} response recorded. Use the verify endpoint to complete verification.",
+        "reference_num": ref_num,
+        "evidence_source": "admin_uploaded_on_behalf",
+        "next_step": f"POST /employees/{employee_id}/references/{ref_num}/verify with action=verify"
+    }

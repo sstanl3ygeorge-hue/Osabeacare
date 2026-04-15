@@ -995,7 +995,18 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             all_mandatory_trainings.append({
                 "id": item.get("id"),
                 "name": item.get("name"),
-                "status": "complete" if item.get("completed") else ("expired" if "expired" in (item.get("invalid_reason") or "").lower() else "missing"),
+                "status": "complete" if item.get("completed") else (
+                    "expired" if (
+                        item.get("expiry_date") and (
+                            lambda exp: exp < datetime.now(timezone.utc)
+                        )(
+                            datetime.fromisoformat(str(item["expiry_date"]).replace("Z", "+00:00"))
+                            if isinstance(item.get("expiry_date"), str)
+                            else item["expiry_date"].replace(tzinfo=timezone.utc) if item["expiry_date"].tzinfo is None else item["expiry_date"]
+                        ) if item.get("expiry_date") else False
+                    ) or "expired" in (item.get("invalid_reason") or "").lower()
+                    else "missing"
+                ),
                 "completion_date": None,
                 "expiry_date": item.get("expiry_date"),
                 "verified": item.get("verified", False),
@@ -1098,7 +1109,12 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     # Get form status for onboarding employees
     forms_status = []
     if not is_active_employee:
+        _emp_role_for_forms = (employee.get("job_role") or employee.get("role") or "").lower()
         for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+            # Skip role-aware forms if this worker's role is not in the required list
+            if form_def.get("role_aware") and form_def.get("roles_required"):
+                if not any(r in _emp_role_for_forms for r in form_def["roles_required"]):
+                    continue
             progress = await db.form_progress.find_one({
                 "employee_id": employee_id,
                 "form_id": form_id
@@ -1140,7 +1156,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     
     # Professional registration
     professional_registrations = employee.get("professional_registrations", [])
-    job_role = employee.get("job_role", "").lower()
+    job_role = (employee.get("job_role") or employee.get("role") or "").lower()
     
     requires_prof_reg = False
     registration_type = None

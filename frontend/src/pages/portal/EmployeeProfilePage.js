@@ -4633,8 +4633,8 @@ export default function EmployeeProfilePage() {
 
                             // Audit trail dates
                             const submittedAt = fmtDate(submission?.submitted_at);
-                            const reviewedAt = fmtDate(submission?.verified_at || submission?.signed_off_at);
-                            const reviewedBy = submission?.verified_by_name || submission?.signed_off_by_name || submission?.verified_by;
+                            const reviewedAt = fmtDate(submission?.reviewed_at || submission?.verified_at || submission?.signed_off_at);
+                            const reviewedBy = submission?.reviewed_by_name || submission?.signed_off_by_name || submission?.verified_by_name;
 
                             return (
                               <div
@@ -4734,17 +4734,17 @@ export default function EmployeeProfilePage() {
                                           </>
                                         )}
 
-                                        {/* Not started / in progress → Open in Worker Dashboard */}
+                                        {/* Not started / in progress → Open form directly in Worker Portal */}
                                         {!isVerified && !isAwaiting && !isRejected && (
                                           <a
-                                            href="/worker/dashboard"
+                                            href={`/worker/forms/${form.key}`}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                                            data-testid={`open-dashboard-${form.key}`}
+                                            data-testid={`open-form-${form.key}`}
                                           >
                                             <ExternalLink className="h-3.5 w-3.5" />
-                                            Open in Worker Dashboard
+                                            Open Form in Worker Portal
                                           </a>
                                         )}
 

@@ -3824,7 +3824,7 @@ export default function EmployeeProfilePage() {
                   </div>
                 </div>{/* end flex row */}
               </div>{/* end overflow-x-auto */}
-            </div>{/* end audit quick view outer wrapper */}
+            </div>
             );
           })()}
 

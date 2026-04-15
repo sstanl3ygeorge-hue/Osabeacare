@@ -268,6 +268,84 @@ def is_document_verified_with_stamp(doc: dict) -> bool:
     return (has_valid_stamp and has_burned_stamp) or has_valid_stamp or (has_verified_status and verified_flag)
 
 
+# =============================================================================
+# COMPETENCY CANONICAL RESOLUTION — SINGLE SOURCE OF TRUTH
+# =============================================================================
+
+# All status values that mean "this competency is satisfied".
+# UCE and WRE MUST both use this set — no inline string comparisons elsewhere.
+_COMPETENCY_PASS_STATUSES: frozenset = frozenset({
+    "competent",
+    "completed",
+    "passed",
+    "verified",
+    "approved",
+})
+
+# Canonical competency_type aliases.
+# Key = canonical gate key (used in checks/blockers/readiness config).
+# Value = list of accepted competency_type values in competency_records.
+# Add legacy aliases here; do NOT add new write-side aliases.
+_COMPETENCY_TYPE_ALIASES: dict = {
+    "medication_competency": ["medication_competency", "medication"],  # "medication" is legacy
+    "clinical_competency": ["clinical_competency"],
+    "care_certificate": ["care_certificate"],
+}
+
+
+async def get_employee_competency(db, employee_id: str, competency_type: str) -> bool:
+    """
+    Canonical check: does this employee have a given competency satisfied?
+
+    Resolution order (do NOT change without updating both UCE and WRE):
+      1. competency_records  (primary — the Competency tab writes here)
+      2. employee_documents  (legacy fallback only — old stamp-based workflow)
+
+    Alias support and status normalisation are both applied at read level.
+    New writes should always use the canonical competency_type key.
+
+    Args:
+        db: database connection
+        employee_id: the employee's string id
+        competency_type: canonical gate key, e.g. "medication_competency"
+
+    Returns:
+        True if the competency is satisfied, False otherwise.
+    """
+    aliases = _COMPETENCY_TYPE_ALIASES.get(competency_type, [competency_type])
+
+    # ---- 1. competency_records (PRIMARY) ------------------------------------
+    rec = await db.competency_records.find_one({
+        "employee_id": employee_id,
+        "competency_type": {"$in": aliases},
+        "status": {"$in": list(_COMPETENCY_PASS_STATUSES)},
+    })
+    if rec:
+        return True
+
+    # ---- 2. employee_documents (LEGACY FALLBACK) ----------------------------
+    docs = await db.employee_documents.find(
+        {
+            "employee_id": employee_id,
+            "requirement_id": {"$in": aliases},
+        },
+        {"_id": 0},
+    ).to_list(20)
+
+    for doc in docs:
+        # Hard-reject invalidated / rejected documents
+        doc_status = (doc.get("status") or "").lower()
+        if doc_status in {"rejected", "amendment_requested", "invalidated",
+                          "deleted", "superseded", "uploaded_in_error"}:
+            continue
+        if doc_status in _COMPETENCY_PASS_STATUSES:
+            return True
+        if is_document_verified_with_stamp(doc):
+            return True
+
+    return False
+
+
 def normalize_training_name(name: str) -> str:
     """
     Normalize training name for matching purposes.
@@ -1451,12 +1529,8 @@ async def get_unified_employee_status(
             })
 
         # Medication Administration Competency (nurse-specific gate)
-        med_comp_docs = find_docs_for_requirement("medication_competency")
-        med_comp_complete = any(
-            d.get("status") in ("complete", "verified", "approved")
-            or is_document_verified_with_stamp(d)
-            for d in med_comp_docs
-        )
+        # All resolution logic is delegated to get_employee_competency() — do NOT inline here.
+        med_comp_complete = await get_employee_competency(db, emp_id, "medication_competency")
         checks["medication_competency"] = med_comp_complete
 
         if not med_comp_complete:
@@ -1470,12 +1544,8 @@ async def get_unified_employee_status(
             })
 
         # Clinical Competency Assessment (nurse-specific gate)
-        clin_comp_docs = find_docs_for_requirement("clinical_competency")
-        clin_comp_complete = any(
-            d.get("status") in ("complete", "verified", "approved")
-            or is_document_verified_with_stamp(d)
-            for d in clin_comp_docs
-        )
+        # All resolution logic is delegated to get_employee_competency() — do NOT inline here.
+        clin_comp_complete = await get_employee_competency(db, emp_id, "clinical_competency")
         checks["clinical_competency"] = clin_comp_complete
 
         if not clin_comp_complete:
@@ -1487,6 +1557,9 @@ async def get_unified_employee_status(
                 "category": "competency",
                 "severity": "critical"
             })
+    
+    # ==========================================================================
+    # CALCULATE OVERALL PROGRESS
     
     # ==========================================================================
     # CALCULATE OVERALL PROGRESS

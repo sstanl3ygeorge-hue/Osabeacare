@@ -37,6 +37,9 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // Competency types available
 const COMPETENCY_TYPES = [
   { value: "medication", label: "Medication Administration", is_critical: true },
+  // "medication_competency" is the canonical gate key used by engines (nurse readiness).
+  // Both values satisfy the readiness check via the alias map in the backend engines.
+  { value: "medication_competency", label: "Medication Administration Competency (Nurse)", is_critical: true },
   { value: "manual_handling", label: "Moving & Handling", is_critical: true },
   { value: "safeguarding", label: "Safeguarding Adults", is_critical: true },
   { value: "dementia_care", label: "Dementia Care", is_critical: false },

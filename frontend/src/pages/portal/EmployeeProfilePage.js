@@ -3506,7 +3506,7 @@ export default function EmployeeProfilePage() {
                     {canonicalProgressPct}% Complete
                   </p>
                   <p className="text-xs text-text-muted mt-0.5">
-                    {canonicalProgress?.completed_requirements ?? 0} of {canonicalProgress?.total_requirements ?? 0} requirements
+                    {canonicalProgress?.progress?.completed ?? 0} of {canonicalProgress?.progress?.total ?? 0} requirements
                   </p>
                 </div>
                 {!isAuditor() && (
@@ -3654,10 +3654,11 @@ export default function EmployeeProfilePage() {
                   <p className="text-xs text-text-muted">Key compliance items for checker review</p>
                 </div>
                 
-                {/* Quick Status Cards - 4 cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-testid="audit-quick-view">
+                {/* Quick Status Cards — horizontal scroll so more cards can be added without crowding */}
+                <div className="overflow-x-auto -mx-1 px-1 pb-2" data-testid="audit-quick-view">
+                  <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
                   {/* DBS Status with Expiry */}
-                  <div className={`p-3 rounded-xl border ${dbsClasses.card}`} data-testid="dbs-status-card">
+                  <div className={`p-3 rounded-xl border w-52 shrink-0 ${dbsClasses.card}`} data-testid="dbs-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <Shield className={`h-4 w-4 ${dbsClasses.icon}`} />
                       <span className="text-xs font-semibold text-text-primary">DBS</span>
@@ -3666,11 +3667,6 @@ export default function EmployeeProfilePage() {
                     <p className={`text-sm font-medium ${dbsClasses.text}`}>
                       {dbsWorkflowStatus?.label || dbsSummary.dbs_status_label || 'Unknown'}
                     </p>
-                    {dbsWorkflowStatus ? (
-                      <p className="text-[10px] mt-0.5 text-text-muted">From Compliance File row</p>
-                    ) : (
-                      <p className="text-[10px] mt-0.5 text-text-muted">Legacy DBS summary</p>
-                    )}
                     {dbsExpiry && (
                       <p className={`text-xs mt-1 ${
                         dbsExpiryDays !== null && dbsExpiryDays < 0 ? 'text-red-600 font-medium' :
@@ -3686,7 +3682,7 @@ export default function EmployeeProfilePage() {
                   </div>
                   
                   {/* RTW Status with Expiry - Dynamic logic based on verification + expiry */}
-                  <div className={`p-3 rounded-xl border ${rtwClasses.card}`} data-testid="rtw-status-card">
+                  <div className={`p-3 rounded-xl border w-52 shrink-0 ${rtwClasses.card}`} data-testid="rtw-status-card">
                     <div className="flex items-center gap-2 mb-1">
                       <FileCheck className={`h-4 w-4 ${rtwClasses.icon}`} />
                       <span className="text-xs font-semibold text-text-primary">Right to Work</span>
@@ -3697,7 +3693,6 @@ export default function EmployeeProfilePage() {
                         <p className={`text-sm font-semibold ${rtwClasses.text}`}>
                           {rtwWorkflowStatus.label}
                         </p>
-                        <p className="text-[10px] mt-0.5 text-text-muted">From Compliance File row</p>
                       </>
                     ) : !rtwSummary.is_verified ? (
                       // Not verified = not yet verified
@@ -3724,7 +3719,7 @@ export default function EmployeeProfilePage() {
                       <p className="text-sm font-semibold text-green-700">VERIFIED</p>
                     )}
                     {!rtwWorkflowStatus && (
-                      <p className="text-[10px] mt-0.5 text-text-muted">Legacy RTW summary</p>
+                      <p className="text-[10px] mt-0.5 text-text-muted">Confirmation pending</p>
                     )}
                     
                     {/* Days countdown for expiring */}
@@ -3742,7 +3737,7 @@ export default function EmployeeProfilePage() {
                   </div>
                   
                   {/* Alerts Card - Show blocking status prominently */}
-                  <div className={`p-3 rounded-xl border ${
+                  <div className={`p-3 rounded-xl border w-52 shrink-0 ${
                     isBlocking ? 'border-red-200 bg-red-50' :
                     (missingItems > 0 || pendingReview > 0) ? 'border-amber-200 bg-amber-50' : 
                     'border-green-200 bg-green-50'
@@ -3753,12 +3748,12 @@ export default function EmployeeProfilePage() {
                         (missingItems > 0 || pendingReview > 0) ? 'text-amber-600' : 'text-green-600'
                       }`} />
                       <span className="text-xs font-semibold text-text-primary">
-                        {isBlocking ? 'BLOCKED' : 'Alerts'}
+                        {isBlocking ? 'Action required' : 'Status'}
                       </span>
                     </div>
                     {isBlocking ? (
                       <div className="space-y-0.5">
-                        <p className="text-xs text-red-700 font-semibold">Not Work Ready</p>
+                        <p className="text-xs text-red-700 font-semibold">Compliance incomplete</p>
                         {blockingReasons.slice(0, 2).map((reason, idx) => (
                           <p key={idx} className="text-xs text-red-600 line-clamp-1" title={reason}>
                             {reason?.split(' - ')[0] || reason}
@@ -3775,14 +3770,14 @@ export default function EmployeeProfilePage() {
                         )}
                       </div>
                     ) : canonicalIsWorkReady || canonicalCanPromote ? (
-                      <p className="text-sm font-medium text-green-700">Work Ready</p>
+                      <p className="text-sm font-medium text-green-700">All checks passed</p>
                     ) : (
-                      <p className="text-sm font-medium text-red-700">Not Work Ready</p>
+                      <p className="text-sm font-medium text-red-700">Checks incomplete</p>
                     )}
                   </div>
                   
                   {/* Compliance Breakdown Card */}
-                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50" data-testid="compliance-breakdown-card">
+                  <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 w-52 shrink-0" data-testid="compliance-breakdown-card">
                     <div className="flex items-center gap-2 mb-2">
                       <ClipboardList className="h-4 w-4 text-slate-600" />
                       <span className="text-xs font-semibold text-text-primary">Breakdown</span>
@@ -3805,8 +3800,8 @@ export default function EmployeeProfilePage() {
                         })}
                     </div>
                   </div>
-                </div>
-              </div>
+                </div>{/* end flex row */}
+              </div>{/* end overflow-x-auto */}
             );
           })()}
 
@@ -4330,8 +4325,8 @@ export default function EmployeeProfilePage() {
             Training
           </TabsTrigger>
           <TabsTrigger value="work_readiness" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
-            <Shield className="h-4 w-4 mr-2" />
-            Readiness & Summary
+            <User className="h-4 w-4 mr-2" />
+            Profile Summary
           </TabsTrigger>
           <TabsTrigger value="competencies" className="rounded-lg data-[state=active]:bg-primary data-[state=active]:text-white">
             <ClipboardCheck className="h-4 w-4 mr-2" />
@@ -4349,150 +4344,232 @@ export default function EmployeeProfilePage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* ========== TAB 1: WORK READINESS ========== */}
-        {/* NOTE: Progress/blockers/actions are shown in ConsolidatedStatusPanel above tabs */}
-        {/* This tab only shows supplementary details not in the main panel */}
+        {/* ========== TAB 1: PROFILE SUMMARY ========== */}
+        {/* Stable profile / core-record tab. Readiness logic lives above the tabs only. */}
         <TabsContent value="work_readiness">
           <div className="space-y-6">
-            {/* Employee Summary with Edit Button */}
+
+            {/* ── Personal Details ── */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">Personal Details</CardTitle>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setEditPersonalOpen(true)}
-                  data-testid="edit-personal-btn"
-                >
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
+                {!isAuditor() && (
+                  <Button variant="outline" size="sm" onClick={() => setEditPersonalOpen(true)} data-testid="edit-personal-btn">
+                    <Edit className="h-4 w-4 mr-1" />Edit
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   <div>
-                    <p className="text-sm text-text-muted">Full Name</p>
+                    <p className="text-xs text-text-muted">Full Name</p>
                     <p className="font-medium text-text-primary">{employee?.first_name} {employee?.last_name}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-text-muted">
-                      {employee?.person_stage === 'applicant' ? 'Applicant Ref' : 'Employee ID'}
-                    </p>
-                    <p className="font-medium text-text-primary">
-                      {employee?.employee_code || employee?.applicant_reference || 'Not assigned'}
-                    </p>
+                    <p className="text-xs text-text-muted">{employee?.person_stage === 'applicant' ? 'Applicant Ref' : 'Employee ID'}</p>
+                    <p className="font-medium text-text-primary">{employee?.employee_code || employee?.applicant_reference || 'Not assigned'}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-text-muted">Role</p>
-                    <p className="font-medium text-text-primary">{employee?.role}</p>
+                    <p className="text-xs text-text-muted">Role</p>
+                    <p className="font-medium text-text-primary">{employee?.role || '—'}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-text-muted">Status</p>
+                    <p className="text-xs text-text-muted">Status</p>
                     <Badge className={
                       employee?.status === 'active_employee' ? 'bg-green-100 text-green-700' :
                       employee?.status === 'onboarding' ? 'bg-amber-100 text-amber-700' :
                       'bg-gray-100 text-gray-700'
                     }>
-                      {employee?.status?.replace(/_/g, ' ')}
+                      {employee?.status === 'active_employee' ? 'Active employee'
+                        : employee?.status === 'onboarding' ? 'Onboarding'
+                        : employee?.status?.replace(/_/g, ' ') || 'Unknown'}
                     </Badge>
                   </div>
+                  {employee?.date_of_birth && (
+                    <div>
+                      <p className="text-xs text-text-muted">Date of Birth</p>
+                      <p className="font-medium text-text-primary">{formatBackendDate(employee.date_of_birth)}</p>
+                    </div>
+                  )}
+                  {employee?.national_insurance_number && (
+                    <div>
+                      <p className="text-xs text-text-muted">NI Number</p>
+                      <p className="font-medium text-text-primary">{employee.national_insurance_number}</p>
+                    </div>
+                  )}
+                  {employee?.nationality && (
+                    <div>
+                      <p className="text-xs text-text-muted">Nationality</p>
+                      <p className="font-medium text-text-primary">{employee.nationality}</p>
+                    </div>
+                  )}
+                  {employee?.start_date && (
+                    <div>
+                      <p className="text-xs text-text-muted">Start Date</p>
+                      <p className="font-medium text-text-primary">{formatBackendDate(employee.start_date)}</p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Employment History Summary with Edit Button */}
+            {/* ── Contact Details ── */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="font-heading text-lg">Employment History</CardTitle>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setEditEmploymentOpen(true)}
-                  data-testid="edit-employment-btn"
-                >
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
+                <CardTitle className="font-heading text-lg">Contact Details</CardTitle>
+                {!isAuditor() && (
+                  <Button variant="outline" size="sm" onClick={() => setEditPersonalOpen(true)} data-testid="edit-contact-btn">
+                    <Edit className="h-4 w-4 mr-1" />Edit
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
-                {employee?.employment_history && employee.employment_history.length > 0 ? (
-                  <div className="space-y-2">
-                    {employee.employment_history.slice(0, 3).map((job, idx) => (
-                      <div key={idx} className="flex justify-between items-center p-2 bg-gray-50 rounded">
-                        <div>
-                          <p className="font-medium text-sm">{job.employer || job.company}</p>
-                          <p className="text-xs text-gray-500">{job.job_title || job.position}</p>
-                        </div>
-                        <p className="text-xs text-gray-400">{job.start_date} - {job.end_date || 'Present'}</p>
-                      </div>
-                    ))}
-                    {employee.employment_history.length > 3 && (
-                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 3} more</p>
-                    )}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-xs text-text-muted">Email</p>
+                    <p className="font-medium text-text-primary break-all">{employee?.email || '—'}</p>
                   </div>
-                ) : (
-                  <p className="text-sm text-gray-500">No employment history recorded</p>
+                  <div>
+                    <p className="text-xs text-text-muted">Phone</p>
+                    <p className="font-medium text-text-primary">{employee?.phone || employee?.phone_number || '—'}</p>
+                  </div>
+                  {employee?.mobile && (
+                    <div>
+                      <p className="text-xs text-text-muted">Mobile</p>
+                      <p className="font-medium text-text-primary">{employee.mobile}</p>
+                    </div>
+                  )}
+                </div>
+                {/* Address */}
+                {(employee?.address_line_1 || employee?.city || employee?.postcode) && (
+                  <div className="mt-4 pt-4 border-t border-[#E4E8EB]">
+                    <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2">Address</p>
+                    <address className="not-italic text-sm text-text-primary leading-relaxed">
+                      {employee?.address_line_1 && <span className="block">{employee.address_line_1}</span>}
+                      {employee?.address_line_2 && <span className="block">{employee.address_line_2}</span>}
+                      {(employee?.city || employee?.county) && (
+                        <span className="block">{[employee?.city, employee?.county].filter(Boolean).join(', ')}</span>
+                      )}
+                      {employee?.postcode && <span className="block">{employee.postcode}</span>}
+                      {employee?.country && employee?.country !== 'United Kingdom' && (
+                        <span className="block">{employee.country}</span>
+                      )}
+                    </address>
+                  </div>
                 )}
               </CardContent>
             </Card>
 
-            {/* References Summary with Edit Button */}
+            {/* ── Emergency Contact / Next of Kin ── */}
+            {(employee?.emergency_contact_name || employee?.next_of_kin_name) && (
+              <Card className="border-[#E4E8EB] shadow-sm">
+                <CardHeader>
+                  <CardTitle className="font-heading text-lg">Emergency Contact</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-xs text-text-muted">Name</p>
+                      <p className="font-medium text-text-primary">
+                        {employee?.emergency_contact_name || employee?.next_of_kin_name || '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-text-muted">Relationship</p>
+                      <p className="font-medium text-text-primary">
+                        {employee?.emergency_contact_relationship || employee?.next_of_kin_relationship || '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-text-muted">Phone</p>
+                      <p className="font-medium text-text-primary">
+                        {employee?.emergency_contact_phone || employee?.next_of_kin_phone || '—'}
+                      </p>
+                    </div>
+                    {employee?.next_of_kin_address && (
+                      <div className="col-span-2 sm:col-span-3">
+                        <p className="text-xs text-text-muted">Address</p>
+                        <p className="font-medium text-text-primary">{employee.next_of_kin_address}</p>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Employment History ── */}
+            <Card className="border-[#E4E8EB] shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="font-heading text-lg">Employment History</CardTitle>
+                {!isAuditor() && (
+                  <Button variant="outline" size="sm" onClick={() => setEditEmploymentOpen(true)} data-testid="edit-employment-btn">
+                    <Edit className="h-4 w-4 mr-1" />Edit
+                  </Button>
+                )}
+              </CardHeader>
+              <CardContent>
+                {employee?.employment_history && employee.employment_history.length > 0 ? (
+                  <div className="space-y-2">
+                    {employee.employment_history.slice(0, 5).map((job, idx) => (
+                      <div key={idx} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                        <div>
+                          <p className="font-medium text-sm">{job.employer || job.company || job.employer_name}</p>
+                          <p className="text-xs text-gray-500">{job.job_title || job.position}</p>
+                        </div>
+                        <p className="text-xs text-gray-400 shrink-0 ml-2">
+                          {formatBackendDate(job.start_date, { format: 'short' })} – {job.end_date ? formatBackendDate(job.end_date, { format: 'short' }) : 'Present'}
+                        </p>
+                      </div>
+                    ))}
+                    {employee.employment_history.length > 5 && (
+                      <p className="text-xs text-gray-500 text-center">+{employee.employment_history.length - 5} more — see Employment Review tab</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No employment history recorded. See the Employment Review tab to add history.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* ── References ── */}
             <Card className="border-[#E4E8EB] shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="font-heading text-lg">References</CardTitle>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setEditReferenceOpen(true)}
-                  data-testid="edit-references-btn"
-                >
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
+                {!isAuditor() && (
+                  <Button variant="outline" size="sm" onClick={() => setEditReferenceOpen(true)} data-testid="edit-references-btn">
+                    <Edit className="h-4 w-4 mr-1" />Edit
+                  </Button>
+                )}
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Reference 1 */}
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-xs text-gray-500 mb-1">Reference 1</p>
-                    {employee?.reference_1 || employee?.references?.[0] ? (
-                      <>
-                        <p className="font-medium text-sm">{employee?.reference_1?.name || employee?.references?.[0]?.name || 'Not provided'}</p>
-                        <p className="text-xs text-gray-500">{employee?.reference_1?.email || employee?.references?.[0]?.email}</p>
-                        <Badge className={
-                          (employee?.reference_1_status === 'verified' || employee?.references?.[0]?.verified) 
-                            ? 'bg-green-100 text-green-700 mt-1' 
-                            : 'bg-amber-100 text-amber-700 mt-1'
-                        }>
-                          {employee?.reference_1_status || (employee?.references?.[0]?.verified ? 'Verified' : 'In progress')}
-                        </Badge>
-                      </>
-                    ) : (
-                      <p className="text-sm text-gray-500">Not provided</p>
-                    )}
-                  </div>
-                  {/* Reference 2 */}
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-xs text-gray-500 mb-1">Reference 2</p>
-                    {employee?.reference_2 || employee?.references?.[1] ? (
-                      <>
-                        <p className="font-medium text-sm">{employee?.reference_2?.name || employee?.references?.[1]?.name || 'Not provided'}</p>
-                        <p className="text-xs text-gray-500">{employee?.reference_2?.email || employee?.references?.[1]?.email}</p>
-                        <Badge className={
-                          (employee?.reference_2_status === 'verified' || employee?.references?.[1]?.verified) 
-                            ? 'bg-green-100 text-green-700 mt-1' 
-                            : 'bg-amber-100 text-amber-700 mt-1'
-                        }>
-                          {employee?.reference_2_status || (employee?.references?.[1]?.verified ? 'Verified' : 'In progress')}
-                        </Badge>
-                      </>
-                    ) : (
-                      <p className="text-sm text-gray-500">Not provided</p>
-                    )}
-                  </div>
+                  {[1, 2].map((n) => {
+                    const ref = employee?.[`reference_${n}`] || employee?.references?.[n - 1];
+                    const status = employee?.[`reference_${n}_status`]
+                      || (employee?.references?.[n - 1]?.verified ? 'Verified' : 'In progress');
+                    const isVerified = status === 'verified' || status === 'Verified';
+                    return (
+                      <div key={n} className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-1">Reference {n}</p>
+                        {ref ? (
+                          <>
+                            <p className="font-medium text-sm">{ref.name || 'Name not recorded'}</p>
+                            {ref.email && <p className="text-xs text-gray-500">{ref.email}</p>}
+                            {ref.company && <p className="text-xs text-gray-500">{ref.company}</p>}
+                            <Badge className={isVerified ? 'bg-green-100 text-green-700 mt-1' : 'bg-amber-100 text-amber-700 mt-1'}>
+                              {isVerified ? 'Verified' : 'Awaiting verification'}
+                            </Badge>
+                          </>
+                        ) : (
+                          <p className="text-sm text-gray-500">Not yet provided</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
+
           </div>
         </TabsContent>
 

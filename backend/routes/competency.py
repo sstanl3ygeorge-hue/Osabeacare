@@ -37,7 +37,9 @@ DEFAULT_COMPETENCY_REQUIREMENTS = {
     ],
     "nurse": [
         {"competency_type": "clinical_competency", "competency_name": "Clinical Competency", "is_critical": True, "review_frequency_months": 12},
-        {"competency_type": "medication", "competency_name": "Medication Administration", "is_critical": True, "review_frequency_months": 12},
+        # Use "medication_competency" to match UCE/WRE gate key.
+        # The engines accept both "medication" and "medication_competency" via alias map.
+        {"competency_type": "medication_competency", "competency_name": "Medication Administration Competency", "is_critical": True, "review_frequency_months": 12},
         {"competency_type": "manual_handling", "competency_name": "Moving & Handling", "is_critical": True, "review_frequency_months": 12},
     ],
 }
@@ -45,6 +47,8 @@ DEFAULT_COMPETENCY_REQUIREMENTS = {
 # All competency types available in the system
 COMPETENCY_TYPES = [
     {"value": "medication", "label": "Medication Administration", "is_critical": True},
+    # "medication_competency" is the canonical key expected by UCE / WRE readiness gates.
+    {"value": "medication_competency", "label": "Medication Administration Competency (Nurse)", "is_critical": True},
     {"value": "manual_handling", "label": "Moving & Handling", "is_critical": True},
     {"value": "safeguarding", "label": "Safeguarding Adults", "is_critical": True},
     {"value": "dementia_care", "label": "Dementia Care", "is_critical": False},

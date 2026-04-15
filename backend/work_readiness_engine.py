@@ -27,6 +27,7 @@ Work Readiness Blockers include:
 from typing import Optional, List, Tuple
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
+from unified_compliance_engine import get_employee_competency
 
 # =============================================================================
 # ROLE-SPECIFIC WORK READINESS REQUIREMENTS
@@ -1015,37 +1016,16 @@ async def evaluate_work_readiness(
     # ==========================================================================
     # CHECK 3: Role-Specific Competencies
     # ==========================================================================
+    # Delegate entirely to UCE's canonical helper — do NOT re-evaluate competencies
+    # here using compliance_sections, training_records, or inline DB queries.
+    # UCE is the ONLY source of truth for competency resolution.
     for competency_key in requirements.get("competencies", []):
         all_required_keys.append(competency_key)
-        
-        # Check in compliance sections first
-        req = req_map.get(competency_key)
-        
-        competency_satisfied = False
-        
-        if req:
-            is_verified = req.get("is_verified", False)
-            status = req.get("status", "")
-            if is_verified or status == "verified":
-                competency_satisfied = True
-        
-        # Also check training records for competency evidence
-        if not competency_satisfied:
-            training_record = await db.training_records.find_one({
-                "employee_id": person.get("id"),
-                "requirement_id": {"$in": [competency_key, competency_key.replace("_", "-")]},
-                "record_status": {"$nin": ["superseded", "deleted"]},
-                "verified": True
-            })
-            if training_record:
-                competency_satisfied = True
-        
-        # For care certificate, also check induction completion as equivalent
-        if not competency_satisfied and competency_key == "care_certificate":
-            induction_req = req_map.get("induction")
-            if induction_req and (induction_req.get("is_verified") or induction_req.get("status") == "verified"):
-                competency_satisfied = True
-        
+
+        competency_satisfied = await get_employee_competency(
+            db, person.get("id"), competency_key
+        )
+
         if competency_satisfied:
             verified_keys.append(competency_key)
         else:

@@ -309,6 +309,9 @@ export default function EmployeeProfilePage() {
   const [cvRejectDialogOpen, setCvRejectDialogOpen] = useState(false);
   const [cvRejectReason, setCvRejectReason] = useState('');
   const [cvRejectLoading, setCvRejectLoading] = useState(false);
+
+  // Employment Review sign-off state
+  const [employmentSignOffLoading, setEmploymentSignOffLoading] = useState(false);
   
   // Delete training record states
   const [deleteTrainingDialogOpen, setDeleteTrainingDialogOpen] = useState(false);
@@ -734,7 +737,25 @@ export default function EmployeeProfilePage() {
       setCvReviewLoading(false);
     }
   };
-  
+
+  // Admin signs off Employment Review
+  const handleSignOffEmploymentReview = async () => {
+    setEmploymentSignOffLoading(true);
+    try {
+      await axios.post(
+        `${API}/admin/employees/${employeeId}/employment-review/sign-off`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Employment review signed off.');
+      fetchEmployee();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Sign-off failed. Check all gaps are resolved.');
+    } finally {
+      setEmploymentSignOffLoading(false);
+    }
+  };
+
   // Admin rejects CV with reason
   const handleRejectCv = async () => {
     if (cvRejectReason.length < 10) {
@@ -3141,13 +3162,22 @@ export default function EmployeeProfilePage() {
       (employmentGapEvaluation?.needs_info_count || 0)
     : null;
   const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
-  const allGapsResolved = employmentGapEvaluation ? Boolean(employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0) : true;
-  const employmentComplete = Boolean(applicationAvailable && cvReviewReady && employmentHistoryExists && allGapsResolved);
+  const allGapsResolved = employmentGapEvaluation
+    ? Boolean(employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
+    : !employmentHistoryExists;
+  // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
+  const employmentReadyForSignOff = Boolean(applicationAvailable && employmentHistoryExists && allGapsResolved);
+  // Persisted sign-off: only true once an admin has explicitly signed off via the backend
+  const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
+  const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
+    || employee?.employment_review_signed_off_by || null;
+  const employmentSignedOffAt = employee?.employment_review_signed_off_at || null;
+  // Final "Complete" requires the persisted sign-off, not just derived conditions
+  const employmentComplete = employmentSignedOff;
   const employmentStatusBlockers = [
-    !applicationAvailable ? 'Upload or attach application form' : null,
-    !cvReviewReady ? 'Upload or link a PDF CV' : null,
+    !applicationAvailable    ? 'Upload or attach application form' : null,
     !employmentHistoryExists ? 'Add or extract employment history' : null,
-    !allGapsResolved ? 'Review or resolve employment gaps' : null,
+    !allGapsResolved         ? 'Review or resolve employment gaps' : null,
   ].filter(Boolean);
 
   if (loading) {
@@ -4353,52 +4383,6 @@ export default function EmployeeProfilePage() {
         {/* ========== TAB 3: FORMS ========== */}
         {/* Health Questionnaire, Personal Info, HMRC, Emergency Contacts */}
         <TabsContent value="forms">
-          <Card className="mb-6 border-[#E4E8EB] shadow-sm" data-testid="section-forms-pre-screen">
-            <CardHeader>
-              <CardTitle className="font-heading text-lg">Application Record</CardTitle>
-              <p className="text-xs text-text-muted">
-                Original structured application submitted by the worker. Use this for recruitment review and audit traceability.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <ApplicationFormViewer
-                employeeId={employeeId}
-                employeeName={`${employee?.first_name} ${employee?.last_name}`}
-                applicationSubmission={applicationSubmission}
-                applicationPdfDocument={applicationPdfDocument}
-                onApplicationUpdated={async () => {
-                  await Promise.all([fetchData(), fetchFormSubmissions()]);
-                }}
-              />
-
-              <div className="border-t pt-6" data-testid="section-forms-declarations">
-                <h4 className="font-medium text-gray-800 mb-1">Applicant Declarations</h4>
-                <p className="text-xs text-gray-500 mb-3">
-                  Consent and declaration data from the original application intake. Use this section to review or amend declarations.
-                </p>
-                <div className="p-4 rounded-lg border bg-gray-50 flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">Declarations & Consent</p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Includes criminal/health declarations, DBS consent, right-to-work restrictions, and professional declarations.
-                    </p>
-                  </div>
-                  {!isAuditor() && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEditDeclarationsOpen(true)}
-                      data-testid="open-declarations-review"
-                    >
-                      <Edit className="h-4 w-4 mr-1" />
-                      Review Declarations
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className="mb-6 border-[#E4E8EB] shadow-sm" data-testid="section-forms-interview">
             <CardHeader>
               <div className="flex items-start justify-between gap-4">
@@ -4640,16 +4624,33 @@ export default function EmployeeProfilePage() {
                 <div className={`mt-0.5 ${employmentComplete ? 'text-green-600' : 'text-amber-600'}`}>
                   {employmentComplete ? <CheckCircle className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
                 </div>
-                <div>
+                <div className="flex-1">
                   <p className={`font-medium ${employmentComplete ? 'text-green-800' : 'text-amber-800'}`}>
-                    Employment Status: {employmentComplete ? 'Complete (gaps reviewed, subject to full 10-year verification)' : 'Incomplete'}
+                    Employment Status: {employmentComplete ? 'Complete (signed off)' : 'Incomplete'}
                   </p>
                   {employmentComplete && (
-                    <p className="mt-1 text-sm text-green-700">
-                      This indicates gaps are reviewed, not full employment verification.
+                    <p className="mt-1 text-xs text-green-700">
+                      ✓ Signed off by {employmentSignedOffBy || 'admin'}
+                      {employmentSignedOffAt ? ` on ${new Date(employmentSignedOffAt).toLocaleDateString('en-GB')}` : ''}
                     </p>
                   )}
-                  {!employmentComplete && employmentStatusBlockers.length > 0 && (
+                  {employmentReadyForSignOff && !employmentSignedOff && !isAuditor() && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <Button
+                        size="sm"
+                        onClick={handleSignOffEmploymentReview}
+                        disabled={employmentSignOffLoading}
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        {employmentSignOffLoading
+                          ? <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          : <CheckCircle className="h-4 w-4 mr-1" />}
+                        Sign off employment review
+                      </Button>
+                      <p className="text-xs text-amber-700">Creates a dated audit entry.</p>
+                    </div>
+                  )}
+                  {!employmentReadyForSignOff && !employmentSignedOff && employmentStatusBlockers.length > 0 && (
                     <p className="mt-1 text-sm text-amber-700">
                       Blockers: {employmentStatusBlockers.join(' · ')}
                     </p>
@@ -4760,6 +4761,32 @@ export default function EmployeeProfilePage() {
                         </p>
                       </div>
                     )}
+
+                    <div className="mt-4 border-t pt-4" data-testid="section-employment-declarations">
+                      <h4 className="font-medium text-gray-800 mb-1">Applicant Declarations</h4>
+                      <p className="text-xs text-gray-500 mb-3">
+                        Consent and declaration data from the original application intake. Use this section to review or amend declarations.
+                      </p>
+                      <div className="p-4 rounded-lg border bg-gray-50 flex items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">Declarations & Consent</p>
+                          <p className="text-xs text-gray-600 mt-1">
+                            Includes criminal/health declarations, DBS consent, right-to-work restrictions, and professional declarations.
+                          </p>
+                        </div>
+                        {!isAuditor() && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEditDeclarationsOpen(true)}
+                            data-testid="open-declarations-review"
+                          >
+                            <Edit className="h-4 w-4 mr-1" />
+                            Review Declarations
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="rounded-xl border border-[#E4E8EB] bg-gray-50 p-4">

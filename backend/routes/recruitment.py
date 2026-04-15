@@ -86,6 +86,10 @@ class RecruitmentApprovalRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class EmploymentReviewSignOffRequest(BaseModel):
+    notes: Optional[str] = None
+
+
 # ==================== HELPER FUNCTIONS ====================
 
 async def generate_employee_code() -> str:
@@ -519,6 +523,92 @@ async def get_recruitment_approval_status(
         "can_be_activated": employee.get("recruitment_approved", False),
         "portal_invite_status": employee.get("portal_invite_status"),
         "portal_invite_sent_at": employee.get("portal_invite_sent_at"),
+    }
+
+
+# ==================== EMPLOYMENT REVIEW SIGN-OFF ====================
+
+@router.post("/employees/{employee_id}/employment-review/sign-off")
+async def sign_off_employment_review(
+    employee_id: str,
+    request: EmploymentReviewSignOffRequest = EmploymentReviewSignOffRequest(),
+    user: dict = Depends(require_admin)
+):
+    """
+    Admin sign-off on Employment Review.
+
+    Stores a dated, attributed record on the employee document that the
+    employment history and gap verification have been reviewed by this user.
+
+    Guards:
+    - Employment history must exist on the profile.
+    - All recorded employment gaps must be resolved (no pending / needs_info /
+      rejected / explained-awaiting-verification entries in employment_gaps).
+
+    Written fields:
+    - employment_review_signed_off      bool
+    - employment_review_signed_off_by   user_id
+    - employment_review_signed_off_at   ISO timestamp
+    - employment_review_notes           str | null
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # ── Guard 1: employment history must exist ───────────────────────────────
+    employment_history = employee.get("employment_history") or []
+    if not employment_history:
+        raise HTTPException(
+            status_code=400,
+            detail="Employment history is required before signing off Employment Review."
+        )
+
+    # ── Guard 2: all gaps must be resolved ───────────────────────────────────
+    unresolved = await db.employment_gaps.find({
+        "employee_id": employee_id,
+        "status": {"$in": ["pending", "needs_info", "rejected", "explained"]}
+    }).to_list(10)
+
+    if unresolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(unresolved)} employment gap(s) are not fully resolved. "
+                   "Verify or resolve all gaps before signing off."
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "employment_review_signed_off": True,
+            "employment_review_signed_off_by": user["user_id"],
+            "employment_review_signed_off_at": now,
+            "employment_review_notes": request.notes,
+            "updated_at": now,
+        }}
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "employment_review_signed_off",
+        "employee",
+        employee_id,
+        {
+            "signed_off_by": user["user_id"],
+            "signed_off_at": now,
+            "notes": request.notes,
+            "employment_history_count": len(employment_history),
+        }
+    )
+
+    return {
+        "signed_off": True,
+        "signed_off_by": user["user_id"],
+        "signed_off_at": now,
+        "notes": request.notes,
     }
 
 

@@ -60,6 +60,16 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
   const [mismatchReason, setMismatchReason] = useState('');
   const [verifyLoading, setVerifyLoading] = useState(false);
 
+  // Recent-employer mismatch flag state
+  const [flaggingMismatch, setFlaggingMismatch] = useState(null); // ref_num being flagged
+
+  // Mismatch explanation review state (admin reviews worker explanation)
+  const [reviewExplanationOpen, setReviewExplanationOpen] = useState(false);
+  const [reviewExplanationRef, setReviewExplanationRef] = useState(null);
+  const [reviewDecision, setReviewDecision] = useState('');
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [reviewingExplanation, setReviewingExplanation] = useState(false);
+
   const fetchReferences = async () => {
     try {
       setLoading(true);
@@ -225,9 +235,60 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
       setVerifyLoading(false);
     }
   };
-  
+
+  // Flag reference as not from most recent employer
+  const handleFlagRecentEmployer = async (refNum) => {
+    setFlaggingMismatch(refNum);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API}/employees/${employeeId}/references/${refNum}/flag-recent-employer-mismatch`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Mismatch flagged — worker will see an explanation task on their dashboard.');
+      fetchReferences();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to flag mismatch');
+    } finally {
+      setFlaggingMismatch(null);
+    }
+  };
+
+  // Admin reviews worker's mismatch explanation
+  const openReviewExplanation = (refNum) => {
+    setReviewExplanationRef(refNum);
+    setReviewDecision('');
+    setReviewNotes('');
+    setReviewExplanationOpen(true);
+  };
+
+  const handleReviewExplanation = async () => {
+    if (!reviewDecision) {
+      toast.error('Please select a decision');
+      return;
+    }
+    setReviewingExplanation(true);
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API}/references/${employeeId}/${reviewExplanationRef}/review-mismatch-explanation`,
+        { decision: reviewDecision, admin_notes: reviewNotes },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success(`Explanation ${reviewDecision}.`);
+      setReviewExplanationOpen(false);
+      fetchReferences();
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to review explanation');
+    } finally {
+      setReviewingExplanation(false);
+    }
+  };
+
   const openAddDialog = (refNum) => {
-    setAddRefNum(refNum);
     setRefereeForm({
       name: '',
       email: '',
@@ -538,6 +599,91 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                                 </div>
                               </>
                             ) : null}
+                          </div>
+                        )}
+
+                        {/* ── Mismatch panel ── */}
+                        {ref?.integrity?.mismatch_detected && (
+                          <div className="mt-3 space-y-2">
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                              <p className="text-xs font-semibold text-amber-800 flex items-center gap-1 mb-1">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                Mismatch Detected
+                              </p>
+                              <p className="text-xs text-amber-700">
+                                {ref.integrity.mismatch_notes ||
+                                  (ref.integrity.mismatch_reasons || []).join(' · ') ||
+                                  'Reference discrepancy detected.'}
+                              </p>
+                            </div>
+
+                            {/* Worker explanation (if submitted) */}
+                            {ref.integrity.mismatch_explanation && (
+                              <div className={`p-3 border rounded-lg ${
+                                ref.integrity.mismatch_admin_decision === 'accepted'
+                                  ? 'bg-green-50 border-green-200'
+                                  : ref.integrity.mismatch_admin_decision === 'rejected'
+                                  ? 'bg-red-50 border-red-200'
+                                  : 'bg-blue-50 border-blue-200'
+                              }`}>
+                                <p className="text-xs font-semibold text-slate-700 mb-1">
+                                  Worker Explanation{' '}
+                                  <span className="text-slate-400 font-normal">
+                                    ({ref.integrity.mismatch_explanation_type || 'other'})
+                                  </span>
+                                </p>
+                                <p className="text-xs text-slate-600 mb-2">{ref.integrity.mismatch_explanation}</p>
+
+                                {ref.integrity.mismatch_admin_decision ? (
+                                  <p className={`text-xs font-medium ${
+                                    ref.integrity.mismatch_admin_decision === 'accepted'
+                                      ? 'text-green-700'
+                                      : 'text-red-700'
+                                  }`}>
+                                    Decision: {ref.integrity.mismatch_admin_decision}
+                                    {ref.integrity.mismatch_admin_notes && ` — ${ref.integrity.mismatch_admin_notes}`}
+                                  </p>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-xs h-7"
+                                    onClick={() => openReviewExplanation(refNum)}
+                                    data-testid={`review-explanation-btn-${refNum}`}
+                                  >
+                                    <MessageSquare className="h-3 w-3 mr-1" />
+                                    Review Explanation
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+
+                            {!ref.integrity.mismatch_explanation && (
+                              <p className="text-xs text-amber-600 italic">
+                                Awaiting worker explanation via dashboard task.
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Flag: not from most recent employer (only if no mismatch already) */}
+                        {declared.name && !ref?.integrity?.mismatch_detected && (
+                          <div className="pt-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs text-slate-500 hover:text-amber-600 w-full justify-start"
+                              onClick={() => handleFlagRecentEmployer(refNum)}
+                              disabled={flaggingMismatch === refNum}
+                              data-testid={`flag-recent-employer-btn-${refNum}`}
+                            >
+                              {flaggingMismatch === refNum ? (
+                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                              ) : (
+                                <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+                              )}
+                              Flag: not from most recent employer
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -958,6 +1104,65 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                 <XCircle className="h-4 w-4 mr-2" />
               )}
               {verifyAction === 'verify' ? 'Verify Reference' : 'Reject Reference'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Review Mismatch Explanation Dialog */}
+      <Dialog open={reviewExplanationOpen} onOpenChange={setReviewExplanationOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-amber-600" />
+              Review Worker Explanation
+            </DialogTitle>
+            <DialogDescription>
+              Review the worker's explanation for the reference mismatch. Accepting will clear the readiness block.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Decision *</Label>
+              <Select value={reviewDecision} onValueChange={setReviewDecision}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select a decision..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="accepted">Accept — explanation satisfactory</SelectItem>
+                  <SelectItem value="needs_clarification">Needs Clarification</SelectItem>
+                  <SelectItem value="rejected">Reject — insufficient justification</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Admin Notes (Optional)</Label>
+              <Textarea
+                value={reviewNotes}
+                onChange={(e) => setReviewNotes(e.target.value)}
+                placeholder="Any notes for the audit trail..."
+                className="mt-1"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReviewExplanationOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReviewExplanation}
+              disabled={!reviewDecision || reviewingExplanation}
+              className={reviewDecision === 'accepted' ? 'bg-green-600 hover:bg-green-700' : ''}
+              variant={reviewDecision === 'rejected' ? 'destructive' : 'default'}
+              data-testid="confirm-review-explanation-btn"
+            >
+              {reviewingExplanation ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <CheckCircle className="h-4 w-4 mr-2" />
+              )}
+              Confirm Decision
             </Button>
           </DialogFooter>
         </DialogContent>

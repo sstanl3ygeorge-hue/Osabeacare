@@ -31279,16 +31279,28 @@ async def review_mismatch_explanation(
     
     now = datetime.now(timezone.utc).isoformat()
     
+    update_fields = {
+        f"{prefix}mismatch_admin_decision": review.decision,
+        f"{prefix}mismatch_admin_notes": review.admin_notes,
+        f"{prefix}mismatch_reviewed_at": now,
+        f"{prefix}mismatch_reviewed_by": user['user_id'],
+        f"{prefix}mismatch_explanation_status": "reviewed",
+        "updated_at": now
+    }
+
+    # When admin accepts the explanation, set override_reason so counts_toward_readiness passes
+    if review.decision == "accepted":
+        worker_explanation = employee.get(f"{prefix}mismatch_explanation", "")
+        update_fields[f"{prefix}override_reason"] = (
+            f"Worker explanation accepted: {worker_explanation[:200]}"
+        )
+        update_fields[f"{prefix}mismatch_override_reason"] = update_fields[f"{prefix}override_reason"]
+        update_fields[f"{prefix}mismatch_override_by"] = user['user_id']
+        update_fields[f"{prefix}mismatch_override_at"] = now
+
     await db.employees.update_one(
         {"id": employee_id},
-        {"$set": {
-            f"{prefix}mismatch_admin_decision": review.decision,
-            f"{prefix}mismatch_admin_notes": review.admin_notes,
-            f"{prefix}mismatch_reviewed_at": now,
-            f"{prefix}mismatch_reviewed_by": user['user_id'],
-            f"{prefix}mismatch_explanation_status": "reviewed",
-            "updated_at": now
-        }}
+        {"$set": update_fields}
     )
     
     # Log audit trail
@@ -31730,6 +31742,13 @@ async def get_normalized_references(
             "override_reason": employee.get(f"{prefix}override_reason"),
             "override_by": employee.get(f"{prefix}override_by"),
             "override_at": employee.get(f"{prefix}override_at"),
+            # Worker explanation for mismatch (submitted via worker dashboard)
+            "mismatch_notes": mismatch_notes,
+            "mismatch_explanation": employee.get(f"{prefix}mismatch_explanation"),
+            "mismatch_explanation_type": employee.get(f"{prefix}mismatch_explanation_type"),
+            "mismatch_explanation_status": employee.get(f"{prefix}mismatch_explanation_status"),
+            "mismatch_admin_decision": employee.get(f"{prefix}mismatch_admin_decision"),
+            "mismatch_admin_notes": employee.get(f"{prefix}mismatch_admin_notes"),
         }
         
         # =====================================================================

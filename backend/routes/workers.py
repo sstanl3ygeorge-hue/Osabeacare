@@ -696,10 +696,30 @@ async def explain_reference_mismatch(
     """
     db = get_db()
     employee_id = worker.get("employee_id")
-    
+
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="Invalid reference number")
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    result = await db.employee_references.update_one(
+    prefix = f"reference_{ref_num}_"
+
+    # Sync to db.employees flat fields (canonical store read by admin review endpoint)
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                f"{prefix}mismatch_explanation": request.explanation_text,
+                f"{prefix}mismatch_explanation_type": request.explanation_type,
+                f"{prefix}mismatch_explained": True,
+                f"{prefix}mismatch_explained_at": now,
+                f"{prefix}mismatch_explanation_status": "submitted",
+                "updated_at": now,
+            }
+        }
+    )
+
+    # Also write to legacy db.employee_references if a record exists
+    await db.employee_references.update_one(
         {"employee_id": employee_id, "reference_number": ref_num},
         {
             "$set": {
@@ -707,22 +727,19 @@ async def explain_reference_mismatch(
                 "mismatch_explanation_type": request.explanation_type,
                 "mismatch_explanation_text": request.explanation_text,
                 "mismatch_explained_at": now,
-                "updated_at": now
+                "updated_at": now,
             }
         }
     )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Reference not found")
-    
+
     await log_audit_action(
         employee_id,
         "reference_mismatch_explained",
-        "employee_reference",
-        f"{employee_id}_ref_{ref_num}",
-        {"explanation_type": request.explanation_type}
+        "employee",
+        employee_id,
+        {"reference_num": ref_num, "explanation_type": request.explanation_type}
     )
-    
+
     return {
         "success": True,
         "reference_number": ref_num

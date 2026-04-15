@@ -1035,3 +1035,65 @@ async def admin_record_reference_response(
         "evidence_source": "admin_uploaded_on_behalf",
         "next_step": f"POST /employees/{employee_id}/references/{ref_num}/verify with action=verify"
     }
+
+
+# ==================== FLAG: RECENT EMPLOYER MISMATCH ====================
+
+@router.post("/employees/{employee_id}/references/{ref_num}/flag-recent-employer-mismatch")
+async def flag_recent_employer_mismatch(
+    employee_id: str,
+    ref_num: int,
+    user: dict = Depends(require_manager_or_admin),
+):
+    """
+    Admin flags that a reference does not cover the most recent employer as required by
+    NHS Safer Recruitment. This:
+      - Sets reference_{n}_mismatch_detected = True on db.employees
+      - Sets specific mismatch_notes so the worker task card is descriptive
+      - The worker will see an 'Action Required' card on their dashboard
+      - Admin can review the explanation via POST /references/{id}/{n}/review-mismatch-explanation
+    """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="Invalid reference number")
+
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    prefix = f"reference_{ref_num}_"
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            f"{prefix}mismatch_detected": True,
+            f"{prefix}mismatch_notes": (
+                "This reference does not appear to be from the most recent employer. "
+                "NHS Safer Recruitment requires at least one reference from the most recent employer. "
+                "Please provide an explanation or nominate a replacement referee."
+            ),
+            f"{prefix}mismatch_flagged_by": user['user_id'],
+            f"{prefix}mismatch_flagged_at": now,
+            "updated_at": now,
+        }}
+    )
+
+    await log_audit_action(
+        user['user_id'],
+        "flag_recent_employer_mismatch",
+        "employee",
+        employee_id,
+        {"reference_num": ref_num},
+    )
+
+    return {
+        "status": "success",
+        "message": f"Reference {ref_num} flagged: worker will see an explanation task on their dashboard.",
+        "reference_num": ref_num,
+        "next_step": (
+            f"Once the worker submits an explanation, review it via "
+            f"POST /references/{employee_id}/{ref_num}/review-mismatch-explanation"
+        ),
+    }

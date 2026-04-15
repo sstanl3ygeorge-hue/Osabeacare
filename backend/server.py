@@ -4126,6 +4126,14 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
                     cert_date = datetime.fromisoformat(cert_date.replace('Z', '+00:00'))
                 except:
                     cert_date = None
+
+            # Normalize to UTC-aware for consistency
+            if isinstance(cert_date, datetime):
+                if cert_date.tzinfo is None:
+                    cert_date = cert_date.replace(tzinfo=timezone.utc)
+                else:
+                    cert_date = cert_date.astimezone(timezone.utc)
+
             if cert_date:
                 summary["certificate_date"] = cert_date.isoformat()
                 summary["certificate_issue_date"] = cert_date.isoformat()
@@ -4152,7 +4160,14 @@ async def get_employee_dbs_summary(employee_id: str) -> dict:
                 check_date = datetime.fromisoformat(check_date.replace('Z', '+00:00'))
             except:
                 check_date = None
-        
+
+        # Normalize to UTC-aware so (next_review - now) never mixes naive/aware datetimes
+        if isinstance(check_date, datetime):
+            if check_date.tzinfo is None:
+                check_date = check_date.replace(tzinfo=timezone.utc)
+            else:
+                check_date = check_date.astimezone(timezone.utc)
+
         if check_date:
             summary["update_service_date"] = check_date.isoformat()
             summary["update_service_last_checked"] = check_date.isoformat()

@@ -31,6 +31,8 @@ MANDATORY_TRAINING_BY_ROLE = {
         "health_safety",  # Matches: Health & Safety
         "basic_life_support",  # Matches: BLS, Basic Life Support, Resuscitation
         "infection_control",  # Matches: Infection Control, Infection Prevention
+        "information_governance",  # Matches: Information Governance, GDPR, Data Protection
+        "prevent",  # Matches: Prevent, Counter-Terrorism Awareness
     ],
     "nurse": [
         "safeguarding",
@@ -39,6 +41,8 @@ MANDATORY_TRAINING_BY_ROLE = {
         "health_safety",
         "basic_life_support",
         "infection_control",
+        "information_governance",
+        "prevent",
         # NMC registration is tracked separately, not as training
     ],
     "senior_carer": [
@@ -48,6 +52,8 @@ MANDATORY_TRAINING_BY_ROLE = {
         "health_safety",
         "basic_life_support",
         "infection_control",
+        "information_governance",
+        "prevent",
         "medication",  # Medication Administration required for senior carers
     ],
     "support_worker": [
@@ -57,6 +63,8 @@ MANDATORY_TRAINING_BY_ROLE = {
         "health_safety",
         "basic_life_support",
         "infection_control",
+        "information_governance",
+        "prevent",
     ],
     "default": [  # Fallback for unknown roles
         "safeguarding",
@@ -65,6 +73,8 @@ MANDATORY_TRAINING_BY_ROLE = {
         "health_safety",
         "basic_life_support",
         "infection_control",
+        "information_governance",
+        "prevent",
     ]
 }
 

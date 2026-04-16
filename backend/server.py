@@ -6880,12 +6880,16 @@ async def evaluate_employee_training_status(employee_id: str, role: str = '') ->
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0}).to_list(100)
     
-    # Build lookup by requirement_id
+    # Build lookup by requirement_id, training_id, and normalized training_name
     records_by_req = {}
     for record in training_records:
         req_id = record.get('requirement_id') or record.get('training_name', '').lower().replace(' ', '_')
         if req_id not in records_by_req:
             records_by_req[req_id] = record
+        # Also index by training_id (set by extractor mapping) for robust matching
+        t_id = record.get('training_id')
+        if t_id and t_id not in records_by_req:
+            records_by_req[t_id] = record
     
     items = []
     blocker_count = 0
@@ -39241,8 +39245,8 @@ TRAINING_CODE_MAPPING = {
     "food safety": "food_hygiene",
     "cstf - equality diversity and human rights": "equality_diversity",
     "equality diversity": "equality_diversity",
-    "cstf - health safety and welfare": "health_and_safety",
-    "health and safety": "health_and_safety",
+    "cstf - health safety and welfare": "health_safety",
+    "health and safety": "health_safety",
     "cstf - information governance": "information_governance",
     "information governance": "information_governance",
     "data protection": "information_governance",
@@ -39275,6 +39279,7 @@ TRAINING_TITLES = {
     "food_hygiene": "Food Hygiene & Safety",
     "equality_diversity": "Equality, Diversity & Human Rights",
     "health_and_safety": "Health, Safety & Welfare",
+    "health_safety": "Health & Safety",
     "information_governance": "Information Governance & GDPR",
     "prevent": "Prevent (Anti-Radicalisation)",
     "first_aid": "First Aid Awareness",

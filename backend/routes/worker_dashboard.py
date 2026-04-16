@@ -683,10 +683,10 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
             })
     
-    # Get training
+    # Get training (exclude superseded AND deleted — aligned with UCE/admin queries)
     trainings = await db.training_records.find({
         "employee_id": employee_id,
-        "record_status": {"$ne": "superseded"}
+        "record_status": {"$nin": ["superseded", "deleted"]}
     }).to_list(length=100)
     
     # 8 mandatory trainings aligned with MANDATORY_TRAINING_HCA in unified_compliance_engine.py

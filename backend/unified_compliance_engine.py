@@ -33,6 +33,14 @@ from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 import logging
 
+from induction_definitions import (
+    CARE_CERTIFICATE_STANDARDS,
+    TRAINING_TO_INDUCTION_MAP,
+    normalize_training_name,
+    get_induction_item_for_training,
+    get_employee_induction_status,
+)
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -53,55 +61,7 @@ MANDATORY_TRAINING_HCA = [
     {"id": "prevent", "name": "Prevent (Counter-Terrorism Awareness)", "induction_sync": None},
 ]
 
-# 15 Care Certificate Standards for Induction (Adults ONLY - NO Safeguarding Children)
-# These are the official NHS Care Certificate standards for adult social care
-# Auto-complete mapping: When training is verified, corresponding induction item auto-completes
-CARE_CERTIFICATE_STANDARDS = [
-    {"id": "understand_your_role", "num": 1, "name": "Understand Your Role", "training_sync": None, "auto_complete": "manual"},
-    {"id": "personal_development", "num": 2, "name": "Your Personal Development", "training_sync": None, "auto_complete": "manual"},
-    {"id": "duty_of_care", "num": 3, "name": "Duty of Care", "training_sync": None, "auto_complete": "manual"},
-    {"id": "equality_diversity", "num": 4, "name": "Equality and Diversity", "training_sync": "equality_diversity", "auto_complete": "training"},
-    {"id": "work_person_centred", "num": 5, "name": "Work in a Person-Centred Way", "training_sync": None, "auto_complete": "manual"},
-    {"id": "communication", "num": 6, "name": "Communication", "training_sync": None, "auto_complete": "interview"},
-    {"id": "privacy_dignity", "num": 7, "name": "Privacy and Dignity", "training_sync": None, "auto_complete": "manual"},
-    {"id": "fluids_nutrition", "num": 8, "name": "Fluids and Nutrition", "training_sync": "food_hygiene", "auto_complete": "training"},
-    {"id": "awareness_mental_health", "num": 9, "name": "Awareness of Mental Health, Dementia and Learning Disabilities", "training_sync": "mental_health", "auto_complete": "training"},
-    {"id": "safeguarding_adults", "num": 10, "name": "Safeguarding Adults", "training_sync": "safeguarding_adults", "auto_complete": "training"},
-    {"id": "basic_life_support", "num": 11, "name": "Basic Life Support", "training_sync": "basic_life_support", "auto_complete": "training"},
-    {"id": "health_safety", "num": 12, "name": "Health and Safety", "training_sync": "health_safety", "auto_complete": "training"},
-    {"id": "handling_information", "num": 13, "name": "Handling Information", "training_sync": "information_governance", "auto_complete": "training"},
-    {"id": "infection_control", "num": 14, "name": "Infection Prevention and Control", "training_sync": "infection_control", "auto_complete": "training"},
-    {"id": "shadow_shift", "num": 15, "name": "Shadow Shift Completed", "training_sync": None, "auto_complete": "manual"},
-]
-
-# Training → Induction Auto-Complete Mapping (P0 CRITICAL)
-# When a training is verified, automatically mark the corresponding induction item as complete
-TRAINING_TO_INDUCTION_MAP = {
-    # Training ID → Induction ID
-    "safeguarding_adults": "safeguarding_adults",
-    "safeguarding": "safeguarding_adults",
-    "manual_handling": None,  # No matching Care Certificate standard for manual handling
-    "moving_handling": None,  # No matching Care Certificate standard for manual handling
-    "fire_safety": "fire_safety",
-    "health_safety": "health_safety",
-    "health_and_safety": "health_safety",
-    "basic_life_support": "basic_life_support",
-    "bls": "basic_life_support",
-    "infection_control": "infection_control",
-    "infection_prevention": "infection_control",
-    "information_governance": "handling_information",
-    "gdpr": "handling_information",
-    "data_protection": "handling_information",
-    "equality_diversity": "equality_diversity",
-    "equality_and_diversity": "equality_diversity",
-    "food_hygiene": "fluids_nutrition",
-    "nutrition": "fluids_nutrition",
-    "mental_health": "awareness_mental_health",
-    "dementia": "awareness_mental_health",
-    "learning_disabilities": "awareness_mental_health",
-    "medication_administration": None,  # No direct induction mapping
-    "medication_awareness": None,
-}
+# CARE_CERTIFICATE_STANDARDS and TRAINING_TO_INDUCTION_MAP imported from induction_definitions
 
 # Documents required for ALL roles
 REQUIRED_DOCUMENTS = [
@@ -346,52 +306,7 @@ async def get_employee_competency(db, employee_id: str, competency_type: str) ->
     return False
 
 
-def normalize_training_name(name: str) -> str:
-    """
-    Normalize training name for matching purposes.
-    Removes special characters (&, /, -, etc.) and extra spaces.
-    This ensures "Health & Safety" matches "health safety".
-    """
-    if not name:
-        return ""
-    # Convert to lowercase
-    name = name.lower()
-    # Replace common separators with space
-    for char in ['&', '/', '-', ',', '(', ')', ':']:
-        name = name.replace(char, ' ')
-    # Collapse multiple spaces and strip
-    name = ' '.join(name.split())
-    return name
-
-
-def get_induction_item_for_training(training_id: str, training_name: str = None) -> Optional[str]:
-    """
-    Get the induction item ID that should be auto-completed when a training is verified.
-    Uses fuzzy matching if exact match not found.
-    
-    Returns: induction_item_id or None
-    """
-    # First try exact match from mapping
-    normalized_id = normalize_training_name(training_id)
-    
-    # Direct mapping lookup
-    if training_id in TRAINING_TO_INDUCTION_MAP:
-        return TRAINING_TO_INDUCTION_MAP[training_id]
-    
-    if normalized_id in TRAINING_TO_INDUCTION_MAP:
-        return TRAINING_TO_INDUCTION_MAP[normalized_id]
-    
-    # Try fuzzy matching on training name
-    if training_name:
-        normalized_name = normalize_training_name(training_name)
-        
-        # Check each mapping key
-        for key, induction_id in TRAINING_TO_INDUCTION_MAP.items():
-            normalized_key = normalize_training_name(key)
-            if normalized_key in normalized_name or normalized_name in normalized_key:
-                return induction_id
-    
-    return None
+# normalize_training_name and get_induction_item_for_training imported from induction_definitions
 
 
 async def auto_complete_induction_from_training(
@@ -1199,73 +1114,32 @@ async def get_unified_employee_status(
     
     # ==========================================================================
     # CHECK 4: INDUCTION CHECKLIST (15 Care Certificate Standards)
-    # AUTO-SYNC: When training is verified, corresponding induction item completes
+    # Delegates to canonical induction_definitions.get_employee_induction_status()
     # ==========================================================================
     
-    induction_items = []
-    if induction_record and induction_record.get("items"):
-        induction_items = induction_record.get("items", [])
+    induction_status = await get_employee_induction_status(db, emp_id, induction_record=induction_record)
     
-    # Build induction status map — supports both ID-keyed (UCE-created) and name-keyed (induction.py-created) items
-    induction_status_map = {}
-    induction_name_map = {}
-    for item in induction_items:
-        item_id = item.get("id") or item.get("standard_id")
-        item_name = (item.get("name") or "").lower().strip()
-        is_item_complete = item.get("status") == "completed"
-        if item_id:
-            induction_status_map[item_id] = is_item_complete
-        if item_name:
-            induction_name_map[item_name] = is_item_complete
+    for item in induction_status["items"]:
+        categories["induction"]["items"].append({
+            "id": item["id"],
+            "num": item["num"],
+            "name": item["name"],
+            "completed": item["completed"],
+            "auto_synced": item["synced_from_training"],
+            "training_sync": item["training_sync"],
+        })
     
-    induction_completed_count = 0
+    categories["induction"]["completed"] = induction_status["completed"]
+    checks["induction"] = not induction_status["blocking"]
     
-    for standard in CARE_CERTIFICATE_STANDARDS:
-        std_id = standard["id"]
-        std_name = standard["name"]
-        training_sync = standard.get("training_sync")
-        
-        # Check if completed in induction record (ID-based, then name-based fallback)
-        is_completed = induction_status_map.get(std_id, False)
-        if not is_completed:
-            is_completed = induction_name_map.get(std_name.lower(), False)
-        
-        # AUTO-SYNC: If corresponding training is verified, mark induction as complete
-        if training_sync and verified_training.get(training_sync):
-            is_completed = True
-        
-        # Also check by standard number
-        for item in induction_items:
-            if item.get("standard_number") == standard.get("num"):
-                if item.get("status") == "completed":
-                    is_completed = True
-                break
-        
-        item_data = {
-            "id": std_id,
-            "num": standard.get("num"),
-            "name": std_name,
-            "completed": is_completed,
-            "auto_synced": training_sync and verified_training.get(training_sync, False),
-            "training_sync": training_sync,
-        }
-        
-        categories["induction"]["items"].append(item_data)
-        
-        if is_completed:
-            induction_completed_count += 1
-    
-    categories["induction"]["completed"] = induction_completed_count
-    checks["induction"] = induction_completed_count == 15
-    
-    if induction_completed_count < 15:
+    if induction_status["blocking"]:
         blockers.append({
             "id": "induction",
             "gate": "induction",
-            "label": f"Induction Checklist ({induction_completed_count}/15 complete)",
-            "reason": f"Induction: {induction_completed_count} of 15 Care Certificate standards complete",
+            "label": f"Induction Checklist ({induction_status['completed']}/15 complete)",
+            "reason": f"Induction: {induction_status['completed']} of 15 Care Certificate standards complete",
             "category": "induction",
-            "severity": "pending" if induction_completed_count > 0 else "critical"
+            "severity": "pending" if induction_status["completed"] > 0 else "critical"
         })
     
     # ==========================================================================

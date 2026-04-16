@@ -21,31 +21,18 @@ from .dependencies import (
     log_audit_action
 )
 from services.pdf_service import generate_admin_form_pdf
+from induction_definitions import (
+    DEFAULT_INDUCTION_ITEMS,
+    INDUCTION_NAME_TO_TRAINING_PATTERNS,
+    get_employee_induction_status,
+    is_training_verified_for_item,
+)
 
 router = APIRouter(tags=["Induction Checklist"])
 
+# DEFAULT_INDUCTION_ITEMS, INDUCTION_NAME_TO_TRAINING_PATTERNS imported from induction_definitions
 
-# Default induction checklist items for all care roles
-# CQC Care Certificate 15 Standards for Adult Care
-DEFAULT_INDUCTION_ITEMS = [
-    {"id": "understand_your_role",     "name": "Understand Your Role",                                                     "mandatory": True, "order": 1,  "training_link": None},
-    {"id": "personal_development",     "name": "Your Personal Development",                                                  "mandatory": True, "order": 2,  "training_link": None},
-    {"id": "duty_of_care",             "name": "Duty of Care",                                                               "mandatory": True, "order": 3,  "training_link": None},
-    {"id": "equality_diversity",       "name": "Equality and Diversity",                                                     "mandatory": True, "order": 4,  "training_link": "equality_diversity"},
-    {"id": "work_person_centred",      "name": "Work in a Person-Centred Way",                                               "mandatory": True, "order": 5,  "training_link": None},
-    {"id": "communication",            "name": "Communication",                                                              "mandatory": True, "order": 6,  "training_link": None},
-    {"id": "privacy_dignity",          "name": "Privacy and Dignity",                                                        "mandatory": True, "order": 7,  "training_link": None},
-    {"id": "fluids_nutrition",         "name": "Fluids and Nutrition",                                                       "mandatory": True, "order": 8,  "training_link": "food_hygiene"},
-    {"id": "awareness_mental_health",  "name": "Awareness of Mental Health, Dementia and Learning Disabilities",             "mandatory": True, "order": 9,  "training_link": None},
-    {"id": "safeguarding_adults",      "name": "Safeguarding Adults",                                                        "mandatory": True, "order": 10, "training_link": "safeguarding"},
-    {"id": "basic_life_support",       "name": "Basic Life Support",                                                         "mandatory": True, "order": 11, "training_link": "bls"},
-    {"id": "health_safety",            "name": "Health and Safety",                                                          "mandatory": True, "order": 12, "training_link": "health_safety"},
-    {"id": "handling_information",     "name": "Handling Information",                                                       "mandatory": True, "order": 13, "training_link": "data_protection"},
-    {"id": "infection_control",        "name": "Infection Prevention and Control",                                           "mandatory": True, "order": 14, "training_link": "infection_control"},
-    {"id": "shadow_shift",             "name": "Shadow Shift Completed",                                                     "mandatory": True, "order": 15, "training_link": None},
-]
-
-# Mapping of induction items to training requirement codes for auto-completion
+# Legacy alias kept for fix endpoint's is_verified inner function
 INDUCTION_TRAINING_MAP = {
     "Safeguarding Adults": ["safeguarding", "safeguard_adults", "safeguarding_adults"],
     "Basic Life Support": ["bls", "basic_life_support", "resuscitation"],
@@ -71,7 +58,7 @@ async def get_induction_checklist(
     """
     Get induction checklist for an employee.
     If no checklist exists, returns default template.
-    AUTO-SYNCS with verified training records.
+    AUTO-SYNCS with verified training records via canonical function.
     """
     db = get_db()
     
@@ -82,132 +69,38 @@ async def get_induction_checklist(
     
     employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
     
-    # Get verified trainings for this employee
-    verified_trainings = await db.training_records.find({
-        "employee_id": employee_id,
-        "verified": True,
-        "record_status": {"$nin": ["superseded", "deleted"]}
-    }, {"_id": 0, "training_name": 1, "requirement_id": 1, "code": 1, "verified_by": 1, "verified_at": 1}).to_list(100)
+    # Use canonical induction status function
+    induction_status = await get_employee_induction_status(db, employee_id)
     
-    # Build set of verified training names/codes for matching
-    verified_set = set()
-    verified_info = {}
-    for tr in verified_trainings:
-        name = (tr.get('training_name') or '').lower()
-        code = (tr.get('code') or tr.get('requirement_id') or '').lower()
-        if name:
-            verified_set.add(name)
-            verified_info[name] = tr
-        if code:
-            verified_set.add(code)
-            verified_info[code] = tr
-    
-    # Mapping from induction item name to training patterns (extended)
-    INDUCTION_TO_TRAINING_MAP = {
-        "Safeguarding Adults": ["safeguarding", "safeguard", "safeguarding adults", "safeguard_adults"],
-        "Safeguarding Children": ["safeguarding children", "child protection", "safeguard_children"],
-        "Basic Life Support": ["basic life support", "bls", "basic_life_support", "resuscitation", "cpr"],
-        "Health and Safety": ["health and safety", "health_safety", "h&s", "cstf_health"],
-        "Infection Prevention and Control": ["infection control", "infection_control", "infection prevention", "ipc", "cstf_infection"],
-        "Equality and Diversity": ["equality", "diversity", "equality_diversity", "edi", "cstf_equality"],
-        "Fluids and Nutrition": ["food hygiene", "food_hygiene", "nutrition", "fluids"],
-        "Handling Information": ["data protection", "gdpr", "data_protection", "information governance", "ig"],
-        "Shadow Shift Completed": ["shadow shift", "shadow_shift", "shadowing"],
-    }
-    
-    def is_training_verified(item_name):
-        """Check if a training item is verified based on training records"""
-        item_lower = item_name.lower()
-        
-        # Direct match
-        if item_lower in verified_set:
-            return True, verified_info.get(item_lower)
-        
-        # Check via mapping
-        patterns = INDUCTION_TO_TRAINING_MAP.get(item_name, [])
-        for pattern in patterns:
-            if pattern.lower() in verified_set:
-                return True, verified_info.get(pattern.lower())
-            # Also check if any verified training contains this pattern
-            for v_name in verified_set:
-                if pattern.lower() in v_name or v_name in pattern.lower():
-                    return True, verified_info.get(v_name)
-        
-        return False, None
+    # Map canonical items to the shape InductionChecklistPanel expects
+    items = []
+    for item in induction_status["items"]:
+        items.append({
+            "id": item["id"],
+            "name": item["name"],
+            "mandatory": item["mandatory"],
+            "status": item["status"],
+            "completed_at": item["completed_at"],
+            "completed_by_name": item["completed_by_name"],
+            "synced_from_training": item["synced_from_training"],
+        })
     
     now = datetime.now(timezone.utc).isoformat()
-    checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
+    completed_count = induction_status["completed"]
+    overall_status = induction_status["overall_status"]
+    # Map "not_started" to "pending" for frontend compat
+    if overall_status == "not_started":
+        overall_status = "pending"
     
-    if not checklist:
-        # Create default structure with auto-sync
-        items = []
-        for item_def in DEFAULT_INDUCTION_ITEMS:
-            is_verified, training_info = is_training_verified(item_def["name"])
-            items.append({
-                "id": item_def["id"],
-                "name": item_def["name"],
-                "mandatory": item_def["mandatory"],
-                "status": "completed" if is_verified else "pending",
-                "completed_at": training_info.get("verified_at") if is_verified and training_info else None,
-                "completed_by_name": f"Auto (Training: {training_info.get('training_name', 'Verified')})" if is_verified and training_info else None,
-                "synced_from_training": is_verified
-            })
-        
-        completed_count = sum(1 for i in items if i["status"] == "completed")
-        overall_status = "completed" if completed_count == len(items) else "in_progress" if completed_count > 0 else "pending"
-        
-        return {
-            "employee_id": employee_id,
-            "employee_name": employee_name,
-            "items": items,
-            "overall_status": overall_status,
-            "started_at": now if completed_count > 0 else None,
-            "completed_at": now if overall_status == "completed" else None,
-            "auto_synced": True
-        }
-    
-    # Existing checklist - sync with verified trainings
-    items_updated = False
-    for item in checklist.get("items", []):
-        # Only update pending items that have verified training
-        if item.get("status") != "completed":
-            is_verified, training_info = is_training_verified(item["name"])
-            if is_verified:
-                item["status"] = "completed"
-                item["completed_at"] = training_info.get("verified_at") if training_info else now
-                item["completed_by_name"] = f"Auto (Training: {training_info.get('training_name', 'Verified')})" if training_info else "Auto-synced"
-                item["synced_from_training"] = True
-                items_updated = True
-    
-    # Recalculate overall status
-    completed_count = sum(1 for i in checklist.get("items", []) if i.get("status") == "completed")
-    total_count = len(checklist.get("items", []))
-    
-    if completed_count == total_count:
-        checklist["overall_status"] = "completed"
-        checklist["completed_at"] = checklist.get("completed_at") or now
-    elif completed_count > 0:
-        checklist["overall_status"] = "in_progress"
-        checklist["started_at"] = checklist.get("started_at") or now
-    else:
-        checklist["overall_status"] = "pending"
-    
-    # Save updates if items were synced
-    if items_updated:
-        await db.induction_checklists.update_one(
-            {"employee_id": employee_id},
-            {"$set": {
-                "items": checklist["items"],
-                "overall_status": checklist["overall_status"],
-                "started_at": checklist.get("started_at"),
-                "completed_at": checklist.get("completed_at"),
-                "updated_at": now,
-                "last_auto_sync": now
-            }}
-        )
-    
-    checklist["auto_synced"] = items_updated
-    return checklist
+    return {
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "items": items,
+        "overall_status": overall_status,
+        "started_at": now if completed_count > 0 else None,
+        "completed_at": now if overall_status == "completed" else None,
+        "auto_synced": any(i["synced_from_training"] for i in induction_status["items"]),
+    }
 
 
 @router.put("/employees/{employee_id}/induction-checklist")

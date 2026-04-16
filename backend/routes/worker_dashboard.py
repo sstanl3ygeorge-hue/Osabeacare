@@ -27,6 +27,7 @@ from .dependencies import (
     JWT_SECRET,
     SENDER_EMAIL
 )
+from induction_definitions import get_employee_induction_status
 
 logger = logging.getLogger(__name__)
 
@@ -1412,135 +1413,24 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             "mismatch_admin_decision": mismatch_admin_decision
         })
     
-    # Induction checklist status
-    induction_record = await db.induction_checklists.find_one({
-        "employee_id": employee_id
-    }, {"_id": 0})
-    
-    training_records = await db.training_records.find({
-        "employee_id": employee_id,
-        "verified": True
-    }, {"_id": 0}).to_list(50)
-    
-    training_docs = await db.employee_documents.find({
-        "employee_id": employee_id,
-        "requirement_id": {"$regex": "training|safeguard|fire|manual|infection|health|bls|basic_life"},
-        "verification_stamp": {"$nin": [None, "", "not_verified"]}
-    }, {"_id": 0}).to_list(50)
-    
-    verified_training_names = set()
-    for tr in training_records:
-        name = (tr.get("training_name") or "").lower()
-        verified_training_names.add(name)
-    for doc in training_docs:
-        req_id = (doc.get("requirement_id") or "").lower()
-        verified_training_names.add(req_id)
-        if "safeguard" in req_id:
-            verified_training_names.add("safeguarding adults")
-            verified_training_names.add("safeguarding")
-        if "fire" in req_id:
-            verified_training_names.add("fire safety")
-        if "manual" in req_id or "moving" in req_id:
-            verified_training_names.add("moving & handling")
-            verified_training_names.add("manual handling")
-        if "infection" in req_id:
-            verified_training_names.add("infection prevention & control")
-            verified_training_names.add("infection control")
-        if "health" in req_id and "safety" in req_id:
-            verified_training_names.add("health & safety")
-        if "bls" in req_id or "basic_life" in req_id:
-            verified_training_names.add("basic life support")
-    
-    INDUCTION_TRAINING_MAP = {
-        "safeguarding adults": ["safeguarding", "safeguard", "safeguard_adults"],
-        "health and safety": ["health_safety", "health safety", "health & safety", "cstf_health"],
-        "infection prevention and control": ["infection", "infection control", "infection_control", "cstf_infection"],
-        "basic life support": ["bls", "basic life", "basic_life", "resuscitation"],
-        "equality and diversity": ["equality", "diversity", "edi", "equality_diversity", "cstf_equality"],
-        "fluids and nutrition": ["food_hygiene", "food safety", "nutrition"],
-        "handling information": ["data_protection", "gdpr", "information governance"],
-        "communication": ["communication"],
-        "mental health, dementia and learning disabilities": ["dementia", "mental health", "learning disabilities"],
-    }
-    
-    def is_training_verified(item_name):
-        item_lower = item_name.lower()
-        if item_lower in verified_training_names:
-            return True
-        for induction_name, training_patterns in INDUCTION_TRAINING_MAP.items():
-            if induction_name in item_lower or item_lower in induction_name:
-                for pattern in training_patterns:
-                    if any(pattern in vtn for vtn in verified_training_names):
-                        return True
-        return False
-    
-    induction_items = []
-    completed_count = 0
-    total_items = 0
-    
-    if induction_record and induction_record.get("items"):
-        admin_items = induction_record.get("items", [])
-        for item in admin_items:
-            item_name = item.get("name", "Unknown")
-            
-            is_complete_in_checklist = item.get("status") == "completed"
-            is_training_complete = is_training_verified(item_name)
-            
-            is_complete = is_complete_in_checklist or is_training_complete
-            completed_at = item.get("completed_at")
-            
-            if is_complete:
-                completed_count += 1
-            total_items += 1
-            
-            induction_items.append({
-                "id": item_name.lower().replace(" ", "_").replace("&", "and"),
-                "name": item_name,
-                "mandatory": item.get("mandatory", True),
-                "completed": is_complete,
-                "completed_at": completed_at,
-                "completed_by_name": item.get("completed_by_name"),
-                "synced_from_training": is_training_complete and not is_complete_in_checklist
-            })
-    else:
-        care_certificate_standards = [
-            {"name": "Understand Your Role", "mandatory": True},
-            {"name": "Your Personal Development", "mandatory": True},
-            {"name": "Duty of Care", "mandatory": True},
-            {"name": "Equality and Diversity", "mandatory": True},
-            {"name": "Work in a Person-Centred Way", "mandatory": True},
-            {"name": "Communication", "mandatory": True},
-            {"name": "Privacy and Dignity", "mandatory": True},
-            {"name": "Fluids and Nutrition", "mandatory": True},
-            {"name": "Awareness of Mental Health, Dementia and Learning Disabilities", "mandatory": True},
-            {"name": "Safeguarding Adults", "mandatory": True},
-            {"name": "Basic Life Support", "mandatory": True},
-            {"name": "Health and Safety", "mandatory": True},
-            {"name": "Handling Information", "mandatory": True},
-            {"name": "Infection Prevention and Control", "mandatory": True},
-            {"name": "Shadow Shift Completed", "mandatory": True},
-        ]
-        for std in care_certificate_standards:
-            std_name = std["name"]
-            is_training_complete = is_training_verified(std_name)
-            if is_training_complete:
-                completed_count += 1
-            total_items += 1
-            induction_items.append({
-                "id": std_name.lower().replace(" ", "_").replace(",", "").replace("&", "and"),
-                "name": std_name,
-                "mandatory": std["mandatory"],
-                "completed": is_training_complete,
-                "completed_at": None,
-                "completed_by_name": None,
-                "synced_from_training": is_training_complete
-            })
-    
+    # Induction checklist status — canonical function
+    induction_canonical = await get_employee_induction_status(db, employee_id)
     induction_status = {
-        "total": total_items,
-        "completed": completed_count,
-        "items": induction_items,
-        "overall_status": induction_record.get("overall_status") if induction_record else "not_started"
+        "total": induction_canonical["total"],
+        "completed": induction_canonical["completed"],
+        "items": [
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "mandatory": item["mandatory"],
+                "completed": item["completed"],
+                "completed_at": item["completed_at"],
+                "completed_by_name": item["completed_by_name"],
+                "synced_from_training": item["synced_from_training"],
+            }
+            for item in induction_canonical["items"]
+        ],
+        "overall_status": induction_canonical["overall_status"],
     }
     
     # Competency assessments

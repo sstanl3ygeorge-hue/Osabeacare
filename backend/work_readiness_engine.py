@@ -418,9 +418,9 @@ async def can_sign_contract(db, employee_id: str) -> dict:
     if has_unified_induction:
         induction_completed = induction_total if induction_ok else 0
     else:
-        induction_items = await db.induction_checklist.find({"employee_id": employee_id}).to_list(50)
-        if induction_items:
-            induction_completed = len([i for i in induction_items if i.get("completed") or i.get("status") == "completed"])
+        from induction_definitions import get_employee_induction_status
+        induction_status = await get_employee_induction_status(db, employee_id)
+        induction_completed = induction_status["completed"]
     
     if induction_completed >= 15:
         completed.append("Induction complete (15/15)")

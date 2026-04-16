@@ -371,6 +371,7 @@ async def auto_complete_induction_from_training(
             "id": f"induction_{employee_id}",
             "employee_id": employee_id,
             "items": completed_items,
+            "overall_status": "in_progress",
             "total_items": 15,
             "created_at": now,
             "updated_at": now
@@ -425,14 +426,30 @@ async def auto_complete_induction_from_training(
                 "training_name": training_name
             }
         
+        # Recalculate overall_status after item update
+        if isinstance(items, list):
+            completed_count = sum(1 for it in items if it.get("status") == "completed" or it.get("completed"))
+        else:
+            completed_count = sum(1 for v in items.values() if isinstance(v, dict) and v.get("completed"))
+        
+        if completed_count >= 15:
+            overall_status = "completed"
+        elif completed_count > 0:
+            overall_status = "in_progress"
+        else:
+            overall_status = "pending"
+        
+        update_fields = {
+            "items": items,
+            "overall_status": overall_status,
+            "updated_at": now
+        }
+        if overall_status == "completed":
+            update_fields["completed_at"] = now
+        
         await db.induction_checklists.update_one(
             {"employee_id": employee_id},
-            {
-                "$set": {
-                    "items": items,
-                    "updated_at": now
-                }
-            }
+            {"$set": update_fields}
         )
         
         result["auto_completed"] = True
@@ -1568,8 +1585,12 @@ def filter_for_worker(data: dict) -> dict:
 
 
 # =============================================================================
-# INDUCTION AUTO-SYNC FUNCTION
+# INDUCTION AUTO-SYNC FUNCTION (DEPRECATED — Stage 2)
 # =============================================================================
+# This function is no longer called anywhere. Training → induction sync is now
+# handled exclusively by auto_complete_induction_from_training() (called on each
+# training verification) and the canonical get_employee_induction_status() (read
+# path). Retained temporarily for rollback safety; remove in Stage 3.
 
 async def sync_induction_with_training(employee_id: str, db) -> dict:
     """

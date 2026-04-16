@@ -452,34 +452,35 @@ async def download_induction_completion_pdf(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
-    if not checklist:
-        raise HTTPException(status_code=404, detail="No induction checklist found for this employee")
+    # Use canonical induction status (Stage 2: no more direct DB reads)
+    induction_status = await get_employee_induction_status(db, employee_id)
 
-    if checklist.get("overall_status") != "completed":
+    if induction_status["overall_status"] != "completed":
         raise HTTPException(
             status_code=400,
-            detail=f"Induction is not yet completed (status: {checklist.get('overall_status', 'pending')})"
+            detail=f"Induction is not yet completed (status: {induction_status['overall_status']})"
         )
 
     # Build form_data expected by generate_induction_pdf_content
-    items = checklist.get("items", [])
     checklist_items = []
-    for item in items:
+    for item in induction_status["items"]:
         checklist_items.append({
             "name": item.get("name", ""),
-            "completed": item.get("status") == "completed",
+            "completed": item.get("completed", False),
             "completed_date": item.get("completed_at", "")[:10] if item.get("completed_at") else "-",
             "completed_by": item.get("completed_by_name") or "",
-            "notes": item.get("notes") or "",
+            "notes": "",
         })
 
+    # Fetch stored checklist for start/completion timestamps
+    stored_checklist = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0, "started_at": 1, "completed_at": 1, "notes": 1})
+
     form_data = {
-        "start_date": checklist.get("started_at", "")[:10] if checklist.get("started_at") else "N/A",
-        "completion_date": checklist.get("completed_at", "")[:10] if checklist.get("completed_at") else "N/A",
+        "start_date": (stored_checklist or {}).get("started_at", "")[:10] if (stored_checklist or {}).get("started_at") else "N/A",
+        "completion_date": (stored_checklist or {}).get("completed_at", "")[:10] if (stored_checklist or {}).get("completed_at") else "N/A",
         "inductor_name": user.get("name") or user.get("email", "Admin"),
         "checklist_items": checklist_items,
-        "notes": checklist.get("notes") or "",
+        "notes": (stored_checklist or {}).get("notes") or "",
     }
 
     employee_data = {

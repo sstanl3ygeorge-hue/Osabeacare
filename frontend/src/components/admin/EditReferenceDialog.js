@@ -102,7 +102,12 @@ export default function EditReferenceDialog({
       onClose();
       toast.success(response.data?.message || 'Reference updated');
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to update reference');
+      const detail = err.response?.data?.detail;
+      let msg = 'Failed to update reference';
+      if (typeof detail === 'string') msg = detail;
+      else if (Array.isArray(detail)) msg = detail.map(e => (typeof e === 'object' ? (e.msg || JSON.stringify(e)) : String(e))).join('; ');
+      else if (detail && typeof detail === 'object') msg = detail.msg || JSON.stringify(detail);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }

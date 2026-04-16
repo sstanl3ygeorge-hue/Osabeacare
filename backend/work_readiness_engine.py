@@ -766,20 +766,19 @@ async def can_promote_to_active_legacy(employee_id: str, db) -> Tuple[bool, dict
         })
     checks["handbook"] = bool(handbook_ack_legacy)
 
-    # 8. Induction complete (15 Care Certificate standards)
-    induction = await db.induction_checklists.find_one({
-        "employee_id": emp_id_str,
-        "overall_status": "completed"  # P0 FIX: Use overall_status field, not status
-    })
-    # Also check form submissions
-    if not induction:
+    # 8. Induction complete (15 Care Certificate standards) — canonical function
+    from induction_definitions import get_employee_induction_status
+    induction_canonical = await get_employee_induction_status(db, emp_id_str)
+    checks["induction"] = induction_canonical["overall_status"] == "completed"
+    # Also check form submissions as fallback
+    if not checks["induction"]:
         induction_form = await db.form_submissions.find_one({
             "employee_id": emp_id_str,
             "form_type": "induction",
             "status": {"$in": ["submitted", "verified"]}
         })
-        induction = induction_form
-    checks["induction"] = bool(induction)
+        if induction_form:
+            checks["induction"] = True
     
     # 9. Health questionnaire complete (check multiple form types)
     health_form = await db.form_submissions.find_one({

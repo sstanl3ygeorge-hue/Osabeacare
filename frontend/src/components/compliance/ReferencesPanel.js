@@ -115,8 +115,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
       fetchReferences();
       if (onRefresh) onRefresh();
     } catch (error) {
-      const msg = error.response?.data?.detail || 'Failed to send request';
-      toast.error(msg);
+      toast.error(extractErrorMessage(error, 'Failed to send request'));
     } finally {
       setSendingRequest(null);
     }
@@ -229,8 +228,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
         await onRefresh();
       }
     } catch (error) {
-      const msg = error.response?.data?.detail || `Failed to ${verifyAction} reference`;
-      toast.error(msg);
+      toast.error(extractErrorMessage(error, `Failed to ${verifyAction} reference`));
     } finally {
       setVerifyLoading(false);
     }
@@ -250,7 +248,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
       fetchReferences();
       if (onRefresh) onRefresh();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to flag mismatch');
+      toast.error(extractErrorMessage(err, 'Failed to flag mismatch'));
     } finally {
       setFlaggingMismatch(null);
     }
@@ -282,13 +280,14 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
       fetchReferences();
       if (onRefresh) onRefresh();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to review explanation');
+      toast.error(extractErrorMessage(err, 'Failed to review explanation'));
     } finally {
       setReviewingExplanation(false);
     }
   };
 
   const openAddDialog = (refNum) => {
+    setAddRefNum(refNum);
     setRefereeForm({
       name: '',
       email: '',
@@ -300,7 +299,25 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
     setAddDialogOpen(true);
   };
   
+  // Safely extract a displayable error message from axios/FastAPI errors
+  const extractErrorMessage = (error, fallback = 'An error occurred') => {
+    const detail = error.response?.data?.detail;
+    if (!detail) return fallback;
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      return detail.map(e => (typeof e === 'object' ? (e.msg || JSON.stringify(e)) : String(e))).join('; ');
+    }
+    if (typeof detail === 'object') return detail.msg || JSON.stringify(detail);
+    return String(detail);
+  };
+
   const handleAddReferee = async () => {
+    // Validate ref num
+    if (!addRefNum || ![1, 2].includes(addRefNum)) {
+      toast.error('Invalid reference number. Please close and try again.');
+      return;
+    }
+
     // Validate
     if (!refereeForm.name.trim() || !refereeForm.email.trim()) {
       toast.error('Name and email are required');
@@ -328,8 +345,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
       fetchReferences();
       if (onRefresh) onRefresh();
     } catch (error) {
-      const msg = error.response?.data?.detail || 'Failed to add referee';
-      toast.error(msg);
+      toast.error(extractErrorMessage(error, 'Failed to add referee'));
     } finally {
       setIsSubmitting(false);
     }

@@ -181,7 +181,6 @@ INSURANCE_TYPES = [
 # All progress/blocker calculations MUST use this module
 from unified_compliance_engine import (
     get_unified_employee_status,
-    sync_induction_with_training,
     auto_complete_induction_from_training,
     CARE_CERTIFICATE_STANDARDS,
     MANDATORY_TRAINING_HCA,
@@ -8116,18 +8115,11 @@ async def compute_unified_progress_internal(employee_id: str, employee: dict = N
     if contract_signed:
         categories["agreements"]["completed"] += 1
     
-    # Induction - read from induction_checklists collection
-    induction_record = await db.induction_checklists.find_one({"employee_id": employee_id}, {"_id": 0})
-    if induction_record and induction_record.get("items"):
-        items = induction_record.get("items", [])
-        # Count only mandatory items (Adults only - 15 Care Certificate standards)
-        mandatory_items = [i for i in items if i.get("mandatory", True)]
-        categories["induction"]["total"] = len(mandatory_items) if mandatory_items else 15
-        categories["induction"]["completed"] = sum(1 for i in mandatory_items if i.get("status") == "completed")
-    else:
-        # P0 FIX: 15 mandatory Care Certificate standards (Adults ONLY - NO Safeguarding Children)
-        categories["induction"]["total"] = 15
-        categories["induction"]["completed"] = 0
+    # Induction - canonical function (Stage 2: no more direct DB reads)
+    from induction_definitions import get_employee_induction_status
+    induction_canonical = await get_employee_induction_status(db, employee_id)
+    categories["induction"]["total"] = induction_canonical["total"]
+    categories["induction"]["completed"] = induction_canonical["completed"]
     
     return {
         "overall_percentage": overall_percentage,
@@ -11019,97 +11011,6 @@ async def record_training_completion(
         "record_id": record_id,
         "expiry_date": expiry_date
     }
-
-
-
-# P0: Helper function to auto-complete induction items when training is verified
-async def auto_sync_induction_from_training(employee_id: str, training_name: str, verified_by: str, verified_at: str):
-    """
-    When a training is verified, automatically mark the corresponding induction checklist item as complete.
-    Uses INDUCTION_TRAINING_MAP from DEFAULT_INDUCTION_ITEMS to determine the mapping.
-    """
-    training_lower = training_name.lower()
-    
-    # Find which induction item(s) this training maps to
-    matched_induction_items = []
-    for induction_item in DEFAULT_INDUCTION_ITEMS:
-        item_name = induction_item["name"]
-        training_link = induction_item.get("training_link")
-        
-        # Check if training_link matches
-        if training_link and training_link in training_lower:
-            matched_induction_items.append(item_name)
-            continue
-            
-        # Check by name similarity
-        item_lower = item_name.lower()
-        if item_lower in training_lower or training_lower in item_lower:
-            matched_induction_items.append(item_name)
-            continue
-            
-        # Check via INDUCTION_TRAINING_MAP at module level
-        if item_name in INDUCTION_TRAINING_MAP:
-            patterns = INDUCTION_TRAINING_MAP[item_name]
-            for pattern in patterns:
-                if pattern.lower() in training_lower:
-                    matched_induction_items.append(item_name)
-                    break
-    
-    if not matched_induction_items:
-        return  # No matching induction items for this training
-    
-    # Get or create the induction checklist for this employee
-    checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
-    
-    if not checklist:
-        # Create new checklist with default items
-        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
-        employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else ""
-        
-        checklist = {
-            "id": str(uuid.uuid4()),
-            "employee_id": employee_id,
-            "employee_name": employee_name,
-            "items": [{"id": item["id"], "name": item["name"], "mandatory": item["mandatory"], "status": "pending", "completed_at": None, "completed_by": None, "completed_by_name": None, "notes": None} for item in DEFAULT_INDUCTION_ITEMS],
-            "overall_status": "pending",
-            "started_at": None,
-            "completed_at": None,
-            "created_at": verified_at,
-            "updated_at": verified_at
-        }
-        await db.induction_checklists.insert_one(checklist)
-        checklist = await db.induction_checklists.find_one({"employee_id": employee_id})
-    
-    # Update matched items to completed
-    items = checklist.get("items", [])
-    updated = False
-    for item in items:
-        if item["name"] in matched_induction_items and item.get("status") != "completed":
-            item["status"] = "completed"
-            item["completed_at"] = verified_at
-            item["completed_by_name"] = f"Auto (Training: {training_name})"
-            item["notes"] = f"Auto-completed from verified training: {training_name}"
-            updated = True
-    
-    if updated:
-        # Calculate overall status
-        completed_count = sum(1 for i in items if i.get("status") == "completed")
-        total_count = len(items)
-        mandatory_complete = all(i.get("status") == "completed" for i in items if i.get("mandatory"))
-        
-        overall_status = "completed" if mandatory_complete and completed_count == total_count else "in_progress" if completed_count > 0 else "pending"
-        completed_at = verified_at if overall_status == "completed" else None
-        
-        await db.induction_checklists.update_one(
-            {"employee_id": employee_id},
-            {"$set": {
-                "items": items,
-                "overall_status": overall_status,
-                "completed_at": completed_at,
-                "started_at": checklist.get("started_at") or verified_at,
-                "updated_at": verified_at
-            }}
-        )
 
 
 

@@ -1646,7 +1646,7 @@ async def get_unified_employee_status(
             "reference_1": {"passed": checks.get("reference_1", False), "label": "Reference 1 Verified"},
             "reference_2": {"passed": checks.get("reference_2", False), "label": "Reference 2 Verified"},
             "induction": {"passed": checks.get("induction", False), "label": "Induction Checklist (15 standards)"},
-            "mandatory_training": {"passed": checks.get("mandatory_training", False), "label": "Mandatory Training (6 items)"},
+            "mandatory_training": {"passed": checks.get("mandatory_training", False), "label": "Mandatory Training (8 items)"},
             "health_questionnaire": {"passed": checks.get("staff_health_questionnaire", False), "label": "Staff Health Questionnaire"},
             "employment_gaps": {"passed": checks.get("employment_gaps_explained", True), "label": "Employment Gaps Explained"},
         },

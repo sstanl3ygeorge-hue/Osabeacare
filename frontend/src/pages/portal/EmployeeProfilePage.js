@@ -4664,7 +4664,7 @@ export default function EmployeeProfilePage() {
                     label: 'Pre-Employment Checks',
                     forms: [
                       { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations', prefill: true },
-                      { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
+                      { key: 'staff_personal_info', name: 'Staff Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
                       { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
                       { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details', prefill: true },
                       { key: 'employment_history_10yr', name: '10-Year Employment History', description: 'Full 10-year employment history with gap explanations (CQC requirement)', infoOnly: true },
@@ -4680,7 +4680,7 @@ export default function EmployeeProfilePage() {
                   {
                     label: 'Screening',
                     forms: [
-                      { key: 'pre_interview_questionnaire', name: 'Pre-Screen Questionnaire', description: 'Worker pre-screen/application intake responses', infoOnly: true },
+                      { key: 'pre_interview_questionnaire', name: 'Pre-Interview Questionnaire', description: 'Worker pre-interview/application intake responses', infoOnly: true },
                     ]
                   },
                 ];

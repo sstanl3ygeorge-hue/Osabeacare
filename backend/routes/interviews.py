@@ -286,7 +286,7 @@ async def get_pre_interview_questionnaire(
         return {
             "employee_id": employee_id,
             "stage": "worker_pre_screen",
-            "stage_label": "Pre-Screen Questionnaire (Worker)",
+            "stage_label": "Pre-Interview Questionnaire (Worker)",
             "status": "not_submitted",
             "form_data": None
         }
@@ -294,7 +294,7 @@ async def get_pre_interview_questionnaire(
     return {
         "employee_id": employee_id,
         "stage": "worker_pre_screen",
-        "stage_label": "Pre-Screen Questionnaire (Worker)",
+        "stage_label": "Pre-Interview Questionnaire (Worker)",
         "next_stage": "admin_final_assessment",
         "status": questionnaire.get("status", "submitted"),
         "form_data": questionnaire.get("form_data") or questionnaire.get("data"),
@@ -348,7 +348,7 @@ async def review_pre_interview_questionnaire(
     )
     
     return {
-        "message": "Pre-screen questionnaire reviewed",
+        "message": "Pre-interview questionnaire reviewed",
         "stage": "worker_pre_screen",
         "next_stage": "admin_final_assessment",
         "review_status": review.review_decision

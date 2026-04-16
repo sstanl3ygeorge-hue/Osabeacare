@@ -689,28 +689,32 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "record_status": {"$ne": "superseded"}
     }).to_list(length=100)
     
+    # 8 mandatory trainings aligned with MANDATORY_TRAINING_HCA in unified_compliance_engine.py
     mandatory_trainings = {
-        # CQC Standard Trainings (in order of priority)
-        "induction": "Induction",
         "safeguarding": "Safeguarding",
-        "manual_handling": "Moving & Handling", 
-        "medication": "Medication",
+        "manual_handling": "Moving & Handling",
         "health_safety": "Health & Safety",
-        "food_hygiene": "Food Hygiene",
         "bls": "First Aid / Basic Life Support",
-        "mca_dols": "MCA and DoLs",
-        "dementia": "Dementia Awareness",
         "fire_safety": "Fire Safety",
-        "autism": "Autism Awareness",
         "infection_control": "Infection Control",
         "information_governance": "Information Governance",
         "prevent": "Prevent"
+    }
+    # 6 recommended trainings — useful but NOT tracked by UCE compliance gate
+    recommended_trainings_def = {
+        "induction": "Induction",
+        "medication": "Medication",
+        "food_hygiene": "Food Hygiene",
+        "mca_dols": "MCA and DoLs",
+        "dementia": "Dementia Awareness",
+        "autism": "Autism Awareness",
     }
     
     missing_trainings = []
     completed_trainings = []
     expired_trainings = []
     all_mandatory_trainings = []
+    all_recommended_trainings = []
     now = datetime.now(timezone.utc)
     
     for training_id, training_name in mandatory_trainings.items():
@@ -724,26 +728,14 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         ]
         
         # Add alternative search patterns for each training type
-        if training_id == "induction":
-            search_patterns.extend(["company induction", "orientation", "welcome training"])
-        elif training_id == "safeguarding":
+        if training_id == "safeguarding":
             search_patterns.extend(["safeguarding adults", "safeguarding children", "safeguard"])
         elif training_id == "manual_handling":
             search_patterns.extend(["moving & handling", "moving and handling", "patient handling"])
-        elif training_id == "medication":
-            search_patterns.extend(["medication administration", "medicines management", "safe handling of medicines"])
         elif training_id == "bls":
             search_patterns.extend(["basic life support", "resuscitation", "cpr", "first aid"])
         elif training_id == "health_safety":
             search_patterns.extend(["health, safety and welfare", "health and safety", "h&s"])
-        elif training_id == "food_hygiene":
-            search_patterns.extend(["food safety", "food handling", "level 2 food"])
-        elif training_id == "mca_dols":
-            search_patterns.extend(["mental capacity", "deprivation of liberty", "mca", "dols", "best interests"])
-        elif training_id == "dementia":
-            search_patterns.extend(["dementia awareness", "dementia care", "alzheimer"])
-        elif training_id == "autism":
-            search_patterns.extend(["autism awareness", "autism spectrum", "asd"])
         elif training_id == "fire_safety":
             search_patterns.extend(["fire awareness", "fire prevention", "fire evacuation"])
         elif training_id == "infection_control":
@@ -822,6 +814,93 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             })
         
         all_mandatory_trainings.append(training_entry)
+    
+    # Process recommended trainings (same logic, separate list)
+    for training_id, training_name in recommended_trainings_def.items():
+        record = None
+        search_patterns = [
+            training_id.replace("_", " "),
+            training_id.replace("_", ""),
+            training_name.lower(),
+            f"cstf {training_name.lower()}",
+            f"cstf {training_id.replace('_', ' ')}",
+        ]
+        if training_id == "induction":
+            search_patterns.extend(["company induction", "orientation", "welcome training"])
+        elif training_id == "medication":
+            search_patterns.extend(["medication administration", "medicines management", "safe handling of medicines"])
+        elif training_id == "food_hygiene":
+            search_patterns.extend(["food safety", "food handling", "level 2 food"])
+        elif training_id == "mca_dols":
+            search_patterns.extend(["mental capacity", "deprivation of liberty", "mca", "dols", "best interests"])
+        elif training_id == "dementia":
+            search_patterns.extend(["dementia awareness", "dementia care", "alzheimer"])
+        elif training_id == "autism":
+            search_patterns.extend(["autism awareness", "autism spectrum", "asd"])
+        
+        for t in trainings:
+            t_name = (t.get("training_name") or "").lower()
+            for pattern in search_patterns:
+                if pattern in t_name:
+                    record = t
+                    break
+            if record:
+                break
+        
+        training_entry = {
+            "id": training_id,
+            "name": training_name,
+            "status": "missing",
+            "completion_date": None,
+            "expiry_date": None,
+            "verified": False,
+            "record_id": None
+        }
+        
+        if record:
+            expiry_str = record.get("expiry_date")
+            is_expired = False
+            
+            if expiry_str:
+                try:
+                    if isinstance(expiry_str, str):
+                        if 'T' in expiry_str or '+' in expiry_str or 'Z' in expiry_str:
+                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+                        else:
+                            expiry = datetime.strptime(expiry_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                    else:
+                        expiry = expiry_str
+                        if expiry.tzinfo is None:
+                            expiry = expiry.replace(tzinfo=timezone.utc)
+                    is_expired = expiry < now
+                except Exception as e:
+                    logger.warning(f"Error parsing recommended training expiry date '{expiry_str}': {e}")
+            
+            training_entry.update({
+                "status": "expired" if is_expired else "complete",
+                "completion_date": record.get("completion_date"),
+                "expiry_date": expiry_str,
+                "verified": record.get("verified", False),
+                "record_id": record.get("id")
+            })
+            
+            if is_expired:
+                expired_trainings.append({
+                    "id": training_id,
+                    "name": training_name,
+                    "expiry_date": expiry_str,
+                    "action": "upload_certificate"
+                })
+            else:
+                completed_trainings.append({
+                    "id": training_id,
+                    "name": training_name,
+                    "completion_date": record.get("completion_date"),
+                    "expiry_date": expiry_str,
+                    "verified": record.get("verified", False)
+                })
+        
+        all_recommended_trainings.append(training_entry)
     
     # Get expiry alerts
     alerts = []
@@ -1514,6 +1593,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         "completed_trainings": completed_trainings,
         "expired_trainings": expired_trainings,
         "all_mandatory_trainings": all_mandatory_trainings,
+        "recommended_trainings": all_recommended_trainings,
         "alerts": sorted(alerts, key=lambda x: x.get("days_left", 999)),
         "contract_signed": contract_signed,
         "professional_registration": prof_reg_status,

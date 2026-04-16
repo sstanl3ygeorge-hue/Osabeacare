@@ -8382,7 +8382,7 @@ async def request_renewal(
 
 WORKER_FORM_DEFINITIONS = {
     "staff_health_questionnaire": {
-        "name": "Health Questionnaire",
+        "name": "Staff Health Questionnaire",
         "description": "Complete your health and wellbeing declaration",
         "required": True,
         "admin_requirement_id": "staff_health_questionnaire"

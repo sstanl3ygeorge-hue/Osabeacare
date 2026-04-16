@@ -734,7 +734,7 @@ export default function WorkerDashboard() {
 
   if (!dashboard) return null;
 
-  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks, agreements } = dashboard;
+  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, recommended_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks, agreements } = dashboard;
   
   const isActiveEmployee =
     employee?.is_active_employee ||
@@ -1690,7 +1690,7 @@ export default function WorkerDashboard() {
                     Mandatory Training Certificates
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    {(all_mandatory_trainings?.length || 6)} mandatory trainings required • AI extracts details from your certificates
+                    {(all_mandatory_trainings?.length || 8)} mandatory trainings required for work readiness • AI extracts details from your certificates
                   </p>
                 </div>
                 <Button 
@@ -1712,14 +1712,16 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {/* Show all 6 mandatory trainings with status */}
+                {/* Show all mandatory trainings with status */}
                 {(all_mandatory_trainings || [
                   { id: 'safeguarding', name: 'Safeguarding', status: 'missing' },
-                  { id: 'manual_handling', name: 'Manual Handling', status: 'missing' },
-                  { id: 'fire_safety', name: 'Fire Safety', status: 'missing' },
+                  { id: 'manual_handling', name: 'Moving & Handling', status: 'missing' },
                   { id: 'health_safety', name: 'Health & Safety', status: 'missing' },
-                  { id: 'bls', name: 'Basic Life Support', status: 'missing' },
-                  { id: 'infection_control', name: 'Infection Control', status: 'missing' }
+                  { id: 'bls', name: 'First Aid / Basic Life Support', status: 'missing' },
+                  { id: 'fire_safety', name: 'Fire Safety', status: 'missing' },
+                  { id: 'infection_control', name: 'Infection Control', status: 'missing' },
+                  { id: 'information_governance', name: 'Information Governance', status: 'missing' },
+                  { id: 'prevent', name: 'Prevent', status: 'missing' }
                 ]).map((training, idx) => (
                   <div 
                     key={idx} 
@@ -1817,6 +1819,96 @@ export default function WorkerDashboard() {
               <p className="text-xs text-slate-400 mt-4 text-center">
                 {ACCEPTED_FORMATS}
               </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ========== RECOMMENDED TRAINING ========== */}
+        {!isActiveEmployee && recommended_trainings?.length > 0 && (
+          <Card className="shadow-md border-0" data-testid="recommended-training-section">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <FileText className="h-5 w-5 text-slate-400" />
+                    Recommended Training
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 mt-1">
+                    These trainings are beneficial but not required for work readiness
+                  </p>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {recommended_trainings.map((training, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`p-3 rounded-xl border ${
+                      training.status === 'complete' ? 'bg-green-50 border-green-200' :
+                      training.status === 'expired' ? 'bg-red-50 border-red-200' :
+                      'bg-slate-50 border-slate-200'
+                    }`}
+                    data-testid={`recommended-training-row-${training.id}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                          training.status === 'complete' ? 'bg-green-100' :
+                          training.status === 'expired' ? 'bg-red-100' :
+                          'bg-slate-100'
+                        }`}>
+                          {training.status === 'complete' ? (
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                          ) : training.status === 'expired' ? (
+                            <AlertTriangle className="h-4 w-4 text-red-600" />
+                          ) : (
+                            <Clock className="h-4 w-4 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-medium text-sm text-slate-700">{training.name}</span>
+                          {training.expiry_date && (
+                            <p className={`text-xs ${training.status === 'expired' ? 'text-red-600' : 'text-slate-500'}`}>
+                              {training.status === 'expired' ? 'Expired: ' : 'Expires: '}{formatDate(training.expiry_date)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {training.status === 'complete' ? (
+                          training.verified ? (
+                            <Badge className="bg-green-100 text-green-700 text-xs"><Shield className="h-3 w-3 mr-1" />Verified</Badge>
+                          ) : (
+                            <Badge className="bg-amber-100 text-amber-700 text-xs"><Clock className="h-3 w-3 mr-1" />Pending</Badge>
+                          )
+                        ) : training.status === 'expired' ? (
+                          <Badge className="bg-red-100 text-red-700 text-xs">Expired</Badge>
+                        ) : (
+                          <Badge className="bg-slate-100 text-slate-500 text-xs">Optional</Badge>
+                        )}
+                        {training.status !== 'complete' && (
+                          <Button 
+                            size="sm" 
+                            variant="outline"
+                            onClick={() => triggerFileInput(`training_${training.id}`)}
+                            disabled={uploading === `training_${training.id}`}
+                            className="gap-1 text-xs"
+                            data-testid={`upload-training-${training.id}`}
+                          >
+                            {uploading === `training_${training.id}` ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <Upload className="h-3 w-3" />
+                            )}
+                            Upload
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

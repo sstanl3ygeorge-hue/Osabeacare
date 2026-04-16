@@ -1304,7 +1304,7 @@ MANDATORY_ITEMS = {
          "work_ready_hint": "Required before employee can start work"},
         
         # ======== CQC STANDARD TRAINING (Added for Matrix Compliance) ========
-        {"id": "induction", "name": "Induction Training", "category": "2_Core_Training",
+        {"id": "induction_training", "name": "Induction Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Induction",
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 1,

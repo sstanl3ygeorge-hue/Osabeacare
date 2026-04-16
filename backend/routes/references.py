@@ -176,20 +176,9 @@ async def verify_reference(
     user: dict = Depends(require_manager_or_admin)
 ):
     """
-    Simple reference verification.
-    
-    Note: For integrity-based verification with mismatch handling,
-    use the endpoints in server.py that leverage ReferenceIntegrityService.
+    LEGACY: Not used by current frontend. Use verify_or_reject_reference
+    in referee_outreach.py or verify_reference in server.py instead.
     """
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
     raise HTTPException(
         status_code=409,
         detail=(

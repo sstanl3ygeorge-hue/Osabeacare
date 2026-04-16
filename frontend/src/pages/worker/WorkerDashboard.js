@@ -118,7 +118,8 @@ function EmploymentGapsSection() {
       setReasonType('');
       fetchGaps();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to submit explanation');
+      const detail = err.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to submit explanation');
     } finally {
       setSubmitting(false);
     }
@@ -616,7 +617,8 @@ export default function WorkerDashboard() {
         setProvideNewForm({ name: '', email: '', phone: '', organisation: '', position: '', relationship: '' });
         fetchDashboard();
       } catch (err) {
-        toast.error(err.response?.data?.detail || 'Failed to submit referee details');
+        const detail = err.response?.data?.detail;
+        toast.error(typeof detail === 'string' ? detail : 'Failed to submit referee details');
       } finally {
         setProvideNewLoading(false);
       }
@@ -651,7 +653,7 @@ export default function WorkerDashboard() {
       fetchReferenceMismatches();
       fetchDashboard();
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to submit explanation';
+      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to submit explanation';
       toast.error(message);
     } finally {
       setSubmittingMismatchExplanation(false);
@@ -696,7 +698,7 @@ export default function WorkerDashboard() {
         fetchDashboard();
       }, 2000);
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to upload CV';
+      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload CV';
       toast.error(message);
     } finally {
       setUploading(null);
@@ -811,7 +813,8 @@ export default function WorkerDashboard() {
       setPasswordForm({ new_password: '', confirm_password: '', current_password: '' });
       setAccountStatus({ ...accountStatus, has_password: true });
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to set password');
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to set password');
     } finally {
       setSettingPassword(false);
     }
@@ -858,7 +861,7 @@ export default function WorkerDashboard() {
       toast.success('Document uploaded successfully! Awaiting admin verification.');
       fetchDashboard(); // Refresh data
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to upload document';
+      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload document';
       toast.error(message);
     } finally {
       setUploading(null);
@@ -896,7 +899,7 @@ export default function WorkerDashboard() {
       toast.success(`${files.length} file${files.length > 1 ? 's' : ''} uploaded successfully! Awaiting admin verification.`);
       fetchDashboard();
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to upload documents';
+      const message = typeof error.response?.data?.detail === 'string' ? error.response.data.detail : 'Failed to upload documents';
       toast.error(message);
     } finally {
       setUploading(null);
@@ -940,9 +943,54 @@ export default function WorkerDashboard() {
     );
   }
 
-  if (!dashboard) return null;
+  if (!dashboard) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <AlertCircle className="h-10 w-10 text-red-400 mx-auto" />
+          <p className="text-slate-600">Could not load your dashboard.</p>
+          <Button onClick={fetchDashboard} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Try Again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
-  const { employee, progress, forms, missing_documents, missing_trainings, completed_documents, completed_trainings, expired_trainings, all_mandatory_trainings, recommended_trainings, alerts, contract_signed, professional_registration, references, induction, competency_assessments, spot_checks, agreements } = dashboard;
+  const {
+    employee = {},
+    progress = { percentage: 0, completed: 0, required: 0 },
+    forms: _forms,
+    missing_documents: _missing_documents,
+    missing_trainings: _missing_trainings,
+    completed_documents: _completed_documents,
+    completed_trainings: _completed_trainings,
+    expired_trainings: _expired_trainings,
+    all_mandatory_trainings: _all_mandatory_trainings,
+    recommended_trainings: _recommended_trainings,
+    alerts: _alerts,
+    contract_signed = false,
+    professional_registration,
+    references: _references,
+    induction,
+    competency_assessments,
+    spot_checks,
+    agreements: _agreements,
+  } = dashboard;
+
+  // Safe array defaults — prevent .length / .map / .filter on undefined
+  const forms = _forms || [];
+  const missing_documents = _missing_documents || [];
+  const missing_trainings = _missing_trainings || [];
+  const completed_documents = _completed_documents || [];
+  const completed_trainings = _completed_trainings || [];
+  const expired_trainings = _expired_trainings || [];
+  const all_mandatory_trainings = _all_mandatory_trainings || [];
+  const recommended_trainings = _recommended_trainings || [];
+  const alerts = _alerts || [];
+  const references = _references || [];
+  const agreements = _agreements || [];
   
   const isActiveEmployee =
     employee?.is_active_employee ||
@@ -973,7 +1021,7 @@ export default function WorkerDashboard() {
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-slate-800">{orgSettings.organisation_name || 'Healthcare Portal'}</h1>
-            <p className="text-sm text-slate-500">Welcome, {employee.name}</p>
+            <p className="text-sm text-slate-500">Welcome, {employee?.name || 'Worker'}</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={fetchDashboard} className="gap-1">
@@ -1180,7 +1228,7 @@ export default function WorkerDashboard() {
               </div>
             )}
           </div>
-        ) : employee.status === 'READY' ? (
+        ) : employee?.status === 'READY' ? (
           <div className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl p-6 text-white shadow-lg" data-testid="status-banner-ready">
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 bg-white/20 rounded-xl flex items-center justify-center">
@@ -2327,7 +2375,7 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="mb-4">
-                <Progress value={(induction.completed / induction.total) * 100} className="h-2" />
+                <Progress value={induction.total > 0 ? (induction.completed / induction.total) * 100 : 0} className="h-2" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {induction.items?.map((item, idx) => (

@@ -378,7 +378,11 @@ export default function EmployeeProfilePage() {
       return data;
     }
 
-    return data?.detail || data?.message || fallbackMessage;
+    const detail = data?.detail;
+    if (detail && typeof detail === 'object') {
+      return detail.message || detail.msg || JSON.stringify(detail);
+    }
+    return detail || data?.message || fallbackMessage;
   };
   
   // File management state
@@ -2611,7 +2615,12 @@ export default function EmployeeProfilePage() {
       setArchiveDialogOpen(false);
       navigate(isRecruitmentView ? '/portal/recruitment' : '/portal/employees');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to archive employee');
+      const detail = error.response?.data?.detail;
+      if (detail && typeof detail === 'object') {
+        toast.error(detail.message || JSON.stringify(detail));
+      } else {
+        toast.error(detail || 'Failed to archive employee');
+      }
     }
   };
 
@@ -2636,7 +2645,12 @@ export default function EmployeeProfilePage() {
       setDeleteDialogOpen(false);
       navigate(isRecruitmentView ? '/portal/recruitment' : '/portal/employees');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to delete employee');
+      const detail = error.response?.data?.detail;
+      if (detail && typeof detail === 'object') {
+        toast.error(detail.message || JSON.stringify(detail));
+      } else {
+        toast.error(detail || 'Failed to delete employee');
+      }
     }
   };
 

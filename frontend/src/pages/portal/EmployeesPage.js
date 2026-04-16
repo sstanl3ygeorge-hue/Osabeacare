@@ -48,7 +48,9 @@ const statusColors = {
   onboarding: 'status-info',
   active: 'status-success',
   inactive: 'status-neutral',
-  archived: 'status-neutral'
+  archived: 'status-neutral',
+  withdrawn: 'status-neutral',
+  superseded: 'status-neutral'
 };
 
 export default function EmployeesPage() {
@@ -219,7 +221,12 @@ export default function EmployeesPage() {
       setSelectedEmployee(null);
       fetchEmployees();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to delete employee');
+      const detail = error.response?.data?.detail;
+      if (detail && typeof detail === 'object') {
+        toast.error(detail.message || JSON.stringify(detail));
+      } else {
+        toast.error(detail || 'Failed to delete employee');
+      }
     }
   };
 

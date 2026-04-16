@@ -182,7 +182,7 @@ export default function ComplianceCentrePage() {
       setPolicies(policiesRes.data);
       setInsurance(insuranceRes.data);
       setIncidents(incidentsRes.data);
-      const activeEmployees = employeesRes.data.filter(e => e.status !== 'archived');
+      const activeEmployees = employeesRes.data.filter(e => !['archived', 'withdrawn', 'superseded'].includes(e.status));
       setEmployees(activeEmployees);
       const staffForReadiness = activeEmployees.filter(e =>
         e.person_stage === 'employee' ||

@@ -344,7 +344,9 @@ export const RECRUITMENT_STAGES = [
   { key: 'onboarding', label: 'Onboarding', order: 5 },
   { key: 'active', label: 'Active', order: 6 },
   { key: 'inactive', label: 'Inactive', order: 7 },
-  { key: 'archived', label: 'Archived', order: 8 }
+  { key: 'archived', label: 'Archived', order: 8 },
+  { key: 'withdrawn', label: 'Withdrawn', order: 9 },
+  { key: 'superseded', label: 'Superseded', order: 10 }
 ];
 
 export const APPLICANT_STAGES = ['new', 'screening', 'interview', 'compliance_review'];

@@ -2791,7 +2791,7 @@ export default function WorkerDashboard() {
         {/* Footer */}
         <div className="text-center py-6 text-xs text-slate-400">
           <p>{orgSettings.organisation_name || 'Healthcare Portal'} - Compliance Portal</p>
-          <p>Employee Code: {employee.code}</p>
+          <p>Employee Code: {employee.employee_code || employee.applicant_reference || '—'}</p>
         </div>
       </div>
 

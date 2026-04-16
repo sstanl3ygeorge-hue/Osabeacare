@@ -8978,15 +8978,20 @@ async def get_contract_status(
 # ==================== EMPLOYEE ROUTES ====================
 
 async def generate_employee_code():
-    last_employee = await db.employees.find_one(sort=[("employee_code", -1)])
-    if last_employee and last_employee.get('employee_code'):
+    """Generate unique employee code in format EMP-XXXX (canonical generator)."""
+    last_emp = await db.employees.find_one(
+        {"employee_code": {"$regex": "^EMP-\\d+$"}},
+        sort=[("employee_code", -1)]
+    )
+    if last_emp and last_emp.get("employee_code"):
         try:
-            num = int(last_employee['employee_code'].split('-')[1]) + 1
-        except (IndexError, ValueError):
-            num = 1
+            last_num = int(last_emp["employee_code"].split("-")[1])
+            new_num = last_num + 1
+        except (ValueError, IndexError):
+            new_num = 1001
     else:
-        num = 1
-    return f"OCS-{str(num).zfill(4)}"
+        new_num = 1001
+    return f"EMP-{new_num:04d}"
 
 async def calculate_completion_percentage(employee_id: str) -> int:
     """
@@ -12697,25 +12702,25 @@ async def bulk_import_employees(
             now = datetime.now(timezone.utc)
             employee_id = str(uuid.uuid4())
             
-            # Generate applicant reference
-            count = await db.employees.count_documents({})
-            applicant_ref = f"OCS-{now.year}-{str(count + 1).zfill(4)}"
+            # Generate applicant reference (canonical APP- prefix)
+            applicant_ref = f"APP-{uuid.uuid4().hex[:8].upper()}"
             
             # Create employee record with all extracted data
             employee = {
                 "id": employee_id,
                 "applicant_reference": applicant_ref,
+                "employee_code": None,  # Not assigned until recruitment approval
                 "first_name": row.first_name.strip(),
                 "last_name": row.last_name.strip(),
                 "email": row.email.lower().strip(),
                 "phone": row.phone,
                 "role": row.role,
-                "status": "onboarding",
-                "person_stage": "applicant",
+                "status": "new",
                 "recruitment_approved": False,
+                "application_source": "offline_pdf_import",
+                "import_source": "offline_pdf_import",
                 "created_at": now.isoformat(),
                 "updated_at": now.isoformat(),
-                "import_source": "offline_pdf_import",
                 "imported_by": user["user_id"],
                 "imported_at": now.isoformat(),
                 "profile_completion_needed": True  # Flag for ProfileCompletionWizard
@@ -25097,14 +25102,10 @@ async def submit_structured_application(form: StructuredApplicationForm):
     if form.county:
         full_address += f", {form.county}"
     
-    # Generate a temporary unique employee_code for applicants to avoid MongoDB unique index collision
-    # This will be replaced with a proper employee code upon recruitment approval
-    temp_employee_code = f"APPLICANT-{uuid.uuid4().hex[:8].upper()}"
-    
     employee_doc = {
         "id": app_id,
         "applicant_reference": applicant_ref,
-        "employee_code": temp_employee_code,  # Temporary code for applicants - replaced on recruitment approval
+        "employee_code": None,  # Not assigned until recruitment approval (EMP-XXXX)
         
         # Personal details
         "title": form.title,

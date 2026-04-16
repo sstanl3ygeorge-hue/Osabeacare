@@ -244,6 +244,7 @@ async def create_employee_simple(
     employee_doc = {
         "id": employee_id,
         **employee.model_dump(),
+        "application_source": "admin_simple",
         "completion_percentage": 0,
         "created_at": now,
         "updated_at": now

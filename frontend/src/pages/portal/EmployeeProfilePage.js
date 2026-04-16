@@ -3835,10 +3835,10 @@ export default function EmployeeProfilePage() {
 
           {/* Status Strip - Replaces contact row */}
           <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-[#E4E8EB]" data-testid="status-strip">
-            {/* Employee ID - Always show business-facing code (OCS-XXXX), never internal UUID */}
+            {/* Business-facing identifier — label adapts to person stage */}
             <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
               <User className="h-4 w-4 text-slate-500" />
-              <span className="text-sm text-slate-500">Employee ID:</span>
+              <span className="text-sm text-slate-500">{employee.person_stage === 'applicant' ? 'Applicant Reference:' : 'Employee ID:'}</span>
               <span className="text-sm font-semibold text-slate-700">{employee.employee_code || employee.applicant_reference || 'Not assigned'}</span>
             </div>
             
@@ -4394,7 +4394,7 @@ export default function EmployeeProfilePage() {
                     <p className="font-medium text-text-primary">{employee?.first_name} {employee?.last_name}</p>
                   </div>
                   <div>
-                    <p className="text-xs text-text-muted">{employee?.person_stage === 'applicant' ? 'Applicant Ref' : 'Employee ID'}</p>
+                    <p className="text-xs text-text-muted">{employee?.person_stage === 'applicant' ? 'Applicant Reference' : 'Employee ID'}</p>
                     <p className="font-medium text-text-primary">{employee?.employee_code || employee?.applicant_reference || 'Not assigned'}</p>
                   </div>
                   <div>
@@ -4757,7 +4757,7 @@ export default function EmployeeProfilePage() {
                                       <p className="text-xs text-gray-500">{form.description}</p>
                                       {form.prefill && (
                                         <p className="text-xs text-indigo-500 mt-0.5 italic">
-                                          Pre-filled from application where available
+                                          Auto-filled from worker's application
                                         </p>
                                       )}
                                       {/* Audit trail */}
@@ -4791,7 +4791,7 @@ export default function EmployeeProfilePage() {
                                     {/* Info-only forms (Pre-Screen): no action button */}
                                     {form.infoOnly ? (
                                       <Badge className="bg-slate-100 text-slate-600 text-xs">
-                                        Worker completes via Dashboard
+                                        Awaiting Worker Completion
                                       </Badge>
                                     ) : (
                                       <div className="flex gap-1">
@@ -4829,29 +4829,25 @@ export default function EmployeeProfilePage() {
                                                     `${API}/form-submissions/${submission.id}/verify`, {},
                                                     { headers: { Authorization: `Bearer ${token}` } }
                                                   );
-                                                  toast.success('Form marked as reviewed');
+                                                  toast.success('Form marked as verified');
                                                   fetchFormSubmissions();
-                                                } catch { toast.error('Failed to mark as reviewed'); }
+                                                } catch { toast.error('Failed to verify form'); }
                                               }}
                                               className="text-green-600 border-green-200 hover:bg-green-50"
-                                              data-testid={`mark-reviewed-${form.key}`}>
-                                              <CheckCircle className="h-3.5 w-3.5 mr-1" />Mark Reviewed
+                                              data-testid={`mark-verified-${form.key}`}>
+                                              <CheckCircle className="h-3.5 w-3.5 mr-1" />Mark Verified
                                             </Button>
                                           </>
                                         )}
 
-                                        {/* Not started / in progress → Open form directly in Worker Portal */}
+                                        {/* Not started / in progress → passive status label (worker completes via their own portal) */}
                                         {!isVerified && !isAwaiting && !isRejected && (
-                                          <a
-                                            href={`/worker/forms/${form.key}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors"
-                                            data-testid={`open-form-${form.key}`}
+                                          <Badge
+                                            className={isInProgress ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
+                                            data-testid={`form-status-${form.key}`}
                                           >
-                                            <ExternalLink className="h-3.5 w-3.5" />
-                                            Open Form in Worker Portal
-                                          </a>
+                                            {isInProgress ? 'Worker In Progress' : 'Awaiting Worker Completion'}
+                                          </Badge>
                                         )}
 
                                         {/* Rejected → also let admin view original + open dashboard */}

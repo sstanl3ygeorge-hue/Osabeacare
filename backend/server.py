@@ -8416,8 +8416,8 @@ WORKER_FORM_DEFINITIONS = {
         "admin_requirement_id": "emergency_contacts"
     },
     "employment_history_10yr": {
-        "name": "10-Year Employment History",
-        "description": "Full employment history for the past 10 years with gap explanations (CQC requirement)",
+        "name": "10-Year Employment History Declaration",
+        "description": "Review your employment history (pre-filled from your CV) and sign the CQC declaration",
         "required": True,
         "admin_requirement_id": "employment_history",
         "role_aware": False  # All roles require this
@@ -8720,12 +8720,14 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
     
     form_definition = {
         "id": "employment_history_10yr",
-        "name": "10-Year Employment History",
-        "description": "CQC Safer Recruitment requires a full account of your employment, education, and activities for the past 10 years. All gaps must be explained.",
+        "name": "10-Year Employment History Declaration",
+        "description": "Review your employment history below and sign the declaration. Your history has been pre-filled from your CV — please check it is correct and complete.",
         "instructions": [
-            f"Please provide details of ALL employment, education, voluntary work, and other activities from {ten_years_ago} to present.",
-            "Include any periods of unemployment, travel, caring responsibilities, or other activities.",
-            "All gaps longer than 28 days MUST be explained.",
+            "Your employment history has been extracted from your CV and pre-filled below.",
+            "Please review the details carefully and correct any errors.",
+            f"This declaration covers the period from {ten_years_ago} to present.",
+            "If any employment is missing, add it in the fields provided.",
+            "All gaps longer than 28 days must be explained.",
             "This information will be verified through references and other checks."
         ],
         "ten_year_start_date": ten_years_ago,
@@ -8733,7 +8735,7 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
             {
                 "id": "employment_entries",
                 "title": "Employment History",
-                "description": "List all employment in chronological order (most recent first)",
+                "description": "Review and confirm your employment details (pre-filled from your CV). Correct any errors below.",
                 "repeatable": True,
                 "min_entries": 1,
                 "fields": [

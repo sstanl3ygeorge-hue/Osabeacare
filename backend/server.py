@@ -8481,25 +8481,7 @@ async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
         "form_type": "pre_interview_questionnaire"
     }, {"_id": 0})
     
-    if submission and submission.get("status") in ["submitted", "verified", "interview_completed"]:
-        return {
-            "form_id": "pre_interview_questionnaire",
-            "status": submission.get("status"),
-            "data": submission.get("form_data", {}),
-            "submitted_at": submission.get("submitted_at"),
-            "can_edit": False,
-            "interview_completed": submission.get("status") == "interview_completed",
-            "admin_scores": submission.get("admin_scores"),
-            "admin_notes": submission.get("admin_notes")
-        }
-    
-    # Get saved progress
-    progress = await db.form_progress.find_one({
-        "employee_id": employee_id,
-        "form_id": "pre_interview_questionnaire"
-    }, {"_id": 0})
-    
-    # Build form definition with role-specific questions
+    # Build form definition with role-specific questions (needed for all return paths)
     form_definition = {
         "id": "pre_interview_questionnaire",
         "name": "Pre-Interview Questionnaire",
@@ -8550,6 +8532,25 @@ async def get_pre_interview_questionnaire_data(employee_id: str, worker: dict):
         "max_score": len(questions) * 3,
         "pass_score": INTERVIEW_SCORING["minimum_total_score"]
     }
+    
+    if submission and submission.get("status") in ["submitted", "verified", "interview_completed"]:
+        return {
+            "form_id": "pre_interview_questionnaire",
+            "form_definition": form_definition,
+            "status": submission.get("status"),
+            "data": submission.get("form_data", {}),
+            "submitted_at": submission.get("submitted_at"),
+            "can_edit": False,
+            "interview_completed": submission.get("status") == "interview_completed",
+            "admin_scores": submission.get("admin_scores"),
+            "admin_notes": submission.get("admin_notes")
+        }
+    
+    # Get saved progress
+    progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": "pre_interview_questionnaire"
+    }, {"_id": 0})
     
     return {
         "form_id": "pre_interview_questionnaire",
@@ -8708,28 +8709,7 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
     employment_history_source = cv_extracted_history if cv_extracted_history else existing_history
     data_source = "cv" if cv_extracted_history else ("profile" if existing_history else "none")
     
-    # Check if already submitted
-    submission = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "form_type": "employment_history_10yr"
-    }, {"_id": 0})
-    
-    if submission and submission.get("status") in ["submitted", "verified"]:
-        return {
-            "form_id": "employment_history_10yr",
-            "status": submission.get("status"),
-            "data": submission.get("form_data", {}),
-            "submitted_at": submission.get("submitted_at"),
-            "can_edit": False
-        }
-    
-    # Get saved progress
-    progress = await db.form_progress.find_one({
-        "employee_id": employee_id,
-        "form_id": "employment_history_10yr"
-    }, {"_id": 0})
-    
-    # Calculate 10-year boundary
+    # Calculate 10-year boundary (needed for form_definition in all return paths)
     ten_years_ago = (datetime.now() - timedelta(days=365*10)).strftime('%Y-%m-%d')
     
     # Detect gaps - use CV gaps if available, otherwise calculate
@@ -8780,14 +8760,14 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
                     {"id": "gap_start_date", "type": "date", "label": "Gap Start Date", "required": True},
                     {"id": "gap_end_date", "type": "date", "label": "Gap End Date", "required": True},
                     {"id": "gap_type", "type": "select", "label": "Type of Gap", "required": True, "options": [
-                        {"value": "unemployment", "label": "Unemployment / Job Seeking"},
-                        {"value": "education", "label": "Education / Training"},
-                        {"value": "travel", "label": "Travel"},
-                        {"value": "caring", "label": "Caring Responsibilities"},
-                        {"value": "health", "label": "Health / Medical"},
-                        {"value": "maternity_paternity", "label": "Maternity / Paternity Leave"},
-                        {"value": "voluntary", "label": "Voluntary Work"},
-                        {"value": "other", "label": "Other"}
+                        "Unemployment / Job Seeking",
+                        "Education / Training",
+                        "Travel",
+                        "Caring Responsibilities",
+                        "Health / Medical",
+                        "Maternity / Paternity Leave",
+                        "Voluntary Work",
+                        "Other"
                     ]},
                     {"id": "gap_explanation", "type": "textarea", "label": "Detailed Explanation", "required": True,
                      "placeholder": "Please provide details of what you were doing during this period..."}
@@ -8807,6 +8787,28 @@ async def get_employment_history_form_data(employee_id: str, worker: dict):
         "detected_gaps": gaps,
         "gap_threshold_days": 28  # Gaps > 28 days need explanation
     }
+    
+    # Check if already submitted
+    submission = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "form_type": "employment_history_10yr"
+    }, {"_id": 0})
+    
+    if submission and submission.get("status") in ["submitted", "verified"]:
+        return {
+            "form_id": "employment_history_10yr",
+            "form_definition": form_definition,
+            "status": submission.get("status"),
+            "data": submission.get("form_data", {}),
+            "submitted_at": submission.get("submitted_at"),
+            "can_edit": False
+        }
+    
+    # Get saved progress
+    progress = await db.form_progress.find_one({
+        "employee_id": employee_id,
+        "form_id": "employment_history_10yr"
+    }, {"_id": 0})
     
     # Merge existing history with saved progress
     merged_data = {}

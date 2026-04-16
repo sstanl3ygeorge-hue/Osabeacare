@@ -2225,8 +2225,20 @@ async def get_worker_forms(worker: dict = Depends(get_current_worker)):
     
     employee_id = worker.get("employee_id")
     
+    # Look up employee role for role-aware form filtering
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1, "job_title": 1})
+    if not employee:
+        employee = await db.applications.find_one({"id": employee_id}, {"_id": 0, "role": 1, "job_title": 1})
+    employee_role = (employee.get("role") or employee.get("job_title") or "").lower() if employee else ""
+    
     forms = []
     for form_id, form_def in WORKER_FORM_DEFINITIONS.items():
+        # Skip forms restricted to specific roles if worker doesn't match
+        roles_required = form_def.get("roles_required")
+        if roles_required:
+            if not any(r.lower() in employee_role for r in roles_required):
+                continue
+        
         progress = await db.form_progress.find_one({
             "employee_id": employee_id,
             "form_id": form_id
@@ -2283,6 +2295,17 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     if form_id not in WORKER_FORM_DEFINITIONS:
         raise HTTPException(status_code=404, detail="Form not found")
     
+    # Block access to role-restricted forms if worker doesn't match
+    form_def_meta = WORKER_FORM_DEFINITIONS[form_id]
+    roles_required = form_def_meta.get("roles_required")
+    if roles_required:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1, "job_title": 1})
+        if not employee:
+            employee = await db.applications.find_one({"id": employee_id}, {"_id": 0, "role": 1, "job_title": 1})
+        employee_role = (employee.get("role") or employee.get("job_title") or "").lower() if employee else ""
+        if not any(r.lower() in employee_role for r in roles_required):
+            raise HTTPException(status_code=403, detail="This form is not required for your role")
+    
     # Special handling for pre-interview questionnaire
     if form_id == "pre_interview_questionnaire":
         return await get_pre_interview_questionnaire_data(employee_id, worker)
@@ -2290,6 +2313,10 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     # Special handling for 10-year employment history
     if form_id == "employment_history_10yr":
         return await get_employment_history_form_data(employee_id, worker)
+    
+    # Resolve form definition early so it's available for all return paths
+    form_def_with_sections = FORM_BASED_REQUIREMENTS.get(form_id)
+    form_definition = form_def_with_sections or WORKER_FORM_DEFINITIONS[form_id]
     
     submission = await db.form_submissions.find_one({
         "employee_id": employee_id,
@@ -2299,6 +2326,7 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     if submission and submission.get("status") in ["submitted", "verified"]:
         return {
             "form_id": form_id,
+            "form_definition": form_definition,
             "status": submission.get("status"),
             "data": submission.get("form_data", {}),
             "submitted_at": submission.get("submitted_at"),
@@ -2308,6 +2336,7 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     if submission and submission.get("status") in ["rejected", "amendment_requested"]:
         return {
             "form_id": form_id,
+            "form_definition": form_definition,
             "status": submission.get("status"),
             "data": submission.get("form_data", {}),
             "submitted_at": submission.get("submitted_at"),
@@ -2318,8 +2347,6 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
         "employee_id": employee_id,
         "form_id": form_id
     }, {"_id": 0})
-    
-    form_def_with_sections = FORM_BASED_REQUIREMENTS.get(form_id)
     
     auto_fill_data = {}
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -2490,6 +2517,17 @@ async def submit_worker_form(
     
     if form_id not in WORKER_FORM_DEFINITIONS:
         raise HTTPException(status_code=404, detail="Form not found")
+    
+    # Block submission of role-restricted forms if worker doesn't match
+    form_def_meta = WORKER_FORM_DEFINITIONS[form_id]
+    roles_required = form_def_meta.get("roles_required")
+    if roles_required:
+        emp = await db.employees.find_one({"id": employee_id}, {"_id": 0, "role": 1, "job_title": 1})
+        if not emp:
+            emp = await db.applications.find_one({"id": employee_id}, {"_id": 0, "role": 1, "job_title": 1})
+        emp_role = (emp.get("role") or emp.get("job_title") or "").lower() if emp else ""
+        if not any(r.lower() in emp_role for r in roles_required):
+            raise HTTPException(status_code=403, detail="This form is not required for your role")
     
     existing = await db.form_submissions.find_one({
         "employee_id": employee_id,

@@ -258,6 +258,7 @@ export default function WorkerFormPage() {
       case 'tel':
       case 'email':
       case 'date':
+      case 'number':
         return (
           <Input
             type={field.type}
@@ -292,9 +293,13 @@ export default function WorkerFormPage() {
               <SelectValue placeholder="Select an option" />
             </SelectTrigger>
             <SelectContent>
-              {field.options.map(opt => (
-                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-              ))}
+              {field.options.map(opt => {
+                const optValue = typeof opt === 'object' ? opt.value : opt;
+                const optLabel = typeof opt === 'object' ? opt.label : opt;
+                return (
+                  <SelectItem key={optValue} value={optValue}>{optLabel}</SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         );

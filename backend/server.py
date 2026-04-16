@@ -38957,12 +38957,16 @@ async def get_expiring_documents_endpoint(
 # ============================================================================
 
 
-# CORS middleware (router included after all routes are defined)
-# Use allowed origins from security module for production safety
-# IMPORTANT: Origins must include all production frontend domains
+# Middleware ordering: CORS must be added LAST so it is the outermost
+# user middleware. This ensures CORS headers are present on ALL responses,
+# including 500 errors that bypass inner middleware.
 cors_origins = get_allowed_origins()
 print(f"[STARTUP] CORS origins configured: {cors_origins}")
 
+# Security headers middleware (added first = innermost)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS middleware (added last = outermost — wraps everything including errors)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -38971,9 +38975,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
-
-# Security headers middleware
-app.add_middleware(SecurityHeadersMiddleware)
 
 
 # ==================== TRAINING INTAKE WIZARD (Step 10 - Phases 1-3) ====================

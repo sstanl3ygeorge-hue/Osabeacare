@@ -514,7 +514,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             )
             rtw_file_doc = (rtw_canonical_item.get("documents") or [{}])[0]
             canonical_entry = {
-                "id": rtw_canonical_item.get("id") or "rtw_canonical",
+                "id": rtw_file_doc.get("id") or rtw_canonical_item.get("id") or "rtw_canonical",
                 "type": doc_type,
                 "name": doc_name,
                 "verified": rtw_is_verified,
@@ -551,7 +551,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             )
             dbs_file_doc = (dbs_canonical_item.get("documents") or [{}])[0]
             dbs_canonical_entry = {
-                "id": dbs_canonical_item.get("id") or "dbs_canonical",
+                "id": dbs_file_doc.get("id") or dbs_canonical_item.get("id") or "dbs_canonical",
                 "type": doc_type,
                 "name": doc_name,
                 "verified": dbs_is_verified,
@@ -1238,7 +1238,8 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
             data_cleared = is_rejected and not referee_name
             mismatch_explanation = mismatch_data.get("reason") or mismatch_data.get("notes")
             mismatch_explanation_status = "documented" if mismatch_data.get("documented") else "not_submitted"
-            mismatch_admin_decision = mismatch_data.get("detected")
+            # Admin writes decision to employee flat fields only; db.references.mismatch.detected is a bool flag.
+            mismatch_admin_decision = employee.get(f"{prefix}mismatch_admin_decision")
             referee_company = declared_data.get("organisation") or declared_data.get("company", "")
         else:
             referee_name = employee.get(f"{prefix}name", "")

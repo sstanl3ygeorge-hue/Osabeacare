@@ -523,7 +523,7 @@ export default function WorkerDashboard() {
     setDocumentLoading(true);
     setDocumentBlobUrl(null);
     
-    if (!doc?.id) {
+    if (!doc?.document_id && !doc?.id) {
       setDocumentLoading(false);
       return;
     }
@@ -531,7 +531,7 @@ export default function WorkerDashboard() {
     try {
       const token = localStorage.getItem('workerToken');
       const response = await axios.get(
-        `${API}/employee-documents/${doc.id}/file`,
+        `${API}/employee-documents/${doc.document_id || doc.id}/file`,
         {
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'
@@ -1142,9 +1142,10 @@ export default function WorkerDashboard() {
                   <div 
                     key={idx}
                     className={`p-4 rounded-xl border ${
-                      mismatch.explanation_status === 'submitted' ? 'bg-blue-50 border-blue-200' :
                       mismatch.mismatch_admin_decision === 'accepted' ? 'bg-green-50 border-green-200' :
                       mismatch.mismatch_admin_decision === 'rejected' ? 'bg-red-50 border-red-200' :
+                      mismatch.mismatch_admin_decision === 'needs_clarification' ? 'bg-amber-50 border-amber-400' :
+                      mismatch.explanation_status === 'submitted' ? 'bg-blue-50 border-blue-200' :
                       'bg-white border-amber-200'
                     }`}
                     data-testid={`mismatch-ref-${mismatch.reference_number}`}
@@ -1152,12 +1153,16 @@ export default function WorkerDashboard() {
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-3">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                          mismatch.explanation_status === 'submitted' ? 'bg-blue-100' :
                           mismatch.mismatch_admin_decision === 'accepted' ? 'bg-green-100' :
+                          mismatch.mismatch_admin_decision === 'rejected' ? 'bg-red-100' :
+                          mismatch.mismatch_admin_decision === 'needs_clarification' ? 'bg-amber-100' :
+                          mismatch.explanation_status === 'submitted' ? 'bg-blue-100' :
                           'bg-amber-100'
                         }`}>
                           {mismatch.mismatch_admin_decision === 'accepted' ? (
                             <CheckCircle className="h-5 w-5 text-green-600" />
+                          ) : mismatch.mismatch_admin_decision === 'rejected' ? (
+                            <AlertCircle className="h-5 w-5 text-red-600" />
                           ) : mismatch.explanation_status === 'submitted' ? (
                             <Clock className="h-5 w-5 text-blue-600" />
                           ) : (
@@ -1200,6 +1205,38 @@ export default function WorkerDashboard() {
                             <CheckCircle className="h-3 w-3 mr-1" />
                             Accepted
                           </Badge>
+                        ) : mismatch.mismatch_admin_decision === 'rejected' ? (
+                          <>
+                            <Badge className="bg-red-100 text-red-700 text-xs">
+                              <AlertCircle className="h-3 w-3 mr-1" />
+                              Rejected
+                            </Badge>
+                            <Button
+                              size="sm"
+                              onClick={() => openMismatchExplanationModal(mismatch)}
+                              className="gap-1 bg-red-600 hover:bg-red-700"
+                              data-testid={`re-explain-mismatch-${mismatch.reference_number}`}
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                              Re-explain
+                            </Button>
+                          </>
+                        ) : mismatch.mismatch_admin_decision === 'needs_clarification' ? (
+                          <>
+                            <Badge className="bg-amber-100 text-amber-700 text-xs">
+                              <Clock className="h-3 w-3 mr-1" />
+                              More Info Needed
+                            </Badge>
+                            <Button
+                              size="sm"
+                              onClick={() => openMismatchExplanationModal(mismatch)}
+                              className="gap-1 bg-amber-600 hover:bg-amber-700"
+                              data-testid={`clarify-mismatch-${mismatch.reference_number}`}
+                            >
+                              <MessageSquare className="h-4 w-4" />
+                              Respond
+                            </Button>
+                          </>
                         ) : mismatch.explanation_status === 'submitted' ? (
                           <Badge className="bg-blue-100 text-blue-700 text-xs">
                             <Clock className="h-3 w-3 mr-1" />

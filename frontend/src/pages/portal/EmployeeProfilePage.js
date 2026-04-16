@@ -71,7 +71,13 @@ const FORM_BASED_REQUIREMENTS = [
   'equal_opportunities',
   'hmrc_starter_checklist',
   'staff_personal_info',
-  'staff_health_questionnaire'
+  'staff_health_questionnaire',
+  // Worker-submittable forms — must open form viewer, not file upload
+  'emergency_contacts',
+  'conflict_of_interest',
+  'pre_interview_questionnaire',
+  'employment_history_10yr',
+  'fit_proper_persons',
 ];
 
 const statusIcons = {
@@ -4661,12 +4667,14 @@ export default function EmployeeProfilePage() {
                       { key: 'staff_personal_info', name: 'Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
                       { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
                       { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details', prefill: true },
+                      { key: 'employment_history_10yr', name: '10-Year Employment History', description: 'Full 10-year employment history with gap explanations (CQC requirement)', infoOnly: true },
                     ]
                   },
                   {
                     label: 'Declarations',
                     forms: [
                       { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)' },
+                      { key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only' },
                     ]
                   },
                   {

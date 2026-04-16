@@ -1492,11 +1492,11 @@ export default function WorkerDashboard() {
                           size="sm" 
                           variant={alert.urgent ? "default" : "outline"}
                           className={`gap-1 ${alert.urgent ? 'bg-red-600 hover:bg-red-700' : ''}`}
-                          onClick={() => triggerFileInput(alert.type === 'training' ? `training_renewal_${alert.training_id || 'general'}` : `${alert.type}_renewal`)}
-                          disabled={uploading === `${alert.type}_renewal`}
+                          onClick={() => triggerFileInput(alert.type === 'training' ? `training_${alert.training_id || 'general'}` : `${alert.type}_renewal`)}
+                          disabled={uploading === (alert.type === 'training' ? `training_${alert.training_id || 'general'}` : `${alert.type}_renewal`)}
                           data-testid={`upload-renewal-${alert.type}`}
                         >
-                          {uploading === `${alert.type}_renewal` ? (
+                          {uploading === (alert.type === 'training' ? `training_${alert.training_id || 'general'}` : `${alert.type}_renewal`) ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                           ) : (
                             <RefreshCw className="h-4 w-4" />
@@ -1642,8 +1642,7 @@ export default function WorkerDashboard() {
           </Card>
         )}
 
-        {/* Missing Training - Only for onboarding */}
-        {/* Mandatory Training Certificates - Show ALL 6 */}
+        {/* Mandatory Training Certificates */}
         {!isActiveEmployee && (
           <Card className="shadow-md border-0">
             <CardHeader className="pb-2">
@@ -1654,7 +1653,7 @@ export default function WorkerDashboard() {
                     Mandatory Training Certificates
                   </CardTitle>
                   <p className="text-xs text-slate-500 mt-1">
-                    All 6 NHS mandatory trainings required • AI extracts details from your certificates
+                    {(all_mandatory_trainings?.length || 6)} mandatory trainings required • AI extracts details from your certificates
                   </p>
                 </div>
                 <Button 
@@ -2103,8 +2102,8 @@ export default function WorkerDashboard() {
         )}
 
         {/* ========== AGREEMENTS (P0: Contract & Handbook Status) ========== */}
-        {/* Filter out contract_acceptance since it's covered by Employment Contract section below */}
-        {agreements && agreements.filter(a => a.id !== 'contract_acceptance').length > 0 && (
+        {/* Show contract_acceptance in this panel only after it's been signed; the dedicated section below handles the pre-signing state */}
+        {agreements && agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).length > 0 && (
           <Card className="shadow-md border-0" data-testid="agreements-section">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -2118,17 +2117,17 @@ export default function WorkerDashboard() {
                   </p>
                 </div>
                 <Badge className={`${
-                  agreements.filter(a => a.id !== 'contract_acceptance').every(a => a.verified) ? 'bg-green-100 text-green-700' :
-                  agreements.filter(a => a.id !== 'contract_acceptance').some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
+                  agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).every(a => a.verified) ? 'bg-green-100 text-green-700' :
+                  agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).some(a => a.signed || a.verified) ? 'bg-blue-100 text-blue-700' :
                   'bg-slate-100 text-slate-600'
                 }`}>
-                  {agreements.filter(a => a.id !== 'contract_acceptance' && a.verified).length} of {agreements.filter(a => a.id !== 'contract_acceptance').length} Verified
+                  {agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed) && a.verified).length} of {agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).length} Verified
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {agreements.filter(a => a.id !== 'contract_acceptance').map((agreement) => (
+                {agreements.filter(a => !(a.id === 'contract_acceptance' && !contract_signed)).map((agreement) => (
                   <div
                     key={agreement.id}
                     className={`p-4 rounded-xl border ${

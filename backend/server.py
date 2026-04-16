@@ -9912,6 +9912,9 @@ async def update_reference(
     - Direct supervisor flag
     - Can contact before offer flag
     """
+    if reference_id not in ("1", "2"):
+        raise HTTPException(status_code=400, detail="reference_id must be '1' or '2'")
+
     await _monitor_legacy_reference_write_usage(
         route_path="/employees/{employee_id}/references/{reference_id}",
         user=user,
@@ -30230,6 +30233,9 @@ class ReferenceIntegrityService:
         
         Required for references with identity_confidence = 'mismatch'.
         """
+        if ref_num not in (1, 2):
+            raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
         if not override_reason or len(override_reason.strip()) < 20:
             raise HTTPException(
                 status_code=400, 
@@ -30268,6 +30274,9 @@ class ReferenceIntegrityService:
         admin_id: str
     ) -> dict:
         """Reject a reference - clears data so worker can provide fresh reference details. Sends email notification."""
+        if ref_num not in (1, 2):
+            raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
         now = datetime.now(timezone.utc).isoformat()
         prefix = f"reference_{ref_num}_"
         
@@ -30935,6 +30944,9 @@ async def override_reference_mismatch(
     Required when comparison.identity_confidence = 'mismatch'.
     Must provide documented justification (min 20 characters).
     """
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
     return await ReferenceIntegrityService.override_mismatch(
         employee_id, ref_num, override_reason, user['user_id']
     )
@@ -31028,6 +31040,9 @@ async def reject_reference(
     user: dict = Depends(require_admin)
 ):
     """Reject a reference. Employee will need to provide a new reference."""
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+
     return await ReferenceIntegrityService.reject_reference(
         employee_id, ref_num, rejection_reason, user['user_id']
     )

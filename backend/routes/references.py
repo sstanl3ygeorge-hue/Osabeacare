@@ -139,101 +139,14 @@ async def create_reference(
     reference: ReferenceCreate,
     user: dict = Depends(require_manager_or_admin)
 ):
-    """Create or update a reference for an employee."""
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Update employee record with reference info
-    update_fields = {
-        f"reference_{ref_num}_name": reference.referee_name,
-        f"reference_{ref_num}_email": reference.referee_email,
-        f"reference_{ref_num}_phone": reference.referee_phone,
-        f"reference_{ref_num}_company": reference.referee_organisation,
-        f"reference_{ref_num}_job_title": reference.referee_job_title,
-        f"reference_{ref_num}_relationship": reference.referee_relationship,
-        f"reference_{ref_num}_is_professional": reference.is_professional,
-        f"reference_{ref_num}_years_known": reference.years_known,
-        "updated_at": now
-    }
-    
-    await db.employees.update_one(
-        {"id": employee_id},
-        {"$set": update_fields}
+    """LEGACY: Not used by current frontend. Use add_referee_details in server.py instead."""
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Legacy reference create endpoint is disabled. "
+            "Use POST /employees/{employee_id}/references/{ref_num} instead."
+        )
     )
-    
-    # Also update references collection
-    ref_key = f"ref{ref_num}"
-    declared_data = {
-        "name": reference.referee_name,
-        "email": reference.referee_email,
-        "phone": reference.referee_phone,
-        "organisation": reference.referee_organisation,
-        "job_title": reference.referee_job_title,
-        "relationship": reference.referee_relationship,
-        "is_professional": reference.is_professional,
-        "years_known": reference.years_known,
-        "created_at": now,
-        "created_by": user.get("user_id")
-    }
-    
-    await db.references.update_one(
-        {"employee_id": employee_id},
-        {
-            "$set": {
-                f"{ref_key}.declared": declared_data,
-                f"{ref_key}.updated_at": now,
-                "updated_at": now
-            },
-            "$setOnInsert": {
-                "employee_id": employee_id,
-                "created_at": now
-            }
-        },
-        upsert=True
-    )
-    
-    # Also update employee_references collection
-    await db.employee_references.update_one(
-        {"employee_id": employee_id, "reference_number": ref_num},
-        {
-            "$set": {
-                "referee_name": reference.referee_name,
-                "referee_email": reference.referee_email,
-                "referee_phone": reference.referee_phone,
-                "referee_organisation": reference.referee_organisation,
-                "referee_position": reference.referee_job_title,
-                "referee_relationship": reference.referee_relationship,
-                "status": "pending",
-                "updated_at": now,
-                "source": "admin_entry"
-            },
-            "$setOnInsert": {
-                "id": str(uuid.uuid4()),
-                "employee_id": employee_id,
-                "reference_number": ref_num,
-                "created_at": now
-            }
-        },
-        upsert=True
-    )
-    
-    await log_audit_action(
-        user['user_id'],
-        "create_reference",
-        "reference",
-        f"{employee_id}_ref_{ref_num}",
-        {"referee_name": reference.referee_name, "referee_email": reference.referee_email}
-    )
-    
-    return {"success": True, "message": f"Reference {ref_num} created/updated"}
 
 
 @router.put("/references/{employee_id}/{ref_num}/update")
@@ -243,61 +156,14 @@ async def update_reference(
     reference: ReferenceUpdate,
     user: dict = Depends(require_manager_or_admin)
 ):
-    """Update an existing reference."""
-    db = get_db()
-    
-    if ref_num not in [1, 2]:
-        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
-    
-    employee = await db.employees.find_one({"id": employee_id})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Build update fields
-    update_fields = {"updated_at": now}
-    ref_updates = {}
-    
-    if reference.referee_name:
-        update_fields[f"reference_{ref_num}_name"] = reference.referee_name
-        ref_updates["name"] = reference.referee_name
-    if reference.referee_email:
-        update_fields[f"reference_{ref_num}_email"] = reference.referee_email
-        ref_updates["email"] = reference.referee_email
-    if reference.referee_phone:
-        update_fields[f"reference_{ref_num}_phone"] = reference.referee_phone
-        ref_updates["phone"] = reference.referee_phone
-    if reference.referee_organisation:
-        update_fields[f"reference_{ref_num}_company"] = reference.referee_organisation
-        ref_updates["organisation"] = reference.referee_organisation
-    if reference.referee_job_title:
-        update_fields[f"reference_{ref_num}_job_title"] = reference.referee_job_title
-        ref_updates["job_title"] = reference.referee_job_title
-    if reference.referee_relationship:
-        update_fields[f"reference_{ref_num}_relationship"] = reference.referee_relationship
-        ref_updates["relationship"] = reference.referee_relationship
-    
-    await db.employees.update_one({"id": employee_id}, {"$set": update_fields})
-    
-    # Update references collection
-    if ref_updates:
-        ref_key = f"ref{ref_num}"
-        for k, v in ref_updates.items():
-            await db.references.update_one(
-                {"employee_id": employee_id},
-                {"$set": {f"{ref_key}.declared.{k}": v, "updated_at": now}}
-            )
-    
-    await log_audit_action(
-        user['user_id'],
-        "update_reference",
-        "reference",
-        f"{employee_id}_ref_{ref_num}",
-        ref_updates
+    """LEGACY: Not used by current frontend. Use change_referee_details in server.py instead."""
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            "Legacy reference update endpoint is disabled. "
+            "Use POST /references/{employee_id}/{ref_num}/change-referee instead."
+        )
     )
-    
-    return {"success": True, "message": f"Reference {ref_num} updated"}
 
 
 # ==================== REFERENCE VERIFICATION (Simple) ====================

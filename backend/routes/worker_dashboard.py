@@ -783,15 +783,26 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 except Exception as e:
                     logger.warning(f"Error parsing training expiry date '{expiry_str}': {e}")
             
+            v_status = record.get("verification_status", "")
+            is_rejected = v_status == "rejected"
+
             training_entry.update({
-                "status": "expired" if is_expired else "complete",
+                "status": "rejected" if is_rejected else ("expired" if is_expired else "complete"),
                 "completion_date": record.get("completion_date"),
                 "expiry_date": expiry_str,
                 "verified": record.get("verified", False),
+                "verification_status": v_status or None,
+                "rejection_reason": record.get("rejection_reason") if is_rejected else None,
                 "record_id": record.get("id")
             })
             
-            if is_expired:
+            if is_rejected:
+                missing_trainings.append({
+                    "id": training_id,
+                    "name": training_name,
+                    "action": "upload_certificate"
+                })
+            elif is_expired:
                 expired_trainings.append({
                     "id": training_id,
                     "name": training_name,
@@ -876,15 +887,26 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 except Exception as e:
                     logger.warning(f"Error parsing recommended training expiry date '{expiry_str}': {e}")
             
+            v_status = record.get("verification_status", "")
+            is_rejected = v_status == "rejected"
+
             training_entry.update({
-                "status": "expired" if is_expired else "complete",
+                "status": "rejected" if is_rejected else ("expired" if is_expired else "complete"),
                 "completion_date": record.get("completion_date"),
                 "expiry_date": expiry_str,
                 "verified": record.get("verified", False),
+                "verification_status": v_status or None,
+                "rejection_reason": record.get("rejection_reason") if is_rejected else None,
                 "record_id": record.get("id")
             })
             
-            if is_expired:
+            if is_rejected:
+                missing_trainings.append({
+                    "id": training_id,
+                    "name": training_name,
+                    "action": "upload_certificate"
+                })
+            elif is_expired:
                 expired_trainings.append({
                     "id": training_id,
                     "name": training_name,

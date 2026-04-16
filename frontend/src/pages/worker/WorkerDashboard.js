@@ -1727,7 +1727,7 @@ export default function WorkerDashboard() {
                     key={idx} 
                     className={`p-4 rounded-xl border ${
                       training.status === 'complete' ? 'bg-green-50 border-green-200' :
-                      training.status === 'expired' ? 'bg-red-50 border-red-200' :
+                      training.status === 'expired' || training.status === 'rejected' ? 'bg-red-50 border-red-200' :
                       'bg-slate-50 border-slate-200'
                     }`}
                     data-testid={`training-row-${training.id}`}
@@ -1736,13 +1736,15 @@ export default function WorkerDashboard() {
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                           training.status === 'complete' ? 'bg-green-100' :
-                          training.status === 'expired' ? 'bg-red-100' :
+                          training.status === 'expired' || training.status === 'rejected' ? 'bg-red-100' :
                           'bg-amber-100'
                         }`}>
                           {training.status === 'complete' ? (
                             <CheckCircle className="h-5 w-5 text-green-600" />
                           ) : training.status === 'expired' ? (
                             <AlertTriangle className="h-5 w-5 text-red-600" />
+                          ) : training.status === 'rejected' ? (
+                            <AlertCircle className="h-5 w-5 text-red-600" />
                           ) : (
                             <Clock className="h-5 w-5 text-amber-600" />
                           )}
@@ -1750,10 +1752,13 @@ export default function WorkerDashboard() {
                         <div>
                           <span className={`font-medium ${
                             training.status === 'complete' ? 'text-green-800' :
-                            training.status === 'expired' ? 'text-red-800' :
+                            training.status === 'expired' || training.status === 'rejected' ? 'text-red-800' :
                             'text-slate-800'
                           }`}>{training.name}</span>
-                          {training.expiry_date && (
+                          {training.rejection_reason && training.status === 'rejected' && (
+                            <p className="text-xs text-red-600">Reason: {training.rejection_reason}</p>
+                          )}
+                          {training.expiry_date && training.status !== 'rejected' && (
                             <p className={`text-xs ${
                               training.status === 'expired' ? 'text-red-600' : 'text-slate-500'
                             }`}>
@@ -1769,7 +1774,19 @@ export default function WorkerDashboard() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {training.status === 'complete' ? (
+                        {training.status === 'rejected' ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge className="bg-red-100 text-red-700 text-xs">
+                              <AlertCircle className="h-3 w-3 mr-1" />
+                              Rejected
+                            </Badge>
+                            {training.rejection_reason && (
+                              <span className="text-xs text-red-600 max-w-[180px] text-right truncate" title={training.rejection_reason}>
+                                {training.rejection_reason}
+                              </span>
+                            )}
+                          </div>
+                        ) : training.status === 'complete' ? (
                           <>
                             {training.verified ? (
                               <Badge className="bg-green-100 text-green-700 text-xs">
@@ -1794,13 +1811,13 @@ export default function WorkerDashboard() {
                             Required
                           </Badge>
                         )}
-                        {training.status !== 'complete' && (
+                        {(training.status !== 'complete' || training.status === 'rejected') && (
                           <Button 
                             size="sm" 
-                            variant="outline"
+                            variant={training.status === 'rejected' ? 'default' : 'outline'}
                             onClick={() => triggerFileInput(`training_${training.id}`)}
                             disabled={uploading === `training_${training.id}`}
-                            className="gap-1"
+                            className={training.status === 'rejected' ? 'gap-1 bg-red-600 hover:bg-red-700 text-white' : 'gap-1'}
                             data-testid={`upload-training-${training.id}`}
                           >
                             {uploading === `training_${training.id}` ? (
@@ -1808,7 +1825,7 @@ export default function WorkerDashboard() {
                             ) : (
                               <Upload className="h-4 w-4" />
                             )}
-                            Upload
+                            {training.status === 'rejected' ? 'Re-upload' : 'Upload'}
                           </Button>
                         )}
                       </div>
@@ -1846,7 +1863,7 @@ export default function WorkerDashboard() {
                     key={idx} 
                     className={`p-3 rounded-xl border ${
                       training.status === 'complete' ? 'bg-green-50 border-green-200' :
-                      training.status === 'expired' ? 'bg-red-50 border-red-200' :
+                      training.status === 'expired' || training.status === 'rejected' ? 'bg-red-50 border-red-200' :
                       'bg-slate-50 border-slate-200'
                     }`}
                     data-testid={`recommended-training-row-${training.id}`}
@@ -1876,7 +1893,16 @@ export default function WorkerDashboard() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {training.status === 'complete' ? (
+                        {training.status === 'rejected' ? (
+                          <div className="flex flex-col items-end gap-1">
+                            <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Rejected</Badge>
+                            {training.rejection_reason && (
+                              <span className="text-xs text-red-600 max-w-[180px] text-right truncate" title={training.rejection_reason}>
+                                {training.rejection_reason}
+                              </span>
+                            )}
+                          </div>
+                        ) : training.status === 'complete' ? (
                           training.verified ? (
                             <Badge className="bg-green-100 text-green-700 text-xs"><Shield className="h-3 w-3 mr-1" />Verified</Badge>
                           ) : (
@@ -1887,13 +1913,13 @@ export default function WorkerDashboard() {
                         ) : (
                           <Badge className="bg-slate-100 text-slate-500 text-xs">Optional</Badge>
                         )}
-                        {training.status !== 'complete' && (
+                        {(training.status !== 'complete' || training.status === 'rejected') && (
                           <Button 
                             size="sm" 
-                            variant="outline"
+                            variant={training.status === 'rejected' ? 'default' : 'outline'}
                             onClick={() => triggerFileInput(`training_${training.id}`)}
                             disabled={uploading === `training_${training.id}`}
-                            className="gap-1 text-xs"
+                            className={training.status === 'rejected' ? 'gap-1 text-xs bg-red-600 hover:bg-red-700 text-white' : 'gap-1 text-xs'}
                             data-testid={`upload-training-${training.id}`}
                           >
                             {uploading === `training_${training.id}` ? (
@@ -1901,7 +1927,7 @@ export default function WorkerDashboard() {
                             ) : (
                               <Upload className="h-3 w-3" />
                             )}
-                            Upload
+                            {training.status === 'rejected' ? 'Re-upload' : 'Upload'}
                           </Button>
                         )}
                       </div>

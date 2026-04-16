@@ -224,6 +224,73 @@ async def run_stamp_migration(
                 results["errors"].append(f"{requirement_id} ({doc_id}): {str(e)}")
                 results["failed"] += 1
     
+
+# ==================== APPLICATION UNIFICATION (Phase 1) ====================
+
+from application_resolver import resolve_application, backfill_dry_run, backfill_execute
+
+
+@router.get("/application-resolver/{employee_id}")
+async def resolve_employee_application(
+    employee_id: str,
+    user: dict = Depends(require_admin),
+):
+    """
+    Resolve application completeness for a single employee.
+
+    Returns section-by-section breakdown, provenance, and whether
+    the record is safe for Employment Review.
+    """
+    db = get_db()
+    result = await resolve_application(db, employee_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.get("/application-backfill/dry-run")
+async def application_backfill_dry_run(
+    user: dict = Depends(require_admin),
+):
+    """
+    Dry-run: report which employees would get a backfilled
+    application_form form_submission, without writing anything.
+
+    Returns a full report: candidates, skipped, section completeness.
+    """
+    db = get_db()
+    report = await backfill_dry_run(db)
+    return report
+
+
+@router.post("/application-backfill/execute")
+async def application_backfill_run(
+    user: dict = Depends(require_admin),
+):
+    """
+    Execute backfill: create application_form form_submissions for
+    non-online employees that don't have one yet.
+
+    Safety:
+    - Never overwrites existing form_submissions
+    - Never touches online_structured records
+    - Provenance stamped on every record
+    """
+    db = get_db()
+    user_id = user.get("user_id", user.get("id", "system"))
+    user_name = user.get("name", user.get("email", "Admin"))
+
+    result = await backfill_execute(db, user_id, user_name)
+
+    await log_audit_action(
+        user_id,
+        "application_backfill_execute",
+        "migration",
+        "all",
+        {"backfilled": result["backfilled"], "skipped": result["skipped"]},
+    )
+
+    return result
     # Log audit
     await log_audit_action(
         user["user_id"],

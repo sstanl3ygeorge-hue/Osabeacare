@@ -284,7 +284,7 @@ async def resolve_application(db, employee_id: str) -> dict:
             "sections": {key: section_eval},
             "backfilled_sections": [str],         # sections that could be backfilled from employee data
             "missing_sections": [str],            # required sections still empty after backfill
-            "safe_for_review": bool,              # all required_for_review sections complete
+            "application_data_complete": bool,    # all required_for_review sections have data
             "completion_summary": {
                 "total_sections": int,
                 "present_sections": int,
@@ -347,7 +347,7 @@ async def resolve_application(db, employee_id: str) -> dict:
     required_sections = [s for s in sections.values() if s["required_for_review"]]
     required_complete = sum(1 for s in required_sections if s["complete"])
 
-    safe_for_review = len(missing_sections) == 0
+    application_data_complete = len(missing_sections) == 0
 
     return {
         "employee_id": employee_id,
@@ -363,7 +363,7 @@ async def resolve_application(db, employee_id: str) -> dict:
         "sections": sections,
         "backfilled_sections": backfilled_sections,
         "missing_sections": missing_sections,
-        "safe_for_review": safe_for_review,
+        "application_data_complete": application_data_complete,
         "completion_summary": {
             "total_sections": total_sections,
             "present_sections": present_sections,
@@ -588,7 +588,7 @@ async def backfill_dry_run(db, employee_ids: list = None) -> dict:
                     "sections_total": int,
                     "required_complete": int,
                     "required_total": int,
-                    "safe_for_review": bool,
+                    "application_data_complete": bool,
                     "missing_sections": [str],
                     "backfilled_sections": [str],
                 },
@@ -650,7 +650,7 @@ async def backfill_dry_run(db, employee_ids: list = None) -> dict:
             "sections_total": resolution["completion_summary"]["total_sections"],
             "required_complete": resolution["completion_summary"]["required_complete"],
             "required_total": resolution["completion_summary"]["required_total"],
-            "safe_for_review": resolution["safe_for_review"],
+            "application_data_complete": resolution["application_data_complete"],
             "missing_sections": resolution["missing_sections"],
             "backfilled_sections": resolution["backfilled_sections"],
         })
@@ -734,6 +734,9 @@ async def backfill_execute(
                 "submitted_by_applicant": False,
                 "submitted_at": now,
                 "verified": False,
+                "verified_by": None,
+                "verified_at": None,
+                "requires_reverification": False,
                 "provenance": f"backfilled_from_{source}",
                 "backfill_metadata": {
                     "original_source": source,
@@ -742,7 +745,7 @@ async def backfill_execute(
                     "backfilled_at": now,
                     "sections_present": cand["sections_present"],
                     "sections_total": cand["sections_total"],
-                    "safe_for_review": cand["safe_for_review"],
+                    "application_data_complete": cand["application_data_complete"],
                     "missing_sections": cand["missing_sections"],
                 },
                 "created_at": now,

@@ -55,6 +55,8 @@ class EmployeeStatus:
     ACTIVE = "active"
     INACTIVE = "inactive"
     ARCHIVED = "archived"
+    WITHDRAWN = "withdrawn"
+    SUPERSEDED = "superseded"
 
 
 class PersonStage:

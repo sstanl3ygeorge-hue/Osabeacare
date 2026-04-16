@@ -239,7 +239,7 @@ async def resolve_employee_application(
     Resolve application completeness for a single employee.
 
     Returns section-by-section breakdown, provenance, and whether
-    the record is safe for Employment Review.
+    the application data sections are complete.
     """
     db = get_db()
     result = await resolve_application(db, employee_id)

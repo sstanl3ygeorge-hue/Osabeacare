@@ -47,6 +47,8 @@ class EmployeeStatus:
     ACTIVE = "active"
     INACTIVE = "inactive"
     ARCHIVED = "archived"
+    WITHDRAWN = "withdrawn"
+    SUPERSEDED = "superseded"
 
 
 class PersonStage:
@@ -68,6 +70,13 @@ EMPLOYEE_STATUSES = [
     EmployeeStatus.INACTIVE
 ]
 
+# Statuses excluded from all active lists (recruitment pipeline, dashboards)
+TERMINAL_STATUSES = [
+    EmployeeStatus.ARCHIVED,
+    EmployeeStatus.WITHDRAWN,
+    EmployeeStatus.SUPERSEDED,
+]
+
 
 def get_person_stage(status: str) -> str:
     """Determine person stage from status"""
@@ -75,7 +84,7 @@ def get_person_stage(status: str) -> str:
         return PersonStage.APPLICANT
     elif status in EMPLOYEE_STATUSES:
         return PersonStage.EMPLOYEE
-    elif status == EmployeeStatus.ARCHIVED:
+    elif status in TERMINAL_STATUSES:
         return PersonStage.ARCHIVED
     return PersonStage.APPLICANT
 
@@ -298,8 +307,8 @@ async def list_employees_simple(
     elif status:
         query["status"] = status
     else:
-        # Exclude archived by default
-        query["status"] = {"$ne": EmployeeStatus.ARCHIVED}
+        # Exclude terminal statuses (archived, withdrawn, superseded) by default
+        query["status"] = {"$nin": TERMINAL_STATUSES}
     
     if role:
         query["role"] = role
@@ -595,6 +604,264 @@ async def restore_employee(
     )
     
     return {"success": True, "message": f"Employee restored to {restore_status}"}
+
+
+# ==================== REAPPLY / SUPERSEDE ====================
+
+class ReapplyRequest(BaseModel):
+    reason: str
+    archive_reason: Optional[str] = None
+
+
+@router.post("/employees/{employee_id}/archive-for-reapply")
+async def archive_for_reapply(
+    employee_id: str,
+    body: ReapplyRequest,
+    user: dict = Depends(require_admin)
+):
+    """
+    Archive an applicant so they can reapply through the online application.
+
+    Sets status to 'superseded', stamps linkage fields, and frees
+    the email address for a new application submission.
+
+    Does NOT delete any data — the old record remains fully viewable
+    in audit/history views.
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    current_status = employee.get("status")
+
+    # Block if already terminal
+    if current_status in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Employee is already in terminal status '{current_status}'"
+        )
+
+    # Block if the employee is active (has a worker account, assignment, etc.)
+    if current_status == EmployeeStatus.ACTIVE:
+        raise HTTPException(
+            status_code=400,
+            detail="Active employees cannot be superseded. Archive them first via the normal archive flow."
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                "status": EmployeeStatus.SUPERSEDED,
+                "previous_status": current_status,
+                "superseded_at": now,
+                "superseded_by": user.get("user_id"),
+                "supersede_reason": body.reason,
+                "reapply_requested": True,
+                "updated_at": now,
+            }
+        }
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "archive_for_reapply",
+        "employee",
+        employee_id,
+        {
+            "reason": body.reason,
+            "previous_status": current_status,
+            "email": employee.get("email"),
+        },
+    )
+
+    return {
+        "success": True,
+        "message": f"Applicant superseded. They can now reapply via the online form.",
+        "superseded_id": employee_id,
+        "email_freed": employee.get("email"),
+    }
+
+
+@router.post("/employees/{employee_id}/link-reapplication")
+async def link_reapplication(
+    employee_id: str,
+    new_employee_id: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """
+    Link a superseded old record to a new reapplication record.
+    Sets superseded_by on the old record and previous_applicant_id on the new one.
+    """
+    db = get_db()
+
+    old = await db.employees.find_one({"id": employee_id})
+    if not old:
+        raise HTTPException(status_code=404, detail="Old employee not found")
+
+    new = await db.employees.find_one({"id": new_employee_id})
+    if not new:
+        raise HTTPException(status_code=404, detail="New employee not found")
+
+    if old.get("status") not in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Old record must be in a terminal status (archived/withdrawn/superseded) to link"
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Stamp both records
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {"superseded_by": new_employee_id, "updated_at": now}}
+    )
+    await db.employees.update_one(
+        {"id": new_employee_id},
+        {"$set": {"previous_applicant_id": employee_id, "updated_at": now}}
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "link_reapplication",
+        "employee",
+        employee_id,
+        {"old_id": employee_id, "new_id": new_employee_id},
+    )
+
+    return {
+        "success": True,
+        "message": "Records linked",
+        "old_id": employee_id,
+        "new_id": new_employee_id,
+    }
+
+
+@router.post("/employees/{employee_id}/withdraw")
+async def withdraw_applicant(
+    employee_id: str,
+    reason: str = Body(..., embed=True),
+    user: dict = Depends(require_admin)
+):
+    """
+    Withdraw an applicant from the recruitment pipeline.
+    Soft status change — record remains for audit.
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    current_status = employee.get("status")
+    if current_status in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Employee is already in terminal status '{current_status}'"
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {
+            "$set": {
+                "status": EmployeeStatus.WITHDRAWN,
+                "previous_status": current_status,
+                "withdrawn_at": now,
+                "withdrawn_by": user.get("user_id"),
+                "withdraw_reason": reason,
+                "updated_at": now,
+            }
+        }
+    )
+
+    await log_audit_action(
+        user["user_id"],
+        "withdraw_applicant",
+        "employee",
+        employee_id,
+        {"reason": reason, "previous_status": current_status},
+    )
+
+    return {"success": True, "message": "Applicant withdrawn from recruitment"}
+
+
+# ==================== SAFE HARD-DELETE GUARD ====================
+
+async def _can_safely_hard_delete(db, employee_id: str) -> dict:
+    """
+    Check whether an employee record can be safely hard-deleted.
+
+    Returns {"safe": True/False, "blockers": [...reasons]}
+    """
+    blockers = []
+
+    employee = await db.employees.find_one({"id": employee_id})
+    if not employee:
+        return {"safe": False, "blockers": ["employee_not_found"]}
+
+    # 1. Has a worker/user account?
+    if employee.get("email"):
+        user_account = await db.users.find_one(
+            {"email": employee["email"]}, {"_id": 0, "email": 1}
+        )
+        if user_account:
+            blockers.append("has_user_account")
+
+    # 2. Was recruitment-approved?
+    if employee.get("recruitment_approved"):
+        blockers.append("recruitment_approved")
+
+    # 3. Has verified documents?
+    verified_docs = await db.employee_documents.count_documents(
+        {"employee_id": employee_id, "verified": True}
+    )
+    if verified_docs > 0:
+        blockers.append(f"has_{verified_docs}_verified_documents")
+
+    # 4. Has active reference workflow?
+    ref_record = await db.references.find_one({"employee_id": employee_id})
+    if ref_record:
+        for key in ("ref1", "ref2"):
+            ref = ref_record.get(key, {})
+            if ref.get("request", {}).get("sent_at") or ref.get("response"):
+                blockers.append(f"{key}_has_reference_workflow")
+
+    # 5. Has audit-critical history (form submissions, training)?
+    form_count = await db.form_submissions.count_documents(
+        {"employee_id": employee_id}
+    )
+    if form_count > 0:
+        blockers.append(f"has_{form_count}_form_submissions")
+
+    training_count = await db.employee_training.count_documents(
+        {"employee_id": employee_id}
+    )
+    if training_count > 0:
+        blockers.append(f"has_{training_count}_training_records")
+
+    return {"safe": len(blockers) == 0, "blockers": blockers}
+
+
+@router.get("/employees/{employee_id}/can-hard-delete")
+async def check_hard_delete_safety(
+    employee_id: str,
+    user: dict = Depends(require_admin)
+):
+    """
+    Pre-flight check: can this employee be safely hard-deleted?
+
+    Returns blockers if not safe.
+    Admins should use this before calling the GDPR purge endpoint.
+    """
+    db = get_db()
+    result = await _can_safely_hard_delete(db, employee_id)
+    return result
 
 
 # ==================== EMPLOYEE SEARCH ====================

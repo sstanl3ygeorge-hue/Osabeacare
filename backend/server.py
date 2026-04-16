@@ -693,6 +693,8 @@ class EmployeeStatus:
     ACTIVE = "active"
     INACTIVE = "inactive"
     ARCHIVED = "archived"
+    WITHDRAWN = "withdrawn"
+    SUPERSEDED = "superseded"
 
 # Stage Classification Constants
 # Applicant = pre-hire decision, Employee = post-hire decision
@@ -723,8 +725,8 @@ def get_person_stage(status: str) -> str:
         return PersonStage.APPLICANT
     elif status in EMPLOYEE_STATUSES:
         return PersonStage.EMPLOYEE
-    elif status == EmployeeStatus.ARCHIVED:
-        # Archived can be either - we default to employee for historical records
+    elif status in (EmployeeStatus.ARCHIVED, EmployeeStatus.WITHDRAWN, EmployeeStatus.SUPERSEDED):
+        # Terminal statuses - we default to employee for historical records
         return PersonStage.EMPLOYEE
     else:
         # Unknown status defaults to applicant (safer - can't work without approval)
@@ -9607,6 +9609,19 @@ async def purge_employee_completely(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Safety guard — refuse to hard-delete records with significant data
+    from routes.employees import _can_safely_hard_delete
+    safety = await _can_safely_hard_delete(db, employee_id)
+    if not safety["safe"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Cannot hard-delete: record has audit-critical data. "
+                           "Use archive or supersede instead.",
+                "blockers": safety["blockers"],
+            },
+        )
     
     employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
     
@@ -24867,8 +24882,12 @@ async def submit_application(form: ApplicationForm):
     
     CONSTRAINT: NO user account created at application stage.
     """
-    # Check for existing application with same email
-    existing = await db.employees.find_one({"email": form.email}, {"_id": 0})
+    # Check for existing ACTIVE application with same email
+    # Archived/withdrawn/superseded records are ignored to allow reapplication
+    existing = await db.employees.find_one(
+        {"email": form.email, "status": {"$nin": ["archived", "withdrawn", "superseded"]}},
+        {"_id": 0}
+    )
     if existing:
         raise HTTPException(
             status_code=400,
@@ -24980,8 +24999,12 @@ async def submit_structured_application(form: StructuredApplicationForm):
     if len(form.references) < 2:
         raise HTTPException(status_code=400, detail="Minimum 2 references required")
     
-    # Check for existing application with same email
-    existing = await db.employees.find_one({"email": form.email}, {"_id": 0})
+    # Check for existing ACTIVE application with same email
+    # Archived/withdrawn/superseded records are ignored to allow reapplication
+    existing = await db.employees.find_one(
+        {"email": form.email, "status": {"$nin": ["archived", "withdrawn", "superseded"]}},
+        {"_id": 0}
+    )
     if existing:
         raise HTTPException(
             status_code=400, 

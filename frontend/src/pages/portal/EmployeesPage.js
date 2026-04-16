@@ -793,7 +793,7 @@ export default function EmployeesPage() {
                                 showIcon={false} 
                               />
                             </div>
-                            <p className="text-sm text-text-muted">{emp.employee_code}</p>
+                            <p className="text-sm text-text-muted">{emp.employee_code || emp.applicant_reference || '—'}</p>
                           </div>
                         </Link>
                       </td>

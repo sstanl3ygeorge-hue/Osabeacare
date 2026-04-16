@@ -573,7 +573,7 @@ export default function AuditViewPage() {
                     <tr key={emp.id} className="border-b border-[#E4E8EB]" data-testid={`audit-employee-row-${emp.id}`}>
                       <td className="p-4">
                         <p className="font-medium text-text-primary">{emp.first_name} {emp.last_name}</p>
-                        <p className="text-sm text-text-muted">{emp.employee_code}</p>
+                        <p className="text-sm text-text-muted">{emp.employee_code || emp.applicant_reference || '—'}</p>
                       </td>
                       <td className="p-4 text-text-primary">{emp.role}</td>
                       <td className="p-4">

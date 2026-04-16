@@ -593,6 +593,7 @@ async def download_induction_completion_pdf(
         "first_name": employee.get("first_name", ""),
         "last_name": employee.get("last_name", ""),
         "employee_code": employee.get("employee_code") or employee.get("id", "")[:8],
+        "applicant_reference": employee.get("applicant_reference"),
     }
 
     admin_data = {

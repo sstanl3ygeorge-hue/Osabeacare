@@ -222,7 +222,7 @@ def generate_admin_form_pdf(
     
     # ===== EMPLOYEE INFO TABLE =====
     employee_name = f"{employee_data.get('first_name', '')} {employee_data.get('last_name', '')}".strip() or employee_data.get('name', 'Unknown')
-    employee_code = employee_data.get('employee_code', employee_data.get('id', '')[:8])
+    employee_code = employee_data.get('employee_code') or employee_data.get('applicant_reference') or employee_data.get('id', '')[:8]
     
     info_data = [
         ['Employee:', employee_name],
@@ -667,7 +667,7 @@ class VerificationPDFGenerator:
         emp_name = f"{employee_data.get('first_name', '')} {employee_data.get('last_name', '')}".strip()
         emp_table = Table([
             ["Name:", emp_name],
-            ["Employee Code:", employee_data.get('employee_code', 'N/A')],
+            ["Employee Code:", employee_data.get('employee_code') or employee_data.get('applicant_reference') or 'N/A'],
             ["Email:", employee_data.get('email', 'N/A')],
             ["Requirement:", requirement_label],
         ], colWidths=[100, 350])

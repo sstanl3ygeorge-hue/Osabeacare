@@ -1778,9 +1778,9 @@ async def worker_upload_document(
     # Send admin notification
     try:
         if resend.api_key:
-            employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
+            employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1, "applicant_reference": 1})
             emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else "Unknown"
-            emp_code = employee.get("employee_code", "N/A") if employee else "N/A"
+            emp_code = (employee.get("employee_code") or employee.get("applicant_reference") or "N/A") if employee else "N/A"
             
             req_name = requirement_id.replace("_", " ").title()
             for item in MANDATORY_ITEMS:
@@ -2570,9 +2570,9 @@ async def submit_worker_form(
     # Send admin notification
     try:
         if resend.api_key:
-            employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1})
+            employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1, "email": 1, "employee_code": 1, "applicant_reference": 1})
             emp_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip() if employee else employee_name
-            emp_code = employee.get("employee_code", "N/A") if employee else "N/A"
+            emp_code = (employee.get("employee_code") or employee.get("applicant_reference") or "N/A") if employee else "N/A"
             
             admin_email_html = f"""
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

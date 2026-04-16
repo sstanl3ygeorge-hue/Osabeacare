@@ -342,7 +342,7 @@ async def generate_form_pdf(submission_id: str, user: dict = Depends(require_adm
         "template_id": active_template["id"] if active_template else None,
         "employee_id": employee_id,
         "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}",
-        "employee_code": employee.get("employee_code", ""),
+        "employee_code": employee.get("employee_code") or employee.get("applicant_reference") or "",
         "form_type": form_type,
         "file_url": result.get("path"),
         "storage_path": storage_path,

@@ -514,7 +514,7 @@ async def approve_verification(
             if CLOUD_STORAGE_URL:
                 storage = CloudStorage(StorageConfig(storage_url=CLOUD_STORAGE_URL))
                 
-                emp_code = employee.get('employee_code', 'unknown')
+                emp_code = employee.get('employee_code') or employee.get('applicant_reference') or 'unknown'
                 pdf_filename = f"verification_{requirement_id}_{verification_id}.pdf"
                 
                 verification_pdf_url = await storage.upload_file_async(

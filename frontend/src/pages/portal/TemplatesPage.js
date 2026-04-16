@@ -387,7 +387,7 @@ export default function TemplatesPage() {
                       <div>
                         <p className="font-medium text-text-primary text-sm">{form.template_name}</p>
                         <p className="text-xs text-text-muted">
-                          {form.employee_name} • {form.employee_code}
+                          {form.employee_name} • {form.employee_code || '—'}
                         </p>
                       </div>
                     </div>
@@ -431,7 +431,7 @@ export default function TemplatesPage() {
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-text-muted" />
                           <span>{emp.first_name} {emp.last_name}</span>
-                          <span className="text-text-muted">({emp.employee_code})</span>
+                          <span className="text-text-muted">({emp.employee_code || emp.applicant_reference || '—'})</span>
                         </div>
                       </SelectItem>
                     ))}

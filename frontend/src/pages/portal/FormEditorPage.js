@@ -228,7 +228,7 @@ export default function FormEditorPage() {
         heightLeft -= pageHeight;
       }
       
-      const fileName = `${form.template_name.replace(/\s+/g, '_')}_${form.employee_code}_${new Date().toISOString().split('T')[0]}.pdf`;
+      const fileName = `${form.template_name.replace(/\s+/g, '_')}_${form.employee_code || 'form'}_${new Date().toISOString().split('T')[0]}.pdf`;
       pdf.save(fileName);
       
       toast.success('PDF exported successfully');
@@ -258,7 +258,7 @@ export default function FormEditorPage() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = form.pdf_filename || `${form.template_name}_${form.employee_code}.pdf`;
+      link.download = form.pdf_filename || `${form.template_name}_${form.employee_code || 'form'}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
       toast.success('Document downloaded');
@@ -343,7 +343,7 @@ export default function FormEditorPage() {
                   )}
                 </div>
                 <p className="text-text-muted">
-                  {form.employee_name} ({form.employee_code})
+                  {form.employee_name} ({form.employee_code || '—'})
                 </p>
               </div>
             </div>
@@ -439,7 +439,7 @@ export default function FormEditorPage() {
                 <FileText className="h-5 w-5 text-text-muted" />
                 <div>
                   <p className="text-xs text-text-muted">Employee ID</p>
-                  <p className="font-medium text-text-primary">{form.employee_code}</p>
+                  <p className="font-medium text-text-primary">{form.employee_code || '—'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -662,7 +662,7 @@ export default function FormEditorPage() {
                 <FileText className="h-5 w-5 text-text-muted" />
                 <div>
                   <p className="text-xs text-text-muted">Employee ID</p>
-                  <p className="font-medium text-text-primary">{form.employee_code}</p>
+                  <p className="font-medium text-text-primary">{form.employee_code || '—'}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">

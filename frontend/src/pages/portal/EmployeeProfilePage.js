@@ -1353,7 +1353,7 @@ export default function EmployeeProfilePage() {
       const link = document.createElement('a');
       link.href = url;
       const filename = response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') 
-        || `${employee?.employee_code}_File.zip`;
+        || `${employee?.employee_code || employee?.applicant_reference || 'export'}_File.zip`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
@@ -1379,7 +1379,7 @@ export default function EmployeeProfilePage() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `${employee?.employee_code}_Compliance_Summary.json`);
+      link.setAttribute('download', `${employee?.employee_code || employee?.applicant_reference || 'export'}_Compliance_Summary.json`);
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1404,7 +1404,7 @@ export default function EmployeeProfilePage() {
       const link = document.createElement('a');
       link.href = url;
       const filename = response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') 
-        || `${employee?.employee_code}_Compliance_Summary.pdf`;
+        || `${employee?.employee_code || employee?.applicant_reference || 'export'}_Compliance_Summary.pdf`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
@@ -1453,7 +1453,7 @@ export default function EmployeeProfilePage() {
       const link = document.createElement('a');
       link.href = url;
       const filename = response.headers['content-disposition']?.split('filename=')[1]?.replace(/"/g, '') 
-        || `${employee?.employee_code}_Compliance_File.pdf`;
+        || `${employee?.employee_code || employee?.applicant_reference || 'export'}_Compliance_File.pdf`;
       link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
@@ -4695,8 +4695,7 @@ export default function EmployeeProfilePage() {
                           {group.forms.map((form) => {
                             const submission = formSubmissions?.find(fs =>
                               fs.form_type === form.key ||
-                              fs.requirement_id === form.key ||
-                              (fs.form_type || '').toLowerCase().includes(form.key.split('_')[0])
+                              fs.requirement_id === form.key
                             );
 
                             // Status — align with compliance-file: signed_off = verified

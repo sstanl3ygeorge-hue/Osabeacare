@@ -144,7 +144,7 @@ async def send_templated_email(request: SendEmailRequest, user: dict = Depends(r
     # Build template variables
     variables = {
         "employee_name": f"{employee['first_name']} {employee['last_name']}",
-        "employee_code": employee['employee_code'],
+        "employee_code": employee.get('employee_code') or employee.get('applicant_reference') or 'N/A',
         "portal_url": os.environ.get('PORTAL_URL', 'https://portal.osabea.care'),
         **(request.custom_data or {})
     }
@@ -427,7 +427,7 @@ async def export_training_audit_data(
     get_training_audit_export_func = get_training_audit_export()
     
     employees = await employees_repo.list_employees(
-        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "employee_code": 1, "email": 1}
+        projection={"_id": 0, "id": 1, "first_name": 1, "last_name": 1, "role": 1, "employee_code": 1, "applicant_reference": 1, "email": 1}
     )
     
     export_data = []
@@ -436,7 +436,7 @@ async def export_training_audit_data(
         training_audit = await get_training_audit_export_func(emp['id'], emp.get('role', ''))
         
         emp_export = {
-            "employee_id": emp.get('employee_code', emp['id']),
+            "employee_id": emp.get('employee_code') or emp.get('applicant_reference') or emp['id'],
             "employee_name": f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
             "employee_email": emp.get('email'),
             "role": emp.get('role'),

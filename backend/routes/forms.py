@@ -174,7 +174,7 @@ async def auto_fill_employee_data(employee_id: str) -> dict:
         "postcode": employee.get("postcode", ""),
         "role": employee.get("role", ""),
         "job_title": employee.get("role", ""),
-        "employee_code": employee.get("employee_code", ""),
+        "employee_code": employee.get("employee_code") or employee.get("applicant_reference") or "",
         "ni_number": employee.get("ni_number", ""),
         "start_date": employee.get("start_date", ""),
         "emergency_contact_name": employee.get("emergency_contact_name", ""),

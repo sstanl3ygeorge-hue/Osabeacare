@@ -226,7 +226,7 @@ async def create_generated_form(form: GeneratedFormCreate, user: dict = Depends(
         "template_category": template['category'],
         "employee_id": form.employee_id,
         "employee_name": f"{employee['first_name']} {employee['last_name']}",
-        "employee_code": employee['employee_code'],
+        "employee_code": employee.get('employee_code') or employee.get('applicant_reference') or '',
         "form_data": merged_data,
         "status": FormStatus.DRAFT,
         "employee_signature": None,
@@ -564,7 +564,7 @@ async def save_form_as_document(form_id: str, user: dict = Depends(require_manag
     
     # Employee info
     info_style = ParagraphStyle('InfoStyle', parent=styles['Normal'], fontSize=10, spaceAfter=5)
-    elements.append(Paragraph(f"<b>Employee:</b> {employee_name} ({employee.get('employee_code', 'N/A')})", info_style))
+    elements.append(Paragraph(f"<b>Employee:</b> {employee_name} ({employee.get('employee_code') or employee.get('applicant_reference') or 'N/A'})", info_style))
     elements.append(Paragraph(f"<b>Role:</b> {employee.get('role', 'N/A')}", info_style))
     elements.append(Paragraph(f"<b>Date:</b> {datetime.now(timezone.utc).strftime('%d/%m/%Y')}", info_style))
     elements.append(Spacer(1, 20))
@@ -759,7 +759,7 @@ async def bulk_generate_forms(
                 "template_category": template['category'],
                 "employee_id": employee_id,
                 "employee_name": f"{employee['first_name']} {employee['last_name']}",
-                "employee_code": employee['employee_code'],
+                "employee_code": employee.get('employee_code') or employee.get('applicant_reference') or '',
                 "form_data": auto_filled,
                 "status": FormStatus.DRAFT,
                 "employee_signature": None,
@@ -938,7 +938,7 @@ async def import_application_form(
         "template_category": application_template.get('category', 'Application'),
         "employee_id": employee_id,
         "employee_name": f"{employee['first_name']} {employee['last_name']}",
-        "employee_code": employee['employee_code'],
+        "employee_code": employee.get('employee_code') or employee.get('applicant_reference') or '',
         "form_data": auto_filled,
         "status": "completed_imported",
         "employee_signature": None,
@@ -1091,7 +1091,7 @@ async def import_form_document(
             "template_category": category,
             "employee_id": employee_id,
             "employee_name": f"{employee['first_name']} {employee['last_name']}",
-            "employee_code": employee.get('employee_code', ''),
+            "employee_code": employee.get('employee_code') or employee.get('applicant_reference') or '',
             "form_data": auto_filled,
             "status": "completed_imported",
             "employee_signature": None,

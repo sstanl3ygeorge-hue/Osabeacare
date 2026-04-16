@@ -67,6 +67,214 @@ const getDocumentWorkflowBadgeMeta = (doc) => {
   return DOCUMENT_WORKFLOW_UI[status] || DOCUMENT_WORKFLOW_UI.awaiting_review;
 };
 
+// Employment Gaps Clarification Section
+function EmploymentGapsSection() {
+  const [gaps, setGaps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [hasGaps, setHasGaps] = useState(false);
+  const [allExplained, setAllExplained] = useState(false);
+  const [reasonTypes, setReasonTypes] = useState([]);
+  const [editingGap, setEditingGap] = useState(null);
+  const [explanation, setExplanation] = useState('');
+  const [reasonType, setReasonType] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetchGaps();
+  }, []);
+
+  const fetchGaps = async () => {
+    try {
+      const token = localStorage.getItem('workerToken');
+      const res = await axios.get(`${API}/worker/employment-gaps`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setGaps(res.data.gaps || []);
+      setHasGaps(res.data.has_gaps);
+      setAllExplained(res.data.all_explained);
+      setReasonTypes(res.data.reason_types || []);
+    } catch {
+      // No gaps or endpoint not available — silently hide section
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExplain = async (gapId) => {
+    if (!explanation.trim()) {
+      toast.error('Please provide an explanation');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(`${API}/worker/employment-gaps/${gapId}/explain`,
+        { explanation: explanation.trim(), reason_type: reasonType || null },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('Gap explanation submitted');
+      setEditingGap(null);
+      setExplanation('');
+      setReasonType('');
+      fetchGaps();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to submit explanation');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) return null;
+  if (!hasGaps) return null;
+
+  const unresolvedGaps = gaps.filter(g => {
+    const s = (g.status || g.verification_status || '').toLowerCase();
+    return !['verified'].includes(s);
+  });
+  const verifiedGaps = gaps.filter(g => {
+    const s = (g.status || g.verification_status || '').toLowerCase();
+    return s === 'verified';
+  });
+
+  const formatGapDate = (d) => {
+    if (!d) return '?';
+    try { return new Date(d).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }); } catch { return d; }
+  };
+
+  const statusBadge = (gap) => {
+    const s = (gap.status || gap.verification_status || 'pending').toLowerCase();
+    if (s === 'verified') return <Badge className="bg-green-100 text-green-700 text-xs"><CheckCircle className="h-3 w-3 mr-1" />Verified</Badge>;
+    if (s === 'explained') return <Badge className="bg-blue-100 text-blue-700 text-xs"><Clock className="h-3 w-3 mr-1" />Awaiting review</Badge>;
+    if (s === 'needs_more_info') return <Badge className="bg-amber-100 text-amber-700 text-xs"><AlertTriangle className="h-3 w-3 mr-1" />More info needed</Badge>;
+    if (s === 'rejected') return <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Rejected</Badge>;
+    return <Badge className="bg-slate-100 text-slate-600 text-xs">Needs explanation</Badge>;
+  };
+
+  const reasonLabel = (t) => {
+    if (!t) return null;
+    return t.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  };
+
+  return (
+    <Card className={`shadow-md border-0 ${allExplained ? 'bg-green-50/30' : 'border-l-4 border-l-amber-400'}`} data-testid="employment-gaps-section">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Briefcase className={`h-5 w-5 ${allExplained ? 'text-green-600' : 'text-amber-600'}`} />
+              Explain Employment Gaps
+            </CardTitle>
+            <p className="text-xs text-slate-500 mt-1">
+              {allExplained
+                ? 'All gaps explained — awaiting admin verification'
+                : `${unresolvedGaps.length} gap${unresolvedGaps.length !== 1 ? 's' : ''} need${unresolvedGaps.length === 1 ? 's' : ''} your explanation`}
+            </p>
+          </div>
+          {allExplained && (
+            <Badge className="bg-green-100 text-green-700">
+              <CheckCircle className="h-3 w-3 mr-1" />All explained
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {unresolvedGaps.map(gap => {
+          const gapId = gap.id || gap.gap_id;
+          const isEditing = editingGap === gapId;
+          const months = gap.duration_months || Math.round((gap.duration_days || 0) / 30);
+          return (
+            <div key={gapId} className="border border-slate-200 rounded-xl p-4 bg-white">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-slate-800">
+                      {formatGapDate(gap.gap_start)} — {formatGapDate(gap.gap_end)}
+                    </span>
+                    {months > 0 && <span className="text-xs text-slate-500">({months} month{months !== 1 ? 's' : ''})</span>}
+                    {statusBadge(gap)}
+                  </div>
+                  {gap.previous_employment?.employer_name && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Between: {gap.previous_employment.employer_name} → {gap.next_employment?.employer_name || 'next role'}
+                    </p>
+                  )}
+                  {gap.explanation && !isEditing && (
+                    <div className="mt-2 p-2 bg-slate-50 rounded text-sm text-slate-700">
+                      {gap.reason_type && <span className="text-xs font-medium text-slate-500 block mb-1">{reasonLabel(gap.reason_type)}</span>}
+                      {gap.explanation}
+                    </div>
+                  )}
+                  {gap.admin_notes && (
+                    <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">
+                      <span className="text-xs font-medium block mb-1">Admin feedback</span>
+                      {gap.admin_notes || gap.verification_notes}
+                    </div>
+                  )}
+                </div>
+                {!isEditing && (gap.status || '').toLowerCase() !== 'verified' && (
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setEditingGap(gapId);
+                    setExplanation(gap.explanation || '');
+                    setReasonType(gap.reason_type || '');
+                  }}>
+                    <Edit3 className="h-3.5 w-3.5 mr-1" />
+                    {gap.explanation ? 'Update' : 'Explain'}
+                  </Button>
+                )}
+              </div>
+              {isEditing && (
+                <div className="mt-3 space-y-3 border-t pt-3">
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 block mb-1">Reason category</label>
+                    <Select value={reasonType} onValueChange={setReasonType}>
+                      <SelectTrigger className="w-full"><SelectValue placeholder="Select a category (optional)" /></SelectTrigger>
+                      <SelectContent>
+                        {reasonTypes.map(rt => (
+                          <SelectItem key={rt} value={rt}>{reasonLabel(rt)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-slate-700 block mb-1">Explanation <span className="text-red-500">*</span></label>
+                    <Textarea
+                      value={explanation}
+                      onChange={e => setExplanation(e.target.value)}
+                      placeholder="Please explain what you were doing during this period..."
+                      rows={3}
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingGap(null); setExplanation(''); setReasonType(''); }}>Cancel</Button>
+                    <Button size="sm" onClick={() => handleExplain(gapId)} disabled={submitting} className="bg-blue-600 hover:bg-blue-700">
+                      {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                      Submit Explanation
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {verifiedGaps.length > 0 && (
+          <div className="pt-2">
+            <p className="text-xs text-slate-500 mb-2">{verifiedGaps.length} verified gap{verifiedGaps.length !== 1 ? 's' : ''}</p>
+            {verifiedGaps.map(gap => {
+              const gapId = gap.id || gap.gap_id;
+              return (
+                <div key={gapId} className="flex items-center justify-between py-2 px-3 bg-green-50/50 rounded-lg mb-1">
+                  <span className="text-sm text-slate-700">{formatGapDate(gap.gap_start)} — {formatGapDate(gap.gap_end)}</span>
+                  {statusBadge(gap)}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // Forms Section Component
 function FormsSection() {
   const [forms, setForms] = useState([]);
@@ -1061,6 +1269,9 @@ export default function WorkerDashboard() {
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
 
+        {/* Employment Gaps Clarification - Only for onboarding */}
+        {!isActiveEmployee && <EmploymentGapsSection />}
+
         {/* ========== CV REJECTION ALERT ========== */}
         {notifications.some(n => n.type === 'cv_rejected' && !n.resolved) && (
           <Card className="shadow-md border-0 border-l-4 border-l-red-500 bg-red-50/50" data-testid="cv-rejection-alert">
@@ -1452,36 +1663,6 @@ export default function WorkerDashboard() {
                       Verified
                     </Badge>
                   </div>
-                  
-                  {/* 10-Year Form Status */}
-                  {cvStatus?.ten_year_form_status && (
-                    <div className="mt-3 pt-3 border-t border-green-200">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-green-600" />
-                          <span className="text-sm text-green-800">10-Year Employment History Form</span>
-                        </div>
-                        {cvStatus.ten_year_form_status.status === 'verified' ? (
-                          <Badge className="bg-green-100 text-green-700 text-xs">
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Verified
-                          </Badge>
-                        ) : cvStatus.ten_year_form_status.status === 'submitted' ? (
-                          <Badge className="bg-blue-100 text-blue-700 text-xs">
-                            <Clock className="h-3 w-3 mr-1" />
-                            Submitted
-                          </Badge>
-                        ) : cvStatus.ten_year_form_status.auto_populated ? (
-                          <Badge className="bg-amber-100 text-amber-700 text-xs">
-                            <Sparkles className="h-3 w-3 mr-1" />
-                            Pre-filled - Complete & Submit
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-slate-100 text-slate-600 text-xs">Not Started</Badge>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </CardContent>

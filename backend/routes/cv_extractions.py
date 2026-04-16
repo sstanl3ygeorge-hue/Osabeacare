@@ -169,43 +169,6 @@ def build_cv_review_extraction_response(extraction_result: dict, employment_hist
     }
 
 
-async def get_10yr_form_status(employee_id: str) -> dict:
-    """
-    Get status of the 10-Year Employment History form for an employee.
-    """
-    db = get_db()
-    
-    # Check for existing form submission
-    form_submission = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "form_type": "employment_history_10yr"
-    }, {"_id": 0})
-    
-    # Check for form progress
-    form_progress = await db.form_progress.find_one({
-        "employee_id": employee_id,
-        "form_id": "employment_history_10yr"
-    }, {"_id": 0})
-    
-    if form_submission:
-        return {
-            "status": form_submission.get("status", "submitted"),
-            "submitted_at": form_submission.get("submitted_at"),
-            "verified_at": form_submission.get("verified_at"),
-            "has_data": True
-        }
-    elif form_progress:
-        return {
-            "status": "in_progress",
-            "last_saved": form_progress.get("last_saved"),
-            "auto_populated": form_progress.get("auto_populated", False),
-            "has_data": True
-        }
-    else:
-        return {
-            "status": "not_started",
-            "has_data": False
-        }
 
 
 # ==================== WORKER CV ENDPOINTS ====================
@@ -320,7 +283,6 @@ async def get_worker_cv_extraction_status(user: dict = Depends(get_current_user)
             "total": len(cv_overlaps),
             "entries": cv_overlaps
         },
-        "ten_year_form_status": await get_10yr_form_status(employee_id)
     }
 
 
@@ -683,34 +645,6 @@ async def admin_approve_cv(
                 "verified_by": user.get("user_id")
             }}
         )
-    
-    # Pre-populate 10-Year Employment History form if not already done
-    existing_form = await db.form_submissions.find_one({
-        "employee_id": employee_id,
-        "form_type": "employment_history_10yr",
-        "status": {"$in": ["submitted", "verified"]}
-    })
-    
-    employment_history = employee.get("cv_extracted_employment_history", [])
-    
-    if not existing_form and employment_history:
-        await db.form_progress.update_one(
-            {"employee_id": employee_id, "form_id": "employment_history_10yr"},
-            {"$set": {
-                "employee_id": employee_id,
-                "form_id": "employment_history_10yr",
-                "data": {
-                    "employment_entries": employment_history,
-                    "gap_explanations": [],
-                    "auto_populated_from_cv": True,
-                    "cv_document_id": cv_doc.get("id") if cv_doc else None
-                },
-                "last_saved": now,
-                "auto_populated": True
-            }},
-            upsert=True
-        )
-        logger.info(f"Pre-populated 10-Year Employment History form with {len(employment_history)} jobs")
     
     # Log audit
     await log_audit_action(

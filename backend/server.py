@@ -8415,13 +8415,6 @@ WORKER_FORM_DEFINITIONS = {
         "required": True,
         "admin_requirement_id": "emergency_contacts"
     },
-    "employment_history_10yr": {
-        "name": "10-Year Employment History Declaration",
-        "description": "Review your employment history (pre-filled from your CV) and sign the CQC declaration",
-        "required": True,
-        "admin_requirement_id": "employment_history",
-        "role_aware": False  # All roles require this
-    },
     "pre_interview_questionnaire": {
         "name": "Pre-Interview Questionnaire", 
         "description": "Complete this questionnaire before your interview - your responses will be reviewed during the interview",

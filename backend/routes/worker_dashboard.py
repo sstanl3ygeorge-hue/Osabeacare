@@ -194,12 +194,6 @@ def get_pre_interview_questionnaire_data_func():
     return get_pre_interview_questionnaire_data
 
 
-def get_employment_history_form_data_func():
-    """Lazy import of get_employment_history_form_data from server.py"""
-    from server import get_employment_history_form_data
-    return get_employment_history_form_data
-
-
 # ==================== WORKER DASHBOARD ====================
 
 @router.get("/worker/dashboard")
@@ -2288,7 +2282,6 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     WORKER_FORM_DEFINITIONS = get_worker_form_definitions()
     FORM_BASED_REQUIREMENTS = get_form_based_requirements()
     get_pre_interview_questionnaire_data = get_pre_interview_questionnaire_data_func()
-    get_employment_history_form_data = get_employment_history_form_data_func()
     
     employee_id = worker.get("employee_id")
     
@@ -2309,10 +2302,6 @@ async def get_worker_form_data(form_id: str, worker: dict = Depends(get_current_
     # Special handling for pre-interview questionnaire
     if form_id == "pre_interview_questionnaire":
         return await get_pre_interview_questionnaire_data(employee_id, worker)
-    
-    # Special handling for 10-year employment history
-    if form_id == "employment_history_10yr":
-        return await get_employment_history_form_data(employee_id, worker)
     
     # Resolve form definition early so it's available for all return paths
     form_def_with_sections = FORM_BASED_REQUIREMENTS.get(form_id)
@@ -2786,3 +2775,117 @@ async def submit_worker_form(
             "message": f"Reference {ref_num} details submitted. Your manager will send the reference request shortly.",
             "reference_number": ref_num,
         }
+
+
+# ==================== WORKER EMPLOYMENT GAP CLARIFICATION ====================
+
+GAP_REASON_TYPES = [
+    "education",
+    "caring_responsibilities",
+    "illness",
+    "travel",
+    "career_break",
+    "redundancy",
+    "unemployment",
+    "maternity_paternity",
+    "voluntary_work",
+    "other",
+]
+
+
+class WorkerGapExplanation(BaseModel):
+    explanation: str
+    reason_type: Optional[str] = None
+
+
+@router.get("/worker/employment-gaps")
+async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker)):
+    """Get the current worker's employment gaps for self-service clarification."""
+    db = get_db()
+    employee_id = worker.get("employee_id")
+
+    gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).sort("gap_start", 1).to_list(50)
+
+    for gap in gap_records:
+        gap.pop("_id", None)
+
+    # Fallback to inline employee.employment_gaps if no collection records
+    if not gap_records:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "employment_gaps": 1})
+        gap_records = employee.get("employment_gaps", []) if employee else []
+
+    from employment_gap_engine import evaluate_gaps_compliance
+    evaluation = evaluate_gaps_compliance(gap_records)
+
+    return {
+        "gaps": gap_records,
+        "has_gaps": evaluation.get("has_gaps", False),
+        "total_gaps": evaluation.get("total_gaps", 0),
+        "all_explained": evaluation.get("is_complete", False),
+        "reason_types": GAP_REASON_TYPES,
+    }
+
+
+@router.post("/worker/employment-gaps/{gap_id}/explain")
+async def worker_explain_gap(
+    gap_id: str,
+    request: WorkerGapExplanation,
+    worker: dict = Depends(get_current_worker),
+):
+    """Worker provides an explanation for a specific employment gap.
+    Writes directly to the canonical db.employment_gaps collection."""
+    db = get_db()
+    employee_id = worker.get("employee_id")
+
+    gap = await db.employment_gaps.find_one(
+        {"employee_id": employee_id, "$or": [{"id": gap_id}, {"gap_id": gap_id}]},
+    )
+    if not gap:
+        raise HTTPException(status_code=404, detail="Gap not found")
+
+    gap.pop("_id", None)
+    record_id = gap.get("id") or gap.get("gap_id")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "explanation": request.explanation.strip(),
+        "reason_type": request.reason_type,
+        "status": "explained",
+        "verification_status": "explained",
+        "verified": False,
+        "requires_further_info": False,
+        "explained_at": now,
+        "explained_by": f"worker_{employee_id}",
+        "explanation_submitted_by_role": "worker",
+        "explanation_submitted_by_name": worker.get("name", ""),
+        "explanation_source": "worker_gap_clarification",
+        "status_updated_at": now,
+        "updated_at": now,
+    }
+
+    await db.employment_gaps.update_one(
+        {"employee_id": employee_id, "id": record_id},
+        {"$set": update_data},
+    )
+
+    # Invalidate employment review sign-off if it was already done
+    await db.employees.update_one(
+        {"id": employee_id, "employment_review_signed_off": True},
+        {"$unset": {
+            "employment_review_signed_off": "",
+            "employment_review_signed_off_by": "",
+            "employment_review_signed_off_at": "",
+        }},
+    )
+
+    await log_audit_action(
+        f"worker_{employee_id}",
+        "employment_gap_explained",
+        "employment_gap",
+        record_id,
+        {"reason_type": request.reason_type, "source": "worker_dashboard"},
+    )
+
+    return {"success": True, "message": "Gap explanation submitted"}

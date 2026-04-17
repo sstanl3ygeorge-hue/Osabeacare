@@ -5288,12 +5288,29 @@ export default function EmployeeProfilePage() {
               )}
               
               {/* Gap analysis empty state */}
-              {employmentHistoryExists && employmentHistoryGapRow && !gapAnalysisRun && (
+              {employmentHistoryExists && employmentHistoryGapRow && !gapAnalysisRun && employee?.gap_analysis_status !== 'failed' && (
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="font-medium text-amber-800">Gap analysis not yet run</p>
                     <p className="text-sm text-amber-600 mt-1">10-year employment gap analysis has not been generated for this profile. Use "Review CV" in the CV section above to trigger gap detection, or the analysis may not have been run yet.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Gap analysis failed alert */}
+              {employee?.gap_analysis_status === 'failed' && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-red-800">Gap analysis failed</p>
+                    <p className="text-sm text-red-600 mt-1">
+                      Automatic gap detection encountered an error during application submission.
+                      The "No gaps detected" status below may be inaccurate. Use "Review CV" to re-run gap analysis.
+                    </p>
+                    {employee?.gap_analysis_error && (
+                      <p className="text-xs text-red-500 mt-1 font-mono">{employee.gap_analysis_error}</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -5334,6 +5351,31 @@ export default function EmployeeProfilePage() {
                 </div>
               )}
               
+              {/* Applicant-Submitted Gap Explanations — always shown if present */}
+              {employee?.gap_explanations?.length > 0 && (
+                <div className="mt-4 mb-4" data-testid="section-applicant-gap-explanations">
+                  <h4 className="font-medium text-gray-800 mb-2">Applicant-Submitted Gap Explanations</h4>
+                  <p className="mb-3 text-xs text-text-muted">
+                    These explanations were provided by the applicant during the application form. They are preserved regardless of whether automated gap detection succeeded.
+                  </p>
+                  <div className="space-y-2">
+                    {employee.gap_explanations.map((expl, idx) => (
+                      <div key={expl.gap_id || idx} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Badge variant="outline" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
+                            {expl.gap_id || `Gap ${idx + 1}`}
+                          </Badge>
+                          {expl.reason_type && (
+                            <span className="text-xs text-blue-600 capitalize">{expl.reason_type.replace(/_/g, ' ')}</span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-700">{expl.explanation || 'No explanation text provided'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Employment History from Application */}
               {employee?.employment_history?.length > 0 && (
                 <div className="mt-6" data-testid="section-employment-history">
@@ -8607,6 +8649,16 @@ export default function EmployeeProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Inline Document Viewer (PDF / image) — replaces window.open */}
+      <InlineDocumentViewer
+        open={inlineViewerOpen}
+        onClose={() => setInlineViewerOpen(false)}
+        fetchUrl={inlineViewerUrl}
+        title={inlineViewerTitle}
+        token={token}
+        filename={inlineViewerFilename}
+      />
     </div>
   );
 }

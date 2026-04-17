@@ -677,6 +677,58 @@ def get_object(path: str) -> tuple:
     resp.raise_for_status()
     return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
+
+# ---------------------------------------------------------------------------
+# Shared evidence retrieval: http(s) → Supabase → legacy Emergent
+# ---------------------------------------------------------------------------
+_EXT_CONTENT_TYPES = {
+    "pdf": "application/pdf",
+    "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "png": "image/png", "gif": "image/gif", "webp": "image/webp",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+
+
+async def retrieve_file_bytes(file_url: str) -> tuple:
+    """
+    Retrieve file bytes from the best available storage backend.
+
+    Resolution order:
+      1. Direct HTTP(S) fetch (Supabase public URLs, any absolute URL)
+      2. Supabase authenticated download via download_file_from_storage
+      3. Legacy Emergent object storage via get_object()
+
+    Returns (bytes, content_type_str).
+    Raises on total failure.
+    """
+    ext = file_url.rsplit(".", 1)[-1].lower() if "." in file_url else ""
+
+    # --- 1. Direct HTTP(S) URL ---
+    if file_url.startswith(("http://", "https://")):
+        try:
+            import httpx as _httpx
+            async with _httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.get(file_url, follow_redirects=True)
+                if resp.status_code == 200:
+                    ct = resp.headers.get("content-type", "").split(";")[0].strip()
+                    return resp.content, ct or _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+        except Exception as e:
+            logger.warning(f"retrieve_file_bytes: direct HTTP fetch failed for {file_url}: {e}")
+
+        # --- 2. Supabase authenticated download ---
+        try:
+            content = await download_file_from_storage(file_url)
+            if content:
+                return content, _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+        except Exception as e:
+            logger.warning(f"retrieve_file_bytes: Supabase download failed for {file_url}: {e}")
+
+    # --- 3. Legacy Emergent storage ---
+    file_bytes, stored_ct = get_object(file_url)
+    return file_bytes, stored_ct or _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+
+
 app = FastAPI(title="Osabea Healthcare Solutions API")
 api_router = APIRouter(prefix="/api")
 
@@ -5256,6 +5308,12 @@ class EmployeeResponse(BaseModel):
     cv_extracted_employment_history: Optional[List[dict]] = None
     cv_reviewed_at: Optional[str] = None
     cv_extracted_at: Optional[str] = None
+    # Employment gaps / coverage (for admin employment review)
+    employment_gaps: Optional[List[dict]] = None
+    employment_coverage: Optional[dict] = None
+    gap_explanations: Optional[List[dict]] = None  # Applicant-submitted gap explanations
+    gap_analysis_status: Optional[str] = None  # "completed" | "failed" | None
+    gap_analysis_error: Optional[str] = None
     # Driving / Vehicle
     has_driving_licence: Optional[bool] = None
     driving_licence_type: Optional[str] = None
@@ -15900,16 +15958,9 @@ async def view_requirement_evidence(
         raise HTTPException(status_code=404, detail="Evidence file not found")
     
     try:
-        file_bytes, stored_content_type = get_object(file_url)
+        file_bytes, stored_content_type = await retrieve_file_bytes(file_url)
         ext = file_url.split('.')[-1].lower()
-        content_types = {
-            'pdf': 'application/pdf',
-            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-            'png': 'image/png',
-            'doc': 'application/msword',
-            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        }
-        content_type = stored_content_type or content_types.get(ext, 'application/octet-stream')
+        content_type = stored_content_type or _EXT_CONTENT_TYPES.get(ext, 'application/octet-stream')
         return Response(content=file_bytes, media_type=content_type)
     except requests.HTTPError as e:
         status = e.response.status_code if e.response is not None else 500
@@ -15979,7 +16030,7 @@ async def download_requirement_evidence(
         raise HTTPException(status_code=404, detail="Evidence file not found")
     
     try:
-        file_bytes, _ = get_object(file_url)
+        file_bytes, _ = await retrieve_file_bytes(file_url)
         return Response(
             content=file_bytes,
             media_type='application/octet-stream',
@@ -25182,6 +25233,19 @@ async def submit_structured_application(form: StructuredApplicationForm):
         employment_history_list = [eh.model_dump() for eh in form.employment_history]
         detected_gaps = detect_employment_gaps_with_coverage(employment_history_list)
         employment_coverage = compute_coverage_summary(employment_history_list)
+
+        # Structured diagnostic log
+        logger.info(
+            "GAP_DETECTION employee=%s history_entries=%d coverage_window=%s→%s "
+            "coverage_pct=%s gaps_detected=%d gap_types=%s",
+            app_id,
+            len(employment_history_list),
+            employment_coverage.get("coverage_start", "?"),
+            employment_coverage.get("coverage_end", "?"),
+            employment_coverage.get("coverage_percent", "?"),
+            len(detected_gaps),
+            [g.get("gap_type") for g in detected_gaps],
+        )
     
         # Store detected gaps in employee record and create gap records
         if detected_gaps:
@@ -25205,6 +25269,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
                     "employment_gaps_detected_at": now,
                     "has_employment_gaps": True,
                     "employment_coverage": employment_coverage,
+                    "gap_analysis_status": "completed",
                 }}
             )
             
@@ -25216,6 +25281,11 @@ async def submit_structured_application(form: StructuredApplicationForm):
                     {"$set": gap_record},
                     upsert=True
                 )
+
+            logger.info(
+                "GAP_PERSIST employee=%s persisted=%d gaps_collection_upserted=%d",
+                app_id, len(detected_gaps), len(detected_gaps),
+            )
             
             # Add to follow-up items - ONLY when there are ACTUAL detected gaps
             follow_up_items.append({
@@ -25227,23 +25297,33 @@ async def submit_structured_application(form: StructuredApplicationForm):
                 "total_gap_months": sum(g.get("duration_months", 0) for g in detected_gaps),
                 "is_admin_only": True  # Flag to filter from applicant-facing display
             })
-            
-            logger.info(f"Detected {len(detected_gaps)} employment gaps for {app_id}")
         else:
-            # No gaps detected — still store coverage summary
+            # No gaps detected — still store coverage summary + analysis status
             await db.employees.update_one(
                 {"id": app_id},
                 {"$set": {
                     "employment_coverage": employment_coverage,
+                    "gap_analysis_status": "completed",
                 }}
             )
     
-    # NOTE: Removed misleading "Applicant declared employment gaps" warning
-    # The gap flag on the form (has_employment_gaps) is now only used internally
-    # We only show gap warnings when there are ACTUAL detected gaps from date analysis
     except Exception as gap_err:
-        logger.error(f"Non-blocking: Gap detection failed for {app_id}: {gap_err}")
+        logger.error(
+            "GAP_DETECTION_FAILED employee=%s error=%s",
+            app_id, gap_err, exc_info=True,
+        )
         post_create_warnings.append(f"gap_detection: {str(gap_err)}")
+        # Persist explicit failure so UI does NOT imply "no gaps detected"
+        try:
+            await db.employees.update_one(
+                {"id": app_id},
+                {"$set": {
+                    "gap_analysis_status": "failed",
+                    "gap_analysis_error": str(gap_err)[:500],
+                }}
+            )
+        except Exception:
+            pass  # best-effort
     
     # ==================== 5. LOG AUDIT TRAIL ====================
     try:

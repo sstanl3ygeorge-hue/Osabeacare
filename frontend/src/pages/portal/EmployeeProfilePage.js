@@ -37,6 +37,7 @@ import EditDeclarationsDialog from '../../components/admin/EditDeclarationsDialo
 import SupersedeContractDialog from '../../components/admin/SupersedeContractDialog';
 import DocumentVerificationModal from '../../components/admin/DocumentVerificationModal';
 import DocumentViewerModal from '../../components/admin/DocumentViewerModal';
+import InlineDocumentViewer from '../../components/shared/InlineDocumentViewer';
 import ApplicationFormViewer from '../../components/compliance/ApplicationFormViewer';
 import { 
   InductionChecklistPanel, 
@@ -315,6 +316,12 @@ export default function EmployeeProfilePage() {
   const [cvRejectDialogOpen, setCvRejectDialogOpen] = useState(false);
   const [cvRejectReason, setCvRejectReason] = useState('');
   const [cvRejectLoading, setCvRejectLoading] = useState(false);
+
+  // Inline document viewer state (replaces window.open / new-tab PDF viewing)
+  const [inlineViewerOpen, setInlineViewerOpen] = useState(false);
+  const [inlineViewerUrl, setInlineViewerUrl] = useState(null);
+  const [inlineViewerTitle, setInlineViewerTitle] = useState('Document');
+  const [inlineViewerFilename, setInlineViewerFilename] = useState('document.pdf');
 
   // Employment Review sign-off state
   const [employmentSignOffLoading, setEmploymentSignOffLoading] = useState(false);
@@ -728,32 +735,14 @@ export default function EmployeeProfilePage() {
     }
   };
 
-  // Open the active CV PDF in a new browser tab (admin view)
-  const handleViewCv = async () => {
-    if (!cvDocument?.id) return;
-    try {
-      const response = await axios.get(
-        `${API}/employees/${employeeId}/requirements/cv/evidence/${cvDocument.id}/view`,
-        { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
-      );
-      const blob = new Blob([response.data], { type: response.headers['content-type'] || 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err) {
-      // When responseType is 'blob', error response data is a Blob — read it as text
-      let detail = 'Failed to open CV file';
-      if (err.response?.data instanceof Blob) {
-        try {
-          const text = await err.response.data.text();
-          const parsed = JSON.parse(text);
-          if (parsed.detail) detail = parsed.detail;
-        } catch (_) { /* keep default message */ }
-      } else if (err.response?.data?.detail) {
-        detail = err.response.data.detail;
-      }
-      toast.error(detail);
-    }
+  // Open the active CV PDF in inline viewer (admin view)
+  const handleViewCv = () => {
+    const docId = employee?.cv_document_id || cvDocument?.id;
+    if (!docId) return;
+    setInlineViewerUrl(`${API}/employees/${employeeId}/requirements/cv/evidence/${docId}/view`);
+    setInlineViewerTitle(cvDocument?.original_filename || cvDocument?.file_name || 'CV / Resume');
+    setInlineViewerFilename(cvDocument?.original_filename || 'cv.pdf');
+    setInlineViewerOpen(true);
   };
   
   // Admin approves CV after review
@@ -3185,26 +3174,10 @@ export default function EmployeeProfilePage() {
 
   // View PDF in a new tab
   const handleViewFormPDF = async (submissionId) => {
-    try {
-      // Fetch the PDF blob and open in new tab
-      const response = await axios.get(
-        `${API}/form-submissions/${submissionId}/view-pdf`,
-        { 
-          headers: { Authorization: `Bearer ${token}` },
-          responseType: 'blob'
-        }
-      );
-      
-      // Create a blob URL and open in new tab
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      
-      // Note: We don't revoke immediately so the tab can load
-      // The blob URL will be garbage collected when the tab closes
-    } catch (error) {
-      toast.error(await getSafeErrorMessage(error, 'Failed to view PDF'));
-    }
+    setInlineViewerUrl(`${API}/form-submissions/${submissionId}/view-pdf`);
+    setInlineViewerTitle('Application Form');
+    setInlineViewerFilename('application-form.pdf');
+    setInlineViewerOpen(true);
   };
 
   const groupedTemplates = templates.reduce((acc, template) => {

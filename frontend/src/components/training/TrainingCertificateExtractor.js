@@ -241,17 +241,17 @@ export default function TrainingCertificateExtractor({
             completion_date: t.completion_date,
             expiry_date: t.expiry_date,
             provider: t.provider,
-            certificate_id: t.certificate_id
+            document_id: t.document_id
           }))
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      toast.success(`Saved ${response.data.saved_count || itemsToSave.length} training records`);
+      toast.success(response.data.message || `Submitted ${response.data.saved_count || itemsToSave.length} item(s) for review`);
       onSuccess?.();
       onClose();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to save training records');
+      toast.error(error.response?.data?.detail || 'Failed to submit training items');
     } finally {
       setSaving(false);
     }
@@ -583,7 +583,7 @@ export default function TrainingCertificateExtractor({
               ) : (
                 <>
                   <CheckCircle className="h-4 w-4" />
-                  Save {selectedItems.length} Selected to Profile
+                  Submit {selectedItems.length} Selected for Review
                 </>
               )}
             </Button>

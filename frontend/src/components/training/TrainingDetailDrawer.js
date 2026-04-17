@@ -225,7 +225,12 @@ export default function TrainingDetailDrawer({
   const handleSaveReExtracted = async () => {
     if (!reExtractedTrainings || selectedReExtracted.length === 0) return;
     
-    const trainingsToSave = selectedReExtracted.map(idx => reExtractedTrainings.trainings[idx]);
+    // Inject document_id from the source training item into each re-extracted training
+    const docId = trainingItem?.source_document_id || trainingItem?.certificate_document_id;
+    const trainingsToSave = selectedReExtracted.map(idx => ({
+      ...reExtractedTrainings.trainings[idx],
+      document_id: docId
+    }));
     
     setLoading(true);
     try {
@@ -235,13 +240,13 @@ export default function TrainingDetailDrawer({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      toast.success(`Saved ${trainingsToSave.length} training record(s)`);
+      toast.success(`Submitted ${trainingsToSave.length} training item(s) for review`);
       setShowReExtractPreview(false);
       setReExtractedTrainings(null);
       setSelectedReExtracted([]);
       onUpdate?.();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to save trainings');
+      toast.error(err.response?.data?.detail || 'Failed to submit trainings for review');
     } finally {
       setLoading(false);
     }
@@ -760,7 +765,7 @@ export default function TrainingDetailDrawer({
                   {loading ? (
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
                   ) : null}
-                  Save {selectedReExtracted.length} Training(s)
+                  Submit {selectedReExtracted.length} for Review
                 </Button>
               </div>
             </div>

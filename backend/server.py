@@ -259,6 +259,10 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# Inject db into training evaluator service
+from services.training_evaluator import set_db as _set_training_evaluator_db
+_set_training_evaluator_db(db)
+
 # Read Source Switch - Minimal staging feature flags for backend source switching
 from read_source_switch import (
     ReadSource,
@@ -1217,6 +1221,7 @@ MANDATORY_ITEMS = {
         # ======== CORE TRAINING (Required to Start Work) ========
         {"id": "safeguarding", "name": "Safeguarding Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Safeguarding",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 6,
          "status_group": "start_status",
@@ -1228,6 +1233,7 @@ MANDATORY_ITEMS = {
         # Safeguarding Level 2 (for senior care staff, team leaders)
         {"id": "safeguarding_l2", "name": "Safeguarding Level 2", "category": "2_Core_Training",
          "type": "training", "training_name": "Safeguarding Level 2",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "supervised_start", "priority_order": 26,
          "status_group": "competency_health",
@@ -1239,6 +1245,7 @@ MANDATORY_ITEMS = {
         # Safeguarding Level 3 (for managers, safeguarding leads)
         {"id": "safeguarding_l3", "name": "Safeguarding Level 3", "category": "2_Core_Training",
          "type": "training", "training_name": "Safeguarding Level 3",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "supervised_start", "priority_order": 27,
          "status_group": "competency_health",
@@ -1249,6 +1256,7 @@ MANDATORY_ITEMS = {
         
         {"id": "manual_handling", "name": "Manual Handling Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Manual Handling",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 7,
          "status_group": "start_status",
@@ -1257,6 +1265,7 @@ MANDATORY_ITEMS = {
         
         {"id": "infection_control", "name": "Infection Control Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Infection Control",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 8,
          "status_group": "start_status",
@@ -1266,6 +1275,7 @@ MANDATORY_ITEMS = {
         # ======== ADDITIONAL TRAINING (Supervised Start) ========
         {"id": "bls", "name": "Basic Life Support (BLS)", "category": "2_Core_Training",
          "type": "training", "training_name": "Basic Life Support",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "supervised_start", "priority_order": 22,
          "status_group": "competency_health",
@@ -1274,6 +1284,7 @@ MANDATORY_ITEMS = {
         
         {"id": "fire_safety", "name": "Fire Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Fire Safety",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 9,
          "status_group": "start_status",
@@ -1282,6 +1293,7 @@ MANDATORY_ITEMS = {
         
         {"id": "health_safety", "name": "Health & Safety Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Health & Safety",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 10,
          "status_group": "start_status",
@@ -1290,6 +1302,7 @@ MANDATORY_ITEMS = {
         
         {"id": "information_governance", "name": "Information Governance / GDPR Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Information Governance",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 11,
          "status_group": "start_status",
@@ -1298,6 +1311,7 @@ MANDATORY_ITEMS = {
         
         {"id": "prevent", "name": "Prevent Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Prevent",
+         "mandatory_for_compliance": True,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 12,
          "status_group": "start_status",
@@ -1307,6 +1321,7 @@ MANDATORY_ITEMS = {
         # ======== CQC STANDARD TRAINING (Added for Matrix Compliance) ========
         {"id": "induction_training", "name": "Induction Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Induction",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "start_required", "priority_order": 1,
          "status_group": "start_status",
@@ -1316,6 +1331,7 @@ MANDATORY_ITEMS = {
         
         {"id": "medication", "name": "Medication Administration Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Medication",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "supervised_start", "priority_order": 23,
          "status_group": "competency_health",
@@ -1325,6 +1341,7 @@ MANDATORY_ITEMS = {
         
         {"id": "food_hygiene", "name": "Food Hygiene Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Food Hygiene",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "secondary", "priority_order": 48,
          "status_group": "other",
@@ -1334,6 +1351,7 @@ MANDATORY_ITEMS = {
         
         {"id": "mca_dols", "name": "MCA & DoLS Training", "category": "2_Core_Training",
          "type": "training", "training_name": "MCA and DoLs",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "secondary", "priority_order": 49,
          "status_group": "other",
@@ -1343,6 +1361,7 @@ MANDATORY_ITEMS = {
         
         {"id": "dementia", "name": "Dementia Awareness Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Dementia",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "secondary", "priority_order": 50,
          "status_group": "other",
@@ -1352,6 +1371,7 @@ MANDATORY_ITEMS = {
         
         {"id": "autism", "name": "Autism Awareness Training", "category": "2_Core_Training",
          "type": "training", "training_name": "Autism Awareness",
+         "mandatory_for_compliance": False,
          "allow_multiple_files": True,
          "priority": "secondary", "priority_order": 51,
          "status_group": "other",
@@ -1492,6 +1512,14 @@ async def ensure_training_catalogue_exists():
     return {"seeded": inserted_count, "total": len(existing_ids)}
 
 
+# Canonical mandatory-training helpers — delegated to evaluator service.
+from services.training_evaluator import (
+    get_canonical_mandatory_training_ids,
+    is_mandatory_training_canonical,
+    get_required_training_for_employee,
+)
+
+
 async def get_training_catalogue() -> List[dict]:
     """
     Returns all active training types from catalogue.
@@ -1520,35 +1548,8 @@ async def get_employee_training_assignments(employee_id: str) -> List[dict]:
     return assignments
 
 
-async def get_required_training_for_employee(employee_id: str, role: str) -> List[dict]:
-    """
-    FUTURE USE: Returns merged list of required training for an employee.
-    
-    Phase 1: Returns ONLY MANDATORY_ITEMS["training"] (behavior unchanged)
-    Phase 2+: Will merge:
-      - MANDATORY_ITEMS["training"] (global defaults)
-      - employee_training_assignments where is_required=True
-    
-    This function is NOT YET USED in calculate_employee_compliance().
-    It is prepared for Phase 2 integration.
-    """
-    # Phase 1: Return existing behavior exactly
-    items = MANDATORY_ITEMS["training"].copy()
-    
-    # Add nurse-specific training if applicable (use system_role for compliance logic)
-    system_role = normalize_to_system_role(role) if role else SystemRole.UNKNOWN
-    if is_nurse_role(system_role):
-        nurse_training = [i for i in MANDATORY_ITEMS["nurse_specific"] if i.get("type") == "training"]
-        items.extend(nurse_training)
-    
-    # Phase 2 would add:
-    # if ENABLE_EMPLOYEE_TRAINING_ASSIGNMENTS:
-    #     assignments = await get_employee_training_assignments(employee_id)
-    #     for assign in assignments:
-    #         if assign.get("is_required"):
-    #             # Merge from catalogue...
-    
-    return items
+# get_required_training_for_employee is imported from services.training_evaluator
+# (see import block near line 1515)
 
 
 # ============================================================================
@@ -1636,8 +1637,8 @@ EXPIRABLE_REQUIREMENTS = {
     "health_safety",
 }
 
-# Expiry thresholds (in days)
-EXPIRY_WARNING_DAYS = 30  # Show "Expiring Soon" when within 30 days
+# Expiry thresholds — canonical from evaluator, re-exported for local use.
+# (Also re-exported later via services.training_evaluator import block.)
 
 def calculate_expiry_status(expiry_date_str: str) -> dict:
     """Calculate expiry status from date string"""
@@ -6544,472 +6545,24 @@ class TrainingRecordResponse(BaseModel):
     status_color: Optional[str] = None  # green, amber, red, gray
 
 
-# Training validity periods (in days) - CQC requirements
-TRAINING_VALIDITY_PERIODS = {
-    "safeguarding": 365,  # Annual
-    "safeguarding_of_vulnerable_adults": 365,
-    "moving_and_handling": 365,
-    "manual_handling": 365,
-    "health_and_safety": 365,
-    "infection_control": 365,
-    "infection_control_and_hygiene": 365,
-    "medication_administration": 365,
-    "food_hygiene_nutrition_and_hydration": 365,
-    "food_hygiene": 365,
-    "first_aid_awareness": 1095,  # 3 years
-    "first_aid": 1095,
-    "fire_safety": 365,
-    "covid_19": 365,
-    "default": 365  # Default to annual
-}
-
-
-def get_training_validity_days(requirement_id: str) -> int:
-    """Get validity period in days for a training requirement."""
-    req_lower = requirement_id.lower().replace(' ', '_').replace('-', '_')
-    return TRAINING_VALIDITY_PERIODS.get(req_lower, TRAINING_VALIDITY_PERIODS['default'])
-
-
-def calculate_training_expiry(completion_date: str, requirement_id: str) -> str:
-    """Calculate expiry date based on completion date and requirement validity period."""
-    validity_days = get_training_validity_days(requirement_id)
-    completion = datetime.fromisoformat(completion_date.replace('Z', '+00:00')) if 'T' in completion_date else datetime.strptime(completion_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-    expiry = completion + timedelta(days=validity_days)
-    return expiry.strftime('%Y-%m-%d')  # Return date-only format
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# CANONICAL DATE STORAGE RULES
-# ═══════════════════════════════════════════════════════════════════════════════
-# - expiry_date: YYYY-MM-DD (date-only, no timezone)
-# - completion_date: YYYY-MM-DD (date-only, no timezone)  
-# - created_at, updated_at, verified_at: Full ISO with timezone
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def normalize_date_only(date_value: str) -> Optional[str]:
-    """
-    Normalize a date value to YYYY-MM-DD format.
-    Used for expiry_date and completion_date fields.
-    
-    Accepts:
-    - YYYY-MM-DD: returns as-is
-    - Full ISO: extracts date part
-    - None/empty: returns None
-    """
-    if not date_value:
-        return None
-    
-    if isinstance(date_value, str):
-        # Already in correct format
-        if len(date_value) == 10 and date_value[4] == '-' and date_value[7] == '-':
-            return date_value
-        
-        # Full ISO format - extract date part
-        if 'T' in date_value:
-            return date_value.split('T')[0]
-        
-        # Try parsing other formats
-        try:
-            dt = datetime.fromisoformat(date_value.replace('Z', '+00:00'))
-            return dt.strftime('%Y-%m-%d')
-        except Exception:
-            pass
-    
-    return date_value  # Return as-is if can't parse
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# SINGLE SOURCE OF TRUTH: Training Record Status Computation
-# ═══════════════════════════════════════════════════════════════════════════════
-# This is the CANONICAL function for computing training status.
-# All APIs MUST use this function. Frontend MUST NOT compute status locally.
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def compute_training_record_status(record: dict) -> dict:
-    """
-    SINGLE SOURCE OF TRUTH for training record status.
-    
-    Canonical fields used:
-    - completion_date: When training was completed
-    - expiry_date: When training expires (if set)
-    - verified: Whether training has been verified
-    
-    Computed status values:
-    - "not_started": No completion_date
-    - "expired": expiry_date exists AND today > expiry_date
-    - "needs_renewal": expiry_date exists AND within 30 days of expiry
-    - "completed": Has completion_date, not expired, not near expiry
-    - "valid": Same as completed (alias for clarity)
-    
-    Returns dict with:
-    - computed_status: The canonical status string
-    - renewal_status: Detailed expiry info (or None)
-    - days_until_expiry: Number (negative if expired)
-    - status_label: Human readable label
-    - status_color: UI color (green/amber/red)
-    """
-    completion_date = record.get('completion_date')
-    expiry_date = record.get('expiry_date')
-    verified = record.get('verified', False)
-    
-    # No completion date = not started
-    if not completion_date:
-        return {
-            "computed_status": "not_started",
-            "renewal_status": None,
-            "days_until_expiry": None,
-            "status_label": "Not Started",
-            "status_color": "gray"
-        }
-    
-    # If no expiry date, it's completed/valid indefinitely
-    if not expiry_date:
-        return {
-            "computed_status": "completed",
-            "renewal_status": "no_expiry",
-            "days_until_expiry": None,
-            "status_label": "Completed" if not verified else "Verified",
-            "status_color": "green"
-        }
-    
-    # Calculate days until expiry
-    try:
-        now = datetime.now(timezone.utc)
-        if isinstance(expiry_date, str):
-            if 'T' in expiry_date:
-                exp_dt = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
-            else:
-                exp_dt = datetime.strptime(expiry_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-        else:
-            exp_dt = expiry_date
-        
-        days_until_expiry = (exp_dt - now).days
-        expiry_date_str = exp_dt.strftime('%Y-%m-%d')
-        
-        if days_until_expiry < 0:
-            # EXPIRED
-            return {
-                "computed_status": "expired",
-                "renewal_status": "expired",
-                "days_until_expiry": days_until_expiry,
-                "expiry_date": expiry_date_str,
-                "status_label": f"Expired ({abs(days_until_expiry)}d ago)",
-                "status_color": "red"
-            }
-        elif days_until_expiry <= EXPIRY_WARNING_DAYS:
-            # NEEDS RENEWAL (within 30 days)
-            return {
-                "computed_status": "needs_renewal",
-                "renewal_status": "expiring_soon",
-                "days_until_expiry": days_until_expiry,
-                "expiry_date": expiry_date_str,
-                "status_label": f"Expires in {days_until_expiry}d",
-                "status_color": "amber"
-            }
-        else:
-            # VALID
-            return {
-                "computed_status": "completed",
-                "renewal_status": "valid",
-                "days_until_expiry": days_until_expiry,
-                "expiry_date": expiry_date_str,
-                "status_label": f"Valid ({days_until_expiry}d left)",
-                "status_color": "green"
-            }
-    except Exception as e:
-        logger.error(f"Error computing training status: {e}")
-        return {
-            "computed_status": "completed",
-            "renewal_status": "unknown",
-            "days_until_expiry": None,
-            "status_label": "Completed",
-            "status_color": "green"
-        }
-
-
-def enrich_training_record_with_computed_status(record: dict) -> dict:
-    """
-    Enrich a training record with computed status fields.
-    This REPLACES any stale persisted status with freshly computed values.
-    """
-    computed = compute_training_record_status(record)
-    
-    # Create enriched record (copy to avoid mutation)
-    enriched = dict(record)
-    
-    # Add computed fields
-    enriched['computed_status'] = computed['computed_status']
-    enriched['renewal_status'] = computed['renewal_status']
-    enriched['days_until_expiry'] = computed['days_until_expiry']
-    enriched['status_label'] = computed['status_label']
-    enriched['status_color'] = computed['status_color']
-    
-    # IMPORTANT: Override persisted 'status' with computed value
-    # This ensures stale "expired" or "expiring" flags don't persist incorrectly
-    if computed['computed_status'] == 'expired':
-        enriched['status'] = 'expired'
-    elif computed['computed_status'] == 'needs_renewal':
-        enriched['status'] = 'expiring'
-    elif computed['computed_status'] == 'not_started':
-        enriched['status'] = 'not_started'
-    else:
-        # Keep original status if completed (could be in_progress -> completed)
-        if record.get('status') not in ['completed', 'verified']:
-            enriched['status'] = 'completed'
-    
-    return enriched
-
-
-# ============================================================================
-# SUPPLEMENTARY TRAINING: BLOCKER CONFIGURATION
-# ============================================================================
-# Training items that can block work readiness when missing/expired/unverified.
-# Only items with blocker_for_work=True can prevent an employee from working.
-# ============================================================================
-
-TRAINING_BLOCKER_CONFIG = {
-    # Core training that blocks work readiness
-    "safeguarding": {
-        "blocker_for_work": True,
-        "evidence_required": True,
-        "reason_code": "safeguarding_training_missing",
-        "reason_message": "Safeguarding training required"
-    },
-    "manual_handling": {
-        "blocker_for_work": True,
-        "evidence_required": True,
-        "reason_code": "manual_handling_training_missing",
-        "reason_message": "Manual Handling training required"
-    },
-    "moving_and_handling": {
-        "blocker_for_work": True,
-        "evidence_required": True,
-        "reason_code": "moving_handling_training_missing",
-        "reason_message": "Moving and Handling training required"
-    },
-    "medication_administration": {
-        "blocker_for_work": True,
-        "evidence_required": True,
-        "reason_code": "medication_training_missing",
-        "reason_message": "Medication training required"
-    },
-    "infection_control": {
-        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
-        "evidence_required": True,
-        "reason_code": "infection_control_training_missing",
-        "reason_message": "Infection Control training required"
-    },
-    "bls": {
-        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
-        "evidence_required": True,
-        "reason_code": "bls_training_missing",
-        "reason_message": "Basic Life Support training required"
-    },
-    "basic_life_support": {
-        "blocker_for_work": True,
-        "evidence_required": True,
-        "reason_code": "bls_training_missing",
-        "reason_message": "Basic Life Support training required"
-    },
-    "fire_safety": {
-        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
-        "evidence_required": True,
-        "reason_code": "fire_safety_training_missing",
-        "reason_message": "Fire Safety training required"
-    },
-    "health_safety": {
-        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
-        "evidence_required": True,
-        "reason_code": "health_safety_training_missing",
-        "reason_message": "Health & Safety training required"
-    },
-    "information_governance": {
-        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
-        "evidence_required": True,
-        "reason_code": "information_governance_training_missing",
-        "reason_message": "Information Governance / GDPR training required"
-    },
-    "prevent": {
-        "blocker_for_work": True,  # UCE CHECK 3 blocks on this
-        "evidence_required": True,
-        "reason_code": "prevent_training_missing",
-        "reason_message": "Prevent (Counter-Terrorism Awareness) training required"
-    },
-}
-
-def get_training_blocker_config(requirement_id: str) -> dict:
-    """Get blocker configuration for a training requirement."""
-    req_lower = requirement_id.lower().replace(' ', '_').replace('-', '_')
-    return TRAINING_BLOCKER_CONFIG.get(req_lower, {
-        "blocker_for_work": False,
-        "evidence_required": True,
-        "reason_code": f"{req_lower}_training_missing",
-        "reason_message": f"{requirement_id} training required"
-    })
-
-
-# ============================================================================
-# CANONICAL TRAINING EVALUATOR (Single Source of Truth)
-# ============================================================================
-# This function evaluates ALL training status for an employee.
-# It must be used by:
-# - GET /employees/{id}/training
-# - GET /employees/{id}/readiness (for training blockers)
-# - GET /dashboard (for training due/overdue counts)
-# - Audit exports
-# ============================================================================
-
-async def evaluate_employee_training_status(employee_id: str, role: str = '') -> dict:
-    """
-    CANONICAL TRAINING EVALUATOR - Single Source of Truth.
-    
-    Evaluates all required training for an employee and returns:
-    - overall: 'current' | 'due_soon' | 'overdue' | 'missing'
-    - blockerCount: Number of work-blocking training items that are not passed
-    - warningCount: Number of non-blocking training items that need attention
-    - items: Array of detailed training item status
-    
-    This function is THE ONLY way to evaluate training status.
-    All endpoints MUST call this function.
-    """
-    # Get required training for this employee
-    required_training = await get_required_training_for_employee(employee_id, role)
-    
-    # Get all training records for this employee
-    training_records = await db.training_records.find({
-        "employee_id": employee_id,
-        "record_status": {"$nin": ["superseded", "deleted"]}
-    }, {"_id": 0}).to_list(100)
-    
-    # Build lookup by requirement_id, training_id, and normalized training_name
-    records_by_req = {}
-    for record in training_records:
-        req_id = record.get('requirement_id') or record.get('training_name', '').lower().replace(' ', '_')
-        if req_id not in records_by_req:
-            records_by_req[req_id] = record
-        # Also index by training_id (set by extractor mapping) for robust matching
-        t_id = record.get('training_id')
-        if t_id and t_id not in records_by_req:
-            records_by_req[t_id] = record
-    
-    items = []
-    blocker_count = 0
-    warning_count = 0
-    has_missing = False
-    has_expired = False
-    has_due_soon = False
-    
-    for req in required_training:
-        req_id = req.get('id') or req.get('training_name', '').lower().replace(' ', '_')
-        training_name = req.get('training_name') or req.get('name', req_id)
-        
-        # Get blocker config
-        blocker_config = get_training_blocker_config(req_id)
-        is_blocker = blocker_config.get('blocker_for_work', False)
-        evidence_required = blocker_config.get('evidence_required', True)
-        
-        # Find matching record
-        record = records_by_req.get(req_id)
-        
-        # Also check by training_name variations
-        if not record:
-            for alt_id in [training_name.lower().replace(' ', '_'), req_id.replace('_', '-')]:
-                if alt_id in records_by_req:
-                    record = records_by_req[alt_id]
-                    break
-        
-        if not record:
-            # MISSING
-            items.append({
-                "code": req_id,
-                "title": training_name,
-                "status": "missing",
-                "blocker": is_blocker,
-                "detail": f"{training_name} training not recorded",
-                "expires_at": None,
-                "verified": False,
-                "evidence_required": evidence_required
-            })
-            has_missing = True
-            if is_blocker:
-                blocker_count += 1
-            else:
-                warning_count += 1
-            continue
-        
-        # Compute status
-        computed = compute_training_record_status(record)
-        computed_status = computed.get('computed_status')
-        verified = record.get('verified', False)
-        expiry_date = record.get('expiry_date')
-        
-        # Determine final status
-        if computed_status == 'not_started':
-            status = 'missing'
-            has_missing = True
-            detail = f"{training_name} training not completed"
-            if is_blocker:
-                blocker_count += 1
-            else:
-                warning_count += 1
-        elif computed_status == 'expired':
-            status = 'expired'
-            has_expired = True
-            detail = f"{training_name} expired on {expiry_date}"
-            if is_blocker:
-                blocker_count += 1
-            else:
-                warning_count += 1
-        elif computed_status == 'needs_renewal':
-            status = 'due_soon'
-            has_due_soon = True
-            days_left = computed.get('days_until_expiry', 0)
-            detail = f"{training_name} expires in {days_left} days"
-            # Due soon is a warning, not a blocker
-            warning_count += 1
-        elif not verified and evidence_required:
-            status = 'awaiting_review'
-            detail = f"{training_name} submitted but awaiting verification"
-            # Unverified training does NOT pass if evidence is required
-            if is_blocker:
-                blocker_count += 1
-            else:
-                warning_count += 1
-        else:
-            status = 'verified' if verified else 'completed'
-            detail = f"{training_name} valid" + (f" until {expiry_date}" if expiry_date else "")
-        
-        items.append({
-            "code": req_id,
-            "title": training_name,
-            "status": status,
-            "blocker": is_blocker,
-            "detail": detail,
-            "expires_at": expiry_date,
-            "verified": verified,
-            "evidence_required": evidence_required,
-            "completion_date": record.get('completion_date'),
-            "days_until_expiry": computed.get('days_until_expiry'),
-            "certificate_url": record.get('certificate_url')
-        })
-    
-    # Determine overall status
-    if has_expired:
-        overall = 'overdue'
-    elif has_missing:
-        overall = 'missing'
-    elif has_due_soon:
-        overall = 'due_soon'
-    else:
-        overall = 'current'
-    
-    return {
-        "overall": overall,
-        "blockerCount": blocker_count,
-        "warningCount": warning_count,
-        "items": items,
-        "evaluatedAt": datetime.now(timezone.utc).isoformat()
-    }
+# ===========================================================================
+# Training evaluator — canonical logic now lives in services/training_evaluator.py.
+# Re-exported here for backward compatibility.
+# ===========================================================================
+from services.training_evaluator import (
+    TRAINING_VALIDITY_PERIODS,
+    TRAINING_BLOCKER_CONFIG,
+    EXPIRY_WARNING_DAYS as _TE_EXPIRY_WARNING_DAYS,
+    get_training_validity_days,
+    calculate_training_expiry,
+    normalize_date_only,
+    compute_training_record_status,
+    enrich_training_record_with_computed_status,
+    get_training_blocker_config,
+    evaluate_employee_training_status,
+)
+# Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
+EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
 
 
 async def get_training_audit_export(employee_id: str, role: str = '') -> dict:
@@ -10705,6 +10258,24 @@ async def get_employee_training_records(
     }
 
 
+@api_router.get("/training/definitions")
+async def get_training_definitions(user: dict = Depends(get_current_user)):
+    """
+    Return the canonical list of training definitions from MANDATORY_ITEMS.
+    Used by the frontend to populate training-course dropdowns without
+    relying on existing records (which may be empty on a fresh system).
+    """
+    items = []
+    for item in MANDATORY_ITEMS["training"]:
+        items.append({
+            "id": item["id"],
+            "name": item.get("training_name") or item.get("name", item["id"]),
+            "mandatory_for_compliance": item.get("mandatory_for_compliance", False),
+            "priority": item.get("priority", "secondary"),
+        })
+    return {"definitions": items}
+
+
 @api_router.get("/employees/{employee_id}/training/matrix")
 async def get_employee_training_matrix(
     employee_id: str,
@@ -10740,26 +10311,16 @@ async def get_employee_training_matrix(
     records_by_req = {}
     additional_records = []  # Non-mandatory training records
     
-    # Define mandatory training codes (must match MANDATORY_TRAINING_HCA in unified_compliance_engine.py)
-    mandatory_codes = {'safeguarding', 'manual_handling', 'infection_control', 
-                      'basic_life_support', 'bls', 'fire_safety', 'health_safety',
-                      'information_governance', 'prevent',
-                      'safeguarding_adults', 'safeguarding_children', 'moving_handling'}
+    # Canonical mandatory training IDs — single source of truth
+    mandatory_codes = get_canonical_mandatory_training_ids()
     
     for r in training_records:
         req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_').replace('&', 'and')
-        training_name_lower = r.get('training_name', '').lower()
         
-        # Check if this is a mandatory training (either by code or by name pattern)
-        is_mandatory = False
-        for code in mandatory_codes:
-            if code in req_id.lower() or code.replace('_', ' ') in training_name_lower:
-                is_mandatory = True
-                records_by_req[req_id] = r
-                break
-        
-        # If not mandatory, add to additional records
-        if not is_mandatory:
+        # Check if this is a mandatory training by canonical ID
+        if req_id in mandatory_codes:
+            records_by_req[req_id] = r
+        else:
             additional_records.append(r)
     
     # Build enhanced matrix items
@@ -10831,7 +10392,6 @@ async def get_employee_training_matrix(
         status = 'current'
         expires_at = record.get('expiry_date') or record.get('expires_at')
         if expires_at:
-            from datetime import datetime, timezone
             try:
                 if isinstance(expires_at, str):
                     exp_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
@@ -10843,7 +10403,7 @@ async def get_employee_training_matrix(
                     status = 'expired'
                 elif days_until <= 30:
                     status = 'expiring_soon'
-            except:
+            except (ValueError, TypeError):
                 pass
         
         additional_items.append({
@@ -10886,6 +10446,88 @@ async def get_employee_training_matrix(
     }
 
 
+@api_router.get("/employees/{employee_id}/training/certificates")
+async def get_employee_training_certificates(
+    employee_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Merged training-certificate view.
+
+    Returns a de-duplicated list combining:
+    1. Canonical employee_documents where document_type is a training certificate.
+    2. Legacy training_records that carry a certificate_url but have NO
+       matching employee_documents entry (identified via source_document_id).
+
+    Legacy records are tagged ``source: "training_record_legacy"`` so the
+    frontend can render them identically while still distinguishing provenance.
+    """
+    # 1. Canonical documents
+    docs = await db.employee_documents.find({
+        "employee_id": employee_id,
+        "$or": [
+            {"document_type": "training_certificate"},
+            {"requirement_id": {"$regex": "training", "$options": "i"}},
+            {"category": "training"}
+        ]
+    }, {"_id": 0}).to_list(500)
+
+    # Set of canonical doc IDs for de-duplication
+    canonical_doc_ids = {d.get("id") or d.get("document_id") for d in docs}
+    # Also collect certificate URLs already present in canonical docs
+    canonical_urls = set()
+    for d in docs:
+        for ef in d.get("evidence_files", []):
+            url = ef.get("file_url") or ef.get("url")
+            if url:
+                canonical_urls.add(url)
+        if d.get("file_url"):
+            canonical_urls.add(d["file_url"])
+
+    # 2. Legacy training_records with a certificate
+    legacy_records = await db.training_records.find({
+        "employee_id": employee_id,
+        "certificate_url": {"$exists": True, "$ne": None, "$ne": ""},
+        "record_status": {"$nin": ["superseded", "deleted"]}
+    }, {"_id": 0}).to_list(500)
+
+    legacy_items = []
+    for rec in legacy_records:
+        # Skip if already represented in canonical documents
+        src_doc_id = rec.get("source_document_id") or rec.get("certificate_document_id")
+        if src_doc_id and src_doc_id in canonical_doc_ids:
+            continue
+        cert_url = rec.get("certificate_url", "")
+        if cert_url in canonical_urls:
+            continue
+
+        # Synthesise a document-shaped record for the frontend
+        legacy_items.append({
+            "id": rec.get("id"),
+            "employee_id": employee_id,
+            "document_type": "training_certificate",
+            "requirement_id": rec.get("requirement_id", ""),
+            "training_name": rec.get("training_name", ""),
+            "file_url": cert_url,
+            "original_filename": rec.get("original_filename") or cert_url.rsplit("/", 1)[-1] if cert_url else "",
+            "uploaded_at": rec.get("uploaded_at") or rec.get("created_at"),
+            "status": "active",
+            "source": "training_record_legacy",
+            "verified": rec.get("verified", False),
+            "verified_by": rec.get("verified_by"),
+            "verified_at": rec.get("verified_at"),
+            "completion_date": rec.get("completion_date"),
+            "expiry_date": rec.get("expiry_date") or rec.get("expires_at"),
+            "provider": rec.get("provider_name") or rec.get("provider"),
+        })
+
+    return {
+        "employee_id": employee_id,
+        "certificates": docs + legacy_items,
+        "total": len(docs) + len(legacy_items),
+        "canonical_count": len(docs),
+        "legacy_count": len(legacy_items)
+    }
 
 
 @api_router.post("/employees/{employee_id}/training/assign")
@@ -11294,9 +10936,14 @@ TRAINING_EXPIRY_MONTHS = {
     "first aid": 36,
 }
 
+# MANDATORY_TRAININGS — derived from canonical MANDATORY_ITEMS at import time.
+# Kept as a module-level list of *lowercase display names* so the fuzzy
+# is_mandatory_training() helper (used by certificate extraction enrichment)
+# stays backward-compatible without maintaining a second hand-curated list.
 MANDATORY_TRAININGS = [
-    "safeguarding", "manual handling", "fire safety", 
-    "health & safety", "basic life support", "infection control"
+    item["training_name"].lower()
+    for item in MANDATORY_ITEMS["training"]
+    if item.get("mandatory_for_compliance")
 ]
 
 def get_expiry_months_for_training(training_name: str) -> int:
@@ -11308,7 +10955,9 @@ def get_expiry_months_for_training(training_name: str) -> int:
     return 12  # Default 12 months
 
 def is_mandatory_training(training_name: str) -> bool:
-    """Check if training is mandatory for work readiness"""
+    """Check if training is mandatory for work readiness.
+    Uses canonical mandatory training names derived from MANDATORY_ITEMS.
+    """
     name_lower = training_name.lower()
     return any(mandatory in name_lower for mandatory in MANDATORY_TRAININGS)
 
@@ -16154,8 +15803,16 @@ async def view_requirement_evidence(
         }
         content_type = stored_content_type or content_types.get(ext, 'application/octet-stream')
         return Response(content=file_bytes, media_type=content_type)
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else 500
+        if status == 404:
+            logger.warning(f"Evidence file not in storage: {file_url} (employee {employee_id})")
+            raise HTTPException(status_code=404, detail="File not found in storage — it may have been deleted or moved")
+        logger.error(f"Storage error retrieving evidence file {file_url}: {e}")
+        raise HTTPException(status_code=502, detail=f"Storage error retrieving file")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
+        logger.error(f"Failed to retrieve evidence file {file_url}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file")
 
 
 @api_router.get("/employees/{employee_id}/requirements/{requirement_id}/evidence/{file_id}/download")

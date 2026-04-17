@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
-  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell
+  Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell,
+  ShieldCheck, Circle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
@@ -21,6 +22,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import ProfileCompletionWizard from '../../components/worker/ProfileCompletionWizard';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+
+// Canonical training status display config — single vocabulary across admin and worker
+const TRAINING_STATUS_CONFIG = {
+  verified:        { badge: 'Verified',              badgeCls: 'bg-green-100 text-green-700',   cardBg: 'bg-green-50 border-green-200',   Icon: ShieldCheck,   iconCls: 'text-green-600',  iconBg: 'bg-green-100',  showUpload: false },
+  completed:       { badge: 'Awaiting Verification', badgeCls: 'bg-blue-100 text-blue-700',     cardBg: 'bg-green-50 border-green-200',   Icon: CheckCircle,   iconCls: 'text-green-600',  iconBg: 'bg-green-100',  showUpload: false },
+  awaiting_review: { badge: 'Awaiting Review',       badgeCls: 'bg-purple-100 text-purple-700', cardBg: 'bg-purple-50 border-purple-200', Icon: Clock,         iconCls: 'text-purple-600', iconBg: 'bg-purple-100', showUpload: false },
+  due_soon:        { badge: 'Expiring Soon',         badgeCls: 'bg-amber-100 text-amber-700',   cardBg: 'bg-amber-50 border-amber-200',   Icon: Clock,         iconCls: 'text-amber-600',  iconBg: 'bg-amber-100',  showUpload: true, uploadLabel: 'Renew' },
+  expired:         { badge: 'Expired',               badgeCls: 'bg-red-100 text-red-700',       cardBg: 'bg-red-50 border-red-200',       Icon: AlertTriangle, iconCls: 'text-red-600',    iconBg: 'bg-red-100',    showUpload: true, uploadLabel: 'Re-upload' },
+  rejected:        { badge: 'Rejected',              badgeCls: 'bg-red-100 text-red-700',       cardBg: 'bg-red-50 border-red-200',       Icon: AlertCircle,   iconCls: 'text-red-600',    iconBg: 'bg-red-100',    showUpload: true, uploadLabel: 'Re-upload' },
+  missing:         { badge: 'Required',              badgeCls: 'bg-slate-100 text-slate-600',   cardBg: 'bg-slate-50 border-slate-200',   Icon: Circle,        iconCls: 'text-slate-400',  iconBg: 'bg-slate-100',  showUpload: true, uploadLabel: 'Upload' },
+};
 
 // Format date helper
 const formatDate = (dateStr) => {
@@ -1941,56 +1953,31 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {/* Show all mandatory trainings with status */}
-                {(all_mandatory_trainings || [
-                  { id: 'safeguarding', name: 'Safeguarding', status: 'missing' },
-                  { id: 'manual_handling', name: 'Moving & Handling', status: 'missing' },
-                  { id: 'health_safety', name: 'Health & Safety', status: 'missing' },
-                  { id: 'bls', name: 'First Aid / Basic Life Support', status: 'missing' },
-                  { id: 'fire_safety', name: 'Fire Safety', status: 'missing' },
-                  { id: 'infection_control', name: 'Infection Control', status: 'missing' },
-                  { id: 'information_governance', name: 'Information Governance', status: 'missing' },
-                  { id: 'prevent', name: 'Prevent', status: 'missing' }
-                ]).map((training, idx) => (
+                {/* Show all mandatory trainings with canonical status */}
+                {all_mandatory_trainings.map((training, idx) => {
+                  const cfg = TRAINING_STATUS_CONFIG[training.status] || TRAINING_STATUS_CONFIG.missing;
+                  const StatusIcon = cfg.Icon;
+                  return (
                   <div 
                     key={idx} 
-                    className={`p-4 rounded-xl border ${
-                      training.status === 'complete' ? 'bg-green-50 border-green-200' :
-                      training.status === 'expired' || training.status === 'rejected' ? 'bg-red-50 border-red-200' :
-                      'bg-slate-50 border-slate-200'
-                    }`}
+                    className={`p-4 rounded-xl border ${cfg.cardBg}`}
                     data-testid={`training-row-${training.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                          training.status === 'complete' ? 'bg-green-100' :
-                          training.status === 'expired' || training.status === 'rejected' ? 'bg-red-100' :
-                          'bg-amber-100'
-                        }`}>
-                          {training.status === 'complete' ? (
-                            <CheckCircle className="h-5 w-5 text-green-600" />
-                          ) : training.status === 'expired' ? (
-                            <AlertTriangle className="h-5 w-5 text-red-600" />
-                          ) : training.status === 'rejected' ? (
-                            <AlertCircle className="h-5 w-5 text-red-600" />
-                          ) : (
-                            <Clock className="h-5 w-5 text-amber-600" />
-                          )}
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${cfg.iconBg}`}>
+                          <StatusIcon className={`h-5 w-5 ${cfg.iconCls}`} />
                         </div>
                         <div>
-                          <span className={`font-medium ${
-                            training.status === 'complete' ? 'text-green-800' :
-                            training.status === 'expired' || training.status === 'rejected' ? 'text-red-800' :
-                            'text-slate-800'
-                          }`}>{training.name}</span>
-                          {training.rejection_reason && training.status === 'rejected' && (
+                          <span className="font-medium text-slate-800">{training.name}</span>
+                          {training.status === 'rejected' && training.rejection_reason && (
                             <p className="text-xs text-red-600">Reason: {training.rejection_reason}</p>
                           )}
-                          {training.expiry_date && training.status !== 'rejected' && (
-                            <p className={`text-xs ${
-                              training.status === 'expired' ? 'text-red-600' : 'text-slate-500'
-                            }`}>
+                          {training.status === 'due_soon' && training.days_until_expiry != null && (
+                            <p className="text-xs text-amber-600">Expires in {training.days_until_expiry} days</p>
+                          )}
+                          {training.expiry_date && training.status !== 'rejected' && training.status !== 'due_soon' && (
+                            <p className={`text-xs ${training.status === 'expired' ? 'text-red-600' : 'text-slate-500'}`}>
                               {training.status === 'expired' ? 'Expired: ' : 'Expires: '}
                               {formatDate(training.expiry_date)}
                             </p>
@@ -2000,53 +1987,23 @@ export default function WorkerDashboard() {
                               Completed: {formatDate(training.completion_date)}
                             </p>
                           )}
+                          {training.detail && training.status === 'due_soon' && training.expiry_date && (
+                            <p className="text-xs text-amber-600">{formatDate(training.expiry_date)}</p>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {training.status === 'rejected' ? (
-                          <div className="flex flex-col items-end gap-1">
-                            <Badge className="bg-red-100 text-red-700 text-xs">
-                              <AlertCircle className="h-3 w-3 mr-1" />
-                              Rejected
-                            </Badge>
-                            {training.rejection_reason && (
-                              <span className="text-xs text-red-600 max-w-[180px] text-right truncate" title={training.rejection_reason}>
-                                {training.rejection_reason}
-                              </span>
-                            )}
-                          </div>
-                        ) : training.status === 'complete' ? (
-                          <>
-                            {training.verified ? (
-                              <Badge className="bg-green-100 text-green-700 text-xs">
-                                <Shield className="h-3 w-3 mr-1" />
-                                Verified
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-amber-100 text-amber-700 text-xs">
-                                <Clock className="h-3 w-3 mr-1" />
-                                Pending
-                              </Badge>
-                            )}
-                          </>
-                        ) : training.status === 'expired' ? (
-                          <Badge className="bg-red-100 text-red-700 text-xs">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            Expired
-                          </Badge>
-                        ) : (
-                          <Badge className="bg-slate-100 text-slate-600 text-xs">
-                            <Clock className="h-3 w-3 mr-1" />
-                            Required
-                          </Badge>
-                        )}
-                        {(training.status !== 'complete' || training.status === 'rejected') && (
+                        <Badge className={`text-xs ${cfg.badgeCls}`}>
+                          <StatusIcon className="h-3 w-3 mr-1" />
+                          {cfg.badge}
+                        </Badge>
+                        {cfg.showUpload && (
                           <Button 
                             size="sm" 
-                            variant={training.status === 'rejected' ? 'default' : 'outline'}
+                            variant={training.status === 'rejected' || training.status === 'expired' ? 'default' : 'outline'}
                             onClick={() => triggerFileInput(`training_${training.id}`)}
                             disabled={uploading === `training_${training.id}`}
-                            className={training.status === 'rejected' ? 'gap-1 bg-red-600 hover:bg-red-700 text-white' : 'gap-1'}
+                            className={training.status === 'rejected' || training.status === 'expired' ? 'gap-1 bg-red-600 hover:bg-red-700 text-white' : 'gap-1'}
                             data-testid={`upload-training-${training.id}`}
                           >
                             {uploading === `training_${training.id}` ? (
@@ -2054,13 +2011,14 @@ export default function WorkerDashboard() {
                             ) : (
                               <Upload className="h-4 w-4" />
                             )}
-                            {training.status === 'rejected' ? 'Re-upload' : 'Upload'}
+                            {cfg.uploadLabel}
                           </Button>
                         )}
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <p className="text-xs text-slate-400 mt-4 text-center">
                 {ACCEPTED_FORMATS}
@@ -2087,34 +2045,29 @@ export default function WorkerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {recommended_trainings.map((training, idx) => (
+                {recommended_trainings.map((training, idx) => {
+                  const cfg = TRAINING_STATUS_CONFIG[training.status] || TRAINING_STATUS_CONFIG.missing;
+                  const StatusIcon = cfg.Icon;
+                  return (
                   <div 
                     key={idx} 
-                    className={`p-3 rounded-xl border ${
-                      training.status === 'complete' ? 'bg-green-50 border-green-200' :
-                      training.status === 'expired' || training.status === 'rejected' ? 'bg-red-50 border-red-200' :
-                      'bg-slate-50 border-slate-200'
-                    }`}
+                    className={`p-3 rounded-xl border ${cfg.cardBg}`}
                     data-testid={`recommended-training-row-${training.id}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                          training.status === 'complete' ? 'bg-green-100' :
-                          training.status === 'expired' ? 'bg-red-100' :
-                          'bg-slate-100'
-                        }`}>
-                          {training.status === 'complete' ? (
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                          ) : training.status === 'expired' ? (
-                            <AlertTriangle className="h-4 w-4 text-red-600" />
-                          ) : (
-                            <Clock className="h-4 w-4 text-slate-400" />
-                          )}
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${cfg.iconBg}`}>
+                          <StatusIcon className={`h-4 w-4 ${cfg.iconCls}`} />
                         </div>
                         <div>
                           <span className="font-medium text-sm text-slate-700">{training.name}</span>
-                          {training.expiry_date && (
+                          {training.status === 'rejected' && training.rejection_reason && (
+                            <p className="text-xs text-red-600">Reason: {training.rejection_reason}</p>
+                          )}
+                          {training.status === 'due_soon' && training.days_until_expiry != null && (
+                            <p className="text-xs text-amber-600">Expires in {training.days_until_expiry} days</p>
+                          )}
+                          {training.expiry_date && training.status !== 'due_soon' && (
                             <p className={`text-xs ${training.status === 'expired' ? 'text-red-600' : 'text-slate-500'}`}>
                               {training.status === 'expired' ? 'Expired: ' : 'Expires: '}{formatDate(training.expiry_date)}
                             </p>
@@ -2122,33 +2075,17 @@ export default function WorkerDashboard() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {training.status === 'rejected' ? (
-                          <div className="flex flex-col items-end gap-1">
-                            <Badge className="bg-red-100 text-red-700 text-xs"><AlertCircle className="h-3 w-3 mr-1" />Rejected</Badge>
-                            {training.rejection_reason && (
-                              <span className="text-xs text-red-600 max-w-[180px] text-right truncate" title={training.rejection_reason}>
-                                {training.rejection_reason}
-                              </span>
-                            )}
-                          </div>
-                        ) : training.status === 'complete' ? (
-                          training.verified ? (
-                            <Badge className="bg-green-100 text-green-700 text-xs"><Shield className="h-3 w-3 mr-1" />Verified</Badge>
-                          ) : (
-                            <Badge className="bg-amber-100 text-amber-700 text-xs"><Clock className="h-3 w-3 mr-1" />Pending</Badge>
-                          )
-                        ) : training.status === 'expired' ? (
-                          <Badge className="bg-red-100 text-red-700 text-xs">Expired</Badge>
-                        ) : (
-                          <Badge className="bg-slate-100 text-slate-500 text-xs">Optional</Badge>
-                        )}
-                        {(training.status !== 'complete' || training.status === 'rejected') && (
+                        <Badge className={`text-xs ${cfg.badgeCls}`}>
+                          <StatusIcon className="h-3 w-3 mr-1" />
+                          {training.status === 'missing' ? 'Optional' : cfg.badge}
+                        </Badge>
+                        {cfg.showUpload && (
                           <Button 
                             size="sm" 
-                            variant={training.status === 'rejected' ? 'default' : 'outline'}
+                            variant={training.status === 'rejected' || training.status === 'expired' ? 'default' : 'outline'}
                             onClick={() => triggerFileInput(`training_${training.id}`)}
                             disabled={uploading === `training_${training.id}`}
-                            className={training.status === 'rejected' ? 'gap-1 text-xs bg-red-600 hover:bg-red-700 text-white' : 'gap-1 text-xs'}
+                            className={training.status === 'rejected' || training.status === 'expired' ? 'gap-1 text-xs bg-red-600 hover:bg-red-700 text-white' : 'gap-1 text-xs'}
                             data-testid={`upload-training-${training.id}`}
                           >
                             {uploading === `training_${training.id}` ? (
@@ -2156,13 +2093,14 @@ export default function WorkerDashboard() {
                             ) : (
                               <Upload className="h-3 w-3" />
                             )}
-                            {training.status === 'rejected' ? 'Re-upload' : 'Upload'}
+                            {cfg.uploadLabel}
                           </Button>
                         )}
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>

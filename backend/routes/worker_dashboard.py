@@ -195,6 +195,18 @@ def get_pre_interview_questionnaire_data_func():
     return get_pre_interview_questionnaire_data
 
 
+def get_evaluate_employee_training_status_func():
+    """Lazy import of evaluate_employee_training_status from training evaluator service."""
+    from services.training_evaluator import evaluate_employee_training_status
+    return evaluate_employee_training_status
+
+
+def _get_mandatory_training_ids():
+    """Lazy import of canonical mandatory training IDs from training evaluator service."""
+    from services.training_evaluator import get_canonical_mandatory_training_ids
+    return get_canonical_mandatory_training_ids()
+
+
 # ==================== WORKER DASHBOARD ====================
 
 @router.get("/worker/dashboard")
@@ -678,246 +690,64 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
                 "verified_at": poa_doc.get("verification_stamp_at") or poa_doc.get("verified_at"),
             })
     
-    # Get training (exclude superseded AND deleted — aligned with UCE/admin queries)
-    trainings = await db.training_records.find({
-        "employee_id": employee_id,
-        "record_status": {"$nin": ["superseded", "deleted"]}
-    }).to_list(length=100)
-    
-    # 8 mandatory trainings aligned with MANDATORY_TRAINING_HCA in unified_compliance_engine.py
-    mandatory_trainings = {
-        "safeguarding": "Safeguarding",
-        "manual_handling": "Moving & Handling",
-        "health_safety": "Health & Safety",
-        "bls": "First Aid / Basic Life Support",
-        "fire_safety": "Fire Safety",
-        "infection_control": "Infection Control",
-        "information_governance": "Information Governance",
-        "prevent": "Prevent"
-    }
-    # 6 recommended trainings — useful but NOT tracked by UCE compliance gate
-    recommended_trainings_def = {
-        "induction": "Induction",
-        "medication": "Medication",
-        "food_hygiene": "Food Hygiene",
-        "mca_dols": "MCA and DoLs",
-        "dementia": "Dementia Awareness",
-        "autism": "Autism Awareness",
-    }
-    
+    # -------- TRAINING: canonical evaluator (Phase 2 Step 5) --------
+    now = datetime.now(timezone.utc)
+
+    evaluate_training = get_evaluate_employee_training_status_func()
+    role = employee.get("role", "") or employee.get("job_title", "")
+    training_eval = await evaluate_training(employee_id, role)
+
+    # IDs that are compliance-mandatory – derived from canonical MANDATORY_ITEMS.
+    _MANDATORY_TRAINING_IDS = _get_mandatory_training_ids()
+
+    all_mandatory_trainings = []
+    all_recommended_trainings = []
     missing_trainings = []
     completed_trainings = []
     expired_trainings = []
-    all_mandatory_trainings = []
-    all_recommended_trainings = []
-    now = datetime.now(timezone.utc)
-    
-    for training_id, training_name in mandatory_trainings.items():
-        record = None
-        search_patterns = [
-            training_id.replace("_", " "),
-            training_id.replace("_", ""),
-            training_name.lower(),
-            f"cstf {training_name.lower()}",
-            f"cstf {training_id.replace('_', ' ')}",
-        ]
-        
-        # Add alternative search patterns for each training type
-        if training_id == "safeguarding":
-            search_patterns.extend(["safeguarding adults", "safeguarding children", "safeguard"])
-        elif training_id == "manual_handling":
-            search_patterns.extend(["moving & handling", "moving and handling", "patient handling"])
-        elif training_id == "bls":
-            search_patterns.extend(["basic life support", "resuscitation", "cpr", "first aid"])
-        elif training_id == "health_safety":
-            search_patterns.extend(["health, safety and welfare", "health and safety", "h&s"])
-        elif training_id == "fire_safety":
-            search_patterns.extend(["fire awareness", "fire prevention", "fire evacuation"])
-        elif training_id == "infection_control":
-            search_patterns.extend(["infection prevention", "ipc"])
-        elif training_id == "information_governance":
-            search_patterns.extend(["gdpr", "data protection", "ig training"])
-        elif training_id == "prevent":
-            search_patterns.extend(["counter terrorism", "radicalisation", "prevent duty"])
-        
-        for t in trainings:
-            t_name = (t.get("training_name") or "").lower()
-            for pattern in search_patterns:
-                if pattern in t_name:
-                    record = t
-                    break
-            if record:
-                break
-        
-        training_entry = {
-            "id": training_id,
-            "name": training_name,
-            "status": "missing",
-            "completion_date": None,
-            "expiry_date": None,
-            "verified": False,
-            "record_id": None
-        }
-        
-        if record:
-            expiry_str = record.get("expiry_date")
-            is_expired = False
-            
-            if expiry_str:
-                try:
-                    if isinstance(expiry_str, str):
-                        if 'T' in expiry_str or '+' in expiry_str or 'Z' in expiry_str:
-                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                        else:
-                            expiry = datetime.strptime(expiry_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-                    else:
-                        expiry = expiry_str
-                        if expiry.tzinfo is None:
-                            expiry = expiry.replace(tzinfo=timezone.utc)
-                    is_expired = expiry < now
-                except Exception as e:
-                    logger.warning(f"Error parsing training expiry date '{expiry_str}': {e}")
-            
-            v_status = record.get("verification_status", "")
-            is_rejected = v_status == "rejected"
 
-            training_entry.update({
-                "status": "rejected" if is_rejected else ("expired" if is_expired else "complete"),
-                "completion_date": record.get("completion_date"),
-                "expiry_date": expiry_str,
-                "verified": record.get("verified", False),
-                "verification_status": v_status or None,
-                "rejection_reason": record.get("rejection_reason") if is_rejected else None,
-                "record_id": record.get("id")
-            })
-            
-            if is_rejected:
-                missing_trainings.append({
-                    "id": training_id,
-                    "name": training_name,
-                    "action": "upload_certificate"
-                })
-            elif is_expired:
-                expired_trainings.append({
-                    "id": training_id,
-                    "name": training_name,
-                    "expiry_date": expiry_str,
-                    "action": "upload_certificate"
-                })
-            else:
-                completed_trainings.append({
-                    "id": training_id,
-                    "name": training_name,
-                    "completion_date": record.get("completion_date"),
-                    "expiry_date": expiry_str,
-                    "verified": record.get("verified", False)
-                })
+    for item in training_eval.get("items", []):
+        entry = {
+            "id": item["code"],
+            "name": item["title"],
+            "status": item["status"],               # canonical — no mapping
+            "completion_date": item.get("completion_date"),
+            "expiry_date": item.get("expires_at"),
+            "verified": item.get("verified", False),
+            "record_id": item.get("record_id"),
+            "days_until_expiry": item.get("days_until_expiry"),
+            "detail": item.get("detail"),
+            "blocker": item.get("blocker", False),
+            "rejection_reason": item.get("rejection_reason"),
+        }
+
+        if item["code"] in _MANDATORY_TRAINING_IDS:
+            all_mandatory_trainings.append(entry)
         else:
-            missing_trainings.append({
-                "id": training_id,
-                "name": training_name,
-                "action": "upload_certificate"
-            })
-        
-        all_mandatory_trainings.append(training_entry)
-    
-    # Process recommended trainings (same logic, separate list)
-    for training_id, training_name in recommended_trainings_def.items():
-        record = None
-        search_patterns = [
-            training_id.replace("_", " "),
-            training_id.replace("_", ""),
-            training_name.lower(),
-            f"cstf {training_name.lower()}",
-            f"cstf {training_id.replace('_', ' ')}",
-        ]
-        if training_id == "induction":
-            search_patterns.extend(["company induction", "orientation", "welcome training"])
-        elif training_id == "medication":
-            search_patterns.extend(["medication administration", "medicines management", "safe handling of medicines"])
-        elif training_id == "food_hygiene":
-            search_patterns.extend(["food safety", "food handling", "level 2 food"])
-        elif training_id == "mca_dols":
-            search_patterns.extend(["mental capacity", "deprivation of liberty", "mca", "dols", "best interests"])
-        elif training_id == "dementia":
-            search_patterns.extend(["dementia awareness", "dementia care", "alzheimer"])
-        elif training_id == "autism":
-            search_patterns.extend(["autism awareness", "autism spectrum", "asd"])
-        
-        for t in trainings:
-            t_name = (t.get("training_name") or "").lower()
-            for pattern in search_patterns:
-                if pattern in t_name:
-                    record = t
-                    break
-            if record:
-                break
-        
-        training_entry = {
-            "id": training_id,
-            "name": training_name,
-            "status": "missing",
-            "completion_date": None,
-            "expiry_date": None,
-            "verified": False,
-            "record_id": None
-        }
-        
-        if record:
-            expiry_str = record.get("expiry_date")
-            is_expired = False
-            
-            if expiry_str:
-                try:
-                    if isinstance(expiry_str, str):
-                        if 'T' in expiry_str or '+' in expiry_str or 'Z' in expiry_str:
-                            expiry = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
-                        else:
-                            expiry = datetime.strptime(expiry_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-                    else:
-                        expiry = expiry_str
-                        if expiry.tzinfo is None:
-                            expiry = expiry.replace(tzinfo=timezone.utc)
-                    is_expired = expiry < now
-                except Exception as e:
-                    logger.warning(f"Error parsing recommended training expiry date '{expiry_str}': {e}")
-            
-            v_status = record.get("verification_status", "")
-            is_rejected = v_status == "rejected"
+            all_recommended_trainings.append(entry)
 
-            training_entry.update({
-                "status": "rejected" if is_rejected else ("expired" if is_expired else "complete"),
-                "completion_date": record.get("completion_date"),
-                "expiry_date": expiry_str,
-                "verified": record.get("verified", False),
-                "verification_status": v_status or None,
-                "rejection_reason": record.get("rejection_reason") if is_rejected else None,
-                "record_id": record.get("id")
+        # Bucket into convenience lists (top-level response keys)
+        if item["status"] in ("missing", "rejected"):
+            missing_trainings.append({
+                "id": item["code"],
+                "name": item["title"],
+                "action": "upload_certificate",
             })
-            
-            if is_rejected:
-                missing_trainings.append({
-                    "id": training_id,
-                    "name": training_name,
-                    "action": "upload_certificate"
-                })
-            elif is_expired:
-                expired_trainings.append({
-                    "id": training_id,
-                    "name": training_name,
-                    "expiry_date": expiry_str,
-                    "action": "upload_certificate"
-                })
-            else:
-                completed_trainings.append({
-                    "id": training_id,
-                    "name": training_name,
-                    "completion_date": record.get("completion_date"),
-                    "expiry_date": expiry_str,
-                    "verified": record.get("verified", False)
-                })
-        
-        all_recommended_trainings.append(training_entry)
+        elif item["status"] == "expired":
+            expired_trainings.append({
+                "id": item["code"],
+                "name": item["title"],
+                "expiry_date": item.get("expires_at"),
+                "action": "upload_certificate",
+            })
+        elif item["status"] in ("completed", "verified", "due_soon", "awaiting_review"):
+            completed_trainings.append({
+                "id": item["code"],
+                "name": item["title"],
+                "completion_date": item.get("completion_date"),
+                "expiry_date": item.get("expires_at"),
+                "verified": item.get("verified", False),
+            })
     
     # Get expiry alerts
     alerts = []
@@ -1042,7 +872,6 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
     agreements_status.append(handbook_status)
     
     # Unified progress
-    unified_training_items = []
     try:
         unified_status = await get_unified_employee_status(employee_id, db, user_role="worker", include_details=True)
         progress_percentage = unified_status["progress"]["percentage"]
@@ -1051,7 +880,6 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         unified_blockers = unified_status.get("blockers", [])
         has_blockers = len(unified_blockers) > 0 or not contract_signed
         
-        unified_training_items = unified_status.get("category_details", {}).get("training", {}).get("items", [])
         rtw_canonical_item = next(
             (
                 item for item in unified_status.get("categories", {}).get("documents", {}).get("items", [])
@@ -1075,7 +903,7 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         )
     except Exception as e:
         logger.error(f"Unified progress failed for {employee_id}: {e}")
-        total_required = len(required_docs) + 1 + len(mandatory_trainings)
+        total_required = len(required_docs) + 1 + len(all_mandatory_trainings)
         total_completed = len([d for d in completed_docs if not d.get("partial")]) + len(completed_trainings)
         if len(poa_docs) >= 2:
             total_completed += 1
@@ -1084,30 +912,6 @@ async def worker_dashboard(worker: dict = Depends(get_current_worker)):
         unified_blockers = []
         dbs_canonical_item = None
         identity_canonical_item = None
-    
-    if unified_training_items:
-        all_mandatory_trainings = []
-        for item in unified_training_items:
-            all_mandatory_trainings.append({
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "status": "complete" if item.get("completed") else (
-                    "expired" if (
-                        item.get("expiry_date") and (
-                            lambda exp: exp < datetime.now(timezone.utc)
-                        )(
-                            datetime.fromisoformat(str(item["expiry_date"]).replace("Z", "+00:00"))
-                            if isinstance(item.get("expiry_date"), str)
-                            else item["expiry_date"].replace(tzinfo=timezone.utc) if item["expiry_date"].tzinfo is None else item["expiry_date"]
-                        ) if item.get("expiry_date") else False
-                    ) or "expired" in (item.get("invalid_reason") or "").lower()
-                    else "missing"
-                ),
-                "completion_date": None,
-                "expiry_date": item.get("expiry_date"),
-                "verified": item.get("verified", False),
-                "record_id": None
-            })
 
     # Second pass: apply canonical UCE state to completed_docs entries that were
     # built from raw document rows before the unified-status fetch.

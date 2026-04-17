@@ -21,29 +21,6 @@ import { formatBackendDate, formatBackendDateTime } from '../../lib/dateUtils';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-const mandatoryTraining = [
-  'Safeguarding of Vulnerable Adults',
-  'Health and Safety',
-  'Moving and Handling',
-  'Infection Control and Hygiene',
-  'Medication Administration',
-  'Food Hygiene, Nutrition and Hydration',
-  'Covid 19',
-  'First Aid Awareness'
-];
-
-const additionalTraining = [
-  'Confidentiality',
-  'Fire Safety',
-  'Understanding Dementia',
-  'Mental Health Awareness',
-  'Pressure Care and Prevention Techniques',
-  'Care Planning Process',
-  'Deprivation of Liberty Safeguards',
-  'Person Centred Care',
-  'Dying, Death and Bereavement'
-];
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // SINGLE SOURCE OF TRUTH: Status comes from backend ONLY
 // Frontend MUST use backend-computed status (computed_status, renewal_status, status_label, status_color)
@@ -82,6 +59,7 @@ export default function TrainingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [training, setTraining] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [trainingDefinitions, setTrainingDefinitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -150,7 +128,7 @@ export default function TrainingPage() {
       setLoading(true);
       const headers = { Authorization: `Bearer ${token}` };
       
-      const [trainingRes, employeesRes, summaryRes, extractionsRes] = await Promise.all([
+      const [trainingRes, employeesRes, summaryRes, extractionsRes, defsRes] = await Promise.all([
         axios.get(`${API}/training-records`, { headers }),
         axios.get(`${API}/employees`, { headers }),
         axios.get(`${API}/training/matrix/summary`, { headers }).catch((err) => {
@@ -160,11 +138,20 @@ export default function TrainingPage() {
         axios.get(`${API}/document-extractions/pending-review?limit=50`, { headers }).catch((err) => {
           console.warn('[TrainingPage] Extractions fetch failed:', err);
           return null;
+        }),
+        axios.get(`${API}/training/definitions`, { headers }).catch((err) => {
+          console.warn('[TrainingPage] Training definitions fetch failed:', err);
+          return null;
         })
       ]);
       
       setTraining(trainingRes.data || []);
       setEmployees(employeesRes.data || []);
+      
+      // Set training definitions from canonical source
+      if (defsRes?.data?.definitions) {
+        setTrainingDefinitions(defsRes.data.definitions);
+      }
       
       // Set summary from backend (canonical source)
       if (summaryRes?.data) {
@@ -436,17 +423,9 @@ export default function TrainingPage() {
                       <SelectValue placeholder="Select training" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="header-mandatory" disabled className="font-semibold">
-                        Mandatory Training
-                      </SelectItem>
-                      {mandatoryTraining.map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
-                      ))}
-                      <SelectItem value="header-additional" disabled className="font-semibold">
-                        Additional Training
-                      </SelectItem>
-                      {additionalTraining.map((t) => (
-                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      {/* Canonical training definitions from backend */}
+                      {trainingDefinitions.map((d) => (
+                        <SelectItem key={d.id} value={d.name}>{d.name}{d.mandatory_for_compliance ? ' *' : ''}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

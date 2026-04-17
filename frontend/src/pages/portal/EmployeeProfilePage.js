@@ -741,7 +741,18 @@ export default function EmployeeProfilePage() {
       window.open(url, '_blank', 'noopener');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err) {
-      toast.error('Failed to open CV file');
+      // When responseType is 'blob', error response data is a Blob — read it as text
+      let detail = 'Failed to open CV file';
+      if (err.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          if (parsed.detail) detail = parsed.detail;
+        } catch (_) { /* keep default message */ }
+      } else if (err.response?.data?.detail) {
+        detail = err.response.data.detail;
+      }
+      toast.error(detail);
     }
   };
   

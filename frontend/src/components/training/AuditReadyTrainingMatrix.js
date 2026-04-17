@@ -149,9 +149,9 @@ export default function AuditReadyTrainingMatrix({
         axios.get(`${API}/api/employees/${employeeId}/training/proposed-items`, {
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => ({ data: [] })),
-        axios.get(`${API}/api/employee-documents?employee_id=${employeeId}`, {
+        axios.get(`${API}/api/employees/${employeeId}/training/certificates`, {
           headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => ({ data: [] }))
+        }).catch(() => ({ data: { certificates: [] } }))
       ]);
       
       // Process matrix data
@@ -170,15 +170,9 @@ export default function AuditReadyTrainingMatrix({
                            proposedData?.items || proposedData?.proposed_items || [];
       setProposedItems(proposedArray);
       
-      // Get training certificates - ensure docs is an array
+      // Get training certificates from merged endpoint (canonical + legacy)
       const docsData = docsRes?.data;
-      const docs = Array.isArray(docsData) ? docsData : 
-                   docsData?.documents || [];
-      const trainingCerts = docs.filter(d => 
-        d.document_type === 'training_certificate' || 
-        d.requirement_id?.includes('training') ||
-        d.category === 'training'
-      );
+      const trainingCerts = docsData?.certificates || [];
       setCertificates(trainingCerts);
       
       // Use the summary from API which already has correct calculations

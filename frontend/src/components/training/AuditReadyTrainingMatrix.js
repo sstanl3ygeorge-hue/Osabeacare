@@ -540,12 +540,12 @@ export default function AuditReadyTrainingMatrix({
                       </TableCell>
                       <TableCell>{renderStatusBadge(item.status)}</TableCell>
                       <TableCell>
-                        {item.source_document_id ? (
+                        {(item.record_id || item.id) && (item.source_document_id || item.certificate_url || item.evidence_files?.length) ? (
                           <Button
                             variant="link"
                             size="sm"
                             className="h-auto p-0 text-blue-600"
-                            onClick={() => onViewCertificate?.(item.source_document_id)}
+                            onClick={() => onViewCertificate?.(item.record_id || item.id)}
                           >
                             <FileText className="h-3 w-3 mr-1" />
                             View
@@ -772,12 +772,12 @@ export default function AuditReadyTrainingMatrix({
                         )}
                       </TableCell>
                       <TableCell>
-                        {item.source_document_id ? (
+                        {(item.record_id || item.id) && (item.source_document_id || item.certificate_url || item.evidence_files?.length) ? (
                           <Button
                             variant="link"
                             size="sm"
                             className="h-auto p-0 text-blue-600"
-                            onClick={() => onViewCertificate?.(item.source_document_id)}
+                            onClick={() => onViewCertificate?.(item.record_id || item.id)}
                           >
                             <LinkIcon className="h-3 w-3 mr-1" />
                             View Cert

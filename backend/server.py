@@ -21687,21 +21687,89 @@ async def upload_training_certificate(
 
 # MOVED TO routes/training.py: /training-records/{record_id}/verify
 # MOVED TO routes/training.py: /training-records/{record_id}/unverify
+async def _resolve_certificate_url(record: dict) -> str:
+    """Resolve the file URL for a training record using fallback chain:
+    1. certificate_url on the record itself
+    2. evidence_files[0].file_url on the record
+    3. source_document_id -> employee_documents.file_url
+    4. source_document_id -> employee_documents.evidence_files[0].file_url
+    Returns the resolved URL or None.
+    """
+    # 1. Direct certificate_url
+    file_url = record.get('certificate_url')
+    if file_url:
+        return file_url
+
+    # 2. evidence_files on the training record
+    evidence_files = record.get('evidence_files')
+    if evidence_files and isinstance(evidence_files, list) and len(evidence_files) > 0:
+        file_url = evidence_files[0].get('file_url') if isinstance(evidence_files[0], dict) else None
+        if file_url:
+            return file_url
+
+    # 3-4. Lookup via source_document_id
+    source_doc_id = record.get('source_document_id') or record.get('certificate_document_id')
+    if source_doc_id:
+        source_doc = await db.employee_documents.find_one({"id": source_doc_id}, {"_id": 0})
+        if source_doc:
+            file_url = source_doc.get('file_url')
+            if file_url:
+                return file_url
+            src_evidence = source_doc.get('evidence_files')
+            if src_evidence and isinstance(src_evidence, list) and len(src_evidence) > 0:
+                file_url = src_evidence[0].get('file_url') if isinstance(src_evidence[0], dict) else None
+                if file_url:
+                    return file_url
+
+    return None
+
+
+async def _resolve_file_url_for_id(record_id: str):
+    """Resolve a file URL given an ID that may be a training_record ID or an employee_document ID.
+    Returns (file_url, record_or_doc) or (None, None).
+    """
+    # 1. Try as training record
+    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
+    if record:
+        file_url = await _resolve_certificate_url(record)
+        if file_url:
+            return file_url, record
+
+    # 2. Try as employee document (for certificate tab items)
+    doc = await db.employee_documents.find_one({"id": record_id}, {"_id": 0})
+    if doc:
+        file_url = doc.get('file_url')
+        if not file_url and doc.get('evidence_files') and isinstance(doc['evidence_files'], list) and len(doc['evidence_files']) > 0:
+            first = doc['evidence_files'][0]
+            file_url = first.get('file_url') if isinstance(first, dict) else None
+        if file_url:
+            return file_url, doc
+
+    # 3. Try training record by source_document_id (if caller passed a doc ID)
+    if not record:
+        record = await db.training_records.find_one({"source_document_id": record_id}, {"_id": 0})
+        if record:
+            file_url = await _resolve_certificate_url(record)
+            if file_url:
+                return file_url, record
+
+    return None, record or doc or None
+
+
 @api_router.get("/training-records/{record_id}/certificate/file")
 async def get_training_certificate_file(record_id: str, user: dict = Depends(get_current_user)):
     """Get certificate file for viewing."""
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    if not record:
+    file_url, source = await _resolve_file_url_for_id(record_id)
+    if not source:
         raise HTTPException(status_code=404, detail="Training record not found")
-    
-    if not record.get('certificate_url'):
-        raise HTTPException(status_code=404, detail="No certificate uploaded for this training")
+    if not file_url:
+        raise HTTPException(status_code=404, detail="No certificate file found for this training")
     
     try:
-        file_bytes, stored_content_type = get_object(record['certificate_url'])
+        file_bytes, stored_content_type = get_object(file_url)
         
         # Determine content type from extension or use stored type
-        ext = record['certificate_url'].split('.')[-1].lower()
+        ext = file_url.split('.')[-1].lower()
         content_types = {
             'pdf': 'application/pdf',
             'jpg': 'image/jpeg',
@@ -21720,17 +21788,16 @@ async def get_training_certificate_file(record_id: str, user: dict = Depends(get
 @api_router.get("/training-records/{record_id}/certificate/download")
 async def download_training_certificate(record_id: str, user: dict = Depends(get_current_user)):
     """Download certificate file."""
-    record = await db.training_records.find_one({"id": record_id}, {"_id": 0})
-    if not record:
+    file_url, source = await _resolve_file_url_for_id(record_id)
+    if not source:
         raise HTTPException(status_code=404, detail="Training record not found")
-    
-    if not record.get('certificate_url'):
-        raise HTTPException(status_code=404, detail="No certificate uploaded for this training")
+    if not file_url:
+        raise HTTPException(status_code=404, detail="No certificate file found for this training")
     
     try:
-        file_bytes, _ = get_object(record['certificate_url'])
+        file_bytes, _ = get_object(file_url)
         
-        filename = record.get('original_filename', f"{record['training_name']}_certificate.pdf")
+        filename = source.get('original_filename') or source.get('file_name') or f"{source.get('training_name', 'training')}_certificate.pdf"
         
         return Response(
             content=file_bytes, 

@@ -149,7 +149,10 @@ export default function TrainingDetailDrawer({
       
       setPreviewUrl(url);
     } catch (err) {
-      toast.error('Failed to view certificate');
+      const msg = err.response?.status === 404 
+        ? 'Certificate file not found — it may not have been uploaded yet'
+        : 'Failed to view certificate';
+      toast.error(msg);
     } finally {
       setPreviewLoading(false);
     }

@@ -5565,8 +5565,8 @@ export default function EmployeeProfilePage() {
               // Open the training intake wizard
               setTrainingIntakeOpen(true);
             }}
-            onViewCertificate={(documentId) => {
-              handleViewTrainingCertificate(documentId, 'training_certificate');
+            onViewCertificate={(recordId) => {
+              handleViewTrainingCertificate(recordId, 'training_certificate');
             }}
             onRefresh={() => {
               fetchTrainingEvaluation();

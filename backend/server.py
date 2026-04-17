@@ -21703,9 +21703,11 @@ async def _resolve_certificate_url(record: dict) -> str:
     # 2. evidence_files on the training record
     evidence_files = record.get('evidence_files')
     if evidence_files and isinstance(evidence_files, list) and len(evidence_files) > 0:
-        file_url = evidence_files[0].get('file_url') if isinstance(evidence_files[0], dict) else None
-        if file_url:
-            return file_url
+        first_ef = evidence_files[0]
+        if isinstance(first_ef, dict):
+            file_url = first_ef.get('file_url') or first_ef.get('url')
+            if file_url:
+                return file_url
 
     # 3-4. Lookup via source_document_id
     source_doc_id = record.get('source_document_id') or record.get('certificate_document_id')
@@ -21717,9 +21719,11 @@ async def _resolve_certificate_url(record: dict) -> str:
                 return file_url
             src_evidence = source_doc.get('evidence_files')
             if src_evidence and isinstance(src_evidence, list) and len(src_evidence) > 0:
-                file_url = src_evidence[0].get('file_url') if isinstance(src_evidence[0], dict) else None
-                if file_url:
-                    return file_url
+                first_src = src_evidence[0]
+                if isinstance(first_src, dict):
+                    file_url = first_src.get('file_url') or first_src.get('url')
+                    if file_url:
+                        return file_url
 
     return None
 
@@ -21741,7 +21745,7 @@ async def _resolve_file_url_for_id(record_id: str):
         file_url = doc.get('file_url')
         if not file_url and doc.get('evidence_files') and isinstance(doc['evidence_files'], list) and len(doc['evidence_files']) > 0:
             first = doc['evidence_files'][0]
-            file_url = first.get('file_url') if isinstance(first, dict) else None
+            file_url = (first.get('file_url') or first.get('url')) if isinstance(first, dict) else None
         if file_url:
             return file_url, doc
 

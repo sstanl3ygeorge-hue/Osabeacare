@@ -2494,7 +2494,7 @@ class WorkerGapExplanation(BaseModel):
 
 @router.get("/worker/employment-gaps")
 async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker)):
-    """Get the current worker's employment gaps for self-service clarification."""
+    """Get the current worker's employment gaps and 10-year coverage for self-service clarification."""
     db = get_db()
     employee_id = worker.get("employee_id")
 
@@ -2507,11 +2507,37 @@ async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker))
 
     # Fallback to inline employee.employment_gaps if no collection records
     if not gap_records:
-        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "employment_gaps": 1})
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "employment_gaps": 1, "employment_history": 1, "employment_coverage": 1})
         gap_records = employee.get("employment_gaps", []) if employee else []
+    else:
+        employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "employment_history": 1, "employment_coverage": 1})
 
-    from employment_gap_engine import evaluate_gaps_compliance
+    from employment_gap_engine import evaluate_gaps_compliance, compute_coverage_summary
     evaluation = evaluate_gaps_compliance(gap_records)
+
+    # Compute 10-year coverage summary
+    employment_history = (employee or {}).get("employment_history", [])
+    # Use stored coverage if available, otherwise compute fresh
+    coverage = (employee or {}).get("employment_coverage")
+    if not coverage:
+        coverage = compute_coverage_summary(employment_history)
+
+    # Build employment entries for the worker — worker-editable fields only
+    # Excludes admin-only fields: verification_status, verified_by, verified_at, reference_id
+    entries_summary = []
+    for entry in employment_history:
+        entries_summary.append({
+            "employer_name": entry.get("employer_name", "Unknown"),
+            "job_title": entry.get("job_title", entry.get("position", "")),
+            "start_date": entry.get("start_date"),
+            "end_date": entry.get("end_date"),
+            "is_current": not bool(entry.get("end_date")),
+            "duties": entry.get("duties", ""),
+            "reason_for_leaving": entry.get("reason_for_leaving", ""),
+            "employer_address": entry.get("employer_address", ""),
+            "employer_phone": entry.get("employer_phone", ""),
+            "can_contact": entry.get("can_contact", True),
+        })
 
     return {
         "gaps": gap_records,
@@ -2519,6 +2545,8 @@ async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker))
         "total_gaps": evaluation.get("total_gaps", 0),
         "all_explained": evaluation.get("is_complete", False),
         "reason_types": GAP_REASON_TYPES,
+        "coverage": coverage,
+        "employment_entries": entries_summary,
     }
 
 
@@ -2583,3 +2611,283 @@ async def worker_explain_gap(
     )
 
     return {"success": True, "message": "Gap explanation submitted"}
+
+
+# =============================================================================
+# WORKER EMPLOYMENT HISTORY AMENDMENT
+# =============================================================================
+
+class WorkerEmploymentEntry(BaseModel):
+    employer_name: str
+    job_title: str
+    start_date: str  # YYYY-MM or YYYY-MM-DD
+    end_date: Optional[str] = None
+    is_current: bool = False
+    duties: Optional[str] = None
+    reason_for_leaving: Optional[str] = None
+    employer_address: Optional[str] = None
+    employer_phone: Optional[str] = None
+    can_contact: bool = True
+
+
+class WorkerEmploymentAmendment(BaseModel):
+    """Payload for adding or updating a single employment entry."""
+    entry: WorkerEmploymentEntry
+    entry_index: Optional[int] = None  # None = add new, int = update existing
+
+
+async def _reconcile_employment_after_amendment(employee_id: str, employment_history: list, actor_id: str):
+    """
+    After employment_history changes:
+    1. Re-detect gaps with coverage awareness
+    2. Re-compute coverage summary
+    3. Reconcile db.employment_gaps — preserve explained/verified where dates still match
+    4. Invalidate employment review sign-off
+    5. Update employee record
+    """
+    db = get_db()
+    from employment_gap_engine import (
+        detect_employment_gaps_with_coverage,
+        compute_coverage_summary,
+        create_gap_record,
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # 1-2. Detect new gaps and compute coverage
+    new_gaps = detect_employment_gaps_with_coverage(employment_history)
+    coverage = compute_coverage_summary(employment_history)
+
+    # 3. Reconcile: load existing gap records, match by date range, preserve status
+    existing_gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).to_list(100)
+    existing_by_range = {}
+    for eg in existing_gap_records:
+        eg.pop("_id", None)
+        key = (eg.get("gap_start"), eg.get("gap_end"))
+        existing_by_range[key] = eg
+
+    # Build set of new gap date-range keys
+    new_gap_keys = set()
+    for ng in new_gaps:
+        key = (ng.get("gap_start"), ng.get("gap_end"))
+        new_gap_keys.add(key)
+
+    # Upsert new/matched gaps
+    for ng in new_gaps:
+        key = (ng.get("gap_start"), ng.get("gap_end"))
+        existing = existing_by_range.get(key)
+        if existing:
+            # Gap still exists — preserve worker-provided data
+            preserved_fields = {
+                "explanation", "reason_type", "explanation_provided_at",
+                "explained_at", "explained_by", "explanation_submitted_by_role",
+                "explanation_submitted_by_name", "explanation_source",
+                "evidence_document_id",
+            }
+            # Preserve status only if explained or verified (not stale pending)
+            existing_status = (existing.get("status") or "pending").lower()
+            if existing_status in ("explained", "verified", "needs_more_info"):
+                preserved_fields.add("status")
+                preserved_fields.add("verification_status")
+                preserved_fields.add("verified")
+                preserved_fields.add("verified_by")
+                preserved_fields.add("verified_at")
+                preserved_fields.add("admin_notes")
+                preserved_fields.add("verification_notes")
+
+            gap_record = create_gap_record(employee_id, ng, created_by=f"worker_{employee_id}")
+            for field in preserved_fields:
+                if existing.get(field) is not None:
+                    gap_record[field] = existing[field]
+            gap_record["updated_at"] = now
+
+            await db.employment_gaps.update_one(
+                {"id": gap_record["id"]},
+                {"$set": gap_record},
+                upsert=True,
+            )
+        else:
+            # Brand new gap
+            gap_record = create_gap_record(employee_id, ng, created_by=f"worker_{employee_id}")
+            await db.employment_gaps.update_one(
+                {"id": gap_record["id"]},
+                {"$set": gap_record},
+                upsert=True,
+            )
+
+    # Remove gap records that no longer exist
+    for key, eg in existing_by_range.items():
+        if key not in new_gap_keys:
+            await db.employment_gaps.delete_one({"id": eg["id"]})
+
+    # 4-5. Update employee record + invalidate sign-off
+    update_set = {
+        "employment_history": employment_history,
+        "employment_coverage": coverage,
+        "employment_gaps": new_gaps,
+        "employment_gaps_detected_at": now,
+        "has_employment_gaps": len(new_gaps) > 0,
+        "employment_history_amended_at": now,
+        "employment_history_amended_by": actor_id,
+    }
+    update_unset = {
+        "employment_review_signed_off": "",
+        "employment_review_signed_off_by": "",
+        "employment_review_signed_off_by_name": "",
+        "employment_review_signed_off_at": "",
+        "employment_review_notes": "",
+    }
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": update_set, "$unset": update_unset},
+    )
+
+    return new_gaps, coverage
+
+
+@router.post("/worker/employment-history/amend")
+async def worker_amend_employment_history(
+    request: WorkerEmploymentAmendment,
+    worker: dict = Depends(get_current_worker),
+):
+    """
+    Worker adds or updates a single employment history entry.
+    After save: re-detects gaps, recomputes coverage, reconciles gap records,
+    and invalidates any existing employment review sign-off.
+    """
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to account")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    employment_history = list(employee.get("employment_history", []))
+    entry_data = request.entry.model_dump()
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Validate: employer_name and start_date are required
+    if not entry_data.get("employer_name", "").strip():
+        raise HTTPException(status_code=422, detail="Employer name is required")
+    if not entry_data.get("start_date", "").strip():
+        raise HTTPException(status_code=422, detail="Start date is required")
+
+    # Validate: end_date required unless is_current
+    if not entry_data.get("is_current") and not entry_data.get("end_date"):
+        raise HTTPException(status_code=422, detail="End date is required unless this is your current role")
+
+    # Validate: start_date < end_date
+    if entry_data.get("end_date"):
+        if entry_data["start_date"] > entry_data["end_date"]:
+            raise HTTPException(status_code=422, detail="Start date must be before end date")
+
+    # If is_current, clear end_date
+    if entry_data.get("is_current"):
+        entry_data["end_date"] = None
+
+    entry_data["amended_at"] = now
+    entry_data["amended_by"] = f"worker_{employee_id}"
+
+    if request.entry_index is not None:
+        # Update existing entry
+        idx = request.entry_index
+        if idx < 0 or idx >= len(employment_history):
+            raise HTTPException(status_code=400, detail="Invalid entry index")
+        # Preserve any admin-only fields from the original entry
+        original = employment_history[idx]
+        for admin_field in ("verification_status", "verified_by", "verified_at", "reference_id"):
+            if admin_field in original:
+                entry_data[admin_field] = original[admin_field]
+        employment_history[idx] = entry_data
+        action = "employment_entry_updated"
+    else:
+        # Add new entry
+        employment_history.append(entry_data)
+        action = "employment_entry_added"
+
+    actor_id = f"worker_{employee_id}"
+
+    # Reconcile gaps, coverage, sign-off
+    new_gaps, coverage = await _reconcile_employment_after_amendment(
+        employee_id, employment_history, actor_id
+    )
+
+    # Audit log
+    await log_audit_action(
+        actor_id,
+        action,
+        "employee",
+        employee_id,
+        {
+            "entry_index": request.entry_index,
+            "employer_name": entry_data["employer_name"],
+            "start_date": entry_data["start_date"],
+            "end_date": entry_data.get("end_date"),
+            "source": "worker_dashboard_amendment",
+            "gaps_after": len(new_gaps),
+            "coverage_percent": coverage.get("coverage_percent", 0),
+        },
+    )
+
+    return {
+        "success": True,
+        "message": "Employment entry saved. Gaps and coverage have been recalculated.",
+        "entry_index": request.entry_index if request.entry_index is not None else len(employment_history) - 1,
+        "gaps_count": len(new_gaps),
+        "coverage": coverage,
+    }
+
+
+@router.delete("/worker/employment-history/{entry_index}")
+async def worker_delete_employment_entry(
+    entry_index: int,
+    worker: dict = Depends(get_current_worker),
+):
+    """
+    Worker removes an employment history entry they added.
+    Re-detects gaps, recomputes coverage, and invalidates sign-off.
+    """
+    db = get_db()
+    employee_id = worker.get("employee_id")
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="No employee linked to account")
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    employment_history = list(employee.get("employment_history", []))
+
+    if entry_index < 0 or entry_index >= len(employment_history):
+        raise HTTPException(status_code=400, detail="Invalid entry index")
+
+    removed_entry = employment_history.pop(entry_index)
+    actor_id = f"worker_{employee_id}"
+
+    new_gaps, coverage = await _reconcile_employment_after_amendment(
+        employee_id, employment_history, actor_id
+    )
+
+    await log_audit_action(
+        actor_id,
+        "employment_entry_removed",
+        "employee",
+        employee_id,
+        {
+            "entry_index": entry_index,
+            "employer_name": removed_entry.get("employer_name"),
+            "source": "worker_dashboard_amendment",
+            "gaps_after": len(new_gaps),
+        },
+    )
+
+    return {
+        "success": True,
+        "message": "Employment entry removed. Gaps and coverage recalculated.",
+        "gaps_count": len(new_gaps),
+        "coverage": coverage,
+    }

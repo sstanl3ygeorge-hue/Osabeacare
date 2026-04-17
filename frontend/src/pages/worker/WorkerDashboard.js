@@ -6,11 +6,13 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { Progress } from '../../components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../../components/ui/dialog';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
 import { 
   CheckCircle, AlertCircle, Clock, Upload, FileText, 
   LogOut, Loader2, AlertTriangle, Calendar, RefreshCw,
   Shield, X, PenTool, Lock, Download, ExternalLink, Eye, User, Award, Bell,
-  ShieldCheck, Circle
+  ShieldCheck, Circle, Plus, Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import SignaturePad from '../../components/worker/SignaturePad';
@@ -90,6 +92,16 @@ function EmploymentGapsSection() {
   const [explanation, setExplanation] = useState('');
   const [reasonType, setReasonType] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [coverage, setCoverage] = useState(null);
+  const [employmentEntries, setEmploymentEntries] = useState([]);
+  const [amendDialogOpen, setAmendDialogOpen] = useState(false);
+  const [amendIndex, setAmendIndex] = useState(null); // null = add, number = edit
+  const [amendForm, setAmendForm] = useState({
+    employer_name: '', job_title: '', start_date: '', end_date: '',
+    is_current: false, duties: '', reason_for_leaving: '',
+    employer_address: '', employer_phone: '', can_contact: true,
+  });
+  const [amendSaving, setAmendSaving] = useState(false);
 
   useEffect(() => {
     fetchGaps();
@@ -105,6 +117,8 @@ function EmploymentGapsSection() {
       setHasGaps(res.data.has_gaps);
       setAllExplained(res.data.all_explained);
       setReasonTypes(res.data.reason_types || []);
+      setCoverage(res.data.coverage || null);
+      setEmploymentEntries(res.data.employment_entries || []);
     } catch {
       // No gaps or endpoint not available — silently hide section
     } finally {
@@ -137,8 +151,76 @@ function EmploymentGapsSection() {
     }
   };
 
+  const openAddEntry = () => {
+    setAmendIndex(null);
+    setAmendForm({
+      employer_name: '', job_title: '', start_date: '', end_date: '',
+      is_current: false, duties: '', reason_for_leaving: '',
+      employer_address: '', employer_phone: '', can_contact: true,
+    });
+    setAmendDialogOpen(true);
+  };
+
+  const openEditEntry = (entry, index) => {
+    setAmendIndex(index);
+    setAmendForm({
+      employer_name: entry.employer_name || '',
+      job_title: entry.job_title || '',
+      start_date: entry.start_date || '',
+      end_date: entry.end_date || '',
+      is_current: entry.is_current || false,
+      duties: entry.duties || '',
+      reason_for_leaving: entry.reason_for_leaving || '',
+      employer_address: entry.employer_address || '',
+      employer_phone: entry.employer_phone || '',
+      can_contact: entry.can_contact !== false,
+    });
+    setAmendDialogOpen(true);
+  };
+
+  const handleAmendSave = async () => {
+    if (!amendForm.employer_name.trim()) { toast.error('Employer name is required'); return; }
+    if (!amendForm.start_date) { toast.error('Start date is required'); return; }
+    if (!amendForm.is_current && !amendForm.end_date) { toast.error('End date is required unless this is your current role'); return; }
+
+    setAmendSaving(true);
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.post(`${API}/worker/employment-history/amend`, {
+        entry: {
+          ...amendForm,
+          end_date: amendForm.is_current ? null : amendForm.end_date,
+        },
+        entry_index: amendIndex,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      toast.success(amendIndex !== null ? 'Employment entry updated' : 'Employment entry added');
+      setAmendDialogOpen(false);
+      fetchGaps(); // Refreshes entries + coverage + gaps
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to save employment entry');
+    } finally {
+      setAmendSaving(false);
+    }
+  };
+
+  const handleDeleteEntry = async (index) => {
+    if (!window.confirm('Remove this employment entry? Gaps and coverage will be recalculated.')) return;
+    try {
+      const token = localStorage.getItem('workerToken');
+      await axios.delete(`${API}/worker/employment-history/${index}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success('Employment entry removed');
+      fetchGaps();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      toast.error(typeof detail === 'string' ? detail : 'Failed to remove entry');
+    }
+  };
+
   if (loading) return null;
-  if (!hasGaps) return null;
+  if (!hasGaps && !coverage) return null;
 
   const unresolvedGaps = gaps.filter(g => {
     const s = (g.status || g.verification_status || '').toLowerCase();
@@ -168,7 +250,102 @@ function EmploymentGapsSection() {
     return t.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
+  const coveragePct = coverage?.coverage_percent ?? 0;
+  const coverageMet = coverage?.meets_10_year_requirement ?? false;
+
   return (
+    <div className="space-y-4">
+      {/* 10-Year Employment Coverage Summary */}
+      {coverage && (
+        <Card className={`shadow-md border-0 ${coverageMet ? 'bg-green-50/30' : 'border-l-4 border-l-blue-400'}`} data-testid="employment-coverage-section">
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Calendar className="h-5 w-5 text-blue-600" />
+                  10-Year Employment History
+                </CardTitle>
+                <p className="text-xs text-slate-500 mt-1">
+                  CQC safer recruitment requires a full account of the last 10 years
+                </p>
+              </div>
+              {coverageMet ? (
+                <Badge className="bg-green-100 text-green-700">
+                  <CheckCircle className="h-3 w-3 mr-1" />Complete
+                </Badge>
+              ) : (
+                <Badge className="bg-blue-100 text-blue-700">
+                  {Math.round(coveragePct)}% covered
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <div className="flex justify-between text-xs text-slate-500 mb-1">
+                <span>{coverage.coverage_start ? formatDate(coverage.coverage_start) : ''}</span>
+                <span>{coverage.coverage_end ? formatDate(coverage.coverage_end) : 'Present'}</span>
+              </div>
+              <Progress value={coveragePct} className="h-2.5" />
+              <p className="text-xs text-slate-500 mt-1">
+                {coverage.total_days_covered?.toLocaleString() || 0} of {coverage.total_days_required?.toLocaleString() || 0} days accounted for
+              </p>
+            </div>
+
+            {/* Employment entries summary with edit actions */}
+            <div className="border-t pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-medium text-slate-600">
+                  {employmentEntries.length > 0
+                    ? `${employmentEntries.length} employment record${employmentEntries.length !== 1 ? 's' : ''} on file`
+                    : 'No employment records on file'}
+                </p>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openAddEntry}>
+                  <Plus className="h-3 w-3 mr-1" />Add Entry
+                </Button>
+              </div>
+              {employmentEntries.length > 0 && (
+                <div className="space-y-1.5">
+                  {employmentEntries.map((entry, i) => (
+                    <div key={i} className="flex items-center justify-between py-1.5 px-3 bg-slate-50 rounded-lg text-sm group">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                        <span className="text-slate-800 truncate font-medium">{entry.employer_name}</span>
+                        {entry.job_title && <span className="text-slate-500 truncate hidden sm:inline">· {entry.job_title}</span>}
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                        <span className="text-xs text-slate-500">
+                          {formatDate(entry.start_date)} — {entry.is_current ? 'Present' : formatDate(entry.end_date)}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => openEditEntry(entry, i)}
+                          title="Edit entry"
+                        >
+                          <Edit3 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {!coverageMet && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {hasGaps
+                  ? 'Please explain any gaps below. All gaps must be explained and verified to meet CQC requirements.'
+                  : 'Your employment history does not yet cover the full 10-year window. Please ensure all roles and any gaps are accounted for.'}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Employment Gaps Card */}
+      {hasGaps && (
     <Card className={`shadow-md border-0 ${allExplained ? 'bg-green-50/30' : 'border-l-4 border-l-amber-400'}`} data-testid="employment-gaps-section">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
@@ -285,6 +462,92 @@ function EmploymentGapsSection() {
         )}
       </CardContent>
     </Card>
+      )}
+
+      {/* Employment Entry Add/Edit Dialog */}
+      <Dialog open={amendDialogOpen} onOpenChange={setAmendDialogOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{amendIndex !== null ? 'Edit Employment Entry' : 'Add Employment Entry'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <Label htmlFor="amend-employer">Employer name <span className="text-red-500">*</span></Label>
+                <Input id="amend-employer" value={amendForm.employer_name}
+                  onChange={e => setAmendForm(f => ({ ...f, employer_name: e.target.value }))}
+                  placeholder="e.g. NHS Foundation Trust" />
+              </div>
+              <div className="sm:col-span-2">
+                <Label htmlFor="amend-title">Job title <span className="text-red-500">*</span></Label>
+                <Input id="amend-title" value={amendForm.job_title}
+                  onChange={e => setAmendForm(f => ({ ...f, job_title: e.target.value }))}
+                  placeholder="e.g. Healthcare Assistant" />
+              </div>
+              <div>
+                <Label htmlFor="amend-start">Start date <span className="text-red-500">*</span></Label>
+                <Input id="amend-start" type="month" value={amendForm.start_date?.slice(0, 7) || ''}
+                  onChange={e => setAmendForm(f => ({ ...f, start_date: e.target.value }))} />
+              </div>
+              <div>
+                <Label htmlFor="amend-end">End date {!amendForm.is_current && <span className="text-red-500">*</span>}</Label>
+                <Input id="amend-end" type="month" value={amendForm.end_date?.slice(0, 7) || ''}
+                  onChange={e => setAmendForm(f => ({ ...f, end_date: e.target.value }))}
+                  disabled={amendForm.is_current} />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="amend-current" checked={amendForm.is_current}
+                onCheckedChange={v => setAmendForm(f => ({ ...f, is_current: !!v, end_date: v ? '' : f.end_date }))} />
+              <Label htmlFor="amend-current" className="text-sm cursor-pointer">I currently work here</Label>
+            </div>
+            <div>
+              <Label htmlFor="amend-duties">Main duties (optional)</Label>
+              <Textarea id="amend-duties" value={amendForm.duties} rows={2}
+                onChange={e => setAmendForm(f => ({ ...f, duties: e.target.value }))}
+                placeholder="Briefly describe your responsibilities" />
+            </div>
+            <div>
+              <Label htmlFor="amend-reason">Reason for leaving (optional)</Label>
+              <Input id="amend-reason" value={amendForm.reason_for_leaving}
+                onChange={e => setAmendForm(f => ({ ...f, reason_for_leaving: e.target.value }))}
+                disabled={amendForm.is_current}
+                placeholder="e.g. Career progression" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="amend-address">Employer address (optional)</Label>
+                <Input id="amend-address" value={amendForm.employer_address}
+                  onChange={e => setAmendForm(f => ({ ...f, employer_address: e.target.value }))} />
+              </div>
+              <div>
+                <Label htmlFor="amend-phone">Employer phone (optional)</Label>
+                <Input id="amend-phone" value={amendForm.employer_phone}
+                  onChange={e => setAmendForm(f => ({ ...f, employer_phone: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="amend-contact" checked={amendForm.can_contact}
+                onCheckedChange={v => setAmendForm(f => ({ ...f, can_contact: !!v }))} />
+              <Label htmlFor="amend-contact" className="text-sm cursor-pointer">You may contact this employer</Label>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            {amendIndex !== null && (
+              <Button variant="destructive" size="sm" className="mr-auto"
+                onClick={() => { setAmendDialogOpen(false); handleDeleteEntry(amendIndex); }}>
+                <Trash2 className="h-3.5 w-3.5 mr-1" />Remove
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => setAmendDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleAmendSave} disabled={amendSaving} className="bg-blue-600 hover:bg-blue-700">
+              {amendSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              {amendIndex !== null ? 'Save Changes' : 'Add Entry'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
@@ -1329,8 +1592,8 @@ export default function WorkerDashboard() {
         {/* Forms Section - Only for onboarding */}
         {!isActiveEmployee && <FormsSection />}
 
-        {/* Employment Gaps Clarification - Only for onboarding */}
-        {!isActiveEmployee && <EmploymentGapsSection />}
+        {/* Employment History & Gaps — visible during onboarding and for active employees */}
+        <EmploymentGapsSection />
 
         {/* ========== CV REJECTION ALERT ========== */}
         {notifications.some(n => n.type === 'cv_rejected' && !n.resolved) && (

@@ -87,7 +87,7 @@ def get_app_name():
 
 
 def get_detect_cv_gaps():
-    """Lazy import of detect_cv_gaps from server.py"""
+    """Delegate to canonical coverage-aware detector via server wrapper."""
     from server import detect_cv_gaps
     return detect_cv_gaps
 

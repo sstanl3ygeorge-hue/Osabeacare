@@ -65,8 +65,8 @@ const API = process.env.REACT_APP_BACKEND_URL;
 
 // Status styling for training items
 const STATUS_STYLES = {
-  current: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Current' },
-  completed: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Completed' },
+  current: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
+  completed: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Awaiting Verification' },
   verified: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
   expiring_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Renew Soon' },
   due_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Due Soon' },
@@ -402,7 +402,7 @@ export default function AuditReadyTrainingMatrix({
         </div>
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
           <p className="text-2xl font-bold text-emerald-700">{summary.current}</p>
-          <p className="text-xs text-emerald-600">Current</p>
+          <p className="text-xs text-emerald-600">Verified</p>
         </div>
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <p className="text-2xl font-bold text-amber-700">{summary.needsRenewal}</p>
@@ -426,7 +426,7 @@ export default function AuditReadyTrainingMatrix({
         </div>
         <div className="p-3 bg-gray-100 border border-gray-200 rounded-lg">
           <p className="text-2xl font-bold text-gray-700">{progressPercent}%</p>
-          <p className="text-xs text-gray-500">Complete</p>
+          <p className="text-xs text-gray-500">Compliant</p>
         </div>
       </div>
 

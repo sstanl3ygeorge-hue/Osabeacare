@@ -31,14 +31,16 @@ from .dependencies import (
 )
 
 # Import from employment_gap_engine
-from employment_gap_engine import evaluate_gaps_compliance
+from employment_gap_engine import (
+    evaluate_gaps_compliance,
+    detect_employment_gaps_with_coverage,
+    compute_coverage_summary,
+)
 
-# Import detect_cv_gaps from server (it's defined there)
-# Note: This creates a dependency on server.py but avoids code duplication
+# Legacy wrapper kept for callers that still reference it
 def _get_detect_cv_gaps():
-    """Lazy import to avoid circular imports"""
-    from server import detect_cv_gaps
-    return detect_cv_gaps
+    """Return canonical coverage-aware detector."""
+    return detect_employment_gaps_with_coverage
 
 def _get_put_object():
     """Lazy import of put_object from server.py"""
@@ -676,9 +678,9 @@ async def detect_employment_gaps(
             "gaps_found": 0
         }
     
-    # Detect gaps using lazy import
-    detect_cv_gaps = _get_detect_cv_gaps()
-    detected_gaps = detect_cv_gaps(employment_history)
+    # Detect gaps using canonical coverage-aware engine
+    detected_gaps = detect_employment_gaps_with_coverage(employment_history)
+    coverage = compute_coverage_summary(employment_history)
     
     now = datetime.now(timezone.utc).isoformat()
     new_gaps = 0
@@ -706,10 +708,21 @@ async def detect_employment_gaps(
             }
             await db.employment_gaps.insert_one(gap_record)
             new_gaps += 1
+
+    # Persist coverage summary on employee doc
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {
+            "employment_coverage": coverage,
+            "employment_gaps_detected_at": now,
+            "has_employment_gaps": len(detected_gaps) > 0,
+        }}
+    )
     
     return {
         "success": True,
         "total_gaps_detected": len(detected_gaps),
         "new_gaps_created": new_gaps,
-        "gaps": [_normalize_gap_record(gap) for gap in detected_gaps]
+        "gaps": [_normalize_gap_record(gap) for gap in detected_gaps],
+        "coverage": coverage,
     }

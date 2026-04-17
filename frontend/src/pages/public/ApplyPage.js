@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Header from '../../components/public/Header';
 import Footer from '../../components/public/Footer';
 import { Button } from '../../components/ui/button';
@@ -374,6 +374,157 @@ export default function ApplyPage() {
     }
   };
 
+  // ===================== CLIENT-SIDE 10-YEAR GAP DETECTION =====================
+  const [gapExplanations, setGapExplanations] = useState({});
+  const MIN_GAP_DAYS = 30;
+  const COVERAGE_YEARS = 10;
+
+  const GAP_REASON_OPTIONS = [
+    { value: 'education', label: 'Education / Training' },
+    { value: 'caring_responsibilities', label: 'Caring Responsibilities' },
+    { value: 'illness', label: 'Illness / Health' },
+    { value: 'travel', label: 'Travel' },
+    { value: 'career_break', label: 'Career Break' },
+    { value: 'redundancy', label: 'Redundancy' },
+    { value: 'unemployment', label: 'Unemployment / Job Seeking' },
+    { value: 'maternity_paternity', label: 'Maternity / Paternity Leave' },
+    { value: 'voluntary_work', label: 'Voluntary Work' },
+    { value: 'other', label: 'Other' },
+  ];
+
+  const { detectedGaps, coverageSummary } = useMemo(() => {
+    const history = formData.employment_history;
+    const now = new Date();
+    const coverageStart = new Date(now);
+    coverageStart.setFullYear(coverageStart.getFullYear() - COVERAGE_YEARS);
+
+    const parseDate = (d) => {
+      if (!d) return null;
+      try {
+        // handles YYYY-MM and YYYY-MM-DD
+        const s = d.length <= 7 ? d + '-01' : d;
+        const dt = new Date(s + 'T00:00:00Z');
+        return isNaN(dt.getTime()) ? null : dt;
+      } catch { return null; }
+    };
+
+    const valid = history.filter(j => j.start_date && parseDate(j.start_date));
+    const sorted = [...valid].sort((a, b) => (parseDate(a.start_date) || 0) - (parseDate(b.start_date) || 0));
+
+    const gaps = [];
+    let gapNum = 0;
+
+    // Pre-history gap: coverage_start → first entry
+    if (sorted.length > 0) {
+      const earliest = parseDate(sorted[0].start_date);
+      if (earliest) {
+        const preGapDays = Math.floor((earliest - coverageStart) / 86400000);
+        if (preGapDays >= MIN_GAP_DAYS) {
+          gapNum++;
+          gaps.push({
+            gap_id: `gap_${gapNum}`,
+            gap_type: 'pre_history',
+            gap_start: coverageStart.toISOString().slice(0, 10),
+            gap_end: sorted[0].start_date,
+            duration_days: preGapDays,
+            duration_months: Math.round(preGapDays / 30 * 10) / 10,
+            label: `Before first employment entry`,
+          });
+        }
+      }
+    }
+
+    // Inter-entry gaps
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const curEnd = sorted[i].is_current ? null : parseDate(sorted[i].end_date);
+      if (!curEnd) continue;
+      const nextStart = parseDate(sorted[i + 1].start_date);
+      if (!nextStart) continue;
+      const gapDays = Math.floor((nextStart - curEnd) / 86400000);
+      if (gapDays >= MIN_GAP_DAYS) {
+        gapNum++;
+        gaps.push({
+          gap_id: `gap_${gapNum}`,
+          gap_type: 'inter_entry',
+          gap_start: sorted[i].end_date,
+          gap_end: sorted[i + 1].start_date,
+          duration_days: gapDays,
+          duration_months: Math.round(gapDays / 30 * 10) / 10,
+          label: `Between ${sorted[i].employer_name || 'employer'} and ${sorted[i + 1].employer_name || 'employer'}`,
+        });
+      }
+    }
+
+    // Trailing gap: last entry → today
+    if (sorted.length > 0) {
+      const last = sorted[sorted.length - 1];
+      if (!last.is_current) {
+        const lastEnd = parseDate(last.end_date);
+        if (lastEnd) {
+          const trailDays = Math.floor((now - lastEnd) / 86400000);
+          if (trailDays >= MIN_GAP_DAYS) {
+            gapNum++;
+            gaps.push({
+              gap_id: `gap_${gapNum}`,
+              gap_type: 'trailing',
+              gap_start: last.end_date,
+              gap_end: 'present',
+              duration_days: trailDays,
+              duration_months: Math.round(trailDays / 30 * 10) / 10,
+              label: `After ${last.employer_name || 'last employer'} to present`,
+            });
+          }
+        }
+      }
+    }
+
+    // Coverage calculation
+    const totalRequired = Math.floor((now - coverageStart) / 86400000);
+    const intervals = valid.map(j => {
+      let s = parseDate(j.start_date);
+      let e = j.is_current ? now : parseDate(j.end_date);
+      if (!s || !e) return null;
+      s = s < coverageStart ? coverageStart : s;
+      e = e > now ? now : e;
+      return s < e ? [s, e] : null;
+    }).filter(Boolean).sort((a, b) => a[0] - b[0]);
+
+    const merged = [];
+    for (const [s, e] of intervals) {
+      if (merged.length && s <= merged[merged.length - 1][1]) {
+        merged[merged.length - 1][1] = e > merged[merged.length - 1][1] ? e : merged[merged.length - 1][1];
+      } else {
+        merged.push([s, e]);
+      }
+    }
+    const totalCovered = merged.reduce((sum, [s, e]) => sum + Math.floor((e - s) / 86400000), 0);
+    const pct = totalRequired > 0 ? Math.round(totalCovered / totalRequired * 100) : 0;
+
+    return {
+      detectedGaps: gaps,
+      coverageSummary: {
+        coverage_start: coverageStart.toISOString().slice(0, 10),
+        coverage_end: now.toISOString().slice(0, 10),
+        total_days_required: totalRequired,
+        total_days_covered: totalCovered,
+        coverage_percent: pct,
+        has_entries: valid.length > 0,
+      },
+    };
+  }, [formData.employment_history]);
+
+  const allGapsExplained = detectedGaps.length === 0 || detectedGaps.every(g => {
+    const expl = gapExplanations[g.gap_id];
+    return expl && expl.explanation && expl.explanation.trim().length >= 10;
+  });
+
+  const handleGapExplanationChange = (gapId, field, value) => {
+    setGapExplanations(prev => ({
+      ...prev,
+      [gapId]: { ...(prev[gapId] || {}), [field]: value }
+    }));
+  };
+
   const validateStep = (step) => {
     const errors = {};
     
@@ -398,6 +549,13 @@ export default function ApplyPage() {
           if (!emp.job_title.trim()) errors[`emp_${idx}_title`] = 'Job title required';
           if (!emp.start_date) errors[`emp_${idx}_start`] = 'Start date required';
           if (!emp.is_current && !emp.end_date) errors[`emp_${idx}_end`] = 'End date required';
+        });
+        // Require explanation for every detected gap
+        detectedGaps.forEach(g => {
+          const expl = gapExplanations[g.gap_id];
+          if (!expl || !expl.explanation || expl.explanation.trim().length < 10) {
+            errors[`gap_${g.gap_id}`] = 'Each employment gap requires an explanation (min 10 characters)';
+          }
         });
         break;
         
@@ -470,7 +628,12 @@ export default function ApplyPage() {
     try {
       const payload = {
         ...formData,
-        cv_file_id: cvFileId
+        cv_file_id: cvFileId,
+        gap_explanations: Object.entries(gapExplanations).map(([gapId, data]) => ({
+          gap_id: gapId,
+          reason_type: data.reason_type || null,
+          explanation: data.explanation || '',
+        })),
       };
       
       const response = await axios.post(`${API}/applications/structured`, payload);
@@ -749,7 +912,7 @@ export default function ApplyPage() {
       <div>
         <h2 className="font-heading text-xl font-semibold text-text-primary mb-2">Employment History</h2>
         <p className="text-sm text-text-muted mb-4">
-          Please provide your complete employment history. This will be verified and checked for any unexplained gaps.
+          Provide your <strong>full employment history for the last 10 years</strong>. All gaps of 30 days or more will be detected automatically and must be explained before your application can proceed. This is a CQC safer-recruitment requirement.
         </p>
         
         {/* CV Extraction Loading State */}
@@ -906,34 +1069,111 @@ export default function ApplyPage() {
         <Plus className="h-4 w-4 mr-2" /> Add Another Employment
       </Button>
       
-      {/* Employment Gaps */}
-      <Card className="border-amber-200 bg-amber-50">
-        <CardContent className="pt-6">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-3 flex-1">
-              <p className="text-sm text-amber-800">
-                Please declare any gaps in your employment history. All gaps will need to be explained for compliance purposes.
-              </p>
-              <div className="flex items-center gap-2">
-                <Checkbox 
-                  checked={formData.has_employment_gaps}
-                  onCheckedChange={(c) => handleChange('has_employment_gaps', c)}
-                />
-                <Label className="cursor-pointer text-amber-800">I have gaps in my employment history</Label>
-              </div>
-              {formData.has_employment_gaps && (
-                <Textarea 
-                  value={formData.employment_gap_explanation}
-                  onChange={(e) => handleChange('employment_gap_explanation', e.target.value)}
-                  placeholder="Please explain any gaps in your employment (e.g., education, caring responsibilities, travel, illness)..."
-                  rows={3}
-                />
+      {/* 10-Year Coverage Summary */}
+      {coverageSummary.has_entries && (
+        <Card className={`${coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              {coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 ? (
+                <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+              ) : (
+                <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
               )}
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-medium text-slate-800">
+                  10-Year Employment Coverage: {coverageSummary.coverage_percent}%
+                </p>
+                <p className="text-xs text-slate-600">
+                  Required period: {new Date(coverageSummary.coverage_start).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} — Today
+                </p>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all ${coverageSummary.coverage_percent >= 100 ? 'bg-green-500' : coverageSummary.coverage_percent >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${Math.min(coverageSummary.coverage_percent, 100)}%` }}
+                  />
+                </div>
+                {detectedGaps.length > 0 && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    {detectedGaps.length} gap{detectedGaps.length !== 1 ? 's' : ''} detected — each must be explained below
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Detected Gaps — each requires reason + explanation */}
+      {detectedGaps.length > 0 && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Clock className="h-5 w-5 text-amber-600" />
+              Employment Gaps Detected
+            </CardTitle>
+            <CardDescription>
+              The following gaps were detected in your 10-year employment timeline. Please explain each one.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {detectedGaps.map(gap => {
+              const expl = gapExplanations[gap.gap_id] || {};
+              const hasError = validationErrors[`gap_${gap.gap_id}`];
+              const formatGapDate = (d) => {
+                if (d === 'present') return 'Present';
+                try { return new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }); } catch { return d; }
+              };
+              return (
+                <div key={gap.gap_id} className={`border rounded-xl p-4 space-y-3 ${hasError ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white'}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">
+                        {formatGapDate(gap.gap_start)} — {formatGapDate(gap.gap_end)}
+                        <span className="ml-2 text-xs text-slate-500">({gap.duration_months} months)</span>
+                      </p>
+                      <p className="text-xs text-slate-500">{gap.label}</p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                      gap.gap_type === 'pre_history' ? 'bg-purple-100 text-purple-700' :
+                      gap.gap_type === 'trailing' ? 'bg-blue-100 text-blue-700' :
+                      'bg-amber-100 text-amber-700'
+                    }`}>
+                      {gap.gap_type === 'pre_history' ? 'Before earliest entry' : gap.gap_type === 'trailing' ? 'Recent gap' : 'Between jobs'}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Reason *</Label>
+                    <Select
+                      value={expl.reason_type || ''}
+                      onValueChange={(v) => handleGapExplanationChange(gap.gap_id, 'reason_type', v)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select a reason..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GAP_REASON_OPTIONS.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs">Explanation * (min 10 characters)</Label>
+                    <Textarea
+                      value={expl.explanation || ''}
+                      onChange={(e) => handleGapExplanationChange(gap.gap_id, 'explanation', e.target.value)}
+                      placeholder="Please explain what you were doing during this period..."
+                      rows={2}
+                      className={hasError ? 'border-red-400' : ''}
+                    />
+                    {hasError && <p className="text-xs text-red-500">{validationErrors[`gap_${gap.gap_id}`]}</p>}
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 

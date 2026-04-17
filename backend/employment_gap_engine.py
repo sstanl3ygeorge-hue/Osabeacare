@@ -370,6 +370,7 @@ def create_gap_record(
         "id": f"{employee_id}_{gap_data['gap_id']}",
         "employee_id": employee_id,
         "gap_id": gap_data["gap_id"],
+        "gap_type": gap_data.get("gap_type", "inter_entry"),
         "gap_start": gap_data["gap_start"],
         "gap_end": gap_data["gap_end"],
         "duration_days": gap_data["duration_days"],
@@ -387,6 +388,187 @@ def create_gap_record(
         "created_at": now,
         "created_by": created_by,
         "updated_at": now
+    }
+
+
+def detect_employment_gaps_with_coverage(
+    employment_history: List[Dict],
+    coverage_years: int = 10
+) -> List[Dict]:
+    """
+    Coverage-aware gap detection.  Wraps detect_employment_gaps() and adds
+    a pre-history gap when the earliest entry does not reach back to the
+    required coverage window start.
+
+    Every returned gap carries a ``gap_type`` field:
+      * ``"inter_entry"``  – gap between two consecutive entries
+      * ``"trailing"``     – gap from the most recent entry to today
+      * ``"pre_history"``  – gap from the coverage window start to the
+                             earliest entry
+    """
+    from datetime import timedelta
+
+    # Baseline inter-entry + trailing gaps
+    gaps = detect_employment_gaps(employment_history)
+
+    # Tag existing gaps
+    for gap in gaps:
+        if gap.get("gap_end") == "present":
+            gap["gap_type"] = "trailing"
+        else:
+            gap["gap_type"] = "inter_entry"
+
+    # --- pre-history coverage gap ---
+    now = datetime.now(timezone.utc)
+    coverage_start = now - timedelta(days=365 * coverage_years)
+
+    valid_jobs = [j for j in (employment_history or []) if j.get("start_date")]
+    if valid_jobs:
+        earliest_start = min(
+            (parse_employment_date(j["start_date"]) for j in valid_jobs),
+            default=None,
+        )
+        if earliest_start and (earliest_start - coverage_start).days >= MIN_GAP_DAYS:
+            gap_days = (earliest_start - coverage_start).days
+            gap_months = round(gap_days / 30, 1)
+            # Determine the next gap_id number
+            existing_ids = [g.get("gap_id", "") for g in gaps]
+            max_num = 0
+            for gid in existing_ids:
+                try:
+                    max_num = max(max_num, int(gid.split("_")[1]))
+                except (IndexError, ValueError):
+                    pass
+            gap_counter = max_num + 1
+
+            earliest_job = min(
+                valid_jobs,
+                key=lambda j: parse_employment_date(j["start_date"]) or datetime.max.replace(tzinfo=timezone.utc),
+            )
+
+            gaps.append({
+                "gap_id": f"gap_{gap_counter}",
+                "gap_type": "pre_history",
+                "gap_start": coverage_start.strftime("%Y-%m-%d"),
+                "gap_end": earliest_job.get("start_date"),
+                "duration_days": gap_days,
+                "duration_months": gap_months,
+                "previous_employment": None,
+                "next_employment": {
+                    "company": earliest_job.get("company") or earliest_job.get("employer_name", "Unknown"),
+                    "role": earliest_job.get("role") or earliest_job.get("job_title", ""),
+                    "start_date": earliest_job.get("start_date"),
+                },
+                "explanation": None,
+                "explanation_provided_at": None,
+                "evidence_document_id": None,
+                "status": GapStatus.PENDING.value,
+                "verified_by": None,
+                "verified_at": None,
+                "rejection_reason": None,
+                "notes": [],
+            })
+
+    return gaps
+
+
+def compute_coverage_summary(
+    employment_history: List[Dict],
+    coverage_years: int = 10
+) -> Dict:
+    """
+    Pure helper – returns a coverage summary dict without side effects.
+
+    ``meets_10_year_requirement`` is **True** only when there are no
+    active unresolved coverage gaps in the required window (NOT a
+    percentage threshold).
+    """
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    coverage_start = now - timedelta(days=365 * coverage_years)
+    coverage_end = now
+    total_days_required = (coverage_end - coverage_start).days
+
+    valid_jobs = [j for j in (employment_history or []) if j.get("start_date")]
+
+    if not valid_jobs:
+        return {
+            "coverage_start": coverage_start.strftime("%Y-%m-%d"),
+            "coverage_end": coverage_end.strftime("%Y-%m-%d"),
+            "total_days_required": total_days_required,
+            "total_days_covered": 0,
+            "coverage_percent": 0.0,
+            "earliest_entry_date": None,
+            "latest_entry_date": None,
+            "has_current_employment": False,
+            "meets_10_year_requirement": False,
+        }
+
+    # Sort ascending
+    sorted_jobs = sorted(
+        valid_jobs,
+        key=lambda j: parse_employment_date(j["start_date"]) or datetime.min.replace(tzinfo=timezone.utc),
+    )
+
+    earliest_date = parse_employment_date(sorted_jobs[0]["start_date"])
+    latest_end = None
+    has_current = False
+
+    # Merge overlapping intervals to compute total covered days within window
+    intervals = []
+    for j in sorted_jobs:
+        s = parse_employment_date(j["start_date"])
+        if not s:
+            continue
+        e = parse_employment_date(j.get("end_date"))
+        if not e:
+            e = now
+            has_current = True
+        # Clamp to coverage window
+        s = max(s, coverage_start)
+        e = min(e, coverage_end)
+        if s < e:
+            intervals.append((s, e))
+        # Track latest end for display
+        raw_end = parse_employment_date(j.get("end_date")) or now
+        if latest_end is None or raw_end > latest_end:
+            latest_end = raw_end
+
+    # Merge intervals
+    intervals.sort()
+    merged = []
+    for s, e in intervals:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
+    total_covered = sum((e - s).days for s, e in merged)
+    coverage_pct = round((total_covered / total_days_required) * 100, 1) if total_days_required > 0 else 0.0
+
+    # Determine if requirement is met: run coverage-aware detection and
+    # check for any unresolved gaps.
+    all_gaps = detect_employment_gaps_with_coverage(employment_history, coverage_years)
+    unresolved_statuses = {
+        GapStatus.PENDING.value,
+        GapStatus.EXPLAINED.value,
+        GapStatus.REOPENED.value,
+        GapStatus.REJECTED.value,
+        GapStatus.NEEDS_MORE_INFO.value,
+    }
+    has_unresolved = any(g.get("status") in unresolved_statuses for g in all_gaps)
+
+    return {
+        "coverage_start": coverage_start.strftime("%Y-%m-%d"),
+        "coverage_end": coverage_end.strftime("%Y-%m-%d"),
+        "total_days_required": total_days_required,
+        "total_days_covered": total_covered,
+        "coverage_percent": coverage_pct,
+        "earliest_entry_date": earliest_date.strftime("%Y-%m-%d") if earliest_date else None,
+        "latest_entry_date": latest_end.strftime("%Y-%m-%d") if latest_end else None,
+        "has_current_employment": has_current,
+        "meets_10_year_requirement": not has_unresolved,
     }
 
 

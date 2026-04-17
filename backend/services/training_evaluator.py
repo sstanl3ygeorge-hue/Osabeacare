@@ -436,6 +436,26 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
                 blocker_count += 1
             else:
                 warning_count += 1
+        elif record.get("verification_status") == "rejected":
+            status = "rejected"
+            detail = f"{training_name} rejected: {record.get('rejection_reason', 'see admin')}"
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
+        elif not verified:
+            # Policy: only verified records are compliant.
+            # Unverified records (completed, awaiting_review) are visible but non-compliant.
+            if evidence_required:
+                status = "awaiting_review"
+                detail = f"{training_name} submitted but awaiting verification"
+            else:
+                status = "completed"
+                detail = f"{training_name} completed — awaiting verification"
+            if is_blocker:
+                blocker_count += 1
+            else:
+                warning_count += 1
         elif computed_status == "expired":
             status = "expired"
             has_expired = True
@@ -450,22 +470,8 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
             days_left = computed.get("days_until_expiry", 0)
             detail = f"{training_name} expires in {days_left} days"
             warning_count += 1
-        elif record.get("verification_status") == "rejected":
-            status = "rejected"
-            detail = f"{training_name} rejected: {record.get('rejection_reason', 'see admin')}"
-            if is_blocker:
-                blocker_count += 1
-            else:
-                warning_count += 1
-        elif not verified and evidence_required:
-            status = "awaiting_review"
-            detail = f"{training_name} submitted but awaiting verification"
-            if is_blocker:
-                blocker_count += 1
-            else:
-                warning_count += 1
         else:
-            status = "verified" if verified else "completed"
+            status = "verified"
             detail = f"{training_name} valid" + (f" until {expiry_date}" if expiry_date else "")
 
         items.append({
@@ -484,12 +490,20 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
             "rejection_reason": record.get("rejection_reason") if status == "rejected" else None,
         })
 
+    # Verified-only policy: "current" requires at least one verified item
+    # and zero blockers.  If every required item is non-verified
+    # (completed / awaiting_review / rejected) with nothing verified,
+    # overall must NOT be "current".
+    has_any_verified = any(i.get("status") == "verified" for i in items)
+
     if has_expired:
         overall = "overdue"
     elif has_missing:
         overall = "missing"
     elif has_due_soon:
         overall = "due_soon"
+    elif not has_any_verified or blocker_count > 0:
+        overall = "missing"
     else:
         overall = "current"
 

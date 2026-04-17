@@ -26,7 +26,7 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 // Canonical training status display config — single vocabulary across admin and worker
 const TRAINING_STATUS_CONFIG = {
   verified:        { badge: 'Verified',              badgeCls: 'bg-green-100 text-green-700',   cardBg: 'bg-green-50 border-green-200',   Icon: ShieldCheck,   iconCls: 'text-green-600',  iconBg: 'bg-green-100',  showUpload: false },
-  completed:       { badge: 'Awaiting Verification', badgeCls: 'bg-blue-100 text-blue-700',     cardBg: 'bg-green-50 border-green-200',   Icon: CheckCircle,   iconCls: 'text-green-600',  iconBg: 'bg-green-100',  showUpload: false },
+  completed:       { badge: 'Awaiting Verification', badgeCls: 'bg-blue-100 text-blue-700',     cardBg: 'bg-blue-50 border-blue-200',     Icon: CheckCircle,   iconCls: 'text-blue-600',   iconBg: 'bg-blue-100',   showUpload: false },
   awaiting_review: { badge: 'Awaiting Review',       badgeCls: 'bg-purple-100 text-purple-700', cardBg: 'bg-purple-50 border-purple-200', Icon: Clock,         iconCls: 'text-purple-600', iconBg: 'bg-purple-100', showUpload: false },
   due_soon:        { badge: 'Expiring Soon',         badgeCls: 'bg-amber-100 text-amber-700',   cardBg: 'bg-amber-50 border-amber-200',   Icon: Clock,         iconCls: 'text-amber-600',  iconBg: 'bg-amber-100',  showUpload: true, uploadLabel: 'Renew' },
   expired:         { badge: 'Expired',               badgeCls: 'bg-red-100 text-red-700',       cardBg: 'bg-red-50 border-red-200',       Icon: AlertTriangle, iconCls: 'text-red-600',    iconBg: 'bg-red-100',    showUpload: true, uploadLabel: 'Re-upload' },

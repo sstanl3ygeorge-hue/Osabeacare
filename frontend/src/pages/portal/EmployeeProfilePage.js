@@ -3294,6 +3294,8 @@ export default function EmployeeProfilePage() {
       (employmentGapEvaluation?.needs_info_count || 0)
     : null;
   const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
+  const employmentCoverage = employee?.employment_coverage || null;
+  const coverageMet = Boolean(employmentCoverage?.meets_10_year_requirement);
   const allGapsResolved = employmentGapEvaluation
     ? Boolean(gapAnalysisRun && employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
     : !employmentHistoryExists;
@@ -3302,7 +3304,8 @@ export default function EmployeeProfilePage() {
     employee?.declarations && 'dbs_consent_given' in employee.declarations
   );
   // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
-  const employmentReadyForSignOff = Boolean(applicationAvailable && declarationsOnFile && employmentHistoryExists && allGapsResolved);
+  // Coverage must be met AND all gaps resolved
+  const employmentReadyForSignOff = Boolean(applicationAvailable && declarationsOnFile && employmentHistoryExists && allGapsResolved && (coverageMet || !employmentCoverage));
   // Persisted sign-off: only true once an admin has explicitly signed off via the backend
   const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
@@ -3315,6 +3318,7 @@ export default function EmployeeProfilePage() {
     !declarationsOnFile      ? 'Record applicant declarations before sign-off' : null,
     !employmentHistoryExists ? 'Add or extract employment history' : null,
     !allGapsResolved         ? 'Review or resolve employment gaps' : null,
+    (employmentCoverage && !coverageMet) ? '10-year employment coverage incomplete' : null,
   ].filter(Boolean);
 
   if (loading) {
@@ -5014,6 +5018,40 @@ export default function EmployeeProfilePage() {
               )}
             </div>
 
+            {/* 10-Year Coverage Card */}
+            {employmentCoverage && (
+              <Card className={`shadow-sm ${coverageMet ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
+                <CardContent className="py-4">
+                  <div className="flex items-start gap-3">
+                    {coverageMet ? (
+                      <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1 space-y-2">
+                      <p className={`text-sm font-medium ${coverageMet ? 'text-green-800' : 'text-amber-800'}`}>
+                        10-Year Employment Coverage: {employmentCoverage.coverage_percent}%
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
+                        {' · '}Status: {coverageMet ? '✅ Complete' : '❌ Incomplete'}
+                      </p>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all ${coverageMet ? 'bg-green-500' : employmentCoverage.coverage_percent >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+                          style={{ width: `${Math.min(employmentCoverage.coverage_percent, 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {employmentCoverage.total_days_covered} of {employmentCoverage.total_days_required} days covered
+                        {employmentCoverage.earliest_entry_date && ` · Earliest entry: ${new Date(employmentCoverage.earliest_entry_date + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}`}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-employment-evidence">
               <CardHeader>
                 <CardTitle className="font-heading text-lg">Application & CV Evidence</CardTitle>
@@ -5298,8 +5336,8 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No employment gaps detected'}</p>
-                    <p className="text-sm text-green-600 mt-1">Gap analysis has run for the current employment history.</p>
+                    <p className="font-medium text-green-800">{employmentHistoryGapRow.status_summary || 'No gaps detected within submitted history'}</p>
+                    <p className="text-sm text-green-600 mt-1">Gap analysis has run for the current employment history. Verify 10-year coverage separately.</p>
                   </div>
                 </div>
               )}

@@ -773,19 +773,28 @@ export default function AuditReadyTrainingMatrix({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {[...mandatoryTraining, ...additionalTraining]
-                    .filter(item => {
-                      if (!searchQuery) return true;
-                      const q = searchQuery.toLowerCase();
-                      return item.title?.toLowerCase().includes(q) ||
-                             item.code?.toLowerCase().includes(q);
-                    })
-                    .map((item) => (
+                  {(() => {
+                    // Deduplicate: one row per canonical training code/title
+                    const seen = new Set();
+                    return [...mandatoryTraining, ...additionalTraining]
+                      .filter(item => {
+                        const key = (item.code || item.title || item.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim();
+                        if (seen.has(key)) return false;
+                        seen.add(key);
+                        if (!searchQuery) return true;
+                        const q = searchQuery.toLowerCase();
+                        return item.title?.toLowerCase().includes(q) ||
+                               item.code?.toLowerCase().includes(q);
+                      })
+                      .map((item) => (
                     <TableRow key={item.code || item.id}>
                       <TableCell>
                         <p className="font-medium text-gray-900">{item.title}</p>
                         {item.provider && (
                           <p className="text-xs text-gray-500">{item.provider}</p>
+                        )}
+                        {item.history_count > 0 && (
+                          <p className="text-xs text-indigo-500 mt-0.5">{item.history_count} record{item.history_count !== 1 ? 's' : ''} — history available</p>
                         )}
                       </TableCell>
                       <TableCell>
@@ -925,7 +934,8 @@ export default function AuditReadyTrainingMatrix({
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ))
+                  })()}
                 </TableBody>
               </Table>
             </CardContent>

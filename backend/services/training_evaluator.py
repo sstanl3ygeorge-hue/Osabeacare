@@ -276,10 +276,78 @@ def get_training_blocker_config(requirement_id: str) -> dict:
     )
 
 
+# ---------------------------------------------------------------------------
+# Training name aliases — maps variant names to canonical requirement IDs.
+# Used by resolve_training_record to match extracted names to mandatory codes.
+# ---------------------------------------------------------------------------
+TRAINING_ALIASES = {
+    # BLS / Basic Life Support
+    "bls": "basic_life_support",
+    "adult_bls": "basic_life_support",
+    "resuscitation": "basic_life_support",
+    "adult_basic_life_support": "basic_life_support",
+    "cstf_resuscitation": "basic_life_support",
+    # Safeguarding
+    "safeguarding_adults": "safeguarding",
+    "safeguarding_children": "safeguarding",
+    "safeguarding_of_vulnerable_adults": "safeguarding",
+    "safeguarding_vulnerable_adults": "safeguarding",
+    # Manual handling
+    "moving_and_handling": "manual_handling",
+    "moving_&_handling": "manual_handling",
+    "cstf_moving_and_handling": "manual_handling",
+    # Fire safety
+    "cstf_fire_safety": "fire_safety",
+    "fire_safety_awareness": "fire_safety",
+    # Infection control
+    "infection_prevention_and_control": "infection_control",
+    "infection_prevention_&_control": "infection_control",
+    "cstf_infection_prevention_and_control": "infection_control",
+    # Health & Safety
+    "health_and_safety": "health_safety",
+    "health_safety_and_welfare": "health_safety",
+    "health,_safety_and_welfare": "health_safety",
+    "cstf_health_safety_and_welfare": "health_safety",
+    # Information governance / GDPR
+    "gdpr": "information_governance",
+    "data_security": "information_governance",
+    "data_protection": "information_governance",
+    "data_security_awareness": "information_governance",
+    # Prevent
+    "preventing_radicalisation": "prevent",
+    "counter_terrorism": "prevent",
+    "counter-terrorism": "prevent",
+    "cstf_preventing_radicalisation": "prevent",
+    # Medication
+    "safe_handling_and_administration_of_medication": "medication_administration",
+    "safe_handling_&_administration_of_medication": "medication_administration",
+    "medication": "medication_administration",
+}
+
+
+def _record_quality_score(record: dict) -> int:
+    """Lower = better quality record for lookup preference.
+    
+    Priority: verified > completed-with-date > completed > not-started.
+    """
+    verified = record.get("verified", False)
+    has_completion = bool(record.get("completion_date"))
+    if record.get("verification_status") == "rejected":
+        return 4
+    if not has_completion:
+        return 5
+    if verified:
+        return 0
+    return 2  # completed but unverified
+
+
 def build_training_records_lookup(records: list) -> dict:
     """Build a lookup dict keyed by all normalised forms of each record's identifiers.
 
-    Keys stored per record (first-write wins):
+    When multiple records map to the same key, the highest-quality record wins
+    (verified > completed > unverified > rejected > not-started).
+
+    Keys stored per record:
       - requirement_id  (as-is)
       - requirement_id with underscores→hyphens
       - requirement_id with hyphens→underscores
@@ -288,6 +356,7 @@ def build_training_records_lookup(records: list) -> dict:
       - training_id   (as-is, if present)
     """
     lookup = {}
+    lookup_scores = {}  # track quality score per key
     for record in records:
         keys = []
         req_id = record.get("requirement_id")
@@ -302,29 +371,55 @@ def build_training_records_lookup(records: list) -> dict:
             normalised = t_name.lower().replace(" ", "_")
             keys.append(normalised)
             keys.append(normalised.replace("&", "and"))
+            # Add canonical alias if this name maps to one
+            canon = TRAINING_ALIASES.get(normalised) or TRAINING_ALIASES.get(normalised.replace("&", "and"))
+            if canon:
+                keys.append(canon)
         if t_id:
             keys.append(t_id)
+        # Also key by canonical alias of requirement_id
+        if req_id:
+            canon_req = TRAINING_ALIASES.get(req_id)
+            if canon_req:
+                keys.append(canon_req)
 
+        score = _record_quality_score(record)
         for k in keys:
-            if k and k not in lookup:
+            if not k:
+                continue
+            existing_score = lookup_scores.get(k)
+            if existing_score is None or score < existing_score:
                 lookup[k] = record
+                lookup_scores[k] = score
     return lookup
 
 
 def resolve_training_record(lookup: dict, req_id: str, training_name: str = None):
     """Look up a training record using the canonical fallback sequence.
 
-    Attempts: exact → training_name normalised → underscore↔hyphen variants.
+    Attempts: exact → alias → training_name normalised → underscore↔hyphen variants.
     Returns the matched record dict or None.
     """
     record = lookup.get(req_id)
     if record:
         return record
+    # Check canonical alias of req_id
+    canon = TRAINING_ALIASES.get(req_id)
+    if canon:
+        record = lookup.get(canon)
+        if record:
+            return record
     if training_name:
         alt = training_name.lower().replace(" ", "_")
         record = lookup.get(alt)
         if record:
             return record
+        # Check alias of training_name
+        canon_name = TRAINING_ALIASES.get(alt) or TRAINING_ALIASES.get(alt.replace("&", "and"))
+        if canon_name:
+            record = lookup.get(canon_name)
+            if record:
+                return record
     record = lookup.get(req_id.replace("_", "-"))
     if record:
         return record

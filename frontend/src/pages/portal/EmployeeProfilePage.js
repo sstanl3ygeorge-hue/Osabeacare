@@ -4707,7 +4707,7 @@ export default function EmployeeProfilePage() {
                   {
                     label: 'Screening',
                     forms: [
-                      { key: 'pre_interview_questionnaire', name: 'Pre-Interview Questionnaire', description: 'Worker pre-interview/application intake responses', infoOnly: true },
+                      { key: 'pre_interview_questionnaire', name: 'Pre-Interview Questionnaire', description: 'Worker pre-interview/application intake responses' },
                     ]
                   },
                 ];
@@ -4816,13 +4816,7 @@ export default function EmployeeProfilePage() {
                                   <div className="flex items-center gap-2 shrink-0">
                                     <Badge className={statusColor}>{statusLabel}</Badge>
 
-                                    {/* Info-only forms (Pre-Screen): no action button */}
-                                    {form.infoOnly ? (
-                                      <Badge className="bg-slate-100 text-slate-600 text-xs">
-                                        Awaiting Worker Completion
-                                      </Badge>
-                                    ) : (
-                                      <div className="flex gap-1">
+                                    <div className="flex gap-1">
                                         {/* Verified → View */}
                                         {isVerified && hasSubmission && (
                                           <Button size="sm" variant="outline"
@@ -4891,7 +4885,6 @@ export default function EmployeeProfilePage() {
                                           </Button>
                                         )}
                                       </div>
-                                    )}
                                   </div>
                                 </div>
                               </div>

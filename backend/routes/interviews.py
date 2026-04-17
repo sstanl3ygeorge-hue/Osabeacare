@@ -275,10 +275,14 @@ async def get_pre_interview_questionnaire(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    # Check for form submission
+    # Check for form submission — match on form_type (canonical) or requirement_id
     questionnaire = await db.form_submissions.find_one({
         "employee_id": employee_id,
-        "requirement_id": "pre_interview_questionnaire"
+        "$or": [
+            {"form_type": "pre_interview_questionnaire"},
+            {"requirement_id": "pre_interview_questionnaire"},
+            {"requirement_id": "interview"}
+        ]
     }, {"_id": 0})
     
     if not questionnaire:
@@ -320,7 +324,11 @@ async def review_pre_interview_questionnaire(
     
     questionnaire = await db.form_submissions.find_one({
         "employee_id": employee_id,
-        "requirement_id": "pre_interview_questionnaire"
+        "$or": [
+            {"form_type": "pre_interview_questionnaire"},
+            {"requirement_id": "pre_interview_questionnaire"},
+            {"requirement_id": "interview"}
+        ]
     })
     
     if not questionnaire:

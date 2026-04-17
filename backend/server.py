@@ -10288,8 +10288,11 @@ async def get_employee_training_matrix(
         t_name = rec.get("training_name", "")
         n = t_name.lower().strip().replace("&", "and").replace("-", " ").replace("_", " ")
         n = " ".join(n.split())
-        # Prefer requirement_id as key, fall back to normalised name
-        return req_id if req_id else n
+        if req_id:
+            # Normalise requirement_id the same way so "fire_safety" matches "Fire Safety"
+            r = req_id.lower().strip().replace("&", "and").replace("-", " ").replace("_", " ")
+            return " ".join(r.split())
+        return n
 
     def _record_sort_key(rec):
         """Sort key: lower = higher priority to be the visible record."""
@@ -10336,7 +10339,11 @@ async def get_employee_training_matrix(
         if rec:
             mandatory_record_ids.add(id(rec))
 
-    additional_records = [r for r in deduped_records if id(r) not in mandatory_record_ids]
+    additional_records = [
+        r for r in deduped_records
+        if id(r) not in mandatory_record_ids
+        and not is_mandatory_training(r.get("training_name", ""))
+    ]
     
     # Build enhanced matrix items
     matrix_items = []
@@ -10385,7 +10392,8 @@ async def get_employee_training_matrix(
             "validity_days": validity_days,
             "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
             "certificate_url": record.get('certificate_url'),
-            "rejection_reason": item.get('rejection_reason')
+            "rejection_reason": item.get('rejection_reason'),
+            "history_count": len(training_history.get(_canonical_key(record), [])) if record else 0
         }
         matrix_items.append(matrix_item)
         
@@ -10451,7 +10459,8 @@ async def get_employee_training_matrix(
             "provider": record.get('provider_name') or record.get('provider'),
             "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
             "certificate_url": record.get('certificate_url'),
-            "rejection_reason": record.get('rejection_reason') if status == 'rejected' else None
+            "rejection_reason": record.get('rejection_reason') if status == 'rejected' else None,
+            "history_count": len(training_history.get(_canonical_key(record), []))
         })
     
     return {
@@ -10983,10 +10992,22 @@ def get_expiry_months_for_training(training_name: str) -> int:
 
 def is_mandatory_training(training_name: str) -> bool:
     """Check if training is mandatory for work readiness.
-    Uses canonical mandatory training names derived from MANDATORY_ITEMS.
+    Uses canonical mandatory training names derived from MANDATORY_ITEMS,
+    plus the TRAINING_ALIASES table for variant names.
     """
+    from services.training_evaluator import TRAINING_ALIASES
     name_lower = training_name.lower()
-    return any(mandatory in name_lower for mandatory in MANDATORY_TRAININGS)
+    # Direct substring match against mandatory names
+    if any(mandatory in name_lower for mandatory in MANDATORY_TRAININGS):
+        return True
+    # Check alias table — normalise name to underscore form and look up
+    normalised = name_lower.replace(" ", "_").replace("&", "and").replace("-", "_")
+    canon = TRAINING_ALIASES.get(normalised)
+    if canon:
+        # Check if the canonical code is a mandatory training ID
+        from services.training_evaluator import get_canonical_mandatory_training_ids
+        return canon in get_canonical_mandatory_training_ids()
+    return False
 
 async def extract_training_from_certificate(file_bytes: bytes, filename: str) -> List[dict]:
     """

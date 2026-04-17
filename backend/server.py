@@ -24711,6 +24711,41 @@ async def submit_structured_application(form: StructuredApplicationForm):
         {"_id": 0}
     )
     if existing:
+        # ── Idempotent retry safety ──
+        # If the existing record was created very recently (within 5 minutes) by
+        # the same applicant, this is almost certainly a retry after a partial
+        # success.  Return the existing application as if it succeeded, so the
+        # user sees the success screen instead of a confusing duplicate error.
+        created_at = existing.get("created_at", "")
+        is_recent = False
+        try:
+            from datetime import datetime, timedelta, timezone as tz
+            created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            is_recent = (datetime.now(tz.utc) - created_dt) < timedelta(minutes=5)
+        except Exception:
+            pass
+        
+        if is_recent and existing.get("application_source") == "online_structured":
+            # Return the existing application cleanly — idempotent success
+            logger.info(f"Idempotent retry detected for {form.email}, returning existing application {existing.get('applicant_reference')}")
+            return {
+                "status": "submitted",
+                "message": "Your application has been submitted successfully. Our recruitment team will review it and contact you.",
+                "reference": existing.get("applicant_reference", "Unknown"),
+                "applicant_id": existing.get("id"),
+                "next_steps": [
+                    "Our team will review your application within 5 working days",
+                    "We may contact your references for verification",
+                    "You may be invited for an interview"
+                ],
+                "follow_up_items": [],
+                "important_notes": [
+                    "This submission does NOT constitute a job offer",
+                    "All information will be verified before any employment decision",
+                    "You will be contacted if additional information is required"
+                ]
+            }
+        
         raise HTTPException(
             status_code=400, 
             detail=f"An application with this email already exists. Reference: {existing.get('applicant_reference', 'Unknown')}"
@@ -24862,7 +24897,13 @@ async def submit_structured_application(form: StructuredApplicationForm):
     
     await db.employees.insert_one(employee_doc)
     
-    # ==================== 2. CREATE STRUCTURED FORM SUBMISSION ====================
+    # ── Post-insert: all operations below are best-effort ──
+    # The applicant record is now committed.  If anything below fails
+    # we log the error but still return success so the user isn't stuck.
+    # A retry will hit the idempotent-duplicate path above.
+    post_create_warnings = []
+    follow_up_items = []
+    applicant_facing_items = []
     # Stores complete application data for review in existing form_submissions
     
     form_submission_id = str(uuid.uuid4())
@@ -25081,22 +25122,27 @@ async def submit_structured_application(form: StructuredApplicationForm):
     }
     
     # Generate requirement slots based on role pack
-    stage_service = StageGateService(db)
-    created_slots = await stage_service.generate_requirements_for_employee(
-        employee_id=app_id,
-        role=normalized_role,
-        reference_metadata=reference_metadata
-    )
-    
-    # Seed application completion (cv, application_form, equal_opportunities)
-    await stage_service.seed_application_completion(
-        employee_id=app_id,
-        cv_file_id=form.cv_file_id,
-        form_submission_id=form_submission_id
-    )
-    
-    # Build follow-up items from created slots
-    follow_up_items = stage_service.build_follow_up_items(normalized_role, created_slots)
+    # ── Wrapped in try/catch: these are enrichment steps, not core creation ──
+    try:
+        stage_service = StageGateService(db)
+        created_slots = await stage_service.generate_requirements_for_employee(
+            employee_id=app_id,
+            role=normalized_role,
+            reference_metadata=reference_metadata
+        )
+        
+        # Seed application completion (cv, application_form, equal_opportunities)
+        await stage_service.seed_application_completion(
+            employee_id=app_id,
+            cv_file_id=form.cv_file_id,
+            form_submission_id=form_submission_id
+        )
+        
+        # Build follow-up items from created slots
+        follow_up_items = stage_service.build_follow_up_items(normalized_role, created_slots)
+    except Exception as stage_err:
+        logger.error(f"Non-blocking: StageGateService failed for {app_id}: {stage_err}")
+        post_create_warnings.append(f"stage_gate: {str(stage_err)}")
     
     # Add conditional follow-up items based on declarations
     
@@ -25132,72 +25178,76 @@ async def submit_structured_application(form: StructuredApplicationForm):
     
     # ==================== AUTO-DETECT EMPLOYMENT GAPS ====================
     # Detect gaps automatically from employment history dates (coverage-aware)
-    employment_history_list = [eh.model_dump() for eh in form.employment_history]
-    detected_gaps = detect_employment_gaps_with_coverage(employment_history_list)
-    employment_coverage = compute_coverage_summary(employment_history_list)
+    try:
+        employment_history_list = [eh.model_dump() for eh in form.employment_history]
+        detected_gaps = detect_employment_gaps_with_coverage(employment_history_list)
+        employment_coverage = compute_coverage_summary(employment_history_list)
     
-    # Store detected gaps in employee record and create gap records
-    if detected_gaps:
-        # --- Merge applicant-supplied gap explanations into detected gaps ---
-        expl_by_id = {e["gap_id"]: e for e in (form.gap_explanations or [])}
-        for gap in detected_gaps:
-            match = expl_by_id.get(gap.get("gap_id"))
-            if match and match.get("explanation"):
-                gap["explanation"] = match["explanation"]
-                gap["reason_type"] = match.get("reason_type")
-                gap["explanation_provided_at"] = now
-                gap["explained_by"] = "applicant"
-                gap["explanation_source"] = "application_form"
-                gap["status"] = "explained"
+        # Store detected gaps in employee record and create gap records
+        if detected_gaps:
+            # --- Merge applicant-supplied gap explanations into detected gaps ---
+            expl_by_id = {e["gap_id"]: e for e in (form.gap_explanations or [])}
+            for gap in detected_gaps:
+                match = expl_by_id.get(gap.get("gap_id"))
+                if match and match.get("explanation"):
+                    gap["explanation"] = match["explanation"]
+                    gap["reason_type"] = match.get("reason_type")
+                    gap["explanation_provided_at"] = now
+                    gap["explained_by"] = "applicant"
+                    gap["explanation_source"] = "application_form"
+                    gap["status"] = "explained"
 
-        # Update employee with gaps + coverage summary
-        await db.employees.update_one(
-            {"id": app_id},
-            {"$set": {
-                "employment_gaps": detected_gaps,
-                "employment_gaps_detected_at": now,
-                "has_employment_gaps": True,
-                "employment_coverage": employment_coverage,
-            }}
-        )
-        
-        # Create individual gap records in gaps collection
-        for gap in detected_gaps:
-            gap_record = create_gap_record(app_id, gap, created_by="system")
-            await db.employment_gaps.update_one(
-                {"id": gap_record["id"]},
-                {"$set": gap_record},
-                upsert=True
+            # Update employee with gaps + coverage summary
+            await db.employees.update_one(
+                {"id": app_id},
+                {"$set": {
+                    "employment_gaps": detected_gaps,
+                    "employment_gaps_detected_at": now,
+                    "has_employment_gaps": True,
+                    "employment_coverage": employment_coverage,
+                }}
             )
-        
-        # Add to follow-up items - ONLY when there are ACTUAL detected gaps
-        follow_up_items.append({
-            "type": "employment_gaps",
-            "requirement_key": "employment_history_verification",
-            "description": f"{len(detected_gaps)} employment gap(s) detected ({sum(g.get('duration_months', 0) for g in detected_gaps):.0f} months total) - explanation will be requested",
-            "status": "review_required",
-            "gap_count": len(detected_gaps),
-            "total_gap_months": sum(g.get("duration_months", 0) for g in detected_gaps),
-            "is_admin_only": True  # Flag to filter from applicant-facing display
-        })
-        
-        logger.info(f"Detected {len(detected_gaps)} employment gaps for {app_id}")
-    else:
-        # No gaps detected — still store coverage summary
-        await db.employees.update_one(
-            {"id": app_id},
-            {"$set": {
-                "employment_coverage": employment_coverage,
-            }}
-        )
+            
+            # Create individual gap records in gaps collection
+            for gap in detected_gaps:
+                gap_record = create_gap_record(app_id, gap, created_by="system")
+                await db.employment_gaps.update_one(
+                    {"id": gap_record["id"]},
+                    {"$set": gap_record},
+                    upsert=True
+                )
+            
+            # Add to follow-up items - ONLY when there are ACTUAL detected gaps
+            follow_up_items.append({
+                "type": "employment_gaps",
+                "requirement_key": "employment_history_verification",
+                "description": f"{len(detected_gaps)} employment gap(s) detected ({sum(g.get('duration_months', 0) for g in detected_gaps):.0f} months total) - explanation will be requested",
+                "status": "review_required",
+                "gap_count": len(detected_gaps),
+                "total_gap_months": sum(g.get("duration_months", 0) for g in detected_gaps),
+                "is_admin_only": True  # Flag to filter from applicant-facing display
+            })
+            
+            logger.info(f"Detected {len(detected_gaps)} employment gaps for {app_id}")
+        else:
+            # No gaps detected — still store coverage summary
+            await db.employees.update_one(
+                {"id": app_id},
+                {"$set": {
+                    "employment_coverage": employment_coverage,
+                }}
+            )
     
     # NOTE: Removed misleading "Applicant declared employment gaps" warning
     # The gap flag on the form (has_employment_gaps) is now only used internally
     # We only show gap warnings when there are ACTUAL detected gaps from date analysis
+    except Exception as gap_err:
+        logger.error(f"Non-blocking: Gap detection failed for {app_id}: {gap_err}")
+        post_create_warnings.append(f"gap_detection: {str(gap_err)}")
     
     # ==================== 5. LOG AUDIT TRAIL ====================
-    
-    await db.audit_log.insert_one({
+    try:
+        await db.audit_log.insert_one({
         "id": str(uuid.uuid4()),
         "user_id": "system",
         "action": "application_submitted",
@@ -25218,8 +25268,12 @@ async def submit_structured_application(form: StructuredApplicationForm):
         },
         "timestamp": now
     })
+    except Exception as audit_err:
+        logger.error(f"Non-blocking: Audit log failed for {app_id}: {audit_err}")
     
     logger.info(f"Structured application submitted: {applicant_ref} for {form.email}")
+    if post_create_warnings:
+        logger.warning(f"Application {applicant_ref} had post-create warnings: {post_create_warnings}")
     
     # Filter follow-up items for applicant-facing display (remove admin-only items)
     applicant_facing_items = [

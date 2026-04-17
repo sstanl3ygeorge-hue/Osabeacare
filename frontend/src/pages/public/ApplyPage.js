@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Header from '../../components/public/Header';
 import Footer from '../../components/public/Footer';
 import { Button } from '../../components/ui/button';
@@ -634,11 +634,16 @@ export default function ApplyPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const submitLock = useRef(false);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitLock.current) return;
+    submitLock.current = true;
     
     // Validate the Review step (step 7) which includes final declarations
     if (!validateStep(7)) {
+      submitLock.current = false;
       toast.error('Please complete all required declarations');
       return;
     }
@@ -682,6 +687,7 @@ export default function ApplyPage() {
       toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
+      submitLock.current = false;
     }
   };
 

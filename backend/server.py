@@ -10269,6 +10269,65 @@ async def get_employee_training_matrix(
     # Build alias-aware lookup — same logic as evaluator
     records_by_req = build_training_records_lookup(training_records)
 
+    # ── Canonical dedup: group records by normalised training key ──
+    # This prevents the same qualification from appearing as duplicate rows
+    # when multiple records exist (e.g. Verified + Awaiting Verification).
+    STATUS_PRIORITY = {
+        "awaiting_review": 0, "awaiting_verification": 0,
+        "verified": 1,
+        "completed": 2,
+        "expired": 3,
+        "rejected": 4,
+        "missing": 5,
+        "not_started": 6,
+    }
+
+    def _canonical_key(rec):
+        """Generate a canonical grouping key for a training record."""
+        req_id = rec.get("requirement_id", "")
+        t_name = rec.get("training_name", "")
+        n = t_name.lower().strip().replace("&", "and").replace("-", " ").replace("_", " ")
+        n = " ".join(n.split())
+        # Prefer requirement_id as key, fall back to normalised name
+        return req_id if req_id else n
+
+    def _record_sort_key(rec):
+        """Sort key: lower = higher priority to be the visible record."""
+        verified = rec.get("verified", False)
+        comp_status = compute_training_record_status(rec).get("computed_status", "completed")
+        if rec.get("verification_status") == "rejected":
+            effective = "rejected"
+        elif not rec.get("completion_date"):
+            effective = "not_started"
+        elif verified and comp_status == "expired":
+            effective = "expired"
+        elif verified:
+            effective = "verified"
+        elif not verified:
+            effective = "awaiting_review"
+        else:
+            effective = "completed"
+        return STATUS_PRIORITY.get(effective, 5)
+
+    # Group by canonical key, pick best visible record per group, collect history
+    from collections import defaultdict
+    grouped = defaultdict(list)
+    for rec in training_records:
+        grouped[_canonical_key(rec)].append(rec)
+
+    # Deduplicated list: best record per group
+    deduped_records = []
+    training_history = {}  # key -> list of all records (for drawer history)
+    for key, recs in grouped.items():
+        recs_sorted = sorted(recs, key=_record_sort_key)
+        best = recs_sorted[0]
+        deduped_records.append(best)
+        if len(recs_sorted) > 1:
+            training_history[key] = recs_sorted
+
+    # Rebuild lookup from deduped records so mandatory resolution uses best records
+    records_by_req = build_training_records_lookup(deduped_records)
+
     # Separate additional (non-mandatory) records
     mandatory_codes = get_canonical_mandatory_training_ids()
     mandatory_record_ids = set()
@@ -10277,7 +10336,7 @@ async def get_employee_training_matrix(
         if rec:
             mandatory_record_ids.add(id(rec))
 
-    additional_records = [r for r in training_records if id(r) not in mandatory_record_ids]
+    additional_records = [r for r in deduped_records if id(r) not in mandatory_record_ids]
     
     # Build enhanced matrix items
     matrix_items = []
@@ -11378,7 +11437,7 @@ async def extract_training_certificate_preview(
 @api_router.post("/employees/{employee_id}/training/re-extract")
 async def re_extract_training_from_existing_certificate(
     employee_id: str,
-    certificate_url: str = Body(..., embed=True),
+    certificate_url: Optional[str] = Body(None, embed=True),
     document_id: Optional[str] = Body(None, embed=True),
     user: dict = Depends(require_manager_or_admin)
 ):
@@ -11456,19 +11515,48 @@ async def re_extract_training_from_existing_certificate(
     existing_records = await db.training_records.find({
         "employee_id": employee_id,
         "record_status": {"$nin": ["superseded", "deleted"]}
-    }, {"_id": 0, "training_name": 1, "id": 1}).to_list(200)
+    }, {"_id": 0, "training_name": 1, "id": 1, "requirement_id": 1}).to_list(200)
     
-    existing_names = {r.get("training_name", "").lower(): r.get("id") for r in existing_records}
+    # Also check pending proposed items to prevent re-submission of same items
+    existing_proposed = await db.proposed_training_items.find({
+        "employee_id": employee_id,
+        "status": "proposed"
+    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1, "id": 1}).to_list(200)
+    
+    # Build normalised name set for dedup (alias-aware)
+    def _normalise_training_name(name):
+        """Normalise for dedup: lowercase, strip whitespace, collapse separators."""
+        n = name.lower().strip()
+        n = n.replace("&", "and").replace("-", " ").replace("_", " ")
+        # Collapse multiple spaces
+        n = " ".join(n.split())
+        return n
+    
+    existing_names = {}
+    for r in existing_records:
+        norm = _normalise_training_name(r.get("training_name", ""))
+        if norm:
+            existing_names[norm] = r.get("id")
+    
+    proposed_names = set()
+    for p in existing_proposed:
+        for field in ("raw_course_title", "mapped_training_title"):
+            val = p.get(field, "")
+            if val:
+                proposed_names.add(_normalise_training_name(val))
     
     # Enrich with additional metadata for preview
     trainings_for_preview = []
     for training in extracted:
         training_name = training.get("training_name", "Unknown Training")
-        training_lower = training_name.lower()
+        training_normalised = _normalise_training_name(training_name)
         
-        # Check if this training already exists
-        existing_id = existing_names.get(training_lower)
+        # Check if this training already exists as a canonical record
+        existing_id = existing_names.get(training_normalised)
         is_update = existing_id is not None
+        
+        # Check if already pending in proposed items
+        already_proposed = training_normalised in proposed_names
         
         # Determine if mandatory
         is_mandatory = is_mandatory_training(training_name)
@@ -11493,7 +11581,8 @@ async def re_extract_training_from_existing_certificate(
             "source_file": original_filename,
             "extracted_by": extraction_source,
             "is_update": is_update,
-            "existing_record_id": existing_id
+            "existing_record_id": existing_id,
+            "already_proposed": already_proposed
         })
     
     # Log re-extraction attempt
@@ -11541,11 +11630,36 @@ async def bulk_save_training_records(
     
     now = datetime.now(timezone.utc).isoformat()
     saved_records = []
+    skipped_duplicates = []
+    
+    # Build set of existing proposed items for dedup
+    existing_proposed = await db.proposed_training_items.find({
+        "employee_id": employee_id,
+        "status": "proposed"
+    }, {"_id": 0, "raw_course_title": 1, "mapped_training_title": 1}).to_list(200)
+    
+    def _norm(name):
+        n = name.lower().strip().replace("&", "and").replace("-", " ").replace("_", " ")
+        return " ".join(n.split())
+    
+    proposed_norms = set()
+    for p in existing_proposed:
+        for f in ("raw_course_title", "mapped_training_title"):
+            v = p.get(f, "")
+            if v:
+                proposed_norms.add(_norm(v))
     
     for training in trainings:
         training_name = training.get("training_name", "").strip()
         if not training_name:
             continue
+        
+        # Skip if already pending in proposed items
+        tn = _norm(training_name)
+        if tn in proposed_norms:
+            skipped_duplicates.append(training_name)
+            continue
+        proposed_norms.add(tn)  # Prevent intra-batch duplicates too
         
         completion_date = training.get("completion_date")
         expiry_date = training.get("expiry_date")
@@ -11614,8 +11728,9 @@ async def bulk_save_training_records(
         "success": True,
         "saved_count": len(saved_records),
         "records": saved_records,
+        "skipped_duplicates": skipped_duplicates,
         "requires_review": True,
-        "message": f"Submitted {len(saved_records)} training item(s) for review"
+        "message": f"Submitted {len(saved_records)} training item(s) for review" + (f" ({len(skipped_duplicates)} duplicate(s) skipped)" if skipped_duplicates else "")
     }
 
 

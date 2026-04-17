@@ -350,13 +350,30 @@ export default function AuditReadyTrainingMatrix({
   // Re-run extraction on certificate
   const handleReExtract = async (documentId) => {
     try {
-      await axios.post(
-        `${API}/api/employees/${employeeId}/documents/${documentId}/extract-training`,
-        {},
+      const response = await axios.post(
+        `${API}/api/employees/${employeeId}/training/re-extract`,
+        { document_id: documentId },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      toast.success('Extraction started - check proposed items');
-      fetchTrainingData();
+      if (response.data.success && response.data.trainings?.length > 0) {
+        // Auto-submit extracted items as proposed for review
+        const trainingsToSave = response.data.trainings
+          .filter(t => !t.already_proposed)
+          .map(t => ({ ...t, document_id: documentId }));
+        if (trainingsToSave.length > 0) {
+          await axios.post(
+            `${API}/api/employees/${employeeId}/training/bulk-save`,
+            { trainings: trainingsToSave },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          toast.success(`Extracted ${trainingsToSave.length} training(s) — submitted for review`);
+        } else {
+          toast.info('All extracted trainings already pending review');
+        }
+        fetchTrainingData();
+      } else {
+        toast.error(response.data.message || 'No trainings detected');
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to extract training');
     }

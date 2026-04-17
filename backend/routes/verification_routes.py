@@ -158,15 +158,15 @@ CHECKLIST_TEMPLATES = {
 
 async def extract_document_info_ai(file_url: str, document_type: str, employee_data: dict) -> AIExtractionResult:
     """
-    Use AI (Gemini) to extract information from document and validate against employee profile.
+    Use AI (OpenAI) to extract information from document and validate against employee profile.
     """
     try:
-        from emergentintegrations.llm.gemini import GeminiChat, message, GeminiConfig
+        from services.openai_client import call_openai_vision_async, parse_json_response
         
-        EMERGENT_API_KEY = os.environ.get("EMERGENT_API_KEY") or os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         
-        if not EMERGENT_API_KEY:
-            logger.warning("No Emergent API key found, skipping AI extraction")
+        if not api_key:
+            logger.warning("No OpenAI API key found, skipping AI extraction")
             return AIExtractionResult()
         
         # Build extraction prompt based on document type
@@ -204,28 +204,13 @@ Return as JSON:
             extraction_prompt = """Extract all relevant information from this document.
 Return as JSON with appropriate fields."""
         
-        chat = GeminiChat(
-            config=GeminiConfig(
-                api_key=EMERGENT_API_KEY,
-                model="gemini-2.0-flash"
-            )
-        )
-        
-        response = await chat.send_message_image_async(
-            message=extraction_prompt,
-            image_url=file_url
+        response = await call_openai_vision_async(
+            extraction_prompt,
+            image_url_list=[file_url],
         )
         
         # Parse the response
-        import json
-        import re
-        
-        # Try to extract JSON from the response
-        json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-        if json_match:
-            extracted_data = json.loads(json_match.group())
-        else:
-            extracted_data = {}
+        extracted_data = parse_json_response(response) if response else {}
         
         # Build validation results
         validation_results = {}

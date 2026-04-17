@@ -25760,9 +25760,19 @@ class DocumentExtractionService:
         return len(common) >= 1
     
     @staticmethod
-    async def _call_gemini_vision(image_base64: str, prompt: str) -> Optional[str]:
-        """Call OpenAI Vision API for document extraction (replaces Gemini)."""
+    async def _call_gemini_vision(image_base64: str, prompt: str, user_prompt: Optional[str] = None) -> Optional[str]:
+        """Call OpenAI Vision API for document extraction (replaces Gemini).
+        
+        When called with 2 args: prompt is the user message.
+        When called with 3 args: prompt is the system message and user_prompt is the user message.
+        """
         from services.openai_client import call_openai_vision_async
+        if user_prompt is not None:
+            return await call_openai_vision_async(
+                user_prompt,
+                system_message=prompt,
+                image_base64_list=[image_base64],
+            )
         return await call_openai_vision_async(
             prompt,
             image_base64_list=[image_base64],

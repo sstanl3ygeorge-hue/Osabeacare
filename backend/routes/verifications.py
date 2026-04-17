@@ -175,9 +175,9 @@ async def extract_rtw_document(
     DocumentExtractionService = get_document_extraction_service()
     
     try:
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise HTTPException(status_code=500, detail="LLM key not configured")
+            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
         
         images = []
         employee_name = None
@@ -302,9 +302,9 @@ async def extract_identity_document(
     DocumentExtractionService = get_document_extraction_service()
     
     try:
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise HTTPException(status_code=500, detail="LLM key not configured")
+            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
         
         images = []
         employee_name = None
@@ -422,9 +422,9 @@ async def extract_address_document(
     DocumentExtractionService = get_document_extraction_service()
     
     try:
-        api_key = os.environ.get("EMERGENT_LLM_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise HTTPException(status_code=500, detail="LLM key not configured")
+            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
         
         images = []
         employee_name = None

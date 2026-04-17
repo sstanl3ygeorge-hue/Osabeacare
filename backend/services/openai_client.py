@@ -104,11 +104,12 @@ def call_openai_vision(
     *,
     system_message: str = "You are an expert document extraction assistant.",
     image_base64_list: Optional[List[str]] = None,
+    image_url_list: Optional[List[str]] = None,
     model: str = "gpt-4o",
     max_tokens: int = 4096,
 ) -> Optional[str]:
     """
-    Synchronous OpenAI chat-completion call with optional base64 images.
+    Synchronous OpenAI chat-completion call with optional base64 images or image URLs.
 
     Returns the assistant's text response, or None on failure.
     """
@@ -121,6 +122,12 @@ def call_openai_vision(
         user_content.append({
             "type": "image_url",
             "image_url": {"url": f"data:{media};base64,{b64}"},
+        })
+
+    for url in (image_url_list or []):
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": url},
         })
 
     try:
@@ -143,6 +150,7 @@ async def call_openai_vision_async(
     *,
     system_message: str = "You are an expert document extraction assistant.",
     image_base64_list: Optional[List[str]] = None,
+    image_url_list: Optional[List[str]] = None,
     model: str = "gpt-4o",
     max_tokens: int = 4096,
 ) -> Optional[str]:
@@ -158,6 +166,7 @@ async def call_openai_vision_async(
             prompt,
             system_message=system_message,
             image_base64_list=image_base64_list,
+            image_url_list=image_url_list,
             model=model,
             max_tokens=max_tokens,
         ),

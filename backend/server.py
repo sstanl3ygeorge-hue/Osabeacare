@@ -68,7 +68,6 @@ from security import (
     sanitize_log_data,
     get_allowed_origins
 )
-from google import genai
 import pytesseract
 # PIL Image already imported above as PILImage
 from pdf2image import convert_from_bytes
@@ -7100,8 +7099,9 @@ class StructuredApplicationForm(BaseModel):
     
     # === SECTION 5: Employment History (Structured for gap analysis) ===
     employment_history: List[EmploymentHistoryEntry]
-    has_employment_gaps: bool = False
-    employment_gap_explanation: Optional[str] = None
+    has_employment_gaps: bool = False  # Legacy — kept for backward compat
+    employment_gap_explanation: Optional[str] = None  # Legacy — kept for backward compat
+    gap_explanations: Optional[List[Dict[str, Any]]] = None  # [{gap_id, reason_type, explanation}]
     
     # === SECTION 6: References (Structured and traceable) ===
     references: List[ReferenceEntry]  # Minimum 2 required
@@ -8073,22 +8073,30 @@ async def _extract_cv_employment_history_helper(file_content: bytes, filename: s
     Returns structured employment history that can populate the 10-Year Employment History form.
     """
     import base64
+    from services.openai_client import call_openai_vision_async, parse_json_response
     
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContent
-        
-        # Prepare file for AI
-        file_base64 = base64.b64encode(file_content).decode('utf-8')
         file_ext = filename.split('.')[-1].lower() if '.' in filename else 'pdf'
         
+        # Convert file to images for OpenAI vision
+        images_b64 = []
         if file_ext == 'pdf':
-            content_type = 'application/pdf'
-        elif file_ext in ['doc', 'docx']:
-            content_type = 'application/msword'
+            import fitz
+            pdf_doc = fitz.open(stream=file_content, filetype="pdf")
+            for page_num in range(min(pdf_doc.page_count, 5)):
+                page = pdf_doc[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_bytes = pix.tobytes("png")
+                images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+            pdf_doc.close()
         elif file_ext in ['png', 'jpg', 'jpeg']:
-            content_type = f'image/{file_ext.replace("jpg", "jpeg")}'
+            images_b64.append(base64.b64encode(file_content).decode('utf-8'))
         else:
-            content_type = 'application/octet-stream'
+            # For doc/docx and other formats, send as-is base64 (best effort)
+            images_b64.append(base64.b64encode(file_content).decode('utf-8'))
+        
+        if not images_b64:
+            return {"status": "error", "message": "Could not process CV file"}
         
         prompt = """Analyze this CV/resume and extract the COMPLETE employment history.
 
@@ -8139,28 +8147,19 @@ IMPORTANT:
 - List jobs in chronological order (oldest first)
 """
         
-        chat = LlmChat(
-            api_key=EMERGENT_KEY,
-            session_id=str(uuid.uuid4()),
-            system_message="You are a CV parser. Extract employment history accurately and completely."
+        response = await call_openai_vision_async(
+            prompt,
+            system_message="You are a CV parser. Extract employment history accurately and completely.",
+            image_base64_list=images_b64,
         )
         
-        user_msg = UserMessage(
-            text=prompt,
-            file_contents=[FileContent(content_type=content_type, file_content_base64=file_base64)]
-        )
-        
-        response = await chat.send_message(user_msg)
+        if not response:
+            return {"status": "error", "message": "No response from AI extraction"}
         
         # Parse JSON from response
-        import json
-        import re
-        
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if not json_match:
+        extraction_data = parse_json_response(response)
+        if not extraction_data:
             return {"status": "error", "message": "Could not parse CV extraction response"}
-        
-        extraction_data = json.loads(json_match.group())
         
         # Calculate 10-year boundary for gap detection
         ten_years_ago = (datetime.now(timezone.utc) - timedelta(days=365*10)).strftime('%Y-%m-%d')
@@ -10956,11 +10955,10 @@ async def extract_training_from_certificate(file_bytes: bytes, filename: str) ->
         except Exception as e:
             logger.warning(f"Failed to extract text from PDF: {e}")
     
-    # Try AI extraction with Emergent LLM integration
-    llm_key = os.environ.get('EMERGENT_LLM_KEY') or os.environ.get('GEMINI_API_KEY')
-    if llm_key and len(file_bytes) < 10 * 1024 * 1024:  # Under 10MB
+    # Try AI extraction via OpenAI
+    if len(file_bytes) < 10 * 1024 * 1024:  # Under 10MB
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+            from services.openai_client import call_openai_vision_async, parse_json_array_response
             import base64
             
             # Enhanced prompt for multi-training extraction with validity period detection
@@ -11017,40 +11015,49 @@ Return ONLY a valid JSON array. Example for a multi-course certificate:
 IMPORTANT: Extract EVERY training visible, even if there are 10+. Do not truncate the list.
 If no trainings detected, return empty array: []"""
 
-            # Initialize chat with Gemini for vision
-            chat = LlmChat(
-                api_key=llm_key,
-                session_id=f"training_extract_{uuid.uuid4().hex[:8]}",
-                system_message="You are an expert at extracting training information from certificates. Always respond with valid JSON."
-            ).with_model("gemini", "gemini-2.5-flash")
-            
-            # For images, use vision capabilities
+            # Build image list for OpenAI vision
+            images_b64 = []
             if is_image:
-                image_base64 = base64.b64encode(file_bytes).decode('utf-8')
-                
-                user_message = UserMessage(
-                    text=extraction_prompt,
-                    file_contents=[ImageContent(image_base64=image_base64)]
+                images_b64.append(base64.b64encode(file_bytes).decode('utf-8'))
+            elif filename.lower().endswith('.pdf'):
+                # Convert PDF pages to images for vision
+                import fitz
+                try:
+                    pdf_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                    for page_num in range(min(pdf_doc.page_count, 3)):
+                        page = pdf_doc[page_num]
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                        img_bytes = pix.tobytes("png")
+                        images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+                    pdf_doc.close()
+                except Exception as pdf_err:
+                    logger.warning(f"PDF to image conversion failed: {pdf_err}")
+            
+            # If we have images, use vision; otherwise use text
+            if images_b64:
+                response_text = await call_openai_vision_async(
+                    extraction_prompt,
+                    system_message="You are an expert at extracting training information from certificates. Always respond with valid JSON.",
+                    image_base64_list=images_b64,
+                )
+            elif text:
+                full_prompt = f"{extraction_prompt}\n\nCertificate text:\n{text[:8000]}"
+                response_text = await call_openai_vision_async(
+                    full_prompt,
+                    system_message="You are an expert at extracting training information from certificates. Always respond with valid JSON.",
                 )
             else:
-                # For PDFs with extracted text
-                if text:
-                    full_prompt = f"{extraction_prompt}\n\nCertificate text:\n{text[:8000]}"
-                    user_message = UserMessage(text=full_prompt)
-                else:
-                    logger.info("PDF has no extractable text, returning empty")
-                    return []
+                logger.info("No images or text to extract from, returning empty")
+                return []
             
-            # Send message and get response
-            response = await chat.send_message(user_message)
-            response_text = response.strip() if isinstance(response, str) else str(response)
-            
-            logger.info(f"AI extraction response: {response_text[:500]}")
-            
-            # Extract JSON array from response
-            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
-            if json_match:
-                extracted = json.loads(json_match.group())
+            if not response_text:
+                logger.warning("AI extraction returned empty response")
+            else:
+                response_text = response_text.strip()
+                logger.info(f"AI extraction response: {response_text[:500]}")
+                
+                # Extract JSON array from response
+                extracted = parse_json_array_response(response_text)
                 if isinstance(extracted, list):
                     for item in extracted:
                         if isinstance(item, dict) and item.get('training_name'):
@@ -11091,7 +11098,7 @@ If no trainings detected, return empty array: []"""
                                 "provider": item.get('provider'),
                                 "level": item.get('level'),
                                 "certificate_file": filename,
-                                "extracted_by": "emergent_gemini_vision" if is_image else "emergent_gemini_text",
+                                "extracted_by": "openai_vision" if is_image else "openai_text",
                                 "is_optional": is_optional,
                                 "confidence": "high"
                             })
@@ -11468,7 +11475,7 @@ async def re_extract_training_from_existing_certificate(
         
         # Calculate confidence based on extraction source
         extraction_source = training.get("extracted_by", "unknown")
-        confidence = training.get("confidence", "high" if extraction_source in ("emergent_gemini_vision", "gemini_vision") else "medium")
+        confidence = training.get("confidence", "high" if extraction_source in ("openai_vision", "openai_text", "emergent_gemini_vision", "gemini_vision") else "medium")
         
         if not training.get("completion_date"):
             confidence = "low"
@@ -12313,18 +12320,25 @@ async def extract_employee_from_pdf(
             tmp_file.write(content)
             tmp_path = tmp_file.name
         
-        # Use Gemini to extract data from PDF
+        # Use OpenAI to extract data from PDF
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+            from services.openai_client import call_openai_vision_async, parse_json_response as _parse_json
+            import fitz
             
-            api_key = os.environ.get('EMERGENT_LLM_KEY')
-            if not api_key:
-                raise HTTPException(status_code=500, detail="AI extraction not configured - EMERGENT_LLM_KEY missing")
+            # Convert PDF pages to images for OpenAI vision
+            images_b64 = []
+            pdf_doc = fitz.open(tmp_path)
+            for page_num in range(min(pdf_doc.page_count, 5)):
+                page = pdf_doc[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_bytes = pix.tobytes("png")
+                images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+            pdf_doc.close()
             
-            chat = LlmChat(
-                api_key=api_key,
-                session_id=f"pdf-extract-{file.filename}-{datetime.now(timezone.utc).timestamp()}",
-                system_message="""You are an expert at extracting structured data from employment application forms.
+            if not images_b64:
+                raise HTTPException(status_code=500, detail="Could not convert PDF to images for extraction")
+
+            system_msg = """You are an expert at extracting structured data from employment application forms.
                 
 Extract the following information from the PDF and return it as valid JSON only (no markdown, no explanation):
 
@@ -12388,21 +12402,15 @@ Extract the following information from the PDF and return it as valid JSON only 
 
 If a field cannot be found, use null. If dates are ambiguous, make your best guess in YYYY-MM-DD format.
 Return ONLY the JSON object, no additional text."""
-            ).with_model("gemini", "gemini-2.5-flash")
-            
-            # Create file content for PDF
-            pdf_file = FileContentWithMimeType(
-                file_path=tmp_path,
-                mime_type="application/pdf"
+
+            response = await call_openai_vision_async(
+                "Extract all employee application data from this PDF form. Return only valid JSON.",
+                system_message=system_msg,
+                image_base64_list=images_b64,
             )
             
-            # Send to AI for extraction
-            user_message = UserMessage(
-                text="Extract all employee application data from this PDF form. Return only valid JSON.",
-                file_contents=[pdf_file]
-            )
-            
-            response = await chat.send_message(user_message)
+            if not response:
+                raise HTTPException(status_code=500, detail="AI extraction returned no response")
             
             # Parse the JSON response
             import json
@@ -13229,10 +13237,10 @@ async def extract_text_from_document(file_url: str) -> tuple[str, ExtractionLog]
         extraction_log.ai_extraction_attempted = True
         
         try:
-            api_key = os.environ.get('EMERGENT_LLM_KEY')
-            if not api_key:
-                extraction_log.ai_error = "LLM API key not configured"
-                logger.warning("[EXTRACTION] AI skipped: LLM API key not configured")
+            openai_key = os.environ.get('OPENAI_API_KEY')
+            if not openai_key:
+                extraction_log.ai_error = "OPENAI_API_KEY not configured"
+                logger.warning("[EXTRACTION] AI skipped: OPENAI_API_KEY not configured")
             else:
                 # For PDFs, convert to images first (GPT-5.2 only accepts images)
                 images_to_process = []
@@ -13315,10 +13323,7 @@ async def parse_extracted_text_to_fields(extracted_text: str, employee_id: str, 
     low_confidence_fields = []
     
     try:
-        api_key = os.environ.get('GEMINI_API_KEY')
-        if not api_key:
-            logger.warning("GEMINI_API_KEY not configured, skipping text parsing")
-            return [], []
+        from services.openai_client import call_openai_vision_async
         
         # Get current employee data for comparison
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
@@ -13364,16 +13369,14 @@ Rules for confidence scoring:
 
 If no data can be extracted, return an empty array: []"""
 
-        # Use Gemini for text parsing
+        # Use OpenAI for text parsing
         try:
-            client = genai.Client(api_key=api_key)
-            gemini_response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[{"role": "user", "parts": [{"text": prompt}]}]
-            )
-            response = gemini_response.text
-        except Exception as gemini_err:
-            logger.error(f"Gemini text parsing failed: {gemini_err}")
+            response = await call_openai_vision_async(prompt)
+            if not response:
+                logger.error("OpenAI text parsing returned empty response")
+                return [], []
+        except Exception as ai_err:
+            logger.error(f"OpenAI text parsing failed: {ai_err}")
             return [], []
         
         # Parse JSON response
@@ -24686,6 +24689,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
         "employment_history": [eh.model_dump() for eh in form.employment_history],
         "has_employment_gaps": form.has_employment_gaps,
         "employment_gap_explanation": form.employment_gap_explanation,
+        "gap_explanations": form.gap_explanations or [],
         
         # Declarations - stored on employee for direct access
         "declarations": {
@@ -24769,6 +24773,7 @@ async def submit_structured_application(form: StructuredApplicationForm):
             "employment_history": [eh.model_dump() for eh in form.employment_history],
             "has_employment_gaps": form.has_employment_gaps,
             "employment_gap_explanation": form.employment_gap_explanation,
+            "gap_explanations": form.gap_explanations or [],
             "references": [ref.model_dump() for ref in form.references],
             "qualifications": {
                 "highest_qualification": form.highest_qualification,
@@ -24997,6 +25002,18 @@ async def submit_structured_application(form: StructuredApplicationForm):
     
     # Store detected gaps in employee record and create gap records
     if detected_gaps:
+        # --- Merge applicant-supplied gap explanations into detected gaps ---
+        expl_by_id = {e["gap_id"]: e for e in (form.gap_explanations or [])}
+        for gap in detected_gaps:
+            match = expl_by_id.get(gap.get("gap_id"))
+            if match and match.get("explanation"):
+                gap["explanation"] = match["explanation"]
+                gap["reason_type"] = match.get("reason_type")
+                gap["explanation_provided_at"] = now
+                gap["explained_by"] = "applicant"
+                gap["explanation_source"] = "application_form"
+                gap["status"] = "explained"
+
         # Update employee with gaps + coverage summary
         await db.employees.update_one(
             {"id": app_id},
@@ -25522,12 +25539,12 @@ class DocumentExtractionService:
                 return extraction
             
             # Get API key
-            api_key = os.environ.get('EMERGENT_LLM_KEY')
+            api_key = os.environ.get('OPENAI_API_KEY')
             if not api_key:
                 extraction["extraction_status"] = ExtractionStatus.FAILED.value
                 extraction["issues"].append({
                     "code": "no_api_key",
-                    "detail": "LLM API key not configured",
+                    "detail": "OPENAI_API_KEY not configured",
                     "severity": ExtractionIssueSeverity.BLOCKER.value
                 })
                 await DocumentExtractionService._save_extraction(extraction)
@@ -25744,42 +25761,12 @@ class DocumentExtractionService:
     
     @staticmethod
     async def _call_gemini_vision(image_base64: str, prompt: str) -> Optional[str]:
-        """Call Gemini Vision API directly with production-grade prompts."""
-        try:
-            api_key = os.environ.get("GEMINI_API_KEY")
-            if not api_key:
-                logger.error("GEMINI_API_KEY not set")
-                return None
-            
-            client = genai.Client(api_key=api_key)
-            
-            # Determine image media type
-            if image_base64.startswith('/9j/'):
-                media_type = "image/jpeg"
-            elif image_base64.startswith('iVBOR'):
-                media_type = "image/png"
-            elif image_base64.startswith('JVBERi'):
-                media_type = "application/pdf"
-            else:
-                media_type = "image/png"
-            
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": prompt},
-                            {"inline_data": {"mime_type": media_type, "data": image_base64}}
-                        ]
-                    }
-                ]
-            )
-            
-            return response.text
-        except Exception as e:
-            logger.error(f"Gemini Vision call failed: {e}")
-            return None
+        """Call OpenAI Vision API for document extraction (replaces Gemini)."""
+        from services.openai_client import call_openai_vision_async
+        return await call_openai_vision_async(
+            prompt,
+            image_base64_list=[image_base64],
+        )
     
     @staticmethod
     def _parse_json_response(response_text: str) -> dict:
@@ -35780,9 +35767,9 @@ async def extract_employment_history_from_cv(
         raise HTTPException(status_code=400, detail="CV file URL not found")
     
     # Get API key
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    api_key = os.environ.get('OPENAI_API_KEY')
     if not api_key:
-        raise HTTPException(status_code=500, detail="LLM API key not configured")
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY not configured")
     
     try:
         # Download and convert CV to images for vision processing
@@ -38789,10 +38776,8 @@ class TrainingIntakeService:
         employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
         employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}" if employee else ""
         
-        # Use GPT-5.2 Vision to extract multi-training data
+        # Use OpenAI Vision to extract multi-training data
         try:
-            from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContent
-            
             prompt = """Analyze this training certificate image and extract ALL training courses/modules present.
 
 This certificate may contain MULTIPLE training items (e.g., a mandatory training bundle with several courses).
@@ -38832,6 +38817,7 @@ Important:
 
             # Download the image using get_object (includes storage key)
             import base64
+            from services.openai_client import call_openai_vision_async, parse_json_response as _pjr
             
             # Extract the storage path from the URL
             storage_path = file_url.replace(f"{STORAGE_URL}/objects/", "")
@@ -38842,46 +38828,44 @@ Important:
                 logger.error(f"Failed to get object from storage: {download_err}")
                 return {"status": "error", "message": f"Failed to download image for extraction: {str(download_err)}"}
             
-            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-            
-            # Determine content type
-            if 'pdf' in storage_path.lower():
-                content_type = 'application/pdf'
-            elif 'png' in storage_path.lower():
-                content_type = 'image/png'
-            elif 'jpg' in storage_path.lower() or 'jpeg' in storage_path.lower():
-                content_type = 'image/jpeg'
+            # Convert to images for OpenAI vision
+            images_b64 = []
+            is_pdf = 'pdf' in storage_path.lower()
+            if is_pdf:
+                import fitz
+                try:
+                    pdf_doc = fitz.open(stream=image_bytes, filetype="pdf")
+                    for page_num in range(min(pdf_doc.page_count, 5)):
+                        page = pdf_doc[page_num]
+                        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                        img_bytes = pix.tobytes("png")
+                        images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+                    pdf_doc.close()
+                except Exception:
+                    images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
             else:
-                content_type = content_type_header or 'image/png'
+                images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
             
-            chat = LlmChat(
-                api_key=EMERGENT_KEY,
-                session_id=str(uuid.uuid4()),
-                system_message="You are a training certificate analyzer. Extract all training courses from certificates accurately."
+            response = await call_openai_vision_async(
+                prompt,
+                system_message="You are a training certificate analyzer. Extract all training courses from certificates accurately.",
+                image_base64_list=images_b64,
             )
             
-            # Create user message with image
-            user_msg = UserMessage(
-                text=prompt,
-                file_contents=[FileContent(content_type=content_type, file_content_base64=image_base64)]
-            )
-            
-            # The send_message is async, so await it directly
-            response = await chat.send_message(user_msg)
+            if not response:
+                return {"status": "error", "message": "AI extraction returned no response"}
             
             # Parse JSON from response
             import json
             import re
             
-            json_match = re.search(r'\{[\s\S]*\}', response)
-            if not json_match:
+            extraction_data = _pjr(response)
+            if not extraction_data:
                 return {
                     "status": "error",
                     "message": "Could not parse extraction response",
                     "raw_response": response
                 }
-            
-            extraction_data = json.loads(json_match.group())
             
         except Exception as e:
             logger.error(f"Multi-training extraction failed: {e}")

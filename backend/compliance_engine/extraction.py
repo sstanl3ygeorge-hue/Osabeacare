@@ -1,5 +1,5 @@
 # Document Extraction Service
-# Uses Google Gemini 2.5 Flash Vision for UK compliance document extraction
+# Uses OpenAI GPT-4o Vision for UK compliance document extraction
 # Production-grade prompts for high accuracy extraction
 
 import json
@@ -8,8 +8,6 @@ import os
 import logging
 from typing import Dict, Optional, Any
 from io import BytesIO
-
-from google import genai
 
 logger = logging.getLogger(__name__)
 
@@ -169,45 +167,22 @@ Example:
 
 
 # =============================================================================
-# GEMINI CLIENT
+# OPENAI CLIENT
 # =============================================================================
 
-def get_gemini_client() -> genai.Client:
-    """Get Gemini client with API key from environment."""
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable not set")
-    return genai.Client(api_key=api_key)
+def _get_openai_helpers():
+    """Lazy import to avoid circular dependencies at module load time."""
+    from services.openai_client import call_openai_vision, parse_json_response as _parse
+    return call_openai_vision, _parse
 
 
 def parse_json_response(response_text: str) -> Dict:
     """
     Parse JSON from model response, handling markdown code blocks.
-    JSON Guard - models sometimes add text before JSON.
+    Delegates to the shared helper in services.openai_client.
     """
-    if not response_text:
-        return {}
-    
-    # Remove markdown code blocks if present
-    text = response_text
-    if "```json" in text:
-        text = text.split("```json")[1].split("```")[0]
-    elif "```" in text:
-        text = text.split("```")[1].split("```")[0]
-    
-    # Try to find JSON in the response
-    match = re.search(r"\{.*\}", text, re.S)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    
-    # Try parsing the whole thing
-    try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
-        return {}
+    from services.openai_client import parse_json_response as _shared_parse
+    return _shared_parse(response_text)
 
 
 # =============================================================================
@@ -216,10 +191,10 @@ def parse_json_response(response_text: str) -> Dict:
 
 class DocumentExtractor:
     """
-    Document extraction service using Google Gemini 2.5 Flash Vision.
+    Document extraction service using OpenAI GPT-4o Vision.
     
     Architecture:
-    Upload Evidence → Backend /api/{requirement}/extract → Gemini Vision → Structured JSON → Populate Result Panel
+    Upload Evidence → Backend /api/{requirement}/extract → OpenAI Vision → Structured JSON → Populate Result Panel
     
     Key behaviors:
     - Extraction is assistive, not blocking
@@ -228,11 +203,10 @@ class DocumentExtractor:
     """
     
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize with Gemini API key."""
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        if not self.api_key:
-            raise ValueError("Gemini API key required")
-        self.client = genai.Client(api_key=self.api_key)
+        """Initialize. API key param kept for backward compat but ignored — uses OPENAI_API_KEY env var."""
+        # Eagerly validate that the shared client can be created
+        from services.openai_client import get_openai_client
+        get_openai_client()
     
     async def extract_rtw(
         self, 
@@ -291,40 +265,21 @@ class DocumentExtractor:
         extraction_type: str
     ) -> Dict[str, Any]:
         """
-        Core extraction method using Gemini 2.5 Flash Vision.
+        Core extraction method using OpenAI GPT-4o Vision.
         """
         try:
-            # Determine image media type
-            if image_base64.startswith('/9j/'):
-                media_type = "image/jpeg"
-            elif image_base64.startswith('iVBOR'):
-                media_type = "image/png"
-            elif image_base64.startswith('JVBERi'):
-                media_type = "application/pdf"
-            else:
-                media_type = "image/png"  # Default
-            
-            # Call Gemini Vision API
-            response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [
-                            {"text": prompt},
-                            {"inline_data": {"mime_type": media_type, "data": image_base64}}
-                        ]
-                    }
-                ]
+            from services.openai_client import call_openai_vision_async
+
+            result = await call_openai_vision_async(
+                prompt,
+                image_base64_list=[image_base64],
             )
-            
-            result = response.text
             
             if not result:
                 return {
                     "fields": {},
                     "success": False,
-                    "error": "No response from Gemini",
+                    "error": "No response from OpenAI",
                     "confidence": 0.0
                 }
             

@@ -95,7 +95,7 @@ function EmploymentGapsSection() {
   const [coverage, setCoverage] = useState(null);
   const [employmentEntries, setEmploymentEntries] = useState([]);
   const [amendDialogOpen, setAmendDialogOpen] = useState(false);
-  const [amendIndex, setAmendIndex] = useState(null); // null = add, number = edit
+  const [amendEntryId, setAmendEntryId] = useState(null); // null = add, string = edit by stable id
   const [amendForm, setAmendForm] = useState({
     employer_name: '', job_title: '', start_date: '', end_date: '',
     is_current: false, duties: '', reason_for_leaving: '',
@@ -152,7 +152,7 @@ function EmploymentGapsSection() {
   };
 
   const openAddEntry = () => {
-    setAmendIndex(null);
+    setAmendEntryId(null);
     setAmendForm({
       employer_name: '', job_title: '', start_date: '', end_date: '',
       is_current: false, duties: '', reason_for_leaving: '',
@@ -161,8 +161,8 @@ function EmploymentGapsSection() {
     setAmendDialogOpen(true);
   };
 
-  const openEditEntry = (entry, index) => {
-    setAmendIndex(index);
+  const openEditEntry = (entry) => {
+    setAmendEntryId(entry.id);
     setAmendForm({
       employer_name: entry.employer_name || '',
       job_title: entry.job_title || '',
@@ -191,9 +191,9 @@ function EmploymentGapsSection() {
           ...amendForm,
           end_date: amendForm.is_current ? null : amendForm.end_date,
         },
-        entry_index: amendIndex,
+        entry_id: amendEntryId,
       }, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success(amendIndex !== null ? 'Employment entry updated' : 'Employment entry added');
+      toast.success(amendEntryId !== null ? 'Employment entry updated' : 'Employment entry added');
       setAmendDialogOpen(false);
       fetchGaps(); // Refreshes entries + coverage + gaps
     } catch (err) {
@@ -204,11 +204,11 @@ function EmploymentGapsSection() {
     }
   };
 
-  const handleDeleteEntry = async (index) => {
+  const handleDeleteEntry = async (entryId) => {
     if (!window.confirm('Remove this employment entry? Gaps and coverage will be recalculated.')) return;
     try {
       const token = localStorage.getItem('workerToken');
-      await axios.delete(`${API}/worker/employment-history/${index}`, {
+      await axios.delete(`${API}/worker/employment-history/${entryId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       toast.success('Employment entry removed');
@@ -306,8 +306,8 @@ function EmploymentGapsSection() {
               </div>
               {employmentEntries.length > 0 && (
                 <div className="space-y-1.5">
-                  {employmentEntries.map((entry, i) => (
-                    <div key={i} className="flex items-center justify-between py-1.5 px-3 bg-slate-50 rounded-lg text-sm group">
+                  {employmentEntries.map((entry) => (
+                    <div key={entry.id || entry.employer_name} className="flex items-center justify-between py-1.5 px-3 bg-slate-50 rounded-lg text-sm group">
                       <div className="flex items-center gap-2 min-w-0">
                         <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
                         <span className="text-slate-800 truncate font-medium">{entry.employer_name}</span>
@@ -321,7 +321,7 @@ function EmploymentGapsSection() {
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => openEditEntry(entry, i)}
+                          onClick={() => openEditEntry(entry)}
                           title="Edit entry"
                         >
                           <Edit3 className="h-3 w-3" />
@@ -468,7 +468,7 @@ function EmploymentGapsSection() {
       <Dialog open={amendDialogOpen} onOpenChange={setAmendDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{amendIndex !== null ? 'Edit Employment Entry' : 'Add Employment Entry'}</DialogTitle>
+            <DialogTitle>{amendEntryId !== null ? 'Edit Employment Entry' : 'Add Employment Entry'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -533,16 +533,16 @@ function EmploymentGapsSection() {
             </div>
           </div>
           <DialogFooter className="gap-2">
-            {amendIndex !== null && (
+            {amendEntryId !== null && (
               <Button variant="destructive" size="sm" className="mr-auto"
-                onClick={() => { setAmendDialogOpen(false); handleDeleteEntry(amendIndex); }}>
+                onClick={() => { setAmendDialogOpen(false); handleDeleteEntry(amendEntryId); }}>
                 <Trash2 className="h-3.5 w-3.5 mr-1" />Remove
               </Button>
             )}
             <Button variant="ghost" onClick={() => setAmendDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleAmendSave} disabled={amendSaving} className="bg-blue-600 hover:bg-blue-700">
               {amendSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              {amendIndex !== null ? 'Save Changes' : 'Add Entry'}
+              {amendEntryId !== null ? 'Save Changes' : 'Add Entry'}
             </Button>
           </DialogFooter>
         </DialogContent>

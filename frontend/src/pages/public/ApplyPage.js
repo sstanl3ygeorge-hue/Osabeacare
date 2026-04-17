@@ -123,9 +123,6 @@ export default function ApplyPage() {
         can_contact: true
       }
     ],
-    has_employment_gaps: false,
-    employment_gap_explanation: '',
-    
     // References (minimum 2)
     references: [
       {
@@ -515,7 +512,7 @@ export default function ApplyPage() {
 
   const allGapsExplained = detectedGaps.length === 0 || detectedGaps.every(g => {
     const expl = gapExplanations[g.gap_id];
-    return expl && expl.explanation && expl.explanation.trim().length >= 10;
+    return expl && expl.reason_type && expl.explanation && expl.explanation.trim().length >= 10;
   });
 
   const handleGapExplanationChange = (gapId, field, value) => {
@@ -543,21 +540,35 @@ export default function ApplyPage() {
         if (!formData.earliest_start_date) errors.earliest_start_date = 'Earliest start date is required';
         break;
         
-      case 2: // Employment History
+      case 2: { // Employment History
+        // Per-entry field validation
         formData.employment_history.forEach((emp, idx) => {
           if (!emp.employer_name.trim()) errors[`emp_${idx}_name`] = 'Employer name required';
           if (!emp.job_title.trim()) errors[`emp_${idx}_title`] = 'Job title required';
           if (!emp.start_date) errors[`emp_${idx}_start`] = 'Start date required';
           if (!emp.is_current && !emp.end_date) errors[`emp_${idx}_end`] = 'End date required';
         });
-        // Require explanation for every detected gap
+        // At least one valid entry with dates
+        const hasValidEntry = formData.employment_history.some(e => e.employer_name.trim() && e.start_date);
+        if (!hasValidEntry) {
+          errors.employment_coverage = 'You must provide at least one employment entry with an employer name and start date';
+        }
+        // Require structured explanation for every detected gap
         detectedGaps.forEach(g => {
           const expl = gapExplanations[g.gap_id];
+          if (!expl || !expl.reason_type) {
+            errors[`gap_reason_${g.gap_id}`] = 'Please select a reason category for this gap';
+          }
           if (!expl || !expl.explanation || expl.explanation.trim().length < 10) {
-            errors[`gap_${g.gap_id}`] = 'Each employment gap requires an explanation (min 10 characters)';
+            errors[`gap_${g.gap_id}`] = 'Each employment gap requires an explanation (minimum 10 characters)';
           }
         });
+        // Coverage-level check
+        if (hasValidEntry && detectedGaps.length > 0 && !allGapsExplained) {
+          errors.gaps_incomplete = `${detectedGaps.length} employment gap${detectedGaps.length !== 1 ? 's' : ''} detected — all must be explained before you can continue`;
+        }
         break;
+      }
         
       case 3: // References
         formData.references.forEach((ref, idx) => {
@@ -605,7 +616,16 @@ export default function ApplyPage() {
       if (currentStep < 7) setCurrentStep(currentStep + 1);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
-      toast.error('Please complete all required fields');
+      // Step-specific error messages
+      if (currentStep === 2) {
+        if (detectedGaps.length > 0 && !allGapsExplained) {
+          toast.error(`${detectedGaps.length} employment gap${detectedGaps.length !== 1 ? 's' : ''} still need an explanation. Please scroll down to the gaps section.`);
+        } else {
+          toast.error('Please complete all employment entry fields before continuing.');
+        }
+      } else {
+        toast.error('Please complete all required fields');
+      }
     }
   };
 
@@ -912,8 +932,24 @@ export default function ApplyPage() {
       <div>
         <h2 className="font-heading text-xl font-semibold text-text-primary mb-2">Employment History</h2>
         <p className="text-sm text-text-muted mb-4">
-          Provide your <strong>full employment history for the last 10 years</strong>. All gaps of 30 days or more will be detected automatically and must be explained before your application can proceed. This is a CQC safer-recruitment requirement.
+          CQC safer-recruitment regulations require a <strong>full account of the last 10 years</strong> of your employment history. Please provide every role you have held.
         </p>
+
+        {/* 10-Year Requirement Banner */}
+        <div className="p-4 bg-blue-50 rounded-xl border border-blue-200 mb-4" data-testid="ten-year-requirement-banner">
+          <div className="flex items-start gap-3">
+            <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-blue-800">What you need to provide</p>
+              <ul className="text-xs text-blue-700 list-disc ml-4 space-y-0.5">
+                <li>All employment, voluntary work, and self-employment for the <strong>last 10 years</strong></li>
+                <li>All periods must be accounted for — no unexplained gaps of 30 days or more</li>
+                <li>Gaps are <strong>detected automatically</strong> from your entries and must be explained before you can continue</li>
+                <li>Dates, employer names, and job titles are verified during the recruitment process</li>
+              </ul>
+            </div>
+          </div>
+        </div>
         
         {/* CV Extraction Loading State */}
         {isExtractingFromCv && (
@@ -934,10 +970,10 @@ export default function ApplyPage() {
               <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-amber-800">
-                  Employment history has been pre-filled from your CV
+                  Employment history has been pre-filled from your CV — this may be incomplete
                 </p>
                 <p className="text-xs text-amber-700 mt-1">
-                  Please review and correct any inaccuracies before submitting. 
+                  CV extraction is a starting point only. Please verify all roles are included, dates are correct, and the full 10-year period is covered. Add any missing roles manually.
                   {cvExtractionConfidence !== null && (
                     <span className="ml-1">
                       (Extraction confidence: {Math.round(cvExtractionConfidence * 100)}%)
@@ -1069,39 +1105,51 @@ export default function ApplyPage() {
         <Plus className="h-4 w-4 mr-2" /> Add Another Employment
       </Button>
       
-      {/* 10-Year Coverage Summary */}
-      {coverageSummary.has_entries && (
-        <Card className={`${coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`}>
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              {coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 ? (
-                <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-              ) : (
-                <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-              )}
-              <div className="flex-1 space-y-2">
-                <p className="text-sm font-medium text-slate-800">
-                  10-Year Employment Coverage: {coverageSummary.coverage_percent}%
-                </p>
-                <p className="text-xs text-slate-600">
-                  Required period: {new Date(coverageSummary.coverage_start).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} — Today
-                </p>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full transition-all ${coverageSummary.coverage_percent >= 100 ? 'bg-green-500' : coverageSummary.coverage_percent >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
-                    style={{ width: `${Math.min(coverageSummary.coverage_percent, 100)}%` }}
-                  />
-                </div>
-                {detectedGaps.length > 0 && (
-                  <p className="text-xs text-amber-700 mt-1">
-                    {detectedGaps.length} gap{detectedGaps.length !== 1 ? 's' : ''} detected — each must be explained below
+      {/* 10-Year Coverage Summary — always visible once any entry has dates */}
+      <Card className={`${!coverageSummary.has_entries ? 'border-slate-200 bg-slate-50' : coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'}`} data-testid="coverage-preview">
+        <CardContent className="pt-6">
+          <div className="flex items-start gap-3">
+            {!coverageSummary.has_entries ? (
+              <Clock className="h-5 w-5 text-slate-400 flex-shrink-0 mt-0.5" />
+            ) : coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 ? (
+              <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 space-y-2">
+              <p className="text-sm font-medium text-slate-800">
+                10-Year Employment Coverage: {coverageSummary.has_entries ? `${coverageSummary.coverage_percent}%` : 'No entries yet'}
+              </p>
+              <p className="text-xs text-slate-600">
+                Required period: {new Date(coverageSummary.coverage_start).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })} — Today
+              </p>
+              {coverageSummary.has_entries ? (
+                <>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full transition-all ${coverageSummary.coverage_percent >= 100 ? 'bg-green-500' : coverageSummary.coverage_percent >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+                      style={{ width: `${Math.min(coverageSummary.coverage_percent, 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {coverageSummary.total_days_covered?.toLocaleString() || 0} of {coverageSummary.total_days_required?.toLocaleString() || 0} days accounted for
                   </p>
-                )}
-              </div>
+                  {detectedGaps.length > 0 && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      {detectedGaps.length} gap{detectedGaps.length !== 1 ? 's' : ''} detected ({detectedGaps.reduce((s, g) => s + g.duration_days, 0)} days total) — each must be explained below
+                    </p>
+                  )}
+                  {coverageSummary.coverage_percent >= 100 && detectedGaps.length === 0 && (
+                    <p className="text-xs text-green-700">Full 10-year period is accounted for. You may continue.</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-slate-500">Add your employment entries above. Coverage will be calculated automatically.</p>
+              )}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Detected Gaps — each requires reason + explanation */}
       {detectedGaps.length > 0 && (
@@ -1142,12 +1190,12 @@ export default function ApplyPage() {
                     </span>
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs">Reason *</Label>
+                    <Label className="text-xs">Reason category *</Label>
                     <Select
                       value={expl.reason_type || ''}
                       onValueChange={(v) => handleGapExplanationChange(gap.gap_id, 'reason_type', v)}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger className={`w-full ${validationErrors[`gap_reason_${gap.gap_id}`] ? 'border-red-400' : ''}`}>
                         <SelectValue placeholder="Select a reason..." />
                       </SelectTrigger>
                       <SelectContent>
@@ -1156,6 +1204,7 @@ export default function ApplyPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {validationErrors[`gap_reason_${gap.gap_id}`] && <p className="text-xs text-red-500">{validationErrors[`gap_reason_${gap.gap_id}`]}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs">Explanation * (min 10 characters)</Label>

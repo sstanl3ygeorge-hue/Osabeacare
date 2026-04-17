@@ -2522,11 +2522,22 @@ async def get_worker_employment_gaps(worker: dict = Depends(get_current_worker))
     if not coverage:
         coverage = compute_coverage_summary(employment_history)
 
+    # Lazily assign stable IDs to any legacy entries without one
+    if _ensure_entry_ids(employment_history):
+        await db.employees.update_one(
+            {"id": employee_id},
+            {"$set": {"employment_history": employment_history}},
+        )
+
+    # Sort consistently: current first, then newest-to-oldest
+    sorted_entries = _sort_employment_entries(employment_history)
+
     # Build employment entries for the worker — worker-editable fields only
     # Excludes admin-only fields: verification_status, verified_by, verified_at, reference_id
     entries_summary = []
-    for entry in employment_history:
+    for entry in sorted_entries:
         entries_summary.append({
+            "id": entry.get("id"),
             "employer_name": entry.get("employer_name", "Unknown"),
             "job_title": entry.get("job_title", entry.get("position", "")),
             "start_date": entry.get("start_date"),
@@ -2617,6 +2628,28 @@ async def worker_explain_gap(
 # WORKER EMPLOYMENT HISTORY AMENDMENT
 # =============================================================================
 
+
+def _ensure_entry_ids(employment_history: list) -> bool:
+    """Ensure every entry has a stable `id`. Returns True if any were assigned."""
+    changed = False
+    for entry in employment_history:
+        if not entry.get("id"):
+            entry["id"] = str(uuid.uuid4())
+            changed = True
+    return changed
+
+
+def _sort_employment_entries(employment_history: list) -> list:
+    """Sort: current role first, then newest-to-oldest by start_date."""
+    def sort_key(e):
+        is_current = 0 if (not e.get("end_date") or e.get("is_current")) else 1
+        start = e.get("start_date") or "0000-00"
+        end = e.get("end_date") or "9999-99"
+        return (is_current, start, end)  # ascending → reversed below
+    # Current first (is_current=0 < 1); among non-current, newest first
+    return sorted(employment_history, key=sort_key, reverse=True)
+
+
 class WorkerEmploymentEntry(BaseModel):
     employer_name: str
     job_title: str
@@ -2633,7 +2666,7 @@ class WorkerEmploymentEntry(BaseModel):
 class WorkerEmploymentAmendment(BaseModel):
     """Payload for adding or updating a single employment entry."""
     entry: WorkerEmploymentEntry
-    entry_index: Optional[int] = None  # None = add new, int = update existing
+    entry_id: Optional[str] = None  # None = add new, str = update existing by stable id
 
 
 async def _reconcile_employment_after_amendment(employee_id: str, employment_history: list, actor_id: str):
@@ -2722,6 +2755,12 @@ async def _reconcile_employment_after_amendment(employee_id: str, employment_his
         if key not in new_gap_keys:
             await db.employment_gaps.delete_one({"id": eg["id"]})
 
+    # Ensure all entries have stable IDs before saving
+    _ensure_entry_ids(employment_history)
+
+    # Sort consistently before persisting
+    employment_history[:] = _sort_employment_entries(employment_history)
+
     # 4-5. Update employee record + invalidate sign-off
     update_set = {
         "employment_history": employment_history,
@@ -2767,6 +2806,10 @@ async def worker_amend_employment_history(
         raise HTTPException(status_code=404, detail="Employee not found")
 
     employment_history = list(employee.get("employment_history", []))
+
+    # Ensure all existing entries have stable IDs (lazy migration)
+    _ensure_entry_ids(employment_history)
+
     entry_data = request.entry.model_dump()
     now = datetime.now(timezone.utc).isoformat()
 
@@ -2789,23 +2832,26 @@ async def worker_amend_employment_history(
     if entry_data.get("is_current"):
         entry_data["end_date"] = None
 
+    # Amendment metadata
     entry_data["amended_at"] = now
     entry_data["amended_by"] = f"worker_{employee_id}"
+    entry_data["amendment_source"] = "worker_dashboard"
 
-    if request.entry_index is not None:
-        # Update existing entry
-        idx = request.entry_index
-        if idx < 0 or idx >= len(employment_history):
-            raise HTTPException(status_code=400, detail="Invalid entry index")
+    if request.entry_id is not None:
+        # Update existing entry by stable ID
+        idx = next((i for i, e in enumerate(employment_history) if e.get("id") == request.entry_id), None)
+        if idx is None:
+            raise HTTPException(status_code=404, detail="Employment entry not found")
         # Preserve any admin-only fields from the original entry
         original = employment_history[idx]
-        for admin_field in ("verification_status", "verified_by", "verified_at", "reference_id"):
+        for admin_field in ("verification_status", "verified_by", "verified_at", "reference_id", "id"):
             if admin_field in original:
                 entry_data[admin_field] = original[admin_field]
         employment_history[idx] = entry_data
         action = "employment_entry_updated"
     else:
-        # Add new entry
+        # Add new entry with a fresh stable ID
+        entry_data["id"] = str(uuid.uuid4())
         employment_history.append(entry_data)
         action = "employment_entry_added"
 
@@ -2823,7 +2869,7 @@ async def worker_amend_employment_history(
         "employee",
         employee_id,
         {
-            "entry_index": request.entry_index,
+            "entry_id": entry_data.get("id"),
             "employer_name": entry_data["employer_name"],
             "start_date": entry_data["start_date"],
             "end_date": entry_data.get("end_date"),
@@ -2833,22 +2879,48 @@ async def worker_amend_employment_history(
         },
     )
 
+    # Admin awareness: create notification so admin knows re-review is needed
+    try:
+        employee_rec = await db.employees.find_one(
+            {"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1}
+        )
+        emp_name = f"{employee_rec.get('first_name', '')} {employee_rec.get('last_name', '')}".strip() if employee_rec else employee_id
+        await db.worker_notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "type": "employment_history_amended",
+            "title": "Employment History Amended",
+            "message": f"{emp_name} amended employment history ({action.replace('_', ' ')}); coverage/gaps re-detected. Employment review requires re-review.",
+            "data": {
+                "entry_id": entry_data.get("id"),
+                "action": action,
+                "employer_name": entry_data["employer_name"],
+                "gaps_after": len(new_gaps),
+                "coverage_percent": coverage.get("coverage_percent", 0),
+            },
+            "created_at": now,
+            "read": False,
+            "target_audience": "admin",
+        })
+    except Exception as e:
+        logger.warning(f"Failed to create admin notification for employment amendment: {e}")
+
     return {
         "success": True,
         "message": "Employment entry saved. Gaps and coverage have been recalculated.",
-        "entry_index": request.entry_index if request.entry_index is not None else len(employment_history) - 1,
+        "entry_id": entry_data.get("id"),
         "gaps_count": len(new_gaps),
         "coverage": coverage,
     }
 
 
-@router.delete("/worker/employment-history/{entry_index}")
+@router.delete("/worker/employment-history/{entry_id}")
 async def worker_delete_employment_entry(
-    entry_index: int,
+    entry_id: str,
     worker: dict = Depends(get_current_worker),
 ):
     """
-    Worker removes an employment history entry they added.
+    Worker removes an employment history entry by stable ID.
     Re-detects gaps, recomputes coverage, and invalidates sign-off.
     """
     db = get_db()
@@ -2862,10 +2934,14 @@ async def worker_delete_employment_entry(
 
     employment_history = list(employee.get("employment_history", []))
 
-    if entry_index < 0 or entry_index >= len(employment_history):
-        raise HTTPException(status_code=400, detail="Invalid entry index")
+    # Ensure stable IDs on legacy entries
+    _ensure_entry_ids(employment_history)
 
-    removed_entry = employment_history.pop(entry_index)
+    idx = next((i for i, e in enumerate(employment_history) if e.get("id") == entry_id), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="Employment entry not found")
+
+    removed_entry = employment_history.pop(idx)
     actor_id = f"worker_{employee_id}"
 
     new_gaps, coverage = await _reconcile_employment_after_amendment(
@@ -2878,12 +2954,39 @@ async def worker_delete_employment_entry(
         "employee",
         employee_id,
         {
-            "entry_index": entry_index,
+            "entry_id": entry_id,
             "employer_name": removed_entry.get("employer_name"),
             "source": "worker_dashboard_amendment",
             "gaps_after": len(new_gaps),
         },
     )
+
+    # Admin awareness
+    try:
+        employee_rec = await db.employees.find_one(
+            {"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1}
+        )
+        emp_name = f"{employee_rec.get('first_name', '')} {employee_rec.get('last_name', '')}".strip() if employee_rec else employee_id
+        now = datetime.now(timezone.utc).isoformat()
+        await db.worker_notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "employee_id": employee_id,
+            "type": "employment_history_amended",
+            "title": "Employment Entry Removed",
+            "message": f"{emp_name} removed an employment entry ({removed_entry.get('employer_name', 'Unknown')}); coverage/gaps re-detected. Employment review requires re-review.",
+            "data": {
+                "entry_id": entry_id,
+                "action": "employment_entry_removed",
+                "employer_name": removed_entry.get("employer_name"),
+                "gaps_after": len(new_gaps),
+                "coverage_percent": coverage.get("coverage_percent", 0),
+            },
+            "created_at": now,
+            "read": False,
+            "target_audience": "admin",
+        })
+    except Exception as e:
+        logger.warning(f"Failed to create admin notification for employment deletion: {e}")
 
     return {
         "success": True,

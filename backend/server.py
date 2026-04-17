@@ -6560,6 +6560,8 @@ from services.training_evaluator import (
     enrich_training_record_with_computed_status,
     get_training_blocker_config,
     evaluate_employee_training_status,
+    build_training_records_lookup,
+    resolve_training_record,
 )
 # Keep module-level EXPIRY_WARNING_DAYS aligned (used in a few other places)
 EXPIRY_WARNING_DAYS = _TE_EXPIRY_WARNING_DAYS
@@ -6588,16 +6590,13 @@ async def get_training_audit_export(employee_id: str, role: str = '') -> dict:
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0}).to_list(100)
     
-    records_by_req = {}
-    for r in training_records:
-        req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_')
-        records_by_req[req_id] = r
+    records_by_req = build_training_records_lookup(training_records)
     
     # Build audit export items with full verification metadata
     audit_items = []
     for item in training_eval.get('items', []):
         code = item.get('code', '')
-        record = records_by_req.get(code, {})
+        record = resolve_training_record(records_by_req, code, item.get('title')) or {}
         
         # Get verifier information
         verifier_name = None
@@ -10308,20 +10307,18 @@ async def get_employee_training_matrix(
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0}).to_list(200)
     
-    records_by_req = {}
-    additional_records = []  # Non-mandatory training records
-    
-    # Canonical mandatory training IDs — single source of truth
+    # Build alias-aware lookup — same logic as evaluator
+    records_by_req = build_training_records_lookup(training_records)
+
+    # Separate additional (non-mandatory) records
     mandatory_codes = get_canonical_mandatory_training_ids()
-    
-    for r in training_records:
-        req_id = r.get('requirement_id') or r.get('training_name', '').lower().replace(' ', '_').replace('&', 'and')
-        
-        # Check if this is a mandatory training by canonical ID
-        if req_id in mandatory_codes:
-            records_by_req[req_id] = r
-        else:
-            additional_records.append(r)
+    mandatory_record_ids = set()
+    for code in mandatory_codes:
+        rec = resolve_training_record(records_by_req, code)
+        if rec:
+            mandatory_record_ids.add(id(rec))
+
+    additional_records = [r for r in training_records if id(r) not in mandatory_record_ids]
     
     # Build enhanced matrix items
     matrix_items = []
@@ -10332,7 +10329,7 @@ async def get_employee_training_matrix(
     
     for item in training_eval.get('items', []):
         code = item.get('code', '')
-        record = records_by_req.get(code, {})
+        record = resolve_training_record(records_by_req, code, item.get('title')) or {}
         
         # Determine evidence status
         has_evidence = bool(
@@ -10369,62 +10366,71 @@ async def get_employee_training_matrix(
             "provider": record.get('provider_name') or record.get('provider'),
             "validity_days": validity_days,
             "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
-            "certificate_url": record.get('certificate_url')
+            "certificate_url": record.get('certificate_url'),
+            "rejection_reason": item.get('rejection_reason')
         }
         matrix_items.append(matrix_item)
         
-        # Count by status
+        # Count by status (evaluator canonical vocab)
         status = item.get('status', 'missing')
-        if status in ['current', 'completed', 'verified']:
+        if status in ['completed', 'verified']:
             total_current += 1
-        elif status in ['expiring_soon', 'due_soon']:
+        elif status == 'due_soon':
             total_expiring += 1
-        elif status in ['missing', 'expired', 'overdue']:
+        elif status in ['missing', 'expired', 'rejected', 'awaiting_review']:
             total_missing += 1
         
-        if item.get('blocker') and status not in ['current', 'completed', 'verified']:
+        if item.get('blocker') and status not in ['completed', 'verified']:
             total_blockers += 1
     
-    # Build additional qualifications list
+    # Build additional qualifications list using canonical status logic
     additional_items = []
     for record in additional_records:
-        # Calculate status based on expiry
-        status = 'current'
+        computed = compute_training_record_status(record)
+        computed_status = computed.get('computed_status', 'completed')
         expires_at = record.get('expiry_date') or record.get('expires_at')
-        if expires_at:
-            try:
-                if isinstance(expires_at, str):
-                    exp_date = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                else:
-                    exp_date = expires_at
-                now = datetime.now(timezone.utc)
-                days_until = (exp_date - now).days
-                if days_until < 0:
-                    status = 'expired'
-                elif days_until <= 30:
-                    status = 'expiring_soon'
-            except (ValueError, TypeError):
-                pass
-        
+        verified = record.get('verified', False)
+
+        # Map compute_training_record_status vocab to evaluator vocab
+        if computed_status == 'not_started':
+            status = 'missing'
+            detail = f"{record.get('training_name', 'Training')} not completed"
+        elif computed_status == 'expired':
+            status = 'expired'
+            detail = f"{record.get('training_name', 'Training')} expired on {expires_at}"
+        elif computed_status == 'needs_renewal':
+            status = 'due_soon'
+            detail = f"{record.get('training_name', 'Training')} expires in {computed.get('days_until_expiry', '?')} days"
+        elif record.get('verification_status') == 'rejected':
+            status = 'rejected'
+            detail = f"{record.get('training_name', 'Training')} rejected: {record.get('rejection_reason', 'see admin')}"
+        else:
+            status = 'verified' if verified else 'completed'
+            detail = f"{record.get('training_name', 'Training')} valid" + (f" until {expires_at}" if expires_at else "")
+
         additional_items.append({
-            "code": record.get('id', ''),
+            "code": record.get('requirement_id') or record.get('id', ''),
             "id": record.get('id', ''),
             "title": record.get('training_name', 'Unknown Training'),
             "status": status,
+            "detail": detail,
+            "blocker": False,
+            "evidence_required": False,
             "is_required": False,
             "is_additional": True,
             "completed_at": record.get('completion_date') or record.get('completed_at'),
             "expires_at": expires_at,
+            "days_until_expiry": computed.get('days_until_expiry'),
             "has_evidence": bool(record.get('certificate_url') or record.get('evidence_files') or record.get('certificate_document_id')),
-            "is_verified": record.get('verified', False),
-            "verified": record.get('verified', False),
+            "is_verified": verified,
+            "verified": verified,
             "verified_by": record.get('verified_by'),
             "verified_at": record.get('verified_at'),
             "record_id": record.get('id'),
             "provider": record.get('provider_name') or record.get('provider'),
             "source_document_id": record.get('source_document_id') or record.get('certificate_document_id'),
             "certificate_url": record.get('certificate_url'),
-            "needs_review": record.get('needs_review', False)
+            "rejection_reason": record.get('rejection_reason') if status == 'rejected' else None
         })
     
     return {
@@ -10487,7 +10493,7 @@ async def get_employee_training_certificates(
     # 2. Legacy training_records with a certificate
     legacy_records = await db.training_records.find({
         "employee_id": employee_id,
-        "certificate_url": {"$exists": True, "$ne": None, "$ne": ""},
+        "certificate_url": {"$exists": True, "$nin": [None, ""]},
         "record_status": {"$nin": ["superseded", "deleted"]}
     }, {"_id": 0}).to_list(500)
 

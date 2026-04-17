@@ -276,6 +276,64 @@ def get_training_blocker_config(requirement_id: str) -> dict:
     )
 
 
+def build_training_records_lookup(records: list) -> dict:
+    """Build a lookup dict keyed by all normalised forms of each record's identifiers.
+
+    Keys stored per record (first-write wins):
+      - requirement_id  (as-is)
+      - requirement_id with underscores→hyphens
+      - requirement_id with hyphens→underscores
+      - training_name → lowercase, spaces→underscores
+      - training_name → lowercase, spaces→underscores, &→and
+      - training_id   (as-is, if present)
+    """
+    lookup = {}
+    for record in records:
+        keys = []
+        req_id = record.get("requirement_id")
+        t_name = record.get("training_name", "")
+        t_id = record.get("training_id")
+
+        if req_id:
+            keys.append(req_id)
+            keys.append(req_id.replace("_", "-"))
+            keys.append(req_id.replace("-", "_"))
+        if t_name:
+            normalised = t_name.lower().replace(" ", "_")
+            keys.append(normalised)
+            keys.append(normalised.replace("&", "and"))
+        if t_id:
+            keys.append(t_id)
+
+        for k in keys:
+            if k and k not in lookup:
+                lookup[k] = record
+    return lookup
+
+
+def resolve_training_record(lookup: dict, req_id: str, training_name: str = None):
+    """Look up a training record using the canonical fallback sequence.
+
+    Attempts: exact → training_name normalised → underscore↔hyphen variants.
+    Returns the matched record dict or None.
+    """
+    record = lookup.get(req_id)
+    if record:
+        return record
+    if training_name:
+        alt = training_name.lower().replace(" ", "_")
+        record = lookup.get(alt)
+        if record:
+            return record
+    record = lookup.get(req_id.replace("_", "-"))
+    if record:
+        return record
+    record = lookup.get(req_id.replace("-", "_"))
+    if record:
+        return record
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Canonical mandatory-training helpers (lazy-import MANDATORY_ITEMS)
 # ---------------------------------------------------------------------------
@@ -326,14 +384,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
         {"_id": 0},
     ).to_list(100)
 
-    records_by_req = {}
-    for record in training_records:
-        req_id = record.get("requirement_id") or record.get("training_name", "").lower().replace(" ", "_")
-        if req_id not in records_by_req:
-            records_by_req[req_id] = record
-        t_id = record.get("training_id")
-        if t_id and t_id not in records_by_req:
-            records_by_req[t_id] = record
+    records_by_req = build_training_records_lookup(training_records)
 
     items = []
     blocker_count = 0
@@ -350,12 +401,7 @@ async def evaluate_employee_training_status(employee_id: str, role: str = "") ->
         is_blocker = blocker_config.get("blocker_for_work", False)
         evidence_required = blocker_config.get("evidence_required", True)
 
-        record = records_by_req.get(req_id)
-        if not record:
-            for alt_id in [training_name.lower().replace(" ", "_"), req_id.replace("_", "-")]:
-                if alt_id in records_by_req:
-                    record = records_by_req[alt_id]
-                    break
+        record = resolve_training_record(records_by_req, req_id, training_name)
 
         if not record:
             items.append({

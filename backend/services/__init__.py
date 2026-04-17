@@ -15,4 +15,6 @@ from .training_evaluator import (
     is_mandatory_training_canonical,
     get_required_training_for_employee,
     evaluate_employee_training_status,
+    build_training_records_lookup,
+    resolve_training_record,
 )

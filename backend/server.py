@@ -24865,9 +24865,8 @@ async def submit_structured_application(form: StructuredApplicationForm):
         created_at = existing.get("created_at", "")
         is_recent = False
         try:
-            from datetime import datetime, timedelta, timezone as tz
             created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-            is_recent = (datetime.now(tz.utc) - created_dt) < timedelta(minutes=5)
+            is_recent = (datetime.now(timezone.utc) - created_dt) < timedelta(minutes=5)
         except Exception:
             pass
         

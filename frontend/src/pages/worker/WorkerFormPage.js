@@ -11,147 +11,18 @@ import { RadioGroup, RadioGroupItem } from '../../components/ui/radio-group';
 import { toast } from 'sonner';
 import { 
   ArrowLeft, Save, Send, Loader2, CheckCircle, Clock,
-  FileText, Heart, User, Briefcase
+  FileText, Heart, User, Briefcase, Info
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
-// Form field definitions for each form type
-// These IDs must match the admin compliance requirements
-const FORM_FIELDS = {
-  staff_health_questionnaire: {
-    icon: Heart,
-    sections: [
-      {
-        title: "General Health",
-        fields: [
-          { id: "general_health", label: "How would you describe your general health?", type: "select", options: ["Excellent", "Good", "Fair", "Poor"], required: true },
-          { id: "current_conditions", label: "Do you have any current medical conditions?", type: "textarea", placeholder: "Please list any conditions or write 'None'" },
-          { id: "medications", label: "Are you currently taking any medications?", type: "textarea", placeholder: "Please list medications or write 'None'" },
-        ]
-      },
-      {
-        title: "Physical Requirements",
-        fields: [
-          { id: "lifting_capable", label: "Can you lift and move patients/equipment safely?", type: "radio", options: ["Yes", "No", "With assistance"], required: true },
-          { id: "standing_capable", label: "Can you stand for extended periods?", type: "radio", options: ["Yes", "No", "With breaks"], required: true },
-          { id: "physical_limitations", label: "Do you have any physical limitations we should know about?", type: "textarea" },
-        ]
-      },
-      {
-        title: "Vaccination Status",
-        fields: [
-          { id: "covid_vaccinated", label: "COVID-19 vaccination status", type: "select", options: ["Fully vaccinated", "Partially vaccinated", "Not vaccinated", "Medical exemption"], required: true },
-          { id: "flu_vaccinated", label: "Flu vaccination (this season)", type: "radio", options: ["Yes", "No", "Planning to get"], required: true },
-          { id: "hepatitis_b", label: "Hepatitis B vaccination status", type: "select", options: ["Fully vaccinated", "Partial", "Not vaccinated", "Unknown"] },
-        ]
-      }
-    ]
-  },
-  staff_personal_info: {
-    icon: User,
-    sections: [
-      {
-        title: "Personal Details",
-        fields: [
-          { id: "title", label: "Title", type: "select", options: ["Mr", "Mrs", "Ms", "Miss", "Dr", "Other"], required: true },
-          { id: "preferred_name", label: "Preferred Name (if different)", type: "text" },
-          { id: "date_of_birth", label: "Date of Birth", type: "date", required: true },
-          { id: "national_insurance", label: "National Insurance Number", type: "text", placeholder: "e.g., AB123456C", required: true },
-        ]
-      },
-      {
-        title: "Contact Information",
-        fields: [
-          { id: "address_line1", label: "Address Line 1", type: "text", required: true },
-          { id: "address_line2", label: "Address Line 2", type: "text" },
-          { id: "city", label: "City/Town", type: "text", required: true },
-          { id: "postcode", label: "Postcode", type: "text", required: true },
-          { id: "mobile_phone", label: "Mobile Phone", type: "tel", required: true },
-          { id: "home_phone", label: "Home Phone", type: "tel" },
-        ]
-      },
-      {
-        title: "Emergency Contact",
-        fields: [
-          { id: "emergency_name", label: "Emergency Contact Name", type: "text", required: true },
-          { id: "emergency_relationship", label: "Relationship", type: "text", required: true },
-          { id: "emergency_phone", label: "Emergency Contact Phone", type: "tel", required: true },
-        ]
-      }
-    ]
-  },
-  hmrc_starter_checklist: {
-    icon: Briefcase,
-    sections: [
-      {
-        title: "Previous Employment",
-        fields: [
-          { id: "statement", label: "Which statement applies to you?", type: "radio", options: [
-            "A: This is my first job since 6 April and I've not received any taxable benefits",
-            "B: This is my only job but I've had another job or received benefits since 6 April",
-            "C: I have another job or receive a State/Occupational Pension"
-          ], required: true },
-        ]
-      },
-      {
-        title: "Student Loan",
-        fields: [
-          { id: "student_loan", label: "Do you have a student loan?", type: "radio", options: ["Yes", "No"], required: true },
-          { id: "student_loan_plan", label: "If yes, which plan?", type: "select", options: ["Plan 1", "Plan 2", "Plan 4", "Postgraduate Loan", "Not applicable"] },
-        ]
-      },
-      {
-        title: "Bank Details",
-        fields: [
-          { id: "bank_name", label: "Bank Name", type: "text", required: true },
-          { id: "account_name", label: "Account Holder Name", type: "text", required: true },
-          { id: "sort_code", label: "Sort Code", type: "text", placeholder: "00-00-00", required: true },
-          { id: "account_number", label: "Account Number", type: "text", placeholder: "8 digits", required: true },
-        ]
-      }
-    ]
-  },
-  equal_opportunities: {
-    icon: FileText,
-    sections: [
-      {
-        title: "Diversity Monitoring (Optional)",
-        description: "This information helps us monitor equality and diversity. All responses are anonymous.",
-        fields: [
-          { id: "ethnicity", label: "Ethnic Group", type: "select", options: ["White British", "White Irish", "White Other", "Mixed/Multiple ethnic groups", "Asian/Asian British", "Black/African/Caribbean/Black British", "Other ethnic group", "Prefer not to say"] },
-          { id: "disability", label: "Do you consider yourself to have a disability?", type: "radio", options: ["Yes", "No", "Prefer not to say"] },
-          { id: "gender", label: "Gender", type: "select", options: ["Male", "Female", "Non-binary", "Other", "Prefer not to say"] },
-          { id: "age_range", label: "Age Range", type: "select", options: ["16-24", "25-34", "35-44", "45-54", "55-64", "65+", "Prefer not to say"] },
-          { id: "religion", label: "Religion or Belief", type: "select", options: ["No religion", "Christian", "Muslim", "Hindu", "Sikh", "Jewish", "Buddhist", "Other", "Prefer not to say"] },
-          { id: "sexual_orientation", label: "Sexual Orientation", type: "select", options: ["Heterosexual/Straight", "Gay/Lesbian", "Bisexual", "Other", "Prefer not to say"] },
-        ]
-      }
-    ]
-  },
-  emergency_contacts: {
-    icon: User,
-    sections: [
-      {
-        title: "Primary Emergency Contact",
-        fields: [
-          { id: "primary_name", label: "Full Name", type: "text", required: true },
-          { id: "primary_relationship", label: "Relationship to You", type: "text", required: true, placeholder: "e.g., Spouse, Parent, Sibling" },
-          { id: "primary_phone", label: "Phone Number", type: "tel", required: true },
-          { id: "primary_email", label: "Email Address", type: "email" },
-          { id: "primary_address", label: "Address", type: "textarea" },
-        ]
-      },
-      {
-        title: "Secondary Emergency Contact",
-        fields: [
-          { id: "secondary_name", label: "Full Name", type: "text" },
-          { id: "secondary_relationship", label: "Relationship to You", type: "text" },
-          { id: "secondary_phone", label: "Phone Number", type: "tel" },
-        ]
-      }
-    ]
-  }
+// Icon lookup for form types — purely cosmetic
+const FORM_ICONS = {
+  staff_health_questionnaire: Heart,
+  staff_personal_info: User,
+  hmrc_starter_checklist: Briefcase,
+  equal_opportunities: FileText,
+  emergency_contacts: User,
 };
 
 export default function WorkerFormPage() {
@@ -162,10 +33,9 @@ export default function WorkerFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState({});
   const [formMeta, setFormMeta] = useState(null);
+  const [autoFillData, setAutoFillData] = useState({});
   const [lastSaved, setLastSaved] = useState(null);
   const [canEdit, setCanEdit] = useState(true);
-
-  const formDefinition = FORM_FIELDS[formId] || formMeta;
 
   useEffect(() => {
     fetchFormData();
@@ -179,6 +49,7 @@ export default function WorkerFormPage() {
       });
       setFormData(response.data.data || {});
       setFormMeta(response.data.form_definition);
+      setAutoFillData(response.data.auto_fill_data || {});
       setLastSaved(response.data.last_saved);
       setCanEdit(response.data.can_edit !== false);
     } catch (error) {
@@ -217,8 +88,10 @@ export default function WorkerFormPage() {
   const handleSubmit = async () => {
     // Validate required fields
     const missingFields = [];
-    formDefinition?.sections?.forEach(section => {
+    formMeta?.sections?.forEach(section => {
       section.fields.forEach(field => {
+        // Skip conditional fields whose parent condition is not met
+        if (field.conditional_on && formData[field.conditional_on] !== field.conditional_value) return;
         if (field.required && !formData[field.id]) {
           missingFields.push(field.label);
         }
@@ -251,98 +124,134 @@ export default function WorkerFormPage() {
   };
 
   const renderField = (field) => {
-    const value = formData[field.id] || '';
+    const value = formData[field.id] ?? '';
+    const isAutoFilled = autoFillData[field.id] !== undefined && formData[field.id] === autoFillData[field.id];
 
-    switch (field.type) {
-      case 'text':
-      case 'tel':
-      case 'email':
-      case 'date':
-      case 'number':
-        return (
-          <Input
-            type={field.type}
-            value={value}
-            onChange={(e) => handleFieldChange(field.id, e.target.value)}
-            placeholder={field.placeholder}
-            disabled={!canEdit}
-            className="mt-1"
-          />
-        );
-      
-      case 'textarea':
-        return (
-          <Textarea
-            value={value}
-            onChange={(e) => handleFieldChange(field.id, e.target.value)}
-            placeholder={field.placeholder}
-            disabled={!canEdit}
-            className="mt-1"
-            rows={3}
-          />
-        );
-      
-      case 'select':
-        return (
-          <Select
-            value={value}
-            onValueChange={(v) => handleFieldChange(field.id, v)}
-            disabled={!canEdit}
-          >
-            <SelectTrigger className="mt-1">
-              <SelectValue placeholder="Select an option" />
-            </SelectTrigger>
-            <SelectContent>
-              {field.options.map(opt => {
-                const optValue = typeof opt === 'object' ? opt.value : opt;
-                const optLabel = typeof opt === 'object' ? opt.label : opt;
-                return (
-                  <SelectItem key={optValue} value={optValue}>{optLabel}</SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-        );
-      
-      case 'radio':
-        return (
-          <RadioGroup
-            value={value}
-            onValueChange={(v) => handleFieldChange(field.id, v)}
-            disabled={!canEdit}
-            className="mt-2 space-y-2"
-          >
-            {field.options.map(opt => (
-              <div key={opt} className="flex items-center space-x-2">
-                <RadioGroupItem value={opt} id={`${field.id}-${opt}`} />
-                <Label htmlFor={`${field.id}-${opt}`} className="font-normal cursor-pointer">
-                  {opt}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-        );
-      
-      case 'checkbox':
-        return (
-          <div className="flex items-start space-x-3 mt-2">
-            <input
-              type="checkbox"
-              id={field.id}
-              checked={!!value}
-              onChange={(e) => handleFieldChange(field.id, e.target.checked)}
-              disabled={!canEdit}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <Label htmlFor={field.id} className="font-normal cursor-pointer text-sm text-slate-600">
-              {field.label}
-            </Label>
-          </div>
-        );
-      
-      default:
-        return null;
+    // Conditional field visibility
+    if (field.conditional_on) {
+      const parentValue = formData[field.conditional_on];
+      if (parentValue !== field.conditional_value) return null;
     }
+
+    const fieldEl = (() => {
+      switch (field.type) {
+        case 'text':
+        case 'tel':
+        case 'email':
+        case 'date':
+        case 'number':
+          return (
+            <Input
+              type={field.type}
+              value={value}
+              onChange={(e) => handleFieldChange(field.id, e.target.value)}
+              placeholder={field.placeholder}
+              disabled={!canEdit}
+              className={`mt-1 ${isAutoFilled ? 'border-green-300 bg-green-50/40' : ''}`}
+            />
+          );
+        
+        case 'textarea':
+          return (
+            <Textarea
+              value={value}
+              onChange={(e) => handleFieldChange(field.id, e.target.value)}
+              placeholder={field.placeholder}
+              disabled={!canEdit}
+              className={`mt-1 ${isAutoFilled ? 'border-green-300 bg-green-50/40' : ''}`}
+              rows={3}
+            />
+          );
+        
+        case 'select':
+          return (
+            <Select
+              value={value}
+              onValueChange={(v) => handleFieldChange(field.id, v)}
+              disabled={!canEdit}
+            >
+              <SelectTrigger className={`mt-1 ${isAutoFilled ? 'border-green-300 bg-green-50/40' : ''}`}>
+                <SelectValue placeholder="Select an option" />
+              </SelectTrigger>
+              <SelectContent>
+                {(field.options || []).map(opt => {
+                  const optValue = typeof opt === 'object' ? opt.value : opt;
+                  const optLabel = typeof opt === 'object' ? opt.label : opt;
+                  return (
+                    <SelectItem key={optValue} value={optValue}>{optLabel}</SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          );
+        
+        case 'radio':
+          return (
+            <RadioGroup
+              value={value}
+              onValueChange={(v) => handleFieldChange(field.id, v)}
+              disabled={!canEdit}
+              className="mt-2 space-y-2"
+            >
+              {(field.options || []).map(opt => (
+                <div key={opt} className="flex items-center space-x-2">
+                  <RadioGroupItem value={opt} id={`${field.id}-${opt}`} />
+                  <Label htmlFor={`${field.id}-${opt}`} className="font-normal cursor-pointer">
+                    {opt}
+                  </Label>
+                </div>
+              ))}
+            </RadioGroup>
+          );
+        
+        case 'checkbox':
+          return (
+            <div className="flex items-start space-x-3 mt-2">
+              <input
+                type="checkbox"
+                id={field.id}
+                checked={!!value}
+                onChange={(e) => handleFieldChange(field.id, e.target.checked)}
+                disabled={!canEdit}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <Label htmlFor={field.id} className="font-normal cursor-pointer text-sm text-slate-600">
+                {field.label}
+              </Label>
+            </div>
+          );
+
+        case 'info':
+          return (
+            <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-md border">
+              {field.label}
+            </div>
+          );
+        
+        default:
+          return null;
+      }
+    })();
+
+    // Checkbox renders its own label, so skip wrapping label for it
+    if (field.type === 'checkbox' || field.type === 'info') return fieldEl;
+
+    return (
+      <div key={field.id}>
+        <div className="flex items-center gap-2">
+          <Label className="text-sm font-medium">
+            {field.label}
+            {field.required && <span className="text-red-500 ml-1">*</span>}
+          </Label>
+          {isAutoFilled && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 border border-green-200 whitespace-nowrap">
+              Pre-filled
+            </span>
+          )}
+        </div>
+        {fieldEl}
+      </div>
+    );
   };
 
   if (loading) {
@@ -353,7 +262,7 @@ export default function WorkerFormPage() {
     );
   }
 
-  if (!formDefinition) {
+  if (!formMeta?.sections) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <Card className="max-w-md">
@@ -368,7 +277,9 @@ export default function WorkerFormPage() {
     );
   }
 
-  const FormIcon = formDefinition.icon || FileText;
+  const FormIcon = FORM_ICONS[formId] || FileText;
+  const autoFillCount = Object.keys(autoFillData).filter(k => formData[k] === autoFillData[k]).length;
+  const totalFields = formMeta.sections.reduce((n, s) => n + s.fields.length, 0);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -417,7 +328,23 @@ export default function WorkerFormPage() {
           </div>
         )}
 
-        {formDefinition.sections.map((section, sIdx) => (
+        {canEdit && autoFillCount > 0 && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-start gap-3">
+            <Info className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-green-800">
+                {autoFillCount === totalFields
+                  ? 'Auto-filled from your application'
+                  : `${autoFillCount} field${autoFillCount !== 1 ? 's' : ''} auto-filled from your application`}
+              </p>
+              <p className="text-xs text-green-600 mt-0.5">
+                Pre-filled fields are marked with a green badge. Please review and correct if needed.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {formMeta.sections.map((section, sIdx) => (
           <Card key={sIdx} className="shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">{section.title}</CardTitle>
@@ -426,15 +353,15 @@ export default function WorkerFormPage() {
               )}
             </CardHeader>
             <CardContent className="space-y-4">
-              {section.fields.map((field) => (
-                <div key={field.id}>
-                  <Label className="text-sm font-medium">
-                    {field.label}
-                    {field.required && <span className="text-red-500 ml-1">*</span>}
-                  </Label>
-                  {renderField(field)}
-                </div>
-              ))}
+              {section.fields.map((field) => {
+                const rendered = renderField(field);
+                if (!rendered) return null;
+                // renderField already wraps non-checkbox/info fields with label div
+                if (field.type === 'checkbox' || field.type === 'info') {
+                  return <div key={field.id}>{rendered}</div>;
+                }
+                return <div key={field.id}>{rendered}</div>;
+              })}
             </CardContent>
           </Card>
         ))}

@@ -3259,30 +3259,11 @@ export default function EmployeeProfilePage() {
   );
   const cvLinkedForReview = Boolean(employee?.cv_document_id && activeCvDocument);
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
-  const cvStatusLabel = cvReviewReady
-    ? (employee?.cv_status === 'approved' ? 'Approved' : 'Review action required')
-    : !cvFileExists
-      ? 'Missing'
-      : !cvIsPdf
-        ? 'Uploaded — unsupported format'
-        : 'Uploaded — select as review CV';
+  const cvStatusLabel = cvFileExists ? 'On file' : 'Missing';
   const cvStatusBadgeClass =
-    (cvReviewReady && employee?.cv_status === 'approved')
+    cvFileExists
       ? 'bg-green-100 text-green-700 border-green-200'
-      : cvFileExists
-        ? 'bg-amber-100 text-amber-700 border-amber-200'
-        : 'bg-gray-100 text-gray-600 border-gray-200';
-  const cvReviewStateLabel =
-    cvReviewReady && employee?.cv_status === 'approved'
-      ? 'CV has been approved for employment review.'
-    : cvReviewReady && employee?.cv_extraction_status === 'reviewed'
-        ? 'CV has been extracted — approve or reject to continue.'
-        : !cvFileExists
-          ? 'No CV file is currently available on this page.'
-          : !cvIsPdf
-            ? 'A CV file exists but is not in a reviewable PDF format. Upload a PDF to enable review.'
-            : 'A CV file exists but is not linked as the review CV. Click "Link as Review CV" to enable review, or upload a new PDF.';
-  const cvRecoveryActionLabel = cvFileExists ? 'Replace with PDF' : 'Upload PDF CV';
+      : 'bg-gray-100 text-gray-600 border-gray-200';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
     ? (employmentGapEvaluation?.pending_count || 0) +
@@ -3391,9 +3372,9 @@ export default function EmployeeProfilePage() {
     employmentGapsCannotAssess ? 'Cannot assess employment gaps' : null,
     (!employmentGapsCannotAssess && employmentHistoryExists && !allGapsResolved) ? 'Gaps unresolved' : null,
   ].filter(Boolean);
-  const employmentStatusWarnings = [
-    cvLinkBlocksReview ? 'CV uploaded but not selected as the review CV — upload a PDF or link the active document' : null,
-  ].filter(Boolean);
+  // CV is supporting evidence only — it does not block sign-off.
+  // Employment history comes from the application form.
+  const employmentStatusWarnings = [].filter(Boolean);
 
   if (loading) {
     return (
@@ -5452,92 +5433,34 @@ export default function EmployeeProfilePage() {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h4 className="font-medium text-gray-800">CV / Resume</h4>
-                        <p className="mt-1 text-xs text-text-muted">CV file status and the existing review action already used on this page.</p>
+                        <p className="mt-1 text-xs text-text-muted">Supporting evidence — view alongside the structured employment history below.</p>
                       </div>
-                      <Badge variant="outline" className={cvStatusBadgeClass}>
-                        {cvStatusLabel}
+                      <Badge variant="outline" className={cvFileExists ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-50 text-slate-600 border-slate-200'}>
+                        {cvFileExists ? 'On file' : 'Missing'}
                       </Badge>
                     </div>
 
                     {cvFileExists ? (
-                      <div className="mt-4 space-y-3">
-                        <p className="text-sm text-gray-700">{cvReviewStateLabel}</p>
-                        <div className="flex flex-wrap gap-2">
-                          {cvFileExists && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={handleViewCv}
-                              data-testid="view-cv-btn"
-                            >
-                              <Eye className="h-4 w-4 mr-1" />
-                              View CV
-                            </Button>
-                          )}
-                          {cvReviewReady ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={handleReviewCv}
-                              disabled={cvReviewLoading || !cvReviewReady}
-                              className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100"
-                            >
-                              {cvReviewLoading ? (
-                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                              ) : (
-                                <FileSearch className="h-4 w-4 mr-1" />
-                              )}
-                              Review CV
-                            </Button>
-                          ) : (
-                            <>
-                              {cvIsPdf && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={handleLinkCv}
-                                  disabled={cvReviewLoading}
-                                  className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
-                                >
-                                  {cvReviewLoading ? (
-                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                  ) : (
-                                    <FileSearch className="h-4 w-4 mr-1" />
-                                  )}
-                                  Link as Review CV
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={openCvRecoveryUpload}
-                              >
-                                <Upload className="h-4 w-4 mr-1" />
-                                {cvRecoveryActionLabel}
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                        {!cvReviewReady && (
-                          <p className="text-xs text-text-muted">
-                            {cvIsPdf
-                              ? 'Upload a replacement PDF CV if the current file should become the active reviewable CV.'
-                              : 'Upload a PDF CV to restore the normal review path.'}
-                          </p>
-                        )}
+                      <div className="mt-4">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleViewCv}
+                          data-testid="view-cv-btn"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View CV
+                        </Button>
+                        <p className="text-xs text-text-muted mt-2">
+                          Compare the CV against the structured employment history from the application form to verify accuracy.
+                        </p>
                       </div>
                     ) : (
                       <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-white p-4">
-                        <p className="text-sm font-medium text-gray-700">CV missing</p>
+                        <p className="text-sm font-medium text-gray-700">CV not uploaded</p>
                         <p className="mt-1 text-xs text-text-muted">
-                          No original CV file is currently linked to this employee record.
+                          Worker has not uploaded a CV yet. The CV is supporting evidence — employment history is taken from the application form.
                         </p>
-                        <div className="mt-3">
-                          <Button size="sm" variant="outline" onClick={openCvRecoveryUpload}>
-                            <Upload className="h-4 w-4 mr-1" />
-                            {cvRecoveryActionLabel}
-                          </Button>
-                        </div>
                       </div>
                     )}
                   </div>
@@ -5548,9 +5471,9 @@ export default function EmployeeProfilePage() {
             <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-employment-cv">
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="font-heading text-lg">Extracted Employment History</CardTitle>
+                  <CardTitle className="font-heading text-lg">Employment History & Gap Review</CardTitle>
                   <p className="text-xs text-text-muted">
-                    Employment records below remain the current structured history used for review, alongside the source evidence above.
+                    Structured employment history from the application form. Compare against the CV (above) to verify accuracy.
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -5566,55 +5489,6 @@ export default function EmployeeProfilePage() {
                 </div>
               </CardHeader>
               <CardContent>
-
-              {/* CV Status Banner */}
-              {employee?.cv_status === 'rejected' && (
-                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-red-800">CV rejected / action required</p>
-                    <p className="text-sm text-red-600 mt-1">{employee?.cv_rejection_reason}</p>
-                    <p className="text-xs text-red-500 mt-2">
-                      Worker has been notified to explain gaps or upload a new CV.
-                    </p>
-                  </div>
-                </div>
-              )}
-              
-              {employee?.cv_extraction_status === 'reviewed' && employee?.cv_status !== 'approved' && !employee?.cv_status && (
-                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
-                  <Clock className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-amber-800">CV extracted — approve or reject</p>
-                    <p className="text-sm text-amber-600 mt-1">
-                      Found {employee?.cv_extracted_employment_history?.length || 0} jobs, 
-                      {employee?.cv_gaps_detected?.length || 0} gaps detected.
-                    </p>
-                    <div className="flex gap-2 mt-3">
-                      <Button size="sm" onClick={handleApproveCv} disabled={cvReviewLoading} className="bg-green-600 hover:bg-green-700">
-                        {cvReviewLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <CheckCircle className="h-4 w-4 mr-1" />}
-                        Approve CV
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => setCvRejectDialogOpen(true)} className="text-red-600 border-red-200 hover:bg-red-50">
-                        <XCircle className="h-4 w-4 mr-1" />
-                        Reject — request action
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {employee?.cv_status === 'approved' && (
-                <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
-                  <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-green-800">CV approved</p>
-                    <p className="text-sm text-green-600 mt-1">
-                      Employment history accepted — {employee?.cv_extracted_employment_history?.length || 0} jobs extracted.
-                    </p>
-                  </div>
-                </div>
-              )}
               
               {/* Gap analysis unavailable state */}
               {employmentGapsCannotAssess && (
@@ -5625,7 +5499,7 @@ export default function EmployeeProfilePage() {
                     <p className="text-sm text-red-600 mt-1">
                       {gapAnalysisFailed
                         ? 'Gap analysis encountered an error during processing. Click "Re-run Gap Analysis" to retry.'
-                        : 'Employment gap analysis has not been run. Use "Review CV" to extract history, or click "Re-run Gap Analysis" if history is already on file.'}
+                        : 'Employment gap analysis has not been run yet. Click "Re-run Gap Analysis" to detect gaps from the application form employment history.'}
                     </p>
                     {employee?.gap_analysis_error && (
                       <p className="text-xs text-red-500 mt-1 font-mono">{employee.gap_analysis_error}</p>

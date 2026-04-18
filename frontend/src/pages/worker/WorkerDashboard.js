@@ -94,14 +94,6 @@ function EmploymentGapsSection() {
   const [submitting, setSubmitting] = useState(false);
   const [coverage, setCoverage] = useState(null);
   const [employmentEntries, setEmploymentEntries] = useState([]);
-  const [amendDialogOpen, setAmendDialogOpen] = useState(false);
-  const [amendEntryId, setAmendEntryId] = useState(null); // null = add, string = edit by stable id
-  const [amendForm, setAmendForm] = useState({
-    employer_name: '', job_title: '', start_date: '', end_date: '',
-    is_current: false, duties: '', reason_for_leaving: '',
-    employer_address: '', employer_phone: '', can_contact: true,
-  });
-  const [amendSaving, setAmendSaving] = useState(false);
 
   useEffect(() => {
     fetchGaps();
@@ -148,74 +140,6 @@ function EmploymentGapsSection() {
       toast.error(typeof detail === 'string' ? detail : 'Failed to submit explanation');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const openAddEntry = () => {
-    setAmendEntryId(null);
-    setAmendForm({
-      employer_name: '', job_title: '', start_date: '', end_date: '',
-      is_current: false, duties: '', reason_for_leaving: '',
-      employer_address: '', employer_phone: '', can_contact: true,
-    });
-    setAmendDialogOpen(true);
-  };
-
-  const openEditEntry = (entry) => {
-    setAmendEntryId(entry.id);
-    setAmendForm({
-      employer_name: entry.employer_name || '',
-      job_title: entry.job_title || '',
-      start_date: entry.start_date || '',
-      end_date: entry.end_date || '',
-      is_current: entry.is_current || false,
-      duties: entry.duties || '',
-      reason_for_leaving: entry.reason_for_leaving || '',
-      employer_address: entry.employer_address || '',
-      employer_phone: entry.employer_phone || '',
-      can_contact: entry.can_contact !== false,
-    });
-    setAmendDialogOpen(true);
-  };
-
-  const handleAmendSave = async () => {
-    if (!amendForm.employer_name.trim()) { toast.error('Employer name is required'); return; }
-    if (!amendForm.start_date) { toast.error('Start date is required'); return; }
-    if (!amendForm.is_current && !amendForm.end_date) { toast.error('End date is required unless this is your current role'); return; }
-
-    setAmendSaving(true);
-    try {
-      const token = localStorage.getItem('workerToken');
-      await axios.post(`${API}/worker/employment-history/amend`, {
-        entry: {
-          ...amendForm,
-          end_date: amendForm.is_current ? null : amendForm.end_date,
-        },
-        entry_id: amendEntryId,
-      }, { headers: { Authorization: `Bearer ${token}` } });
-      toast.success(amendEntryId !== null ? 'Employment entry updated' : 'Employment entry added');
-      setAmendDialogOpen(false);
-      fetchGaps(); // Refreshes entries + coverage + gaps
-    } catch (err) {
-      const detail = err.response?.data?.detail;
-      toast.error(typeof detail === 'string' ? detail : 'Failed to save employment entry');
-    } finally {
-      setAmendSaving(false);
-    }
-  };
-
-  const handleDeleteEntry = async (entryId) => {
-    if (!window.confirm('Remove this employment entry? Gaps and coverage will be recalculated.')) return;
-    try {
-      const token = localStorage.getItem('workerToken');
-      await axios.delete(`${API}/worker/employment-history/${entryId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      toast.success('Employment entry removed');
-      fetchGaps();
-    } catch (err) {
-      const detail = err.response?.data?.detail;
-      toast.error(typeof detail === 'string' ? detail : 'Failed to remove entry');
     }
   };
 
@@ -292,41 +216,25 @@ function EmploymentGapsSection() {
               </p>
             </div>
 
-            {/* Employment entries summary with edit actions */}
+            {/* Employment entries summary (read-only — submitted via application form) */}
             <div className="border-t pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-medium text-slate-600">
-                  {employmentEntries.length > 0
-                    ? `${employmentEntries.length} employment record${employmentEntries.length !== 1 ? 's' : ''} on file`
-                    : 'No employment records on file'}
-                </p>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openAddEntry}>
-                  <Plus className="h-3 w-3 mr-1" />Add Entry
-                </Button>
-              </div>
+              <p className="text-xs font-medium text-slate-600 mb-2">
+                {employmentEntries.length > 0
+                  ? `${employmentEntries.length} employment record${employmentEntries.length !== 1 ? 's' : ''} from your application`
+                  : 'No employment records on file — these are collected during your application'}
+              </p>
               {employmentEntries.length > 0 && (
                 <div className="space-y-1.5">
                   {employmentEntries.map((entry) => (
-                    <div key={entry.id || entry.employer_name} className="flex items-center justify-between py-1.5 px-3 bg-slate-50 rounded-lg text-sm group">
+                    <div key={entry.id || entry.employer_name} className="flex items-center justify-between py-1.5 px-3 bg-slate-50 rounded-lg text-sm">
                       <div className="flex items-center gap-2 min-w-0">
                         <Briefcase className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
                         <span className="text-slate-800 truncate font-medium">{entry.employer_name}</span>
                         {entry.job_title && <span className="text-slate-500 truncate hidden sm:inline">· {entry.job_title}</span>}
                       </div>
-                      <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                        <span className="text-xs text-slate-500">
-                          {formatDate(entry.start_date)} — {entry.is_current ? 'Present' : formatDate(entry.end_date)}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={() => openEditEntry(entry)}
-                          title="Edit entry"
-                        >
-                          <Edit3 className="h-3 w-3" />
-                        </Button>
-                      </div>
+                      <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
+                        {formatDate(entry.start_date)} — {entry.is_current ? 'Present' : formatDate(entry.end_date)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -337,7 +245,7 @@ function EmploymentGapsSection() {
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                 {hasGaps
                   ? 'Please explain any gaps below. All gaps must be explained and verified to meet CQC requirements.'
-                  : 'Your employment history does not yet cover the full 10-year window. Please ensure all roles and any gaps are accounted for.'}
+                  : 'Your employment history does not yet cover the full 10-year window. Please contact your recruiter if you need to update your application.'}
               </p>
             )}
           </CardContent>
@@ -464,89 +372,6 @@ function EmploymentGapsSection() {
     </Card>
       )}
 
-      {/* Employment Entry Add/Edit Dialog */}
-      <Dialog open={amendDialogOpen} onOpenChange={setAmendDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{amendEntryId !== null ? 'Edit Employment Entry' : 'Add Employment Entry'}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <Label htmlFor="amend-employer">Employer name <span className="text-red-500">*</span></Label>
-                <Input id="amend-employer" value={amendForm.employer_name}
-                  onChange={e => setAmendForm(f => ({ ...f, employer_name: e.target.value }))}
-                  placeholder="e.g. NHS Foundation Trust" />
-              </div>
-              <div className="sm:col-span-2">
-                <Label htmlFor="amend-title">Job title <span className="text-red-500">*</span></Label>
-                <Input id="amend-title" value={amendForm.job_title}
-                  onChange={e => setAmendForm(f => ({ ...f, job_title: e.target.value }))}
-                  placeholder="e.g. Healthcare Assistant" />
-              </div>
-              <div>
-                <Label htmlFor="amend-start">Start date <span className="text-red-500">*</span></Label>
-                <Input id="amend-start" type="month" value={amendForm.start_date?.slice(0, 7) || ''}
-                  onChange={e => setAmendForm(f => ({ ...f, start_date: e.target.value }))} />
-              </div>
-              <div>
-                <Label htmlFor="amend-end">End date {!amendForm.is_current && <span className="text-red-500">*</span>}</Label>
-                <Input id="amend-end" type="month" value={amendForm.end_date?.slice(0, 7) || ''}
-                  onChange={e => setAmendForm(f => ({ ...f, end_date: e.target.value }))}
-                  disabled={amendForm.is_current} />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox id="amend-current" checked={amendForm.is_current}
-                onCheckedChange={v => setAmendForm(f => ({ ...f, is_current: !!v, end_date: v ? '' : f.end_date }))} />
-              <Label htmlFor="amend-current" className="text-sm cursor-pointer">I currently work here</Label>
-            </div>
-            <div>
-              <Label htmlFor="amend-duties">Main duties (optional)</Label>
-              <Textarea id="amend-duties" value={amendForm.duties} rows={2}
-                onChange={e => setAmendForm(f => ({ ...f, duties: e.target.value }))}
-                placeholder="Briefly describe your responsibilities" />
-            </div>
-            <div>
-              <Label htmlFor="amend-reason">Reason for leaving (optional)</Label>
-              <Input id="amend-reason" value={amendForm.reason_for_leaving}
-                onChange={e => setAmendForm(f => ({ ...f, reason_for_leaving: e.target.value }))}
-                disabled={amendForm.is_current}
-                placeholder="e.g. Career progression" />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="amend-address">Employer address (optional)</Label>
-                <Input id="amend-address" value={amendForm.employer_address}
-                  onChange={e => setAmendForm(f => ({ ...f, employer_address: e.target.value }))} />
-              </div>
-              <div>
-                <Label htmlFor="amend-phone">Employer phone (optional)</Label>
-                <Input id="amend-phone" value={amendForm.employer_phone}
-                  onChange={e => setAmendForm(f => ({ ...f, employer_phone: e.target.value }))} />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox id="amend-contact" checked={amendForm.can_contact}
-                onCheckedChange={v => setAmendForm(f => ({ ...f, can_contact: !!v }))} />
-              <Label htmlFor="amend-contact" className="text-sm cursor-pointer">You may contact this employer</Label>
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            {amendEntryId !== null && (
-              <Button variant="destructive" size="sm" className="mr-auto"
-                onClick={() => { setAmendDialogOpen(false); handleDeleteEntry(amendEntryId); }}>
-                <Trash2 className="h-3.5 w-3.5 mr-1" />Remove
-              </Button>
-            )}
-            <Button variant="ghost" onClick={() => setAmendDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleAmendSave} disabled={amendSaving} className="bg-blue-600 hover:bg-blue-700">
-              {amendSaving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              {amendEntryId !== null ? 'Save Changes' : 'Add Entry'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -1873,121 +1698,6 @@ export default function WorkerDashboard() {
                   </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ========== CV EXTRACTION & 10-YEAR HISTORY SECTION ========== */}
-        {!isActiveEmployee && (
-          <Card className={`shadow-md border-0 ${
-            cvStatus?.verified ? 'bg-green-50/30' :
-            cvStatus?.needs_verification ? 'bg-blue-50/30' :
-            'bg-slate-50'
-          }`} data-testid="cv-extraction-section">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Briefcase className={`h-5 w-5 ${
-                      cvStatus?.verified ? 'text-green-600' :
-                      cvStatus?.needs_verification ? 'text-blue-600' :
-                      'text-slate-500'
-                    }`} />
-                    CV & Employment History
-                  </CardTitle>
-                  <p className="text-xs text-slate-500 mt-1">
-                    NHS requires 10-year employment history with gap explanations
-                  </p>
-                </div>
-                {cvStatusLoading && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
-              </div>
-            </CardHeader>
-            <CardContent>
-              {/* No CV / replacement required — show upload CTA */}
-              {cvStatus?.can_upload_cv && (
-                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
-                        <Upload className="h-6 w-6 text-amber-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-slate-800">Upload Your CV</p>
-                        <p className="text-sm text-slate-600">
-                          AI will extract your employment history to auto-fill your 10-year form
-                        </p>
-                      </div>
-                    </div>
-                    <Button
-                      onClick={triggerCvFileInput}
-                      disabled={uploading === 'cv'}
-                      className="gap-2 bg-amber-600 hover:bg-amber-700"
-                      data-testid="upload-cv-btn"
-                    >
-                      {uploading === 'cv' ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Upload className="h-4 w-4" />
-                      )}
-                      Upload CV
-                    </Button>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-3">
-                    Accepted format: PDF only (max 10MB)
-                  </p>
-                </div>
-              )}
-
-              {/* CV Received - Awaiting Admin Review */}
-              {cvStatus?.has_cv && !cvStatus?.needs_verification && !cvStatus?.verified && (
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center">
-                        <FileText className="h-6 w-6 text-slate-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-slate-800">CV received</p>
-                        <p className="text-sm text-slate-600">
-                          Your CV is on file and is awaiting review before employment history extraction starts.
-                        </p>
-                        {cvStatus?.cv_document?.uploaded_at && (
-                          <p className="text-xs text-slate-500 mt-1">
-                            Received {formatDate(cvStatus.cv_document.uploaded_at)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <Badge className="bg-slate-100 text-slate-700">
-                      <Clock className="h-3 w-3 mr-1" />
-                      Awaiting review
-                    </Badge>
-                  </div>
-                </div>
-              )}
-
-              {/* CV Verified */}
-              {cvStatus?.verified && (
-                <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                        <CheckCircle className="h-6 w-6 text-green-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-green-800">CV Data Verified</p>
-                        <p className="text-sm text-green-700">
-                          {cvStatus?.employment_history?.jobs_found || 0} jobs verified • {formatDate(cvStatus?.verified_at)}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge className="bg-green-100 text-green-700">
-                      <CheckCircle className="h-3 w-3 mr-1" />
-                      Verified
-                    </Badge>
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}

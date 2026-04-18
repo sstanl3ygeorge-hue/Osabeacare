@@ -5824,7 +5824,11 @@ export default function EmployeeProfilePage() {
                           if (rawUrl.startsWith('/api/')) {
                             url = `${API}${rawUrl.substring(4)}`; // "/api/foo" -> API + "/foo"
                           }
-                          setPreviewFile({ url, name, filename: name });
+                          let stampedUrl = fileObj?.stamped_file_url || null;
+                          if (stampedUrl && stampedUrl.startsWith('/api/')) {
+                            stampedUrl = `${API}${stampedUrl.substring(4)}`;
+                          }
+                          setPreviewFile({ url, name, filename: name, stampedFileUrl: stampedUrl });
                           setPreviewFiles([]); // Clear multi-file array
                           setPreviewOpen(true);
                         } else {
@@ -6917,6 +6921,7 @@ export default function EmployeeProfilePage() {
         onClose={() => { setPreviewOpen(false); setPreviewFiles([]); }}
         fileUrl={previewFile?.url}
         fileName={previewFile?.name || previewFile?.filename}
+        stampedFileUrl={previewFile?.stampedFileUrl}
         token={token}
         files={previewFiles}
         onDownload={previewFile ? async () => {

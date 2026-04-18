@@ -7,7 +7,7 @@ import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { 
   X, Download, ExternalLink, ZoomIn, ZoomOut, RotateCw,
   ChevronLeft, ChevronRight, Loader2, FileText, Image as ImageIcon,
-  File, AlertCircle, Maximize2, Minimize2
+  File, AlertCircle, Maximize2, Minimize2, ShieldCheck
 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -52,6 +52,8 @@ export default function DocumentPreviewModal({
   fileSize,
   token,
   onDownload,
+  // Original/Stamped toggle support
+  stampedFileUrl,
   // Multi-file support
   files = [],  // Array of {url, filename, content_type, file_id}
   initialFileIndex = 0
@@ -62,16 +64,25 @@ export default function DocumentPreviewModal({
   const [contentType, setContentType] = useState(null);
   const [actualFileSize, setActualFileSize] = useState(fileSize);
   
+  // Original/Stamped toggle
+  const [viewingStamped, setViewingStamped] = useState(!!stampedFileUrl);
+  
   // Multi-file navigation state
   const [currentFileIndex, setCurrentFileIndex] = useState(initialFileIndex);
   
   // Get current file from array or use single file props
   const allFiles = files.length > 0 ? files : (fileUrl ? [{ url: fileUrl, filename: fileName, content_type: providedFileType }] : []);
   const currentFile = allFiles[currentFileIndex] || {};
-  const activeFileUrl = currentFile.url || fileUrl;
+  const baseFileUrl = currentFile.url || fileUrl;
+  const activeFileUrl = (stampedFileUrl && viewingStamped) ? stampedFileUrl : baseFileUrl;
   const activeFileName = currentFile.filename || currentFile.file_label || fileName;
   const hasMultipleFiles = allFiles.length > 1;
   
+  // Reset stamped toggle when prop changes
+  useEffect(() => {
+    setViewingStamped(!!stampedFileUrl);
+  }, [stampedFileUrl]);
+
   // PDF specific state
   const [numPages, setNumPages] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -173,12 +184,22 @@ export default function DocumentPreviewModal({
   
   // Download handler
   const handleDownload = () => {
+    // When viewing stamped version, download from blob (correct version)
+    if (viewingStamped && stampedFileUrl && blobUrl) {
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `stamped_${activeFileName || 'document'}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return;
+    }
     if (onDownload) {
       onDownload();
     } else if (blobUrl) {
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = fileName || 'document';
+      link.download = activeFileName || 'document';
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -548,6 +569,33 @@ export default function DocumentPreviewModal({
             </div>
           </div>
           
+          {/* Original / Stamped toggle */}
+          {stampedFileUrl && (
+            <div className="flex items-center bg-gray-100 rounded-lg p-0.5 gap-0.5 mr-3 shrink-0">
+              <button
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  !viewingStamped
+                    ? 'bg-white shadow-sm text-gray-900'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => setViewingStamped(false)}
+              >
+                Original
+              </button>
+              <button
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 ${
+                  viewingStamped
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => setViewingStamped(true)}
+              >
+                <ShieldCheck className="h-3 w-3" />
+                Stamped
+              </button>
+            </div>
+          )}
+
           {/* Multi-file navigation */}
           {hasMultipleFiles && (
             <div className="flex items-center gap-1 mr-4">

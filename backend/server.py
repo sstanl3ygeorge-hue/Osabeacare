@@ -3023,6 +3023,36 @@ def create_verification_footer_elements(
 # Adds visible, permanent verification stamps directly to PDF/Image files
 # ============================================================================
 
+async def _upload_stamped_file(stamped_bytes: bytes, filename: str, file_ext: str, employee_id: str) -> Optional[str]:
+    """Upload stamped file to cloud storage / Supabase / local fallback. Returns URL or None."""
+    stamped_url = None
+    try:
+        from emergentintegrations.cloud_storage import CloudStorage, StorageConfig  # pyright: ignore[reportMissingImports]
+        CLOUD_STORAGE_URL = os.environ.get("CLOUD_STORAGE_URL")
+        if CLOUD_STORAGE_URL:
+            storage = CloudStorage(StorageConfig(storage_url=CLOUD_STORAGE_URL))
+            emp_code = str(employee_id)[:20]
+            ct = "application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+            stamped_url = await storage.upload_file_async(
+                file_data=stamped_bytes, file_name=filename,
+                folder=f"employees/{emp_code}/stamped", content_type=ct
+            )
+        else:
+            raise Exception("CLOUD_STORAGE_URL not configured")
+    except Exception:
+        try:
+            from supabase_storage import upload_file_to_supabase
+            ct = "application/pdf" if file_ext == "pdf" else f"image/{file_ext}"
+            stamped_url = await upload_file_to_supabase(stamped_bytes, filename, ct)
+        except Exception:
+            local_path = f"/app/uploads/stamped/{filename}"
+            os.makedirs("/app/uploads/stamped", exist_ok=True)
+            with open(local_path, "wb") as f:
+                f.write(stamped_bytes)
+            stamped_url = f"/api/uploads/stamped/{filename}"
+    return stamped_url
+
+
 def add_verification_stamp_to_pdf(input_pdf_bytes: bytes, stamp_data: dict) -> bytes:
     """
     Add a visible verification stamp to a PDF document.
@@ -19139,6 +19169,12 @@ VERIFICATION_STAMP_TYPES = {
         "description": "Verified via official online service (e.g., Home Office right to work check)",
         "audit_text": "ONLINE VERIFIED",
         "badge_color": "indigo"
+    },
+    "document_verified": {
+        "label": "Document Verified",
+        "description": "Document reviewed and verified by authorised staff",
+        "audit_text": "DOCUMENT VERIFIED",
+        "badge_color": "green"
     }
 }
 
@@ -20057,16 +20093,17 @@ async def verify_document_with_evidence(
     user: dict = Depends(require_manager_or_admin)
 ):
     """
-    Enhanced document verification with evidence upload.
+    Enhanced document verification with evidence upload and dual stamping.
     
     CQC Regulation 17 compliant:
     - Requires stamp type (original_seen, copy_verified, online_check)
     - Requires proof of verification (screenshot/PDF)
     - Requires outcome selection
+    - Burns visual CQC stamp into BOTH evidence file AND proof file
     - All actions logged to audit trail
     """
     # Validate stamp type
-    valid_stamp_types = ['original_seen', 'copy_verified', 'online_check']
+    valid_stamp_types = list(VERIFICATION_STAMP_TYPES.keys())
     if stamp_type not in valid_stamp_types:
         raise HTTPException(status_code=400, detail=f"Invalid stamp type. Valid options: {valid_stamp_types}")
     
@@ -20084,6 +20121,8 @@ async def verify_document_with_evidence(
     employee = await db.employees.find_one({"id": employee_id}, {"_id": 0, "first_name": 1, "last_name": 1})
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee_name = f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip()
     
     # Find the document
     doc = await db.employee_documents.find_one({"id": document_id})
@@ -20106,9 +20145,9 @@ async def verify_document_with_evidence(
     proof_path = f"{proof_dir}/{proof_filename}.{proof_ext}"
     
     try:
-        content = await proof_file.read()
+        proof_content = await proof_file.read()
         with open(proof_path, 'wb') as f:
-            f.write(content)
+            f.write(proof_content)
         proof_url = f"/uploads/verification_proofs/{proof_filename}.{proof_ext}"
     except Exception as e:
         logging.error(f"Failed to save proof file: {e}")
@@ -20130,12 +20169,7 @@ async def verify_document_with_evidence(
     now = datetime.now(timezone.utc).isoformat()
     verification_id = str(uuid.uuid4())[:12].upper()
     
-    # Stamp type labels
-    stamp_labels = {
-        'original_seen': {'label': 'Original Seen', 'audit_text': 'Original document physically verified'},
-        'copy_verified': {'label': 'Copy Verified', 'audit_text': 'Copy compared with original'},
-        'online_check': {'label': 'Online Check', 'audit_text': 'Verified via online system'}
-    }
+    stamp_info = VERIFICATION_STAMP_TYPES[stamp_type]
     
     # Determine status based on outcome
     status_map = {
@@ -20144,11 +20178,113 @@ async def verify_document_with_evidence(
         'not_verified': 'rejected'
     }
     
-    # Update document
+    # ======================================================================
+    # Build stamp data for visual CQC stamp burning
+    # ======================================================================
+    doc_type_labels = {
+        "right_to_work_evidence": "Right to Work",
+        "right_to_work": "Right to Work",
+        "dbs_certificate": "DBS Certificate",
+        "dbs": "DBS Certificate",
+        "identity_evidence": "Identity Document",
+        "identity": "Identity Document",
+        "proof_of_address_evidence": "Proof of Address",
+        "proof_of_address": "Proof of Address",
+    }
+    doc_type_label = doc_type_labels.get(doc.get("requirement_id", ""), doc.get("document_type", "Document"))
+    
+    stamp_data = {
+        "stamp_type": stamp_type,
+        "verified_by_name": verifier_name,
+        "verified_at": now,
+        "employee_name": employee_name,
+        "document_type": doc_type_label,
+        "verification_id": verification_id,
+        "reference_code": reference_number or notes or None
+    }
+    
+    # ======================================================================
+    # BURN VISUAL STAMP INTO EVIDENCE FILE (the uploaded document)
+    # ======================================================================
+    stamped_file_url = None
+    file_url = doc.get("file_url")
+    if file_url:
+        try:
+            original_bytes = None
+            content_type_ev = None
+            if file_url.startswith("osabea-care/") or not file_url.startswith(("http://", "https://")):
+                original_bytes, content_type_ev = get_object(file_url)
+            else:
+                import httpx
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(file_url)
+                    if response.status_code == 200:
+                        original_bytes = response.content
+                        content_type_ev = response.headers.get("content-type", "").lower()
+            
+            if original_bytes:
+                content_type_ev = (content_type_ev or "").lower()
+                stamped_bytes = None
+                file_ext = None
+                
+                if "pdf" in content_type_ev or file_url.lower().endswith(".pdf"):
+                    stamped_bytes = add_verification_stamp_to_pdf(original_bytes, stamp_data)
+                    file_ext = "pdf"
+                elif any(t in content_type_ev for t in ["image/", "png", "jpg", "jpeg", "webp"]):
+                    if "png" in content_type_ev or file_url.lower().endswith(".png"):
+                        original_format, file_ext = "PNG", "png"
+                    else:
+                        original_format, file_ext = "JPEG", "jpg"
+                    stamped_bytes = add_verification_stamp_to_image(original_bytes, stamp_data, original_format)
+                else:
+                    try:
+                        converted_pdf = convert_document_to_pdf(original_bytes, content_type_ev, file_url)
+                        if converted_pdf:
+                            stamped_bytes = add_verification_stamp_to_pdf(converted_pdf, stamp_data)
+                            file_ext = "pdf"
+                    except Exception:
+                        pass
+                
+                if stamped_bytes:
+                    import uuid as uuid_module
+                    stamped_fn = f"stamped_{doc['id']}_{uuid_module.uuid4().hex[:8]}.{file_ext}"
+                    stamped_file_url = await _upload_stamped_file(stamped_bytes, stamped_fn, file_ext, doc.get("employee_id", "unknown"))
+        except Exception as e:
+            logger.error(f"Failed to burn stamp onto evidence {doc['id']}: {e}")
+    
+    # ======================================================================
+    # BURN VISUAL STAMP INTO PROOF FILE (the verification result)
+    # ======================================================================
+    stamped_proof_url = None
+    if proof_content:
+        try:
+            proof_stamp_data = {**stamp_data, "document_type": f"{doc_type_label} — Verification Proof"}
+            proof_ct = (proof_file.content_type or "").lower()
+            stamped_proof_bytes = None
+            proof_file_ext = proof_ext
+            
+            if "pdf" in proof_ct or proof_ext == "pdf":
+                stamped_proof_bytes = add_verification_stamp_to_pdf(proof_content, proof_stamp_data)
+                proof_file_ext = "pdf"
+            elif any(t in proof_ct for t in ["image/", "png", "jpg", "jpeg"]):
+                fmt = "PNG" if ("png" in proof_ct or proof_ext == "png") else "JPEG"
+                stamped_proof_bytes = add_verification_stamp_to_image(proof_content, proof_stamp_data, fmt)
+            
+            if stamped_proof_bytes:
+                import uuid as uuid_module
+                stamped_proof_fn = f"stamped_proof_{doc['id']}_{uuid_module.uuid4().hex[:8]}.{proof_file_ext}"
+                stamped_proof_url = await _upload_stamped_file(stamped_proof_bytes, stamped_proof_fn, proof_file_ext, doc.get("employee_id", "unknown"))
+        except Exception as e:
+            logger.error(f"Failed to burn stamp onto proof file for {doc['id']}: {e}")
+    
+    # ======================================================================
+    # Update document record
+    # ======================================================================
     update_data = {
         "verification_stamp": stamp_type,
-        "verification_stamp_label": stamp_labels[stamp_type]['label'],
-        "verification_stamp_audit_text": stamp_labels[stamp_type]['audit_text'],
+        "verification_stamp_label": stamp_info["label"],
+        "verification_stamp_audit_text": stamp_info["audit_text"],
+        "verification_stamp_badge_color": stamp_info.get("badge_color", "green"),
         "verification_outcome": outcome,
         "verification_proof_url": proof_url,
         "verification_reference_number": reference_number,
@@ -20158,25 +20294,37 @@ async def verify_document_with_evidence(
         "verified_by": user['user_id'],
         "verified_by_name": verifier_name,
         "verified_at": now,
-        "status": status_map[outcome]
+        "status": status_map[outcome],
+        "verification_stamp_by": user['user_id'],
+        "verification_stamp_by_name": verifier_name,
+        "verification_stamp_at": now,
+        "review_status": "approved" if outcome != 'not_verified' else "rejected",
     }
+    if stamped_file_url:
+        update_data["stamped_file_url"] = stamped_file_url
+        update_data["stamp_burned_at"] = now
+    if stamped_proof_url:
+        update_data["stamped_proof_url"] = stamped_proof_url
+        update_data["proof_stamp_burned_at"] = now
     
     await db.employee_documents.update_one({"id": doc['id']}, {"$set": update_data})
     
     # Log to audit trail with full details
     await log_audit_action(
         user_id=user['user_id'],
-        action="document_verification",
+        action="document_verification_with_evidence",
         entity_type="employee_document",
         entity_id=doc['id'],
         metadata={
             "employee_id": employee_id,
-            "employee_name": f"{employee.get('first_name', '')} {employee.get('last_name', '')}".strip(),
+            "employee_name": employee_name,
             "document_type": document_type,
             "stamp_type": stamp_type,
-            "stamp_label": stamp_labels[stamp_type]['label'],
+            "stamp_label": stamp_info["label"],
             "outcome": outcome,
             "proof_file": proof_url,
+            "stamped_file_url": stamped_file_url,
+            "stamped_proof_url": stamped_proof_url,
             "reference_number": reference_number,
             "notes": notes,
             "verification_id": verification_id,
@@ -20184,13 +20332,19 @@ async def verify_document_with_evidence(
         }
     )
     
+    # Try auto-promotion after document verification
+    if employee_id:
+        await try_auto_promote_worker(employee_id)
+    
     updated_doc = await db.employee_documents.find_one({"id": doc['id']}, {"_id": 0})
     
     return {
         "success": True,
-        "message": f"Document verified with {stamp_labels[stamp_type]['label']}",
+        "message": f"Document verified with {stamp_info['label']}",
         "verification_id": verification_id,
         "outcome": outcome,
+        "stamped_file_url": stamped_file_url,
+        "stamped_proof_url": stamped_proof_url,
         "document": EmployeeDocumentResponse(**updated_doc) if updated_doc else None
     }
 

@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { 
   FileText, CheckCircle, Clock, AlertTriangle,
   Eye, Send, RefreshCw, Shield, Download, X, ChevronDown, ChevronUp, Upload as UploadIcon,
-  ClipboardCheck, Stamp
+  ClipboardCheck, Stamp, FileCheck
 } from 'lucide-react';
 import RequirementSectionShell from './RequirementSectionShell';
 import RequirementActionBar from './RequirementActionBar';
@@ -16,6 +16,7 @@ import VerificationStampDialog from './VerificationStampDialog';
 import VerificationChecklistModal from './VerificationChecklistModal';
 import AmendmentRequestDialog from './AmendmentRequestDialog';
 import QuickVerifyStampDialog from './QuickVerifyStampDialog';
+import OnlineCheckVerifyDialog from './OnlineCheckVerifyDialog';
 import {
   Dialog,
   DialogContent,
@@ -99,6 +100,12 @@ export default function UploadRequirementCard({
   
   // NEW: Amendment Request Dialog state
   const [amendmentDialog, setAmendmentDialog] = useState({
+    isOpen: false,
+    file: null
+  });
+  
+  // NEW: Online Check Verify Dialog state (for RTW & DBS)
+  const [onlineCheckDialog, setOnlineCheckDialog] = useState({
     isOpen: false,
     file: null
   });
@@ -645,33 +652,18 @@ export default function UploadRequirementCard({
                           </Button>
                         )}
                         
-                        {/* Review Evidence button - visible for non-verified files (RTW/DBS only) */}
-                        {!isAuditor && !file.verified && file.status !== 'rejected' && (key === 'right_to_work' || key === 'dbs') && (
+                        {/* UNIFIED Verify & Record button — RTW/DBS online check flow */}
+                        {!isAuditor && !file.verification_stamp && !file.verified && file.status !== 'verified' && file.status !== 'rejected' && (key === 'right_to_work' || key === 'dbs') && (
                           <Button
                             size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs text-teal-600 border-teal-200 hover:bg-teal-50"
-                            onClick={() => setReviewDialog({ isOpen: true, file })}
-                            title="Review evidence"
-                            data-testid={`${key}-evidence-review-${file.file_id || file.id}`}
+                            variant="default"
+                            className="h-7 px-3 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                            onClick={() => setOnlineCheckDialog({ isOpen: true, file })}
+                            title="Verify via online check, upload proof, and dual-stamp"
+                            data-testid={`${key}-verify-record-${file.file_id || file.id}`}
                           >
-                            <ClipboardCheck className="h-3 w-3 mr-1" />
-                            Review
-                          </Button>
-                        )}
-                        
-                        {/* NEW: Complete Verification button - Smart Verification System (RTW/DBS only) */}
-                        {!isAuditor && file.status !== 'rejected' && !file.verification_stamp && (key === 'right_to_work' || key === 'dbs') && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-xs text-green-600 border-green-200 hover:bg-green-50"
-                            onClick={() => setChecklistModal({ isOpen: true, file })}
-                            title="Complete verification checklist"
-                            data-testid={`${key}-verify-checklist-${file.file_id || file.id}`}
-                          >
-                            <CheckCircle className="h-3 w-3 mr-1" />
-                            Verify
+                            <Shield className="h-3 w-3 mr-1" />
+                            Verify & Record
                           </Button>
                         )}
                         
@@ -697,13 +689,11 @@ export default function UploadRequirementCard({
                             variant="ghost"
                             className="h-7 w-7 p-0 text-gray-500 hover:text-blue-600"
                             onClick={() => onPreviewFile({
-                              // Use stamped file URL if available, otherwise original
-                              file_url: file.stamped_file_url || `/api/employee-documents/${file.file_id || file.id}/file`,
-                              file_name: file.stamped_file_url 
-                                ? `[STAMPED] ${file.file_name || file.original_filename || 'Document'}`
-                                : file.file_name || file.original_filename || 'Document'
+                              file_url: `/api/employee-documents/${file.file_id || file.id}/file`,
+                              file_name: file.file_name || file.original_filename || 'Document',
+                              stamped_file_url: file.stamped_file_url || null
                             })}
-                            title={file.stamped_file_url ? "View stamped document" : "View file"}
+                            title="View document"
                             data-testid={`${key}-evidence-view-${file.file_id || file.id}`}
                           >
                             <Eye className="h-3.5 w-3.5" />
@@ -737,6 +727,24 @@ export default function UploadRequirementCard({
                           >
                             <Stamp className="h-3 w-3 mr-0.5" />
                             <Download className="h-3 w-3" />
+                          </Button>
+                        )}
+                        
+                        {/* View stamped proof (online check result) — RTW/DBS only */}
+                        {file.stamped_proof_url && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                            onClick={() => onPreviewFile && onPreviewFile({
+                              file_url: file.stamped_proof_url,
+                              file_name: `Verification Proof — ${file.file_name || 'Document'}`
+                            })}
+                            title="View stamped verification proof"
+                            data-testid={`${key}-evidence-view-proof-${file.file_id || file.id}`}
+                          >
+                            <FileText className="h-3 w-3 mr-0.5" />
+                            Proof
                           </Button>
                         )}
                       </div>
@@ -2051,6 +2059,22 @@ export default function UploadRequirementCard({
         }}
       />
       
+      {/* NEW: Online Check Verify Dialog (RTW & DBS) */}
+      <OnlineCheckVerifyDialog
+        isOpen={onlineCheckDialog.isOpen}
+        onClose={() => setOnlineCheckDialog({ isOpen: false, file: null })}
+        file={onlineCheckDialog.file}
+        employeeId={employeeId}
+        employeeName={employeeName || 'Employee'}
+        requirementType={key}
+        onVerificationComplete={() => {
+          setOnlineCheckDialog({ isOpen: false, file: null });
+          if (onRefresh) {
+            onRefresh();
+          }
+        }}
+      />
+
       {/* NEW: Quick Verify & Stamp Dialog (Identity & PoA only) */}
       <QuickVerifyStampDialog
         isOpen={quickVerifyDialog.isOpen}

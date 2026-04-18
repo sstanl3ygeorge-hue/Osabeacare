@@ -90,6 +90,9 @@ export function FinalStatusSection({ workflow, requirementKey, checkRecord }) {
         return 'Check is verified, but a required proof document is missing.';
 
       case 'failed':
+        if (workflow.hasRejectedEvidence && !workflow.hasAcceptedEvidence) {
+          return 'Evidence has been rejected or requires replacement. This requirement is not satisfied.';
+        }
         return 'The check outcome was "Failed". This requirement is not satisfied.';
 
       case 'overdue': {

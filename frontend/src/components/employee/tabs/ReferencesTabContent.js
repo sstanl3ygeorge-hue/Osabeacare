@@ -7,6 +7,7 @@ import { ReferencesPanel } from '../../compliance';
  */
 export default function ReferencesTabContent({
   employeeId,
+  employee,
   onRefresh,
   onEditReference,
 }) {
@@ -21,6 +22,7 @@ export default function ReferencesTabContent({
 
       <ReferencesPanel
         employeeId={employeeId}
+        employee={employee}
         onRefresh={onRefresh}
         onEditReference={onEditReference}
       />

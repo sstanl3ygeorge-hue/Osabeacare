@@ -23,6 +23,7 @@ export function useComplianceWorkflow({
     const isRTW = requirementKey === 'right_to_work';
     const isDBS = requirementKey === 'dbs';
     const isRTWOrDBS = isRTW || isDBS;
+    const hasCheckStage = true;
 
     // ── Evidence analysis ──────────────────────────────────────────────────
     const hasEvidence = evidenceFiles.length > 0;
@@ -34,6 +35,7 @@ export function useComplianceWorkflow({
         f.status === 'approved',
     );
     const hasAcceptedEvidence = acceptedFiles.length > 0;
+    const hasRejectedEvidence = evidenceFiles.some((f) => f.status === 'rejected');
     const allEvidenceReviewed =
       hasEvidence &&
       evidenceFiles.every(
@@ -81,6 +83,7 @@ export function useComplianceWorkflow({
     const isUpdateServiceCheck =
       checkRecord?.method === 'dbs_update_service_check';
     const proofRequired = isRTW || (isDBS && isUpdateServiceCheck);
+    const hasProofStep = isRTWOrDBS && (proofRequired || hasProof);
 
     // ── Step computation ───────────────────────────────────────────────────
     let currentStep = 1;
@@ -95,7 +98,7 @@ export function useComplianceWorkflow({
     } else if (!hasCheck) {
       currentStep = 3;
       stepLabel = 'Record Check';
-    } else if (isRTWOrDBS && !hasProof) {
+    } else if (hasProofStep && !hasProof) {
       currentStep = 4;
       stepLabel = proofRequired
         ? 'Upload Proof of Check'
@@ -111,23 +114,26 @@ export function useComplianceWorkflow({
 
     if (!hasEvidence) {
       finalStatus = 'pending';
-      finalStatusLabel = 'Pending – No Evidence';
+      finalStatusLabel = 'Missing';
+    } else if (!hasAcceptedEvidence && hasRejectedEvidence) {
+      finalStatus = 'failed';
+      finalStatusLabel = 'Rejected / action required';
     } else if (!hasAcceptedEvidence) {
       finalStatus = 'pending';
-      finalStatusLabel = 'Pending – Under Review';
+      finalStatusLabel = 'Awaiting admin review';
     } else if (!hasCheck) {
       finalStatus = 'pending';
-      finalStatusLabel = 'Pending – No Check';
+      finalStatusLabel = 'Evidence accepted - check required';
     } else if (checkFailed) {
       finalStatus = 'failed';
-      finalStatusLabel = 'Failed';
+      finalStatusLabel = 'Rejected / action required';
     } else if (!checkVerified) {
       finalStatus = 'pending';
-      finalStatusLabel = `Pending – ${(checkRecord?.outcome || 'unknown').replace(/_/g, ' ')}`;
+      finalStatusLabel = 'Awaiting admin review';
     } else if (proofRequired && !hasProof) {
       // SAFEGUARD: verified check + no proof → show incomplete, not verified
       finalStatus = 'incomplete';
-      finalStatusLabel = 'Incomplete – Proof Required';
+      finalStatusLabel = 'Cannot assess - proof missing';
     } else if (isDBS && isOverdue) {
       finalStatus = 'overdue';
       finalStatusLabel = 'Overdue – Recheck Required';
@@ -139,7 +145,7 @@ export function useComplianceWorkflow({
       finalStatusLabel = 'Follow-up Overdue';
     } else if (checkVerified && (hasProof || !proofRequired)) {
       finalStatus = 'verified';
-      finalStatusLabel = 'Verified';
+      finalStatusLabel = 'Requirement satisfied';
     }
 
     // ── Safeguard flags (used to show warning callouts in FinalStatusSection) ──
@@ -162,7 +168,7 @@ export function useComplianceWorkflow({
         type: 'record_check',
         disabled: !hasAcceptedEvidence,
       };
-    } else if (isRTWOrDBS && proofRequired && !hasProof && isAdminView) {
+    } else if (hasProofStep && proofRequired && !hasProof && isAdminView) {
       nextAction = { label: 'Upload Proof', type: 'upload_proof' };
     } else if (isRTW && followUpOverdue && isAdminView) {
       nextAction = { label: 'Resolve Follow-up', type: 'resolve_followup' };
@@ -220,11 +226,14 @@ export function useComplianceWorkflow({
       stepLabel,
       steps,
       isRTWOrDBS,
+      hasCheckStage,
+      hasProofStep,
       isRTW,
       isDBS,
       // Evidence state
       hasEvidence,
       hasAcceptedEvidence,
+      hasRejectedEvidence,
       allEvidenceReviewed,
       acceptedFiles,
       // Check state

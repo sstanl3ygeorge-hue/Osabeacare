@@ -124,7 +124,7 @@ const CHECK_METHODS = {
 
 const CHECK_OUTCOMES = [
   { value: 'verified', label: 'Verified', color: 'text-green-600' },
-  { value: 'failed', label: 'Failed', color: 'text-red-600' },
+  { value: 'failed', label: 'Rejected / action required', color: 'text-red-600' },
   { value: 'follow_up_required', label: 'Follow-up Required', color: 'text-amber-600' }
 ];
 
@@ -389,6 +389,7 @@ export default function RecordCheckDialog({
   
   // Check if Address check
   const isAddress = checkType === 'address_verification' || checkType === 'proof_of_address';
+  const proofUploadRequired = isRTW || isDBS;
 
   // Get methods for this check type with fallback to default
   const methods = CHECK_METHODS[checkType] || CHECK_METHODS.default;
@@ -866,7 +867,7 @@ export default function RecordCheckDialog({
     const requiresProof = isRTW && (onlineCheckMethods.includes(formData.method) || methodGuidance?.proofRequired);
     
     // COMPLIANCE-CRITICAL: Require proof file for online/ECS methods
-    if (!proofFile && !uploadedProofId) {
+    if (proofUploadRequired && !proofFile && !uploadedProofId) {
       if (requiresProof) {
         const proofLabel = methodGuidance?.proofLabel || 'verification proof';
         toast.error(`This method requires ${proofLabel}. This is a legal requirement.`);
@@ -986,7 +987,7 @@ export default function RecordCheckDialog({
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      toast.success('Verification check recorded with proof');
+      toast.success(proofDocId ? 'Verification check recorded with proof' : 'Verification check recorded');
       if (onComplete) onComplete();
       handleClose();
     } catch (err) {
@@ -1071,7 +1072,9 @@ export default function RecordCheckDialog({
             {getTitle()}
           </DialogTitle>
           <DialogDescription>
-            Record the employer verification check with proof. Both the check record and proof file are required for compliance.
+            {proofUploadRequired
+              ? 'Record the employer verification check with proof. Both the check record and proof file are required for compliance.'
+              : 'Record the employer verification check. Accepted evidence remains the evidence layer; AI extraction is only supporting information.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -1095,10 +1098,10 @@ export default function RecordCheckDialog({
             </div>
           )}
 
-          {/* PROOF FILE UPLOAD - MANDATORY */}
+          {/* PROOF FILE UPLOAD */}
           <div className="space-y-2">
             <Label className="flex items-center gap-1">
-              Proof of Check *
+              Proof of Check {proofUploadRequired ? '*' : '(optional)'}
               {hasProof && <CheckCircle className="h-4 w-4 text-green-600" />}
             </Label>
             
@@ -1859,7 +1862,7 @@ export default function RecordCheckDialog({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || isUploading || isExtracting || !formData.method || !hasProof}
+            disabled={isSubmitting || isUploading || isExtracting || !formData.method || (proofUploadRequired && !hasProof)}
             className="bg-primary hover:bg-primary-hover text-white rounded-xl"
             data-testid="record-check-submit"
           >

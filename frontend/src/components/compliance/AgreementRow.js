@@ -88,17 +88,17 @@ export default function AgreementRow({
   const getStatusConfig = () => {
     switch (lifecycleStatus) {
       case 'verified':
-        return { color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700', icon: CheckCircle, label: 'Verified' };
+        return { color: 'green', bgColor: 'bg-green-100', textColor: 'text-green-700', icon: CheckCircle, label: 'Requirement satisfied' };
       case 'rejected':
-        return { color: 'red', bgColor: 'bg-red-100', textColor: 'text-red-700', icon: XCircle, label: 'Rejected' };
+        return { color: 'red', bgColor: 'bg-red-100', textColor: 'text-red-700', icon: XCircle, label: 'Rejected / action required' };
       case 'submitted':
-        return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: Clock, label: 'Awaiting Review' };
+        return { color: 'amber', bgColor: 'bg-amber-100', textColor: 'text-amber-700', icon: Clock, label: 'Awaiting admin review' };
       case 'sent':
-        return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Mail, label: 'Sent' };
+        return { color: 'blue', bgColor: 'bg-blue-100', textColor: 'text-blue-700', icon: Mail, label: 'Evidence requested' };
       case 'in_progress':
-        return { color: 'purple', bgColor: 'bg-purple-100', textColor: 'text-purple-700', icon: Edit, label: 'In Progress' };
+        return { color: 'purple', bgColor: 'bg-purple-100', textColor: 'text-purple-700', icon: Edit, label: 'Submitted, not reviewed' };
       default:
-        return { color: 'gray', bgColor: 'bg-gray-100', textColor: 'text-gray-700', icon: FileSignature, label: 'Not Started' };
+        return { color: 'gray', bgColor: 'bg-gray-100', textColor: 'text-gray-700', icon: FileSignature, label: 'Missing' };
     }
   };
 
@@ -304,7 +304,7 @@ export default function AgreementRow({
             <div className="flex items-center gap-2 flex-wrap">
               <h4 className="font-medium text-text-primary">{title}</h4>
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-600 border-purple-200">
-                Agreement
+                Readiness requirement
               </Badge>
               {blocker_text && (
                 <Badge className="bg-red-100 text-red-700 text-[10px]">
@@ -346,7 +346,7 @@ export default function AgreementRow({
                   data-testid={`open-form-${key}`}
                 >
                   <Edit className="h-3.5 w-3.5 mr-1" />
-                  Complete
+                  Fill Agreement
                 </Button>
               )}
               
@@ -493,7 +493,7 @@ export default function AgreementRow({
               <div className="col-span-2 p-3 bg-green-50 rounded-lg border border-green-200">
                 <div className="flex items-center gap-2">
                   <CheckCircle className="h-4 w-4 text-green-600" />
-                  <span className="font-medium text-green-800">Verified</span>
+                  <span className="font-medium text-green-800">Requirement satisfied</span>
                 </div>
                 <p className="text-sm text-green-700 mt-1">
                   {formatBackendDate(submission_data?.verified_at || acknowledgement_data?.verified_at, { format: 'medium' })}
@@ -508,7 +508,7 @@ export default function AgreementRow({
               <div className="col-span-2 p-3 bg-red-50 rounded-lg border border-red-200">
                 <div className="flex items-center gap-2">
                   <XCircle className="h-4 w-4 text-red-600" />
-                  <span className="font-medium text-red-800">Rejected</span>
+                  <span className="font-medium text-red-800">Rejected / action required</span>
                 </div>
                 <p className="text-sm text-red-700 mt-1">
                   {submission_data?.rejection_reason || acknowledgement_data?.rejection_reason || 'No reason provided'}
@@ -521,10 +521,10 @@ export default function AgreementRow({
               <div className="col-span-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-gray-500" />
-                  <span className="font-medium text-gray-700">Not Started</span>
+                  <span className="font-medium text-gray-700">Missing</span>
                 </div>
                 <p className="text-sm text-gray-600 mt-1">
-                  Click "Complete" to fill out the {title} form
+                  The {title} agreement has not been submitted.
                 </p>
               </div>
             )}

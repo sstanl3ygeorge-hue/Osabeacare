@@ -91,7 +91,7 @@ export function EvidenceSection({
     return (
       <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border border-amber-200">
         <Clock className="h-2.5 w-2.5 mr-0.5" />
-        Pending Review
+        Awaiting admin review
       </Badge>
     );
   };
@@ -141,7 +141,7 @@ export function EvidenceSection({
         </div>
         {isAdminView && hasFiles && !workflow.hasAcceptedEvidence && (
           <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-700 border-amber-200">
-            Review required
+            Awaiting admin review
           </Badge>
         )}
       </div>

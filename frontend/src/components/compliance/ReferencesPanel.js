@@ -20,14 +20,43 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const STATUS_CONFIG = {
   not_declared: { label: 'Missing', color: 'bg-gray-100 text-gray-600', icon: XCircle },
-  declared: { label: 'Evidence on file', color: 'bg-blue-100 text-blue-700', icon: Clock },
-  sent: { label: 'Awaiting admin review', color: 'bg-amber-100 text-amber-700', icon: Send },
-  response_received: { label: 'Submitted, not reviewed', color: 'bg-purple-100 text-purple-700', icon: MessageSquare },
-  verified: { label: 'Verified', color: 'bg-green-100 text-green-700', icon: CheckCircle },
-  rejected: { label: 'Rejected / action required', color: 'bg-red-100 text-red-700', icon: XCircle }
+  declared: { label: 'Referee declared', color: 'bg-blue-100 text-blue-700', icon: Clock },
+  sent: { label: 'Awaiting response', color: 'bg-amber-100 text-amber-700', icon: Send },
+  response_received: { label: 'Response received — awaiting admin review', color: 'bg-purple-100 text-purple-700', icon: MessageSquare },
+  verified: { label: 'Satisfactory', color: 'bg-green-100 text-green-700', icon: CheckCircle },
+  rejected: { label: 'Unsatisfactory / action required', color: 'bg-red-100 text-red-700', icon: XCircle },
+  legacy_unverified: { label: 'Declared referee on file — response evidence not found', color: 'bg-amber-100 text-amber-700', icon: AlertTriangle },
 };
 
-export default function ReferencesPanel({ employeeId, onRefresh, onEditReference }) {
+/**
+ * Derive the display status for a reference, accounting for legacy data.
+ * A reference is only "satisfactory" if it has:
+ *  1. A real response on file (response object with at least one key beyond submitted_at)
+ *  2. An admin verification stamp (verified_by or verified_at)
+ *  3. Status === 'verified'
+ * Legacy employee-level "verified" flags without canonical evidence are downgraded.
+ */
+function deriveDisplayStatus(ref) {
+  const status = ref?.status || 'not_declared';
+  const response = ref?.response;
+  const verification = ref?.verification || {};
+  const hasCanonicalResponse = Boolean(
+    response && typeof response === 'object' && Object.keys(response).length > 0
+  );
+  const hasAdminStamp = Boolean(verification.verified_by || verification.verified_at);
+
+  if (status === 'verified') {
+    if (!hasCanonicalResponse && !hasAdminStamp) {
+      return 'legacy_unverified';
+    }
+    if (!hasCanonicalResponse) {
+      return 'legacy_unverified';
+    }
+  }
+  return status;
+}
+
+export default function ReferencesPanel({ employeeId, employee, onRefresh, onEditReference }) {
   const [references, setReferences] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -382,10 +411,32 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
   }
 
   const referenceValues = [1, 2].map((refNum) => references.references?.[`reference_${refNum}`] || {});
-  const missingCount = referenceValues.filter((ref) => !ref?.declared?.name).length;
-  const pendingReviewCount = referenceValues.filter((ref) => ref?.status === 'response_received').length;
-  const rejectedCount = referenceValues.filter((ref) => ref?.status === 'rejected').length;
-  const verifiedCount = referenceValues.filter((ref) => ref?.status === 'verified').length;
+  const displayStatuses = referenceValues.map(deriveDisplayStatus);
+
+  // ── Readiness counts ──
+  // A reference only counts toward readiness when: response received + admin reviewed + satisfactory (verified)
+  // AND it truly has canonical response evidence (not legacy shortcut)
+  const satisfactoryCount = displayStatuses.filter((s) => s === 'verified').length;
+  const missingCount = displayStatuses.filter((s) => s === 'not_declared').length;
+  const requestNotSentCount = displayStatuses.filter((s) => s === 'declared').length;
+  const awaitingResponseCount = displayStatuses.filter((s) => s === 'sent').length;
+  const awaitingAdminReviewCount = displayStatuses.filter((s) => s === 'response_received').length;
+  const rejectedCount = displayStatuses.filter((s) => s === 'rejected').length;
+  const legacyUnverifiedCount = displayStatuses.filter((s) => s === 'legacy_unverified').length;
+  const cannotAssessCount = legacyUnverifiedCount;
+  const hasBlockers = satisfactoryCount < 2;
+
+  // Summary banner colour
+  const summaryBorderClass = satisfactoryCount >= 2
+    ? 'border-green-200 bg-green-50'
+    : (rejectedCount > 0 || cannotAssessCount > 0)
+      ? 'border-red-200 bg-red-50'
+      : 'border-amber-200 bg-amber-50';
+  const summaryTextClass = satisfactoryCount >= 2
+    ? 'text-green-800'
+    : (rejectedCount > 0 || cannotAssessCount > 0)
+      ? 'text-red-800'
+      : 'text-amber-800';
 
   return (
     <>
@@ -408,15 +459,34 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
             </Button>
           </CardTitle>
           <p className="text-sm text-gray-500 mt-1">
-            NHS-level reference verification. Minimum 2 verified professional references required.
+            CQC safer recruitment. Minimum 2 satisfactory professional references required before readiness.
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <span className="font-medium">Reference blockers:</span> {missingCount + rejectedCount} &nbsp;|&nbsp;
-            <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
-            <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-            <span className="font-medium">Verified:</span> {verifiedCount}/2
+          {/* ── Top summary banner ── */}
+          <div className={`rounded-xl border p-4 ${summaryBorderClass}`}>
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5">
+                {satisfactoryCount >= 2
+                  ? <CheckCircle className="h-5 w-5 text-green-600" />
+                  : <AlertTriangle className="h-5 w-5 text-amber-600" />}
+              </div>
+              <div className="flex-1">
+                <p className={`font-medium ${summaryTextClass}`}>
+                  Satisfactory References: {satisfactoryCount} / 2
+                </p>
+                {hasBlockers && (
+                  <div className="mt-2 text-sm space-y-0.5">
+                    {missingCount > 0 && <p>Missing referees: {missingCount}</p>}
+                    {requestNotSentCount > 0 && <p>Request not sent: {requestNotSentCount}</p>}
+                    {awaitingResponseCount > 0 && <p>Awaiting response: {awaitingResponseCount}</p>}
+                    {awaitingAdminReviewCount > 0 && <p>Response received — awaiting admin review: {awaitingAdminReviewCount}</p>}
+                    {rejectedCount > 0 && <p className="text-red-700 font-medium">Unsatisfactory / action required: {rejectedCount}</p>}
+                    {cannotAssessCount > 0 && <p className="text-red-700 font-medium">Cannot assess (legacy data, no response evidence): {cannotAssessCount}</p>}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           {/* Reference Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -426,9 +496,13 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
               const request = ref?.request || {};
               const response = ref?.response || {};
               const verification = ref?.verification || {};
-              const status = ref?.status || 'not_declared';
-              const config = STATUS_CONFIG[status] || STATUS_CONFIG.not_declared;
+              const rawStatus = ref?.status || 'not_declared';
+              const displayStatus = deriveDisplayStatus(ref);
+              const config = STATUS_CONFIG[displayStatus] || STATUS_CONFIG.not_declared;
               const StatusIcon = config.icon;
+              const hasCanonicalResponse = Boolean(
+                ref?.response && typeof ref.response === 'object' && Object.keys(ref.response).length > 0
+              );
 
               return (
                 <div 
@@ -519,31 +593,71 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                           )}
                         </div>
 
-                        {/* Request Status */}
-                        {request.sent_at && (
+                        {/* ── Stage Pipeline ── */}
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Evidence stages</p>
+                          {/* Stage 1: Referee declared */}
+                          <div className="flex items-center gap-2 text-xs">
+                            <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                            <span className="text-gray-700">Referee declared</span>
+                          </div>
+                          {/* Stage 2: Request sent */}
+                          <div className="flex items-center gap-2 text-xs">
+                            {request.sent_at
+                              ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                              : <Clock className="h-3.5 w-3.5 text-gray-300 shrink-0" />}
+                            <span className={request.sent_at ? 'text-gray-700' : 'text-gray-400'}>
+                              {request.sent_at
+                                ? `Request sent ${formatBackendDate(request.sent_at)}`
+                                : 'Request not sent'}
+                            </span>
+                          </div>
+                          {/* Stage 3: Response received */}
+                          <div className="flex items-center gap-2 text-xs">
+                            {hasCanonicalResponse
+                              ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                              : <Clock className="h-3.5 w-3.5 text-gray-300 shrink-0" />}
+                            <span className={hasCanonicalResponse ? 'text-gray-700' : 'text-gray-400'}>
+                              {hasCanonicalResponse
+                                ? `Response received${ref?.response_submitted_at || ref?.response?.submitted_at ? ` ${formatBackendDate(ref.response_submitted_at || ref.response.submitted_at)}` : ''}`
+                                : 'No response yet'}
+                            </span>
+                          </div>
+                          {/* Stage 4: Admin reviewed */}
+                          <div className="flex items-center gap-2 text-xs">
+                            {(displayStatus === 'verified' || displayStatus === 'rejected')
+                              ? <CheckCircle className={`h-3.5 w-3.5 shrink-0 ${displayStatus === 'verified' ? 'text-green-500' : 'text-red-500'}`} />
+                              : <Clock className="h-3.5 w-3.5 text-gray-300 shrink-0" />}
+                            <span className={(displayStatus === 'verified' || displayStatus === 'rejected') ? 'text-gray-700' : 'text-gray-400'}>
+                              {displayStatus === 'verified'
+                                ? `Satisfactory${verification.verified_by ? ` — ${verification.verified_by}` : ''}${verification.verified_at ? ` on ${formatBackendDate(verification.verified_at)}` : ''}`
+                                : displayStatus === 'rejected'
+                                  ? 'Unsatisfactory / action required'
+                                  : 'Awaiting admin review'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Legacy data warning */}
+                        {displayStatus === 'legacy_unverified' && (
                           <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                             <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
-                              <Send className="h-4 w-4" />
-                              Awaiting admin review
+                              <AlertTriangle className="h-4 w-4" />
+                              Cannot assess — response evidence not found
                             </p>
                             <p className="text-xs text-amber-600 mt-1">
-                              Sent: {formatBackendDate(request.sent_at)}
+                              Legacy employee record shows this reference as verified, but no canonical response trail exists. Re-request or manually record the response source before marking satisfactory.
                             </p>
-                            {request.due_at && (
-                              <p className="text-xs text-amber-600">
-                                Due: {formatBackendDate(request.due_at)}
-                              </p>
-                            )}
                           </div>
                         )}
 
-                        {/* Submitted response with View Full Response button */}
-                        {response && Object.keys(response).length > 0 && (
+                        {/* Response detail view (only when canonical response exists) */}
+                        {hasCanonicalResponse && displayStatus !== 'verified' && (
                           <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                             <div className="flex items-center justify-between">
                               <p className="text-sm font-medium text-purple-700 flex items-center gap-2">
                                 <MessageSquare className="h-4 w-4" />
-                                Submitted, not reviewed
+                                Response received — awaiting admin review
                               </p>
                               <Button
                                 size="sm"
@@ -556,20 +670,15 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                                 View Full Response
                               </Button>
                             </div>
-                            {response.submitted_at && (
-                              <p className="text-xs text-purple-600 mt-1">
-                                Received: {formatBackendDate(response.submitted_at)}
-                              </p>
-                            )}
                           </div>
                         )}
 
-                        {/* Verification Status */}
-                        {verification.status === 'verified' && (
+                        {/* Verification status (satisfactory) */}
+                        {displayStatus === 'verified' && (
                           <div className="bg-green-50 rounded-lg p-3 border border-green-200">
                             <p className="text-sm font-medium text-green-700 flex items-center gap-2">
                               <CheckCircle className="h-4 w-4" />
-                              Verified
+                              Satisfactory
                             </p>
                             {verification.verified_by && (
                               <p className="text-xs text-green-600 mt-1">
@@ -584,10 +693,10 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                           </div>
                         )}
 
-                        {/* Actions */}
-                        {status !== 'verified' && declared.email && (
+                        {/* Actions — guard verify/reject behind canonical response */}
+                        {displayStatus !== 'verified' && declared.email && (
                           <div className="pt-2 border-t space-y-2">
-                            {status === 'declared' || status === 'sent' ? (
+                            {displayStatus === 'declared' || displayStatus === 'sent' || displayStatus === 'legacy_unverified' ? (
                               <Button
                                 size="sm"
                                 className="w-full rounded-lg"
@@ -600,9 +709,11 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                                 ) : (
                                   <Send className="h-4 w-4 mr-2" />
                                 )}
-                                {status === 'sent' ? 'Resend Request' : 'Send Request'}
+                                {displayStatus === 'sent' ? 'Resend Request'
+                                  : displayStatus === 'legacy_unverified' ? 'Re-request Reference'
+                                  : 'Send Request'}
                               </Button>
-                            ) : status === 'response_received' ? (
+                            ) : displayStatus === 'response_received' && hasCanonicalResponse ? (
                               <>
                                 <Button
                                   size="sm"
@@ -622,7 +733,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                                     data-testid={`verify-reference-btn-${refNum}`}
                                   >
                                     <CheckCircle className="h-4 w-4 mr-2" />
-                                    Verify
+                                    Mark Satisfactory
                                   </Button>
                                   <Button
                                     size="sm"
@@ -632,10 +743,16 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                                     data-testid={`reject-reference-btn-${refNum}`}
                                   >
                                     <XCircle className="h-4 w-4 mr-2" />
-                                    Reject
+                                    Unsatisfactory
                                   </Button>
                                 </div>
                               </>
+                            ) : displayStatus === 'response_received' && !hasCanonicalResponse ? (
+                              <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+                                <p className="text-xs text-amber-700">
+                                  Response status set but no canonical response data found. Re-request or manually set response source before review.
+                                </p>
+                              </div>
                             ) : null}
                           </div>
                         )}
@@ -747,13 +864,15 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
             })}
           </div>
 
-          {/* Summary */}
+          {/* Readiness Requirements */}
           <div className="bg-gray-50 rounded-lg p-4">
-            <h4 className="font-medium text-sm mb-2">Reference Requirements</h4>
+            <h4 className="font-medium text-sm mb-2">Reference Readiness Criteria</h4>
             <ul className="text-sm text-gray-600 space-y-1">
-              <li>- Minimum 2 professional references required</li>
-              <li>- References should cover recent employment history</li>
-              <li>- At least one must be from the most recent employer</li>
+              <li>- Minimum 2 satisfactory professional references required</li>
+              <li>- Each must have a canonical response on file (not just declared or legacy-verified)</li>
+              <li>- Each must be reviewed and marked satisfactory by an admin</li>
+              <li>- At least one should be from the most recent employer</li>
+              <li>- Declared referee details alone do not count as a satisfactory reference</li>
             </ul>
           </div>
         </CardContent>
@@ -1046,7 +1165,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                 return (
                   <div className="inline-flex items-center px-3 py-2 rounded-lg bg-green-50 text-green-700 border border-green-200 text-sm font-medium">
                     <CheckCircle className="h-4 w-4 mr-2" />
-                    Already verified
+                    Already satisfactory
                   </div>
                 );
               }
@@ -1060,7 +1179,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                   }}
                 >
                   <CheckCircle className="h-4 w-4 mr-2" />
-                  Verify Reference
+                  Mark Satisfactory
                 </Button>
               );
             })()}
@@ -1076,19 +1195,19 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
               {verifyAction === 'verify' ? (
                 <>
                   <Shield className="h-5 w-5 text-green-600" />
-                  Verify Reference
+                  Mark Reference Satisfactory
                 </>
               ) : (
                 <>
                   <XCircle className="h-5 w-5 text-red-600" />
-                  Reject Reference
+                  Mark Reference Unsatisfactory
                 </>
               )}
             </DialogTitle>
             <DialogDescription>
               {verifyAction === 'verify' 
-                ? 'Confirm that this reference meets NHS employment standards.'
-                : 'Provide a reason for rejecting this reference.'}
+                ? 'Confirm that this reference meets CQC safer recruitment standards. Response evidence and admin review will be recorded.'
+                : 'Provide a reason for marking this reference unsatisfactory.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
@@ -1141,7 +1260,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
               ) : (
                 <XCircle className="h-4 w-4 mr-2" />
               )}
-              {verifyAction === 'verify' ? 'Verify Reference' : 'Reject Reference'}
+              {verifyAction === 'verify' ? 'Mark Satisfactory' : 'Mark Unsatisfactory'}
             </Button>
           </DialogFooter>
         </DialogContent>

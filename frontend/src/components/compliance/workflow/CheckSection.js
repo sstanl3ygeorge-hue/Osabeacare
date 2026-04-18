@@ -29,7 +29,7 @@ const OUTCOME_CONFIG = {
     className: 'bg-emerald-100 text-emerald-700 border-emerald-200',
   },
   failed: {
-    label: 'Failed',
+    label: 'Rejected / action required',
     className: 'bg-red-100 text-red-700 border-red-200',
   },
   follow_up_required: {
@@ -37,7 +37,7 @@ const OUTCOME_CONFIG = {
     className: 'bg-amber-100 text-amber-700 border-amber-200',
   },
   awaiting_review: {
-    label: 'Awaiting Review',
+    label: 'Awaiting admin review',
     className: 'bg-gray-100 text-gray-600 border-gray-200',
   },
   in_progress: {
@@ -73,6 +73,8 @@ export function CheckSection({
 }) {
   const isRTW = requirementKey === 'right_to_work';
   const isDBS = requirementKey === 'dbs';
+  const isIdentity = requirementKey === 'identity';
+  const isAddress = requirementKey === 'proof_of_address';
   const hasCheck = !!checkRecord;
   const outcome = checkRecord?.outcome;
   const outcomeConfig = OUTCOME_CONFIG[outcome] || OUTCOME_CONFIG.awaiting_review;
@@ -106,7 +108,11 @@ export function CheckSection({
               ? 'Right to Work Check'
               : isDBS
                 ? 'DBS Status Check'
-                : 'Check Record'}
+                : isIdentity
+                  ? 'Identity Verification Check'
+                  : isAddress
+                    ? 'Address Verification Check'
+                    : 'Check Record'}
           </h4>
         </div>
         {isAdminView && hasCheck && (
@@ -331,16 +337,18 @@ export function CheckSection({
                 <Edit2 className="h-3 w-3 mr-1" />
                 Edit Check
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
-                onClick={onInvalidate}
-                data-testid={`${requirementKey}-invalidate-check-btn`}
-              >
-                <Trash2 className="h-3 w-3 mr-1" />
-                Invalidate
-              </Button>
+              {onInvalidate && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
+                  onClick={onInvalidate}
+                  data-testid={`${requirementKey}-invalidate-check-btn`}
+                >
+                  <Trash2 className="h-3 w-3 mr-1" />
+                  Invalidate
+                </Button>
+              )}
             </div>
           )}
         </div>

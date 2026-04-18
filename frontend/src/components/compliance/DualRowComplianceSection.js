@@ -369,16 +369,20 @@ export default function DualRowComplianceSection({
     });
   };
 
-  // Requirements that use the new 5-step workflow card
-  const WORKFLOW_CARD_KEYS = new Set(['right_to_work', 'dbs']);
+  // Requirements that use the staged workflow card
+  const WORKFLOW_CARD_KEYS = new Set([
+    'right_to_work',
+    'dbs',
+    'identity',
+    'proof_of_address',
+  ]);
 
   /**
    * Render upload-type requirement.
-   * RTW and DBS use the new RequirementWorkflowCard (5-step workflow).
-   * Identity and PoA continue to use UploadRequirementCard.
+   * RTW, DBS, Identity, and PoA use the same staged compliance workflow.
    */
   const renderUploadSection = (sectionKey, section) => {
-    // New workflow card for RTW and DBS
+    // Staged workflow card for compliance-critical evidence and checks
     if (WORKFLOW_CARD_KEYS.has(sectionKey)) {
       return (
         <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
@@ -397,7 +401,7 @@ export default function DualRowComplianceSection({
       );
     }
 
-    // Legacy card for identity and proof_of_address
+    // Legacy fallback for any future upload-style section not yet workflow-enabled
     const surface = transformToUploadSurface(sectionKey, section);
     if (!surface) return null;
     
@@ -434,6 +438,24 @@ export default function DualRowComplianceSection({
     
     // Count blockers in this section
     const blockers = section.rows.filter(r => r.blocker_text);
+    const isAgreementsSection = sectionKey === 'agreements';
+    const agreementRows = isAgreementsSection
+      ? section.rows.filter((row) => row.row_type === 'form_acknowledgement')
+      : [];
+    const agreementSatisfiedCount = agreementRows.filter((row) => row.is_verified).length;
+    const agreementPendingReviewCount = agreementRows.filter((row) => (
+      !row.is_verified && (
+        row.has_acknowledgement ||
+        row.submission_data ||
+        row.acknowledgement_data?.submission_id
+      )
+    )).length;
+    const agreementMissingCount = agreementRows.filter((row) => (
+      !row.is_verified &&
+      !row.has_acknowledgement &&
+      !row.submission_data &&
+      !row.acknowledgement_data?.submission_id
+    )).length;
     
     return (
       <div key={sectionKey} className="mb-6" data-testid={`section-${sectionKey}`}>
@@ -449,6 +471,16 @@ export default function DualRowComplianceSection({
                 {blockers.length} blocking
               </Badge>
             )}
+            {isAgreementsSection && agreementPendingReviewCount > 0 && (
+              <Badge className="bg-amber-100 text-amber-700 text-xs">
+                {agreementPendingReviewCount} awaiting admin review
+              </Badge>
+            )}
+            {isAgreementsSection && agreementSatisfiedCount > 0 && (
+              <Badge className="bg-emerald-100 text-emerald-700 text-xs">
+                {agreementSatisfiedCount} requirement satisfied
+              </Badge>
+            )}
           </div>
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
             {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -458,6 +490,15 @@ export default function DualRowComplianceSection({
         {/* Section Content */}
         {isExpanded && (
           <div className="space-y-3 p-3 bg-white border border-t-0 border-gray-200 rounded-b-xl">
+            {isAgreementsSection && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <span className="font-medium">Agreements readiness impact:</span>{' '}
+                {blockers.length} blocking readiness &nbsp;|&nbsp;
+                {agreementPendingReviewCount} awaiting admin review &nbsp;|&nbsp;
+                {agreementMissingCount} missing/not submitted &nbsp;|&nbsp;
+                {agreementSatisfiedCount} requirement satisfied
+              </div>
+            )}
             {section.rows.map((row, idx) => {
               // CV row is evidence type but should use FormRequirementRow for file display
               if (row.row_type === 'evidence' && row.key !== 'cv') {
@@ -737,7 +778,40 @@ export default function DualRowComplianceSection({
     row.status === 'response_received' ||
     row.requires_admin_review
   )).length;
-  const verifiedCount = sectionRows.filter((row) => row.is_verified || row.status === 'verified').length;
+  const coreRequirementKeys = ['right_to_work', 'dbs', 'identity', 'proof_of_address'];
+  const presentCoreRequirementKeys = coreRequirementKeys.filter((key) => sections?.[key]);
+  const coreSatisfiedCount = presentCoreRequirementKeys.filter((key) => {
+    const rows = sections[key]?.rows || [];
+    const evidenceRow = rows.find((row) => row.row_type === 'evidence');
+    const checkRow = rows.find((row) => row.row_type === 'check');
+    const evidenceDocs = evidenceRow?.documents_preview || [];
+    const hasAcceptedEvidence =
+      evidenceRow?.is_verified ||
+      evidenceRow?.status === 'verified' ||
+      evidenceRow?.status === 'accepted' ||
+      evidenceDocs.some((doc) => (
+        doc.verified ||
+        doc.status === 'verified' ||
+        doc.status === 'accepted' ||
+        doc.status === 'approved'
+      ));
+    const checkData = checkRow?.check_data || {};
+    const hasVerifiedCheck =
+      checkRow?.is_verified ||
+      checkData.outcome === 'verified' ||
+      checkData.status === 'verified';
+    const proofRequired =
+      key === 'right_to_work' ||
+      (key === 'dbs' && checkData.method === 'dbs_update_service_check');
+    const hasProof = Boolean(checkData.proof_document_id || checkData.evidence_document_id);
+
+    return hasAcceptedEvidence && hasVerifiedCheck && (!proofRequired || hasProof);
+  }).length;
+  const agreementRowsForSummary = sections?.agreements?.rows?.filter((row) => row.row_type === 'form_acknowledgement') || [];
+  const agreementSatisfiedCount = agreementRowsForSummary.filter((row) => row.is_verified).length;
+  const agreementBlockingCount = agreementRowsForSummary.filter((row) => row.blocker_text).length;
+  const satisfiedRequirementCount = coreSatisfiedCount + agreementSatisfiedCount;
+  const totalRequirementCount = presentCoreRequirementKeys.length + agreementRowsForSummary.length;
 
   return (
     <div className="space-y-6" data-testid="dual-row-compliance-section">
@@ -758,22 +832,28 @@ export default function DualRowComplianceSection({
         <span className="font-medium">Compliance blockers:</span> {blockerCount} &nbsp;|&nbsp;
         <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
         <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-        <span className="font-medium">Verified rows:</span> {verifiedCount}
+        <span className="font-medium">Requirement satisfied:</span> {satisfiedRequirementCount}/{totalRequirementCount}
+        {agreementRowsForSummary.length > 0 && (
+          <>
+            &nbsp;|&nbsp;
+            <span className="font-medium">Agreements blocking readiness:</span> {agreementBlockingCount}
+          </>
+        )}
       </div>
 
       {/* Compliance Sections */}
       {sections && (
         <>
-          {/* Right to Work - Uses unified UploadRequirementCard */}
+          {/* Right to Work */}
           {sections.right_to_work && renderUploadSection('right_to_work', sections.right_to_work)}
           
-          {/* DBS - Uses unified UploadRequirementCard */}
+          {/* DBS */}
           {sections.dbs && renderUploadSection('dbs', sections.dbs)}
           
-          {/* Identity - Uses unified UploadRequirementCard */}
+          {/* Identity */}
           {sections.identity && renderUploadSection('identity', sections.identity)}
           
-          {/* Proof of Address - Uses unified UploadRequirementCard */}
+          {/* Proof of Address */}
           {sections.proof_of_address && renderUploadSection('proof_of_address', sections.proof_of_address)}
           
           {/* Agreements - Uses legacy section for now */}

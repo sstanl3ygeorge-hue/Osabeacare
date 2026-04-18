@@ -4685,306 +4685,431 @@ export default function EmployeeProfilePage() {
         </TabsContent>
 
         {/* ========== TAB 3: FORMS ========== */}
-        {/* Health Questionnaire, Personal Info, HMRC, Emergency Contacts */}
+        {/* Interview record + worker onboarding forms (health, personal, HMRC, declarations) */}
         <TabsContent value="forms">
-          <Card className="mb-6 border-[#E4E8EB] shadow-sm" data-testid="section-forms-interview">
-            <CardHeader>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle className="font-heading text-lg">Interview Assessment</CardTitle>
-                  <p className="text-xs text-text-muted mt-1">
-                    Complete and review the interview record before progressing to later onboarding checks.
-                  </p>
-                </div>
-                <Badge className="bg-blue-100 text-blue-700">Awaiting admin review</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <InterviewFormPanel 
-                employeeId={employeeId}
-                employeeName={`${employee?.first_name} ${employee?.last_name}`}
-                employeeRole={employee?.role || 'Healthcare Assistant'}
-                onComplete={() => {
-                  fetchCompliance();
-                  fetchFormSubmissions();
-                }}
-              />
-            </CardContent>
-          </Card>
+          {/* ── Top-level Forms & Interview Summary ── */}
+          {(() => {
+            // Derive form-level counts — reused in summary banner and form cards
+            const FORM_GROUPS = [
+              {
+                label: 'Pre-Employment Checks',
+                sensitive: false,
+                forms: [
+                  { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations', prefill: true, sensitive: true },
+                  { key: 'staff_personal_info', name: 'Staff Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
+                  { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status', sensitive: true },
+                  { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details', prefill: true },
+                ]
+              },
+              {
+                label: 'Declarations',
+                sensitive: true,
+                forms: [
+                  { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)', sensitive: true },
+                  { key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only', sensitive: true },
+                ]
+              },
+              {
+                label: 'Screening',
+                sensitive: true,
+                forms: [
+                  { key: 'pre_interview_questionnaire', name: 'Pre-Interview Questionnaire', description: 'Worker pre-interview/application intake responses', sensitive: true },
+                ]
+              },
+            ];
+            const allFormDefinitions = FORM_GROUPS.flatMap((g) => g.forms);
 
-          <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
-            <CardHeader>
-              <CardTitle className="font-heading text-lg">Worker Onboarding Forms</CardTitle>
-              <p className="text-xs text-text-muted">
-                Forms submitted by the worker for onboarding and admin review.
-              </p>
-            </CardHeader>
-            <CardContent>
-              {/* Error state with retry */}
-              {formSubmissionsError && (
-                <div className="flex items-center justify-between p-3 mb-4 rounded-lg border border-red-200 bg-red-50 text-red-700">
-                  <div className="flex items-center gap-2 text-sm">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    Cannot assess forms. Data unavailable and review actions are disabled.
+            // Status derivation for each form
+            const deriveFormStatus = (form) => {
+              const submission = formSubmissions?.find(fs =>
+                fs.form_type === form.key || fs.requirement_id === form.key
+              );
+              if (!submission) return { status: 'missing', submission: null };
+              const raw = submission?.status || 'not_started';
+              if (raw === 'verified' || raw === 'signed_off' || submission?.verified === true) return { status: 'signed_off', submission };
+              if (raw === 'rejected') return { status: 'rejected', submission };
+              if (raw === 'approved' || raw === 'reviewed') return { status: 'reviewed', submission };
+              if (raw === 'submitted') return { status: 'submitted', submission };
+              if (raw === 'draft' || raw === 'in_progress') return { status: 'in_progress', submission };
+              return { status: 'missing', submission };
+            };
+
+            const formStatuses = allFormDefinitions.map((f) => ({ ...f, ...deriveFormStatus(f) }));
+
+            // Cannot-assess guard
+            const cannotAssessForms = Boolean(formSubmissionsError);
+
+            // Counts
+            const missingCount = formStatuses.filter((f) => f.status === 'missing').length;
+            const inProgressCount = formStatuses.filter((f) => f.status === 'in_progress').length;
+            const submittedCount = formStatuses.filter((f) => f.status === 'submitted').length;
+            const reviewedCount = formStatuses.filter((f) => f.status === 'reviewed').length;
+            const signedOffCount = formStatuses.filter((f) => f.status === 'signed_off').length;
+            const rejectedCount = formStatuses.filter((f) => f.status === 'rejected').length;
+            const totalForms = allFormDefinitions.length;
+            const allSignedOff = signedOffCount === totalForms && !cannotAssessForms;
+
+            // Interview record status (from formSubmissions — interview submission)
+            const interviewSubmission = formSubmissions?.find(fs =>
+              fs.form_type === 'interview_record' || fs.requirement_id === 'interview_record'
+            );
+            const interviewFormStatus = interviewSubmission?.status || null;
+            const interviewExists = Boolean(interviewSubmission);
+            const interviewDecision = interviewSubmission?.form_data?.decision || interviewSubmission?.data?.decision || interviewSubmission?.form_data?.overall_decision || null;
+            const interviewScore = interviewSubmission?.form_data?.total_score || interviewSubmission?.data?.total_score || null;
+            const interviewPassed = interviewScore !== null ? interviewScore >= 11 : null;
+
+            // Banner colour
+            const summaryBorderClass = cannotAssessForms
+              ? 'border-red-200 bg-red-50'
+              : allSignedOff
+                ? 'border-green-200 bg-green-50'
+                : (rejectedCount > 0)
+                  ? 'border-red-200 bg-red-50'
+                  : 'border-amber-200 bg-amber-50';
+            const summaryTextClass = cannotAssessForms
+              ? 'text-red-800'
+              : allSignedOff
+                ? 'text-green-800'
+                : (rejectedCount > 0)
+                  ? 'text-red-800'
+                  : 'text-amber-800';
+
+            // Status display config
+            const STATUS_DISPLAY = {
+              missing:     { label: 'Missing',                         color: 'bg-gray-100 text-gray-600',   icon: AlertCircle, iconColor: 'text-gray-400',   cardBorder: 'bg-gray-50 border-gray-200' },
+              in_progress: { label: 'Worker in progress',              color: 'bg-amber-100 text-amber-700', icon: Clock,       iconColor: 'text-amber-500',  cardBorder: 'bg-amber-50 border-amber-200' },
+              submitted:   { label: 'Submitted, not reviewed',         color: 'bg-blue-100 text-blue-700',   icon: FileText,    iconColor: 'text-blue-500',   cardBorder: 'bg-blue-50 border-blue-200' },
+              reviewed:    { label: 'Reviewed',                        color: 'bg-indigo-100 text-indigo-700',icon: Eye,         iconColor: 'text-indigo-500', cardBorder: 'bg-indigo-50 border-indigo-200' },
+              signed_off:  { label: 'Signed off',                      color: 'bg-green-100 text-green-700', icon: CheckCircle,  iconColor: 'text-green-600',  cardBorder: 'bg-green-50 border-green-200' },
+              rejected:    { label: 'Rejected / action required',      color: 'bg-red-100 text-red-700',     icon: XCircle,     iconColor: 'text-red-500',    cardBorder: 'bg-red-50 border-red-200' },
+            };
+
+            const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', {
+              day: 'numeric', month: 'short', year: 'numeric'
+            }) : null;
+
+            return (
+              <div className="space-y-6">
+                {/* ── Summary banner ── */}
+                <div className={`rounded-xl border p-4 ${summaryBorderClass}`}>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5">
+                      {cannotAssessForms
+                        ? <AlertTriangle className="h-5 w-5 text-red-600" />
+                        : allSignedOff
+                          ? <CheckCircle className="h-5 w-5 text-green-600" />
+                          : <AlertTriangle className="h-5 w-5 text-amber-600" />}
+                    </div>
+                    <div className="flex-1">
+                      <p className={`font-medium ${summaryTextClass}`}>
+                        {cannotAssessForms
+                          ? 'Cannot assess forms — submission data unavailable'
+                          : allSignedOff
+                            ? `All ${totalForms} forms signed off`
+                            : `Forms Signed Off: ${signedOffCount} / ${totalForms}`}
+                      </p>
+                      {!cannotAssessForms && !allSignedOff && (
+                        <div className="mt-2 text-sm space-y-0.5">
+                          {missingCount > 0 && <p>Missing: {missingCount}</p>}
+                          {inProgressCount > 0 && <p>Worker in progress: {inProgressCount}</p>}
+                          {submittedCount > 0 && <p>Submitted, not reviewed: {submittedCount}</p>}
+                          {reviewedCount > 0 && <p>Reviewed (not yet signed off): {reviewedCount}</p>}
+                          {rejectedCount > 0 && <p className="text-red-700 font-medium">Rejected / action required: {rejectedCount}</p>}
+                        </div>
+                      )}
+                      {cannotAssessForms && (
+                        <div className="mt-2">
+                          <Button size="sm" variant="outline" onClick={fetchFormSubmissions}
+                            className="text-red-600 border-red-200 hover:bg-red-50">
+                            <RefreshCw className="h-3 w-3 mr-1" /> Retry
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <Button size="sm" variant="outline" onClick={fetchFormSubmissions}
-                    className="text-red-600 border-red-200 hover:bg-red-50">
-                    <RefreshCw className="h-3 w-3 mr-1" /> Retry
-                  </Button>
                 </div>
-              )}
 
-              {/* Helper: derive robust form status */}
-              {(() => {
-                if (formSubmissionsError) {
-                  return (
-                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                      <span className="font-medium">Form blockers:</span> Cannot assess &nbsp;|&nbsp;
-                      <span className="font-medium">Pending reviews:</span> Cannot assess &nbsp;|&nbsp;
-                      <span className="font-medium">Cannot assess:</span> 1 &nbsp;|&nbsp;
-                      <span className="font-medium">Signed off:</span> Cannot assess
-                    </div>
-                  );
-                }
-
-                const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', {
-                  day: 'numeric', month: 'short', year: 'numeric'
-                }) : null;
-
-                // Form groups: label + forms in order
-                const FORM_GROUPS = [
-                  {
-                    label: 'Pre-Employment Checks',
-                    forms: [
-                      { key: 'staff_health_questionnaire', name: 'Staff Health Questionnaire', description: 'Medical history and health declarations', prefill: true },
-                      { key: 'staff_personal_info', name: 'Staff Personal Information', description: 'Contact details, NI number, bank details', prefill: true },
-                      { key: 'hmrc_starter_checklist', name: 'HMRC Starter Checklist', description: 'Tax code and employment status' },
-                      { key: 'emergency_contacts', name: 'Emergency Contacts', description: 'Next of kin and emergency contact details', prefill: true },
-                    ]
-                  },
-                  {
-                    label: 'Declarations',
-                    forms: [
-                      { key: 'conflict_of_interest', name: 'Conflict of Interest Declaration', description: 'Secondary employment, relationships or financial interests (NHS standard)' },
-                      { key: 'fit_proper_persons', name: 'Fit and Proper Persons Declaration', description: 'CQC Regulation 5 — managers and directors only' },
-                    ]
-                  },
-                  {
-                    label: 'Screening',
-                    forms: [
-                      { key: 'pre_interview_questionnaire', name: 'Pre-Interview Questionnaire', description: 'Worker pre-interview/application intake responses' },
-                    ]
-                  },
-                ];
-                const allFormDefinitions = FORM_GROUPS.flatMap((group) => group.forms);
-                const formStatusCounts = allFormDefinitions.reduce((counts, form) => {
-                  const submission = formSubmissions?.find(fs =>
-                    fs.form_type === form.key ||
-                    fs.requirement_id === form.key
-                  );
-                  const rawStatus = submission?.status || 'not_started';
-                  const isVerified = rawStatus === 'verified' || rawStatus === 'signed_off' || submission?.verified === true;
-                  const isRejected = rawStatus === 'rejected';
-                  const isAwaiting = !isVerified && !isRejected && (rawStatus === 'submitted' || rawStatus === 'approved');
-                  return {
-                    blockers: counts.blockers + (!submission || isRejected ? 1 : 0),
-                    pending: counts.pending + (isAwaiting ? 1 : 0),
-                    signedOff: counts.signedOff + (isVerified ? 1 : 0)
-                  };
-                }, { blockers: 0, pending: 0, signedOff: 0 });
-
-                return (
-                  <div className="space-y-5">
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                      <span className="font-medium">Form blockers:</span> {formStatusCounts.blockers} &nbsp;|&nbsp;
-                      <span className="font-medium">Pending reviews:</span> {formStatusCounts.pending} &nbsp;|&nbsp;
-                      <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-                      <span className="font-medium">Signed off:</span> {formStatusCounts.signedOff}
-                    </div>
-                    {FORM_GROUPS.map(group => (
-                      <div key={group.label}>
-                        {/* Group label */}
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
-                          {group.label}
+                {/* ── Interview Record (distinct recruitment decision) ── */}
+                <Card className={`shadow-sm ${
+                  cannotAssessForms ? 'border-red-200'
+                  : !interviewExists ? 'border-amber-200'
+                  : 'border-[#E4E8EB]'
+                }`} data-testid="section-forms-interview">
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle className="font-heading text-lg flex items-center gap-2">
+                          <ClipboardList className="h-5 w-5 text-primary" />
+                          Interview Assessment Record
+                        </CardTitle>
+                        <p className="text-xs text-text-muted mt-1">
+                          Scored recruitment decision record. Must be completed and reviewed before progressing onboarding.
                         </p>
-                        <div className="space-y-2">
-                          {group.forms.map((form) => {
-                            const submission = formSubmissions?.find(fs =>
-                              fs.form_type === form.key ||
-                              fs.requirement_id === form.key
-                            );
+                        <Badge variant="outline" className="mt-1 text-xs bg-slate-50 text-slate-600 border-slate-200">
+                          Sensitive recruitment record
+                        </Badge>
+                      </div>
+                      {cannotAssessForms ? (
+                        <Badge className="bg-red-100 text-red-700">Cannot assess</Badge>
+                      ) : !interviewExists ? (
+                        <Badge className="bg-gray-100 text-gray-600">Missing</Badge>
+                      ) : interviewDecision ? (
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge className={
+                            ['Approve', 'Hire', 'Strong Hire'].includes(interviewDecision)
+                              ? 'bg-green-100 text-green-700'
+                              : ['Reject', 'Not Suitable'].includes(interviewDecision)
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-700'
+                          }>
+                            Outcome: {interviewDecision}
+                          </Badge>
+                          {interviewPassed !== null && (
+                            <span className={`text-xs font-medium ${interviewPassed ? 'text-green-600' : 'text-red-600'}`}>
+                              Score: {interviewScore}/24 — {interviewPassed ? 'Passed' : 'Failed'}
+                            </span>
+                          )}
+                        </div>
+                      ) : interviewPassed !== null ? (
+                        <Badge className={interviewPassed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}>
+                          {interviewPassed ? 'Completed — Passed' : 'Completed — Failed'}
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-blue-100 text-blue-700">Record exists — no outcome recorded</Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {cannotAssessForms ? (
+                      <div className="text-center py-6 text-red-700">
+                        <AlertTriangle className="h-6 w-6 mx-auto mb-2 text-red-500" />
+                        <p className="text-sm font-medium">Cannot assess interview record</p>
+                        <p className="text-xs text-red-600 mt-1">Form submissions unavailable. Review and sign-off actions are disabled.</p>
+                      </div>
+                    ) : (
+                      <InterviewFormPanel
+                        employeeId={employeeId}
+                        employeeName={`${employee?.first_name} ${employee?.last_name}`}
+                        employeeRole={employee?.role || 'Healthcare Assistant'}
+                        onComplete={() => {
+                          fetchCompliance();
+                          fetchFormSubmissions();
+                        }}
+                      />
+                    )}
+                  </CardContent>
+                </Card>
 
-                            // Status — align with compliance-file: signed_off = verified
-                            const rawStatus = submission?.status || 'not_started';
-                            const isVerified = rawStatus === 'verified' || rawStatus === 'signed_off' || submission?.verified === true;
-                            const isRejected = rawStatus === 'rejected';
-                            const isAwaiting = !isVerified && !isRejected && (rawStatus === 'submitted' || rawStatus === 'approved');
-                            const isInProgress = !isVerified && !isRejected && !isAwaiting && (rawStatus === 'draft' || rawStatus === 'in_progress');
-                            const hasSubmission = !!submission;
+                {/* ── Worker Onboarding Forms ── */}
+                <Card className="border-[#E4E8EB] shadow-sm" data-testid="section-forms-core">
+                  <CardHeader>
+                    <CardTitle className="font-heading text-lg">Worker Onboarding Forms</CardTitle>
+                    <p className="text-xs text-text-muted">
+                      Forms submitted by the worker for onboarding and admin review. Sensitive records are marked.
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    {cannotAssessForms ? (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-center text-red-700">
+                        <AlertTriangle className="h-6 w-6 mx-auto mb-2 text-red-500" />
+                        <p className="font-medium">Cannot assess forms</p>
+                        <p className="text-sm text-red-600 mt-1">
+                          Submission data unavailable. All review and sign-off actions are disabled until data loads.
+                        </p>
+                        <Button size="sm" variant="outline" onClick={fetchFormSubmissions}
+                          className="mt-3 text-red-600 border-red-200 hover:bg-red-50">
+                          <RefreshCw className="h-3 w-3 mr-1" /> Retry
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        {FORM_GROUPS.map(group => (
+                          <div key={group.label}>
+                            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
+                              {group.label}
+                              {group.sensitive && (
+                                <span className="ml-2 text-slate-400 normal-case font-normal">— sensitive recruitment records</span>
+                              )}
+                            </p>
+                            <div className="space-y-2">
+                              {group.forms.map((form) => {
+                                const derived = formStatuses.find((f) => f.key === form.key) || { status: 'missing', submission: null };
+                                const cfg = STATUS_DISPLAY[derived.status] || STATUS_DISPLAY.missing;
+                                const IconEl = cfg.icon;
+                                const hasSubmission = Boolean(derived.submission);
+                                const submission = derived.submission;
 
-                            const statusLabel = isVerified ? 'Verified'
-                              : isRejected ? 'Rejected / action required'
-                              : isAwaiting ? 'Submitted, not reviewed'
-                              : isInProgress ? 'Worker in progress'
-                              : 'Missing';
+                                const submittedAt = fmtDate(submission?.submitted_at);
+                                const reviewedAt = fmtDate(submission?.reviewed_at || submission?.verified_at || submission?.signed_off_at);
+                                const reviewedBy = submission?.reviewed_by_name || submission?.signed_off_by_name || submission?.verified_by_name;
 
-                            const statusColor = isVerified ? 'bg-green-100 text-green-700'
-                              : isRejected ? 'bg-red-100 text-red-700'
-                              : isAwaiting ? 'bg-blue-100 text-blue-700'
-                              : isInProgress ? 'bg-amber-100 text-amber-700'
-                              : 'bg-gray-100 text-gray-600';
-
-                            const cardBorder = isVerified ? 'bg-green-50 border-green-200'
-                              : isRejected ? 'bg-red-50 border-red-200'
-                              : isAwaiting ? 'bg-blue-50 border-blue-200'
-                              : isInProgress ? 'bg-amber-50 border-amber-200'
-                              : 'bg-gray-50 border-gray-200';
-
-                            const IconEl = isVerified ? CheckCircle
-                              : isRejected ? XCircle
-                              : isAwaiting ? FileText
-                              : isInProgress ? Clock
-                              : AlertCircle;
-
-                            const iconColor = isVerified ? 'text-green-600'
-                              : isRejected ? 'text-red-500'
-                              : isAwaiting ? 'text-blue-500'
-                              : isInProgress ? 'text-amber-500'
-                              : 'text-gray-400';
-
-                            // Audit trail dates
-                            const submittedAt = fmtDate(submission?.submitted_at);
-                            const reviewedAt = fmtDate(submission?.reviewed_at || submission?.verified_at || submission?.signed_off_at);
-                            const reviewedBy = submission?.reviewed_by_name || submission?.signed_off_by_name || submission?.verified_by_name;
-
-                            return (
-                              <div
-                                key={form.key}
-                                className={`p-4 rounded-lg border ${cardBorder}`}
-                                data-testid={`form-card-${form.key}`}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  {/* Left: icon + text */}
-                                  <div className="flex items-start gap-3 min-w-0">
-                                    <IconEl className={`h-5 w-5 mt-0.5 shrink-0 ${iconColor}`} />
-                                    <div className="min-w-0">
-                                      <p className="font-medium text-gray-800 text-sm">{form.name}</p>
-                                      <p className="text-xs text-gray-500">{form.description}</p>
-                                      {form.prefill && (
-                                        <p className="text-xs text-indigo-500 mt-0.5 italic">
-                                          Auto-filled from worker's application
-                                        </p>
-                                      )}
-                                      {/* Audit trail */}
-                                      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-                                        {submittedAt && (
-                                          <span className="text-gray-400">
-                                            Submitted: <span className="text-gray-600">{submittedAt}</span>
-                                          </span>
-                                        )}
-                                        {reviewedAt ? (
-                                          <span className="text-gray-400">
-                                            Reviewed: <span className="text-gray-600">{reviewedAt}</span>
-                                            {reviewedBy && <span className="text-gray-600"> by {reviewedBy}</span>}
-                                          </span>
-                                        ) : isAwaiting ? (
-                                          <span className="text-gray-400 italic">Not yet reviewed</span>
-                                        ) : null}
-                                        {isRejected && submission?.rejection_reason && (
-                                          <span className="text-red-600">
-                                            Reason: {submission.rejection_reason}
-                                          </span>
-                                        )}
+                                return (
+                                  <div
+                                    key={form.key}
+                                    className={`p-4 rounded-lg border ${cfg.cardBorder}`}
+                                    data-testid={`form-card-${form.key}`}
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex items-start gap-3 min-w-0">
+                                        <IconEl className={`h-5 w-5 mt-0.5 shrink-0 ${cfg.iconColor}`} />
+                                        <div className="min-w-0">
+                                          <p className="font-medium text-gray-800 text-sm">{form.name}</p>
+                                          <p className="text-xs text-gray-500">{form.description}</p>
+                                          {form.sensitive && (
+                                            <Badge variant="outline" className="mt-0.5 text-xs bg-slate-50 text-slate-500 border-slate-200">
+                                              Sensitive
+                                            </Badge>
+                                          )}
+                                          {form.prefill && (
+                                            <p className="text-xs text-indigo-500 mt-0.5 italic">
+                                              Auto-filled from worker's application
+                                            </p>
+                                          )}
+                                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+                                            {submittedAt && (
+                                              <span className="text-gray-400">
+                                                Submitted: <span className="text-gray-600">{submittedAt}</span>
+                                              </span>
+                                            )}
+                                            {reviewedAt ? (
+                                              <span className="text-gray-400">
+                                                Reviewed: <span className="text-gray-600">{reviewedAt}</span>
+                                                {reviewedBy && <span className="text-gray-600"> by {reviewedBy}</span>}
+                                              </span>
+                                            ) : (derived.status === 'submitted' || derived.status === 'reviewed') ? (
+                                              <span className="text-gray-400 italic">Not yet reviewed</span>
+                                            ) : null}
+                                            {derived.status === 'rejected' && submission?.rejection_reason && (
+                                              <span className="text-red-600">
+                                                Reason: {submission.rejection_reason}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
                                       </div>
-                                    </div>
-                                  </div>
 
-                                  {/* Right: badge + actions */}
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <Badge className={statusColor}>{statusLabel}</Badge>
-
-                                    <div className="flex gap-1">
-                                        {/* Verified → View */}
-                                        {isVerified && hasSubmission && (
-                                          <Button size="sm" variant="outline"
-                                            onClick={() => setViewFormSubmission({
-                                              isOpen: true, formType: form.key, formName: form.name,
-                                              submissionId: submission?.id,
-                                              data: submission?.data || submission?.form_data
-                                            })}
-                                            className="text-green-700 border-green-200 hover:bg-green-50"
-                                            data-testid={`view-submission-${form.key}`}>
-                                            <Eye className="h-3.5 w-3.5 mr-1" />View
-                                          </Button>
-                                        )}
-
-                                        {/* Awaiting → Review Submission + Mark Reviewed */}
-                                        {isAwaiting && (
-                                          <>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <Badge className={cfg.color}>{cfg.label}</Badge>
+                                        <div className="flex gap-1">
+                                          {/* Signed off → View */}
+                                          {derived.status === 'signed_off' && hasSubmission && (
                                             <Button size="sm" variant="outline"
                                               onClick={() => setViewFormSubmission({
                                                 isOpen: true, formType: form.key, formName: form.name,
                                                 submissionId: submission?.id,
                                                 data: submission?.data || submission?.form_data
                                               })}
-                                              className="text-blue-600 border-blue-200 hover:bg-blue-50"
-                                              data-testid={`review-submission-${form.key}`}>
-                                              <Eye className="h-3.5 w-3.5 mr-1" />Review Submission
+                                              className="text-green-700 border-green-200 hover:bg-green-50"
+                                              data-testid={`view-submission-${form.key}`}>
+                                              <Eye className="h-3.5 w-3.5 mr-1" />View
                                             </Button>
+                                          )}
+
+                                          {/* Reviewed → View + Sign Off */}
+                                          {derived.status === 'reviewed' && hasSubmission && (
+                                            <>
+                                              <Button size="sm" variant="outline"
+                                                onClick={() => setViewFormSubmission({
+                                                  isOpen: true, formType: form.key, formName: form.name,
+                                                  submissionId: submission?.id,
+                                                  data: submission?.data || submission?.form_data
+                                                })}
+                                                className="text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                                                data-testid={`view-submission-${form.key}`}>
+                                                <Eye className="h-3.5 w-3.5 mr-1" />View
+                                              </Button>
+                                              {!isAuditor() && (
+                                                <Button size="sm" variant="outline"
+                                                  onClick={async () => {
+                                                    try {
+                                                      await axios.post(
+                                                        `${API}/form-submissions/${submission.id}/verify`, {},
+                                                        { headers: { Authorization: `Bearer ${token}` } }
+                                                      );
+                                                      toast.success('Form signed off');
+                                                      fetchFormSubmissions();
+                                                    } catch { toast.error('Failed to sign off form'); }
+                                                  }}
+                                                  className="text-green-600 border-green-200 hover:bg-green-50"
+                                                  data-testid={`sign-off-${form.key}`}>
+                                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />Sign Off
+                                                </Button>
+                                              )}
+                                            </>
+                                          )}
+
+                                          {/* Submitted → Review + Mark Reviewed */}
+                                          {derived.status === 'submitted' && hasSubmission && (
+                                            <>
+                                              <Button size="sm" variant="outline"
+                                                onClick={() => setViewFormSubmission({
+                                                  isOpen: true, formType: form.key, formName: form.name,
+                                                  submissionId: submission?.id,
+                                                  data: submission?.data || submission?.form_data
+                                                })}
+                                                className="text-blue-600 border-blue-200 hover:bg-blue-50"
+                                                data-testid={`review-submission-${form.key}`}>
+                                                <Eye className="h-3.5 w-3.5 mr-1" />Review Submission
+                                              </Button>
+                                              {!isAuditor() && (
+                                                <Button size="sm" variant="outline"
+                                                  onClick={async () => {
+                                                    try {
+                                                      await axios.post(
+                                                        `${API}/form-submissions/${submission.id}/verify`, {},
+                                                        { headers: { Authorization: `Bearer ${token}` } }
+                                                      );
+                                                      toast.success('Form marked as reviewed');
+                                                      fetchFormSubmissions();
+                                                    } catch { toast.error('Failed to mark form reviewed'); }
+                                                  }}
+                                                  className="text-green-600 border-green-200 hover:bg-green-50"
+                                                  data-testid={`mark-reviewed-${form.key}`}>
+                                                  <CheckCircle className="h-3.5 w-3.5 mr-1" />Mark Reviewed
+                                                </Button>
+                                              )}
+                                            </>
+                                          )}
+
+                                          {/* Missing / in-progress → passive label */}
+                                          {(derived.status === 'missing' || derived.status === 'in_progress') && (
+                                            <Badge
+                                              className={derived.status === 'in_progress' ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
+                                              data-testid={`form-status-${form.key}`}
+                                            >
+                                              {derived.status === 'in_progress' ? 'Worker in progress' : 'Missing'}
+                                            </Badge>
+                                          )}
+
+                                          {/* Rejected → View */}
+                                          {derived.status === 'rejected' && hasSubmission && (
                                             <Button size="sm" variant="outline"
-                                              onClick={async () => {
-                                                try {
-                                                  await axios.post(
-                                                    `${API}/form-submissions/${submission.id}/verify`, {},
-                                                    { headers: { Authorization: `Bearer ${token}` } }
-                                                  );
-                                                  toast.success('Form marked as verified');
-                                                  fetchFormSubmissions();
-                                                } catch { toast.error('Failed to verify form'); }
-                                              }}
-                                              className="text-green-600 border-green-200 hover:bg-green-50"
-                                              data-testid={`mark-verified-${form.key}`}>
-                                              <CheckCircle className="h-3.5 w-3.5 mr-1" />Mark Verified
+                                              onClick={() => setViewFormSubmission({
+                                                isOpen: true, formType: form.key, formName: form.name,
+                                                submissionId: submission?.id,
+                                                data: submission?.data || submission?.form_data
+                                              })}
+                                              className="text-red-600 border-red-200 hover:bg-red-50">
+                                              <Eye className="h-3.5 w-3.5 mr-1" />View
                                             </Button>
-                                          </>
-                                        )}
-
-                                        {/* Not started / in progress → passive status label (worker completes via their own portal) */}
-                                        {!isVerified && !isAwaiting && !isRejected && (
-                                          <Badge
-                                            className={isInProgress ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
-                                            data-testid={`form-status-${form.key}`}
-                                          >
-                                            {isInProgress ? 'Worker in progress' : 'Missing'}
-                                          </Badge>
-                                        )}
-
-                                        {/* Rejected → also let admin view original + open dashboard */}
-                                        {isRejected && hasSubmission && (
-                                          <Button size="sm" variant="outline"
-                                            onClick={() => setViewFormSubmission({
-                                              isOpen: true, formType: form.key, formName: form.name,
-                                              submissionId: submission?.id,
-                                              data: submission?.data || submission?.form_data
-                                            })}
-                                            className="text-red-600 border-red-200 hover:bg-red-50">
-                                            <Eye className="h-3.5 w-3.5 mr-1" />View
-                                          </Button>
-                                        )}
+                                          )}
+                                        </div>
                                       </div>
+                                    </div>
                                   </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </CardContent>
-          </Card>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            );
+          })()}
           
           {/* Form Submission View Dialog */}
           <Dialog open={viewFormSubmission?.isOpen} onOpenChange={(open) => !open && setViewFormSubmission(null)}>

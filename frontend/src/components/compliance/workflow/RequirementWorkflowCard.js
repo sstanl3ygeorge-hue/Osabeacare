@@ -112,7 +112,18 @@ export default function RequirementWorkflowCard({
   const evidenceRow = sectionData?.rows?.find((r) => r.row_type === 'evidence');
   const checkRow = sectionData?.rows?.find((r) => r.row_type === 'check');
   const evidenceFiles = evidenceRow?.documents_preview || [];
-  const checkRecord = checkRow?.check_data || null;
+  const rawCheckRecord = checkRow?.check_data || null;
+  const checkRecord = rawCheckRecord
+    ? {
+        ...rawCheckRecord,
+        outcome:
+          rawCheckRecord.outcome ||
+          rawCheckRecord.status ||
+          (checkRow?.is_verified ? 'verified' : undefined),
+      }
+    : checkRow?.has_check
+      ? { outcome: checkRow?.is_verified ? 'verified' : 'pending' }
+      : null;
   const sectionTitle = sectionData?.title || requirementKey;
   const checkType = REQUIREMENT_TO_CHECK_TYPE[requirementKey] || requirementKey;
 
@@ -123,6 +134,11 @@ export default function RequirementWorkflowCard({
     checkRecord,
     isAdminView,
   });
+  const displaySteps = workflow.hasProofStep
+    ? workflow.steps
+    : workflow.steps.filter((step) => step.id !== 4);
+  const canInvalidateCheck =
+    requirementKey === 'right_to_work' || requirementKey === 'dbs';
 
   const handleRefresh = useCallback(() => {
     if (onRefresh) onRefresh();
@@ -193,6 +209,10 @@ export default function RequirementWorkflowCard({
   };
 
   const submitInvalidate = async () => {
+    if (!canInvalidateCheck) {
+      toast.error('Invalidate is not available for this requirement yet.');
+      return;
+    }
     if (!invalidateDialog.reason.trim()) {
       toast.error('Please provide a reason for invalidating this check.');
       return;
@@ -316,11 +336,11 @@ export default function RequirementWorkflowCard({
         </div>
       </div>
 
-      {/* ── Step tracker (RTW & DBS only) ────────────────────────────── */}
-      {isOpen && workflow.isRTWOrDBS && (
+      {/* ── Step tracker ─────────────────────────────────────────────── */}
+      {isOpen && workflow.hasCheckStage && (
         <div className="px-4 pt-3 pb-2 border-b border-gray-100 bg-white/80">
           <div className="flex items-center justify-between">
-            {workflow.steps.map((step, idx) => (
+            {displaySteps.map((step, idx) => (
               <div key={step.id} className="flex items-center flex-1">
                 <div className="flex flex-col items-center">
                   <div
@@ -357,10 +377,10 @@ export default function RequirementWorkflowCard({
                   </span>
                 </div>
                 {/* Connector line */}
-                {idx < workflow.steps.length - 1 && (
+                {idx < displaySteps.length - 1 && (
                   <div
                     className={`flex-1 h-0.5 mx-1 mb-4 rounded-full transition-colors ${
-                      idx + 1 < workflow.currentStep || workflow.steps[idx + 1].complete
+                      idx + 1 < workflow.currentStep || displaySteps[idx + 1].complete
                         ? 'bg-emerald-500'
                         : 'bg-gray-200'
                     }`}
@@ -392,20 +412,20 @@ export default function RequirementWorkflowCard({
             workflow={workflow}
           />
 
-          {/* Step 3: Check record (RTW & DBS only) */}
-          {workflow.isRTWOrDBS && (
+          {/* Step 3: Check record */}
+          {workflow.hasCheckStage && (
             <CheckSection
               requirementKey={requirementKey}
               checkRecord={checkRecord}
               hasAcceptedEvidence={workflow.hasAcceptedEvidence}
               isAdminView={isAdminView}
               onRecordCheck={() => setCheckDialog({ open: true })}
-              onInvalidate={handleInvalidateCheck}
+              onInvalidate={canInvalidateCheck ? handleInvalidateCheck : null}
             />
           )}
 
-          {/* Step 4: Proof of check (RTW & DBS only) */}
-          {workflow.isRTWOrDBS && (
+          {/* Step 4: Proof of check, where applicable */}
+          {workflow.hasProofStep && (
             <ProofSection
               requirementKey={requirementKey}
               checkRecord={checkRecord}

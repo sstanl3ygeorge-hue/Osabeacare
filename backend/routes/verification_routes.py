@@ -15,9 +15,11 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
+
+from .dependencies import get_current_user, require_manager_or_admin
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,11 @@ class AIExtractionResult(BaseModel):
     confidence_scores: dict = {}
     validation_results: dict = {}
     raw_extraction: dict = {}
+
+
+VALID_REQUIREMENT_IDS = {"right_to_work", "identity", "proof_of_address", "dbs"}
+VALID_VERIFICATION_METHODS = {"video_call", "in_person", "online_check"}
+VALID_REASON_CODES = {"address_mismatch", "document_too_old", "name_mismatch", "unclear", "wrong_type", "other"}
 
 
 class VerificationChecklist(BaseModel):
@@ -82,12 +89,42 @@ class VerificationChecklist(BaseModel):
     # General notes
     admin_notes: Optional[str] = None
 
+    @validator('requirement_id')
+    def validate_requirement_id(cls, v):
+        if v not in VALID_REQUIREMENT_IDS:
+            raise ValueError(f"Invalid requirement_id. Must be one of: {', '.join(VALID_REQUIREMENT_IDS)}")
+        return v
+
+    @validator('verification_method')
+    def validate_verification_method(cls, v):
+        if v not in VALID_VERIFICATION_METHODS:
+            raise ValueError(f"Invalid verification_method. Must be one of: {', '.join(VALID_VERIFICATION_METHODS)}")
+        return v
+
+    @validator('document_appears_genuine')
+    def must_confirm_genuine(cls, v):
+        if not v:
+            raise ValueError("document_appears_genuine must be confirmed as True before submitting checklist")
+        return v
+
+    @validator('details_match_profile')
+    def must_confirm_details_match(cls, v):
+        if not v:
+            raise ValueError("details_match_profile must be confirmed as True before submitting checklist")
+        return v
+
 
 class AmendmentRequest(BaseModel):
     """Request for employee to amend/re-upload document"""
     document_id: str
     reason_code: str  # 'address_mismatch', 'document_too_old', 'name_mismatch', 'unclear', 'wrong_type', 'other'
     reason_details: Optional[str] = None
+
+    @validator('reason_code')
+    def validate_reason_code(cls, v):
+        if v not in VALID_REASON_CODES:
+            raise ValueError(f"Invalid reason_code. Must be one of: {', '.join(VALID_REASON_CODES)}")
+        return v
 
 
 class VerificationApproval(BaseModel):
@@ -298,7 +335,7 @@ async def get_checklist_template(requirement_id: str):
 @router.post("/extract-document/{document_id}")
 async def extract_document_with_ai(
     document_id: str,
-    current_user: dict = None  # Will be injected by main app
+    current_user: dict = Depends(require_manager_or_admin)
 ):
     """
     Run AI extraction on an evidence document and validate against employee profile.
@@ -356,7 +393,7 @@ async def extract_document_with_ai(
 @router.post("/submit-checklist")
 async def submit_verification_checklist(
     checklist: VerificationChecklist,
-    current_user: dict = None  # Will be injected
+    current_user: dict = Depends(require_manager_or_admin)
 ):
     """
     Submit admin verification checklist and generate verification document.
@@ -435,7 +472,7 @@ async def submit_verification_checklist(
 @router.post("/approve")
 async def approve_verification(
     approval: VerificationApproval,
-    current_user: dict = None
+    current_user: dict = Depends(require_manager_or_admin)
 ):
     """
     Final approval of verification document. This is what makes compliance % increase.
@@ -649,7 +686,7 @@ async def approve_verification(
 @router.post("/request-amendment")
 async def request_amendment(
     request: AmendmentRequest,
-    current_user: dict = None
+    current_user: dict = Depends(require_manager_or_admin)
 ):
     """
     Request employee to amend/re-upload a document.
@@ -807,7 +844,7 @@ async def get_verification_status(employee_id: str):
 async def reopen_verification(
     verification_document_id: str,
     reason: str = Form(...),
-    current_user: dict = None
+    current_user: dict = Depends(require_manager_or_admin)
 ):
     """
     Reopen a previously approved verification for re-review.

@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Send,
   Clock,
+  ShieldCheck,
 } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
@@ -245,6 +246,20 @@ export function EvidenceSection({
                   >
                     <Download className="h-3.5 w-3.5" />
                   </Button>
+
+                  {/* Download Stamped — only when verified & stamped */}
+                  {file.stamped_file_url && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 text-emerald-500 hover:text-emerald-700"
+                      onClick={() => window.open(file.stamped_file_url, '_blank')}
+                      data-testid={`evidence-download-stamped-${docId}`}
+                      title="Download stamped & verified version"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
 
                   {/* Admin action menu — evidence actions ONLY */}
                   {isAdminView && (

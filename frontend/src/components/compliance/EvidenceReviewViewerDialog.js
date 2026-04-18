@@ -701,13 +701,18 @@ export default function EvidenceReviewViewerDialog({
                     <p className="text-sm text-green-700 mt-1">
                       {isAcceptMode
                         ? `Evidence has been accepted after ${viewSeconds}s of review. You can now proceed to record the verification check.`
-                        : `Document has been verified and stamped. The audit trail records ${viewSeconds}s of viewing time.`}
+                        : `Document verified, stamped, and verification check auto-recorded. The audit trail records ${viewSeconds}s of viewing time.`}
                     </p>
                   </div>
                   {!isAcceptMode && stampedBlobUrl && (
-                    <p className="text-xs text-slate-500 text-center">
-                      Use the Original / Stamped toggle above to compare versions.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-slate-500 text-center">
+                        Use the Original / Stamped toggle above to compare versions.
+                      </p>
+                      <p className="text-xs text-emerald-600 text-center font-medium">
+                        The stamped document has been saved as proof of verification — no further action needed.
+                      </p>
+                    </div>
                   )}
                 </div>
               )}

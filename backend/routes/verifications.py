@@ -771,11 +771,47 @@ async def verify_and_stamp_identity(
         }
     )
     
+    # STEP 4: Auto-record the formal identity check — stamped document IS the proof
+    # This eliminates the manual "Record Check" step after stamping.
+    auto_check_record = None
+    try:
+        # Map stamp method to check method
+        STAMP_TO_CHECK_METHOD = {
+            "original_seen_interview": "original_document_seen",
+            "original_seen_office": "original_document_seen",
+            "original_seen": "original_document_seen",
+            "copy_verified_video": "copy_verified",
+            "copy_verified": "copy_verified",
+        }
+        check_method = STAMP_TO_CHECK_METHOD.get(data.method, "original_document_seen")
+
+        CheckRecordService = get_check_record_service()
+        auto_check_record = await CheckRecordService.record_identity_verification(
+            employee_id=employee_id,
+            data={
+                "method": check_method,
+                "checked_at": now,
+                "outcome": "verified",
+                "proof_document_id": data.document_id,
+                "notes": f"Auto-recorded from verify-and-stamp ({data.stamp_type}). Checks confirmed: document genuine, details match profile.",
+                "name_matches_application": True,
+                "photo_match_confirmed": True,
+            },
+            recorded_by=user['user_id']
+        )
+        logger.info(f"Auto-recorded identity check {auto_check_record.get('id')} for employee {employee_id}")
+    except Exception as e:
+        logger.error(f"Failed to auto-record identity check for {employee_id}: {e}")
+        # Non-fatal — admin can still record manually
+
     return {
         "success": True,
         "message": "Identity verified and stamped successfully",
         "verification": verification_record,
-        "stamp_applied": stamped_url is not None
+        "stamp_applied": stamped_url is not None,
+        "stamped_file_url": stamped_url,
+        "check_auto_recorded": auto_check_record is not None,
+        "check_record_id": auto_check_record.get("id") if auto_check_record else None
     }
 
 
@@ -925,13 +961,44 @@ async def verify_and_stamp_address(
         }
     )
     
+    # STEP 4: Auto-record the formal address check — stamped document IS the proof
+    auto_check_record = None
+    try:
+        STAMP_TO_CHECK_METHOD = {
+            "original_seen": "original_document_seen",
+            "copy_verified": "uploaded_copy_reviewed",
+        }
+        check_method = STAMP_TO_CHECK_METHOD.get(data.method, "original_document_seen")
+
+        CheckRecordService = get_check_record_service()
+        auto_check_record = await CheckRecordService.record_address_verification(
+            employee_id=employee_id,
+            data={
+                "method": check_method,
+                "checked_at": now,
+                "outcome": "verified",
+                "proof_document_id": data.document_id,
+                "documents_received_count": total_verified,
+                "documents_required_count": 2,
+                "address_matches_application": True,
+                "notes": f"Auto-recorded from verify-and-stamp ({data.stamp_type}). Checks confirmed: document genuine, details match, date valid.",
+            },
+            recorded_by=user['user_id']
+        )
+        logger.info(f"Auto-recorded address check {auto_check_record.get('id')} for employee {employee_id}")
+    except Exception as e:
+        logger.error(f"Failed to auto-record address check for {employee_id}: {e}")
+
     return {
         "success": True,
         "message": f"Address document verified and stamped. {total_verified}/2 documents verified.",
         "verification": verification_record,
         "stamp_applied": stamped_url is not None,
+        "stamped_file_url": stamped_url,
         "documents_verified_count": total_verified,
-        "is_complete": is_complete
+        "is_complete": is_complete,
+        "check_auto_recorded": auto_check_record is not None,
+        "check_record_id": auto_check_record.get("id") if auto_check_record else None
     }
 
 

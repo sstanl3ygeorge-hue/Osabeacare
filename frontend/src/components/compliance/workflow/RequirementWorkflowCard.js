@@ -110,8 +110,11 @@ export default function RequirementWorkflowCard({
   const [checkDialog, setCheckDialog] = useState({ open: false });
   const [invalidateDialog, setInvalidateDialog] = useState({ open: false, reason: '', loading: false });
 
-  // Identity and PoA use the full evidence review viewer for accepting
+  // Identity and PoA use the full evidence review viewer (verify mode)
   const isIdentityOrPOA = requirementKey === 'identity' || requirementKey === 'proof_of_address';
+  // RTW and DBS use the evidence review viewer in accept-only mode
+  const isRTWOrDBS = requirementKey === 'right_to_work' || requirementKey === 'dbs';
+  const usesEvidenceViewer = isIdentityOrPOA || isRTWOrDBS;
 
   // ── Extract rows from section data ────────────────────────────────────
   const evidenceRow = sectionData?.rows?.find((r) => r.row_type === 'evidence');
@@ -412,7 +415,7 @@ export default function RequirementWorkflowCard({
             onRemove={handleRemoveFile}
             onRequestReplacement={handleRequestReplacement}
             onReviewFile={(file) => setReviewDialog({ open: true, file })}
-            onViewAndApprove={isIdentityOrPOA ? (file) => setViewerDialog({ open: true, file }) : null}
+            onViewAndApprove={usesEvidenceViewer ? (file) => setViewerDialog({ open: true, file }) : null}
             onPreviewFile={onPreviewFile}
             onUpload={onUploadEvidence || (() => {})}
             workflow={workflow}
@@ -469,8 +472,8 @@ export default function RequirementWorkflowCard({
         }}
       />
 
-      {/* Full evidence review viewer for Identity/POA — view, checklist, verify & stamp */}
-      {isIdentityOrPOA && (
+      {/* Full evidence review viewer for Identity/POA/RTW/DBS */}
+      {usesEvidenceViewer && (
         <EvidenceReviewViewerDialog
           isOpen={viewerDialog.open}
           onClose={() => setViewerDialog({ open: false, file: null })}
@@ -478,6 +481,7 @@ export default function RequirementWorkflowCard({
           employeeId={employeeId}
           employeeName={employeeName}
           requirementType={requirementKey}
+          mode={isRTWOrDBS ? 'accept' : 'verify'}
           aiValidation={viewerDialog.file?.ai_extraction?.date_validation || null}
           onVerificationComplete={() => {
             setViewerDialog({ open: false, file: null });

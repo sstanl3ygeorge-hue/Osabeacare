@@ -113,9 +113,11 @@ export default function EvidenceReviewViewerDialog({
   employeeName,
   requirementType,
   aiValidation,
-  onVerificationComplete
+  onVerificationComplete,
+  mode = 'verify' // 'verify' = Identity/POA (checklist → verify & stamp), 'accept' = RTW/DBS (view → accept evidence)
 }) {
   const { token } = useAuth();
+  const isAcceptMode = mode === 'accept';
 
   // Viewer state
   const [blobUrl, setBlobUrl] = useState(null);
@@ -282,23 +284,37 @@ export default function EvidenceReviewViewerDialog({
       const docId = file.file_id || file.id;
       if (!docId) { setChecklistError('Document ID not found'); return; }
 
-      await axios.post(
-        `${API}/employee-documents/${docId}/start-review`,
-        {
-          file_viewed: true,
-          name_matches: checklist.nameMatches,
-          document_acceptable: checklist.documentAcceptable,
-          legible: checklist.legible,
-          front_present: isIdentity ? checklist.frontPresent : undefined,
-          back_present: isIdentity ? checklist.backPresent : undefined,
-          address_valid: isAddress ? checklist.addressValid : undefined,
-          date_valid: isAddress ? checklist.dateValid : undefined,
-          viewing_duration_seconds: viewSeconds
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      setStep('verification');
-      toast.success('Review recorded. Select verification method.');
+      if (isAcceptMode) {
+        // Accept mode (RTW/DBS): just accept the evidence, no start-review/stamp flow
+        await axios.post(
+          `${API}/employee-documents/${docId}/verify`,
+          {
+            notes: `Reviewed in viewer for ${viewSeconds}s. Checklist: file_viewed=${checklist.fileViewed}, legible=${checklist.legible}, acceptable=${checklist.documentAcceptable}, name_matches=${checklist.nameMatches}`
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setStep('complete');
+        toast.success('Evidence accepted after review');
+      } else {
+        // Verify mode (Identity/POA): start review then proceed to verification step
+        await axios.post(
+          `${API}/employee-documents/${docId}/start-review`,
+          {
+            file_viewed: true,
+            name_matches: checklist.nameMatches,
+            document_acceptable: checklist.documentAcceptable,
+            legible: checklist.legible,
+            front_present: isIdentity ? checklist.frontPresent : undefined,
+            back_present: isIdentity ? checklist.backPresent : undefined,
+            address_valid: isAddress ? checklist.addressValid : undefined,
+            date_valid: isAddress ? checklist.dateValid : undefined,
+            viewing_duration_seconds: viewSeconds
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setStep('verification');
+        toast.success('Review recorded. Select verification method.');
+      }
     } catch (err) {
       setChecklistError(err.response?.data?.detail || 'Failed to record review');
     } finally {
@@ -385,7 +401,9 @@ export default function EvidenceReviewViewerDialog({
         data-testid="evidence-review-viewer-dialog"
       >
         <DialogTitle className="sr-only">
-          Review & Verify {isIdentity ? 'Identity Document' : 'Proof of Address'}
+          {isAcceptMode
+            ? `Review ${requirementType === 'right_to_work' ? 'Right to Work' : requirementType === 'dbs' ? 'DBS Certificate' : requirementType} Evidence`
+            : `Review & Verify ${isIdentity ? 'Identity Document' : 'Proof of Address'}`}
         </DialogTitle>
         <DialogDescription className="sr-only">
           View the document and complete the verification checklist
@@ -501,10 +519,12 @@ export default function EvidenceReviewViewerDialog({
             {/* Header */}
             <div className="px-4 py-3 border-b bg-slate-50">
               <div className="flex items-center gap-2">
-                {isIdentity ? <User className="h-5 w-5 text-blue-600" /> : <MapPin className="h-5 w-5 text-purple-600" />}
+                {isAcceptMode ? <Shield className="h-5 w-5 text-indigo-600" /> : isIdentity ? <User className="h-5 w-5 text-blue-600" /> : <MapPin className="h-5 w-5 text-purple-600" />}
                 <div>
                   <h3 className="font-semibold text-sm">
-                    Verify {isIdentity ? 'Identity Document' : 'Proof of Address'}
+                    {isAcceptMode
+                      ? `Review ${requirementType === 'right_to_work' ? 'Right to Work' : requirementType === 'dbs' ? 'DBS Certificate' : requirementType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} Evidence`
+                      : `Verify ${isIdentity ? 'Identity Document' : 'Proof of Address'}`}
                   </h3>
                   <p className="text-xs text-slate-500 truncate">{fileName} — {employeeName}</p>
                 </div>
@@ -512,19 +532,19 @@ export default function EvidenceReviewViewerDialog({
 
               {/* Progress steps */}
               <div className="flex items-center gap-2 mt-3">
-                {['viewing', 'verification', 'complete'].map((s, i) => (
+                {(isAcceptMode ? ['viewing', 'complete'] : ['viewing', 'verification', 'complete']).map((s, i, arr) => (
                   <div key={s} className="flex items-center gap-1">
                     <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                       step === s ? 'bg-blue-600 text-white' :
-                      (step === 'verification' && i === 0) || step === 'complete' ? 'bg-green-600 text-white' :
+                      (arr.indexOf(step) > i) ? 'bg-green-600 text-white' :
                       'bg-slate-200 text-slate-500'
                     }`}>
-                      {(step === 'verification' && i === 0) || step === 'complete' && i < 2 || (step === 'complete' && i === 2) ? (
-                        step === s ? (i + 1) : <CheckCircle className="h-3.5 w-3.5" />
+                      {arr.indexOf(step) > i ? (
+                        <CheckCircle className="h-3.5 w-3.5" />
                       ) : (i + 1)}
                     </div>
-                    {i < 2 && <div className={`w-6 h-0.5 ${
-                      (step === 'verification' && i === 0) || step === 'complete' ? 'bg-green-400' : 'bg-slate-200'
+                    {i < arr.length - 1 && <div className={`w-6 h-0.5 ${
+                      arr.indexOf(step) > i ? 'bg-green-400' : 'bg-slate-200'
                     }`} />}
                   </div>
                 ))}
@@ -675,12 +695,16 @@ export default function EvidenceReviewViewerDialog({
                 <div className="space-y-4">
                   <div className="p-4 bg-green-50 border border-green-200 rounded-lg text-center">
                     <ShieldCheck className="h-10 w-10 text-green-600 mx-auto mb-2" />
-                    <h4 className="font-semibold text-green-800">Verification Complete</h4>
+                    <h4 className="font-semibold text-green-800">
+                      {isAcceptMode ? 'Evidence Accepted' : 'Verification Complete'}
+                    </h4>
                     <p className="text-sm text-green-700 mt-1">
-                      Document has been verified and stamped. The audit trail records {viewSeconds}s of viewing time.
+                      {isAcceptMode
+                        ? `Evidence has been accepted after ${viewSeconds}s of review. You can now proceed to record the verification check.`
+                        : `Document has been verified and stamped. The audit trail records ${viewSeconds}s of viewing time.`}
                     </p>
                   </div>
-                  {stampedBlobUrl && (
+                  {!isAcceptMode && stampedBlobUrl && (
                     <p className="text-xs text-slate-500 text-center">
                       Use the Original / Stamped toggle above to compare versions.
                     </p>
@@ -712,7 +736,7 @@ export default function EvidenceReviewViewerDialog({
                     className="flex-1 gap-1 bg-blue-600 hover:bg-blue-700"
                   >
                     {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                    Proceed to Verify
+                    {isAcceptMode ? 'Accept Evidence' : 'Proceed to Verify'}
                   </Button>
                 </>
               )}

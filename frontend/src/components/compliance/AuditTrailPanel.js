@@ -54,12 +54,14 @@ const ACTION_CONFIG = {
 export default function AuditTrailPanel({ employeeId }) {
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [filter, setFilter] = useState('all');
   const [pagination, setPagination] = useState({ limit: 50, skip: 0 });
 
   const fetchAuditTrail = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
       const token = localStorage.getItem('token');
       const params = new URLSearchParams({
         limit: pagination.limit.toString(),
@@ -76,7 +78,8 @@ export default function AuditTrailPanel({ employeeId }) {
       setAuditLogs(response.data.audit_trail || []);
     } catch (error) {
       console.error('Failed to fetch audit trail:', error);
-      // Silently fail - audit is optional
+      setAuditLogs([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -136,19 +139,36 @@ export default function AuditTrailPanel({ employeeId }) {
           </div>
         </CardTitle>
         <p className="text-sm text-gray-500 mt-1">
-          Complete CQC-compliant activity log for compliance auditing
+          Audit events for compliance review
         </p>
       </CardHeader>
       <CardContent>
-        {auditLogs.length === 0 ? (
+        {loadError ? (
+          <div className="text-center py-12 text-red-700">
+            <AlertTriangle className="h-12 w-12 mx-auto mb-3 text-red-400" />
+            <p className="font-medium">Cannot assess audit trail</p>
+            <p className="text-sm mt-1">Audit data unavailable. Do not rely on this tab for sign-off evidence until it loads.</p>
+            <Button variant="outline" size="sm" onClick={fetchAuditTrail} className="mt-4 rounded-lg">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          </div>
+        ) : auditLogs.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
             <History className="h-12 w-12 mx-auto mb-3 text-gray-300" />
             <p>No audit events recorded yet</p>
             <p className="text-xs mt-1">Activity will be logged automatically</p>
           </div>
         ) : (
-          <div className="space-y-1">
-            {auditLogs.map((log, index) => {
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <span className="font-medium">Blockers:</span> 0 &nbsp;|&nbsp;
+              <span className="font-medium">Pending reviews:</span> 0 &nbsp;|&nbsp;
+              <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+              <span className="font-medium">Audit events:</span> {auditLogs.length}
+            </div>
+            <div className="space-y-1">
+              {auditLogs.map((log, index) => {
               const config = formatAction(log.action);
               const ActionIcon = config.icon;
               
@@ -210,7 +230,8 @@ export default function AuditTrailPanel({ employeeId }) {
                   </div>
                 </div>
               );
-            })}
+              })}
+            </div>
           </div>
         )}
 

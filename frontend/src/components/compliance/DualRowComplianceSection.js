@@ -712,7 +712,9 @@ export default function DualRowComplianceSection({
     return (
       <div className="text-center py-12">
         <AlertTriangle className="h-12 w-12 mx-auto text-red-400 mb-4" />
-        <p className="text-text-muted mb-4">{error}</p>
+        <p className="font-medium text-red-700">Cannot assess compliance file</p>
+        <p className="text-sm text-red-600 mt-1 mb-4">{error}</p>
+        <p className="text-xs text-red-500 mb-4">Verification and row actions are unavailable until this source loads.</p>
         <Button variant="outline" onClick={handleRefresh}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Retry
@@ -726,6 +728,16 @@ export default function DualRowComplianceSection({
   }
 
   const { summary, sections } = complianceFile;
+  const sectionRows = Object.values(sections || {}).flatMap((section) => section?.rows || []);
+  const blockerCount = sectionRows.filter((row) => row.blocker_text).length;
+  const pendingReviewCount = sectionRows.filter((row) => (
+    row.status === 'submitted' ||
+    row.status === 'awaiting_review' ||
+    row.status === 'pending' ||
+    row.status === 'response_received' ||
+    row.requires_admin_review
+  )).length;
+  const verifiedCount = sectionRows.filter((row) => row.is_verified || row.status === 'verified').length;
 
   return (
     <div className="space-y-6" data-testid="dual-row-compliance-section">
@@ -740,6 +752,13 @@ export default function DualRowComplianceSection({
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
+      </div>
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        <span className="font-medium">Compliance blockers:</span> {blockerCount} &nbsp;|&nbsp;
+        <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
+        <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+        <span className="font-medium">Verified rows:</span> {verifiedCount}
       </div>
 
       {/* Compliance Sections */}

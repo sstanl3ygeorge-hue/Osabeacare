@@ -16,11 +16,13 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 export default function ReferenceEmploymentComparison({ employeeId, onRefresh }) {
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   const fetchComparison = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API}/employees/${employeeId}/reference-employment-comparison`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -28,6 +30,8 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
       setComparison(response.data);
     } catch (error) {
       console.error('Failed to fetch comparison:', error);
+      setComparison(null);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -49,7 +53,21 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
     );
   }
 
-  if (!comparison) return null;
+  if (loadError || !comparison) {
+    return (
+      <Card className="border-red-200 shadow-sm" data-testid="reference-employment-comparison">
+        <CardContent className="py-6 text-center text-red-700">
+          <AlertTriangle className="h-6 w-6 mx-auto mb-2 text-red-500" />
+          <p className="font-medium">Cannot assess reference-employment cross check</p>
+          <p className="text-sm text-red-600 mt-1">Cross-check data unavailable. Treat this tab as blocked until it loads.</p>
+          <Button variant="outline" size="sm" onClick={fetchComparison} className="mt-4">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const { employment_history, references, comparison_summary, alert } = comparison;
   const hasDiscrepancy = comparison_summary?.has_discrepancy;
@@ -79,7 +97,7 @@ export default function ReferenceEmploymentComparison({ employeeId, onRefresh })
             ) : (
               <Badge className="bg-green-100 text-green-700">
                 <CheckCircle className="h-3 w-3 mr-1" />
-                Verified
+                Reviewed
               </Badge>
             )}
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">

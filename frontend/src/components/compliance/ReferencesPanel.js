@@ -19,17 +19,18 @@ import { formatBackendDate } from '../../lib/dateUtils';
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const STATUS_CONFIG = {
-  not_declared: { label: 'Not Declared', color: 'bg-gray-100 text-gray-600', icon: XCircle },
-  declared: { label: 'Declared', color: 'bg-blue-100 text-blue-700', icon: Clock },
-  sent: { label: 'Request Sent', color: 'bg-amber-100 text-amber-700', icon: Send },
-  response_received: { label: 'Response Received', color: 'bg-purple-100 text-purple-700', icon: MessageSquare },
+  not_declared: { label: 'Missing', color: 'bg-gray-100 text-gray-600', icon: XCircle },
+  declared: { label: 'Evidence on file', color: 'bg-blue-100 text-blue-700', icon: Clock },
+  sent: { label: 'Awaiting admin review', color: 'bg-amber-100 text-amber-700', icon: Send },
+  response_received: { label: 'Submitted, not reviewed', color: 'bg-purple-100 text-purple-700', icon: MessageSquare },
   verified: { label: 'Verified', color: 'bg-green-100 text-green-700', icon: CheckCircle },
-  rejected: { label: 'Rejected', color: 'bg-red-100 text-red-700', icon: XCircle }
+  rejected: { label: 'Rejected / action required', color: 'bg-red-100 text-red-700', icon: XCircle }
 };
 
 export default function ReferencesPanel({ employeeId, onRefresh, onEditReference }) {
   const [references, setReferences] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [sendingRequest, setSendingRequest] = useState(null);
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [selectedRef, setSelectedRef] = useState(null);
@@ -73,6 +74,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
   const fetchReferences = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API}/employees/${employeeId}/references`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -80,6 +82,8 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
       setReferences(response.data);
     } catch (error) {
       console.error('Failed to fetch references:', error);
+      setReferences(null);
+      setLoadError(true);
       toast.error('Failed to load references');
     } finally {
       setLoading(false);
@@ -361,15 +365,27 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
     );
   }
 
-  if (!references) {
+  if (loadError || !references) {
     return (
       <Card className="border-[#E4E8EB] shadow-sm">
-        <CardContent className="py-8 text-center text-gray-500">
-          No references data available
+        <CardContent className="py-8 text-center text-red-700">
+          <AlertTriangle className="h-8 w-8 mx-auto mb-2 text-red-500" />
+          <p className="font-medium">Cannot assess references</p>
+          <p className="text-sm text-red-600 mt-1">Reference data unavailable. Verification actions are disabled until this source loads.</p>
+          <Button variant="outline" size="sm" onClick={fetchReferences} className="mt-4 rounded-lg">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
         </CardContent>
       </Card>
     );
   }
+
+  const referenceValues = [1, 2].map((refNum) => references.references?.[`reference_${refNum}`] || {});
+  const missingCount = referenceValues.filter((ref) => !ref?.declared?.name).length;
+  const pendingReviewCount = referenceValues.filter((ref) => ref?.status === 'response_received').length;
+  const rejectedCount = referenceValues.filter((ref) => ref?.status === 'rejected').length;
+  const verifiedCount = referenceValues.filter((ref) => ref?.status === 'verified').length;
 
   return (
     <>
@@ -396,6 +412,12 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
           </p>
         </CardHeader>
         <CardContent className="space-y-6">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <span className="font-medium">Reference blockers:</span> {missingCount + rejectedCount} &nbsp;|&nbsp;
+            <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
+            <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+            <span className="font-medium">Verified:</span> {verifiedCount}/2
+          </div>
           {/* Reference Cards */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {[1, 2].map(refNum => {
@@ -502,7 +524,7 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                           <div className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                             <p className="text-sm font-medium text-amber-700 flex items-center gap-2">
                               <Send className="h-4 w-4" />
-                              Request Sent
+                              Awaiting admin review
                             </p>
                             <p className="text-xs text-amber-600 mt-1">
                               Sent: {formatBackendDate(request.sent_at)}
@@ -515,13 +537,13 @@ export default function ReferencesPanel({ employeeId, onRefresh, onEditReference
                           </div>
                         )}
 
-                        {/* Response Received - with View Full Response button */}
+                        {/* Submitted response with View Full Response button */}
                         {response && Object.keys(response).length > 0 && (
                           <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                             <div className="flex items-center justify-between">
                               <p className="text-sm font-medium text-purple-700 flex items-center gap-2">
                                 <MessageSquare className="h-4 w-4" />
-                                Response Received
+                                Submitted, not reviewed
                               </p>
                               <Button
                                 size="sm"

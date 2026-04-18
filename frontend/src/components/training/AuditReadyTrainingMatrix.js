@@ -66,17 +66,17 @@ const API = process.env.REACT_APP_BACKEND_URL;
 // Status styling for training items
 const STATUS_STYLES = {
   current: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
-  completed: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Awaiting Verification' },
+  completed: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Submitted, not reviewed' },
   verified: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', icon: CheckCircle2, label: 'Verified' },
-  expiring_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Renew Soon' },
-  due_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Due Soon' },
-  expired: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Expired' },
-  overdue: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Overdue' },
+  expiring_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting admin review' },
+  due_soon: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', icon: Clock, label: 'Awaiting admin review' },
+  expired: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Rejected / action required' },
+  overdue: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Rejected / action required' },
   missing: { bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200', icon: XCircle, label: 'Missing' },
-  pending: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Pending Review' },
-  awaiting_review: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Clock, label: 'Awaiting Review' },
-  rejected: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', icon: XCircle, label: 'Rejected' },
-  proposed: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Wand2, label: 'Awaiting Review' },
+  pending: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', icon: Clock, label: 'Awaiting admin review' },
+  awaiting_review: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Clock, label: 'Awaiting admin review' },
+  rejected: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', icon: XCircle, label: 'Rejected / action required' },
+  proposed: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Wand2, label: 'Awaiting admin review' },
 };
 
 /**
@@ -98,6 +98,7 @@ export default function AuditReadyTrainingMatrix({
 }) {
   const { token, user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [activeTab, setActiveTab] = useState('mandatory');
   
   // Data states
@@ -142,6 +143,7 @@ export default function AuditReadyTrainingMatrix({
     
     setLoading(true);
     try {
+      setLoadError(false);
       // Fetch training matrix data
       const [matrixRes, proposedRes, docsRes] = await Promise.all([
         axios.get(`${API}/api/employees/${employeeId}/training/matrix`, {
@@ -154,6 +156,10 @@ export default function AuditReadyTrainingMatrix({
           headers: { Authorization: `Bearer ${token}` }
         }).catch(() => ({ data: { certificates: [] } }))
       ]);
+
+      if (!matrixRes) {
+        throw new Error('Training matrix unavailable');
+      }
       
       // Process matrix data
       const matrixData = matrixRes?.data || {};
@@ -193,6 +199,7 @@ export default function AuditReadyTrainingMatrix({
       
     } catch (err) {
       console.error('Error fetching training data:', err);
+      setLoadError(true);
       toast.error('Failed to load training data');
     } finally {
       setLoading(false);
@@ -407,6 +414,22 @@ export default function AuditReadyTrainingMatrix({
     );
   }
 
+  if (loadError) {
+    return (
+      <Card className="border-red-200" data-testid="training-matrix-error">
+        <CardContent className="text-center py-12 text-red-700">
+          <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-500" />
+          <p className="font-medium">Cannot assess training</p>
+          <p className="text-sm mt-1">Training data unavailable. Upload, verify, and review actions are disabled until this source loads.</p>
+          <Button variant="outline" size="sm" onClick={fetchTrainingData} className="mt-4">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <div className="space-y-6" data-testid="audit-ready-training-matrix">
       {/* ============================================ */}
@@ -423,7 +446,7 @@ export default function AuditReadyTrainingMatrix({
         </div>
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <p className="text-2xl font-bold text-amber-700">{summary.needsRenewal}</p>
-          <p className="text-xs text-amber-600">Needs Renewal</p>
+          <p className="text-xs text-amber-600">Awaiting admin review</p>
         </div>
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-2xl font-bold text-red-700">{summary.missing}</p>
@@ -439,18 +462,25 @@ export default function AuditReadyTrainingMatrix({
         </div>
         <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
           <p className="text-2xl font-bold text-purple-700">{summary.needsReview}</p>
-          <p className="text-xs text-purple-600">Needs Review</p>
+          <p className="text-xs text-purple-600">Awaiting admin review</p>
         </div>
         <div className="p-3 bg-gray-100 border border-gray-200 rounded-lg">
           <p className="text-2xl font-bold text-gray-700">{progressPercent}%</p>
-          <p className="text-xs text-gray-500">Compliant</p>
+          <p className="text-xs text-gray-500">Verified</p>
         </div>
+      </div>
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        <span className="font-medium">Training blockers:</span> {summary.blockers} &nbsp;|&nbsp;
+        <span className="font-medium">Pending reviews:</span> {summary.needsReview + summary.needsRenewal} &nbsp;|&nbsp;
+        <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+        <span className="font-medium">Verified:</span> {summary.current}/{summary.totalRequired}
       </div>
 
       {/* Progress Bar */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium text-gray-700">Mandatory Training Completion</span>
+          <span className="text-sm font-medium text-gray-700">Mandatory Training Verified</span>
           <span className="text-sm font-bold">{progressPercent}%</span>
         </div>
         <Progress 
@@ -705,7 +735,7 @@ export default function AuditReadyTrainingMatrix({
                 <div className="mb-6">
                   <h4 className="text-sm font-medium text-purple-800 mb-3 flex items-center gap-2">
                     <Wand2 className="h-4 w-4" />
-                    Awaiting Review ({proposedItems.filter(p => p.status === 'proposed').length})
+                    Awaiting admin review ({proposedItems.filter(p => p.status === 'proposed').length})
                   </h4>
                   <div className="space-y-2">
                     {proposedItems.filter(p => p.status === 'proposed').map((item) => (
@@ -748,7 +778,7 @@ export default function AuditReadyTrainingMatrix({
                               onClick={() => handleApproveProposed(item)}
                             >
                               <CheckCircle className="h-4 w-4 mr-1" />
-                              Approve
+                              Mark reviewed
                             </Button>
                           </div>
                         )}

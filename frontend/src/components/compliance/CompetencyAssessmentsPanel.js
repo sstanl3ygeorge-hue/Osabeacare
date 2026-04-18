@@ -61,9 +61,10 @@ const COMPETENCY_TYPES = [
 
 // Status options
 const STATUS_OPTIONS = [
-  { value: "competent", label: "Competent", color: "bg-green-100 text-green-700 border-green-200" },
-  { value: "not_competent", label: "Not Competent", color: "bg-red-100 text-red-700 border-red-200" },
-  { value: "training_required", label: "Training Required", color: "bg-amber-100 text-amber-700 border-amber-200" },
+  { value: "competent", label: "Verified", color: "bg-green-100 text-green-700 border-green-200" },
+  { value: "not_competent", label: "Rejected / action required", color: "bg-red-100 text-red-700 border-red-200" },
+  { value: "training_required", label: "Awaiting admin review", color: "bg-amber-100 text-amber-700 border-amber-200" },
+  { value: "scheduled", label: "Awaiting admin review", color: "bg-blue-100 text-blue-700 border-blue-200" },
 ];
 
 /**
@@ -80,6 +81,7 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
   const { token, user } = useAuth();
   const [competencies, setCompetencies] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
   
   // Dialog states
@@ -120,12 +122,15 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
   const fetchCompetencies = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
       const response = await axios.get(`${API}/employees/${employeeId}/competencies`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setCompetencies(response.data.competencies || []);
     } catch (error) {
       console.error('Failed to fetch competencies:', error);
+      setCompetencies([]);
+      setLoadError(true);
       toast.error('Failed to load competency assessments');
     } finally {
       setLoading(false);
@@ -290,7 +295,7 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
 
   const getStatusBadge = (status) => {
     const statusConfig = STATUS_OPTIONS.find(s => s.value === status);
-    if (!statusConfig) return <Badge variant="outline">{status}</Badge>;
+    if (!statusConfig) return <Badge variant="outline">Cannot assess</Badge>;
     
     const Icon = status === 'competent' ? CheckCircle : status === 'not_competent' ? XCircle : AlertTriangle;
     
@@ -430,12 +435,29 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
     );
   }
 
+  if (loadError) {
+    return (
+      <Card className="border-red-200 shadow-sm">
+        <CardContent className="py-12 text-center text-red-700">
+          <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-500" />
+          <p className="font-medium">Cannot assess competencies</p>
+          <p className="text-sm mt-1">Competency data unavailable. Schedule, add, edit, and result actions are disabled until this source loads.</p>
+          <Button variant="outline" size="sm" onClick={fetchCompetencies} className="mt-4">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   // Group competencies by status for summary
   const competentCount = competencies.filter(c => c.status === 'competent').length;
   const trainingRequiredCount = competencies.filter(c => c.status === 'training_required').length;
   const notCompetentCount = competencies.filter(c => c.status === 'not_competent').length;
   const reviewDueSoon = competencies.filter(c => isReviewDueSoon(c.review_due_date)).length;
   const overdueCount = competencies.filter(c => isOverdue(c.review_due_date)).length;
+  const pendingReviewCount = trainingRequiredCount + reviewDueSoon;
 
   return (
     <div className="space-y-4" data-testid="competency-assessments-panel">
@@ -487,30 +509,36 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="p-3 bg-green-50 rounded-lg text-center border border-green-100">
               <p className="text-2xl font-bold text-green-700">{competentCount}</p>
-              <p className="text-xs text-green-600">Competent</p>
+              <p className="text-xs text-green-600">Verified</p>
             </div>
             <div className="p-3 bg-amber-50 rounded-lg text-center border border-amber-100">
               <p className="text-2xl font-bold text-amber-700">{trainingRequiredCount}</p>
-              <p className="text-xs text-amber-600">Training Required</p>
+              <p className="text-xs text-amber-600">Awaiting admin review</p>
             </div>
             <div className="p-3 bg-red-50 rounded-lg text-center border border-red-100">
               <p className="text-2xl font-bold text-red-700">{notCompetentCount}</p>
-              <p className="text-xs text-red-600">Not Competent</p>
+              <p className="text-xs text-red-600">Rejected / action required</p>
             </div>
             <div className={cn(
               "p-3 rounded-lg text-center border",
               reviewDueSoon > 0 ? "bg-orange-50 border-orange-100" : "bg-gray-50 border-gray-100"
             )}>
               <p className={cn("text-2xl font-bold", reviewDueSoon > 0 ? "text-orange-700" : "text-gray-500")}>{reviewDueSoon}</p>
-              <p className={cn("text-xs", reviewDueSoon > 0 ? "text-orange-600" : "text-gray-500")}>Due Soon</p>
+              <p className={cn("text-xs", reviewDueSoon > 0 ? "text-orange-600" : "text-gray-500")}>Awaiting admin review</p>
             </div>
             <div className={cn(
               "p-3 rounded-lg text-center border",
               overdueCount > 0 ? "bg-red-50 border-red-100" : "bg-gray-50 border-gray-100"
             )}>
               <p className={cn("text-2xl font-bold", overdueCount > 0 ? "text-red-700" : "text-gray-500")}>{overdueCount}</p>
-              <p className={cn("text-xs", overdueCount > 0 ? "text-red-600" : "text-gray-500")}>Overdue</p>
+              <p className={cn("text-xs", overdueCount > 0 ? "text-red-600" : "text-gray-500")}>Rejected / action required</p>
             </div>
+          </div>
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <span className="font-medium">Competency blockers:</span> {notCompetentCount + overdueCount} &nbsp;|&nbsp;
+            <span className="font-medium">Pending reviews:</span> {pendingReviewCount} &nbsp;|&nbsp;
+            <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+            <span className="font-medium">Verified:</span> {competentCount}
           </div>
         </CardContent>
       </Card>
@@ -577,7 +605,7 @@ export default function CompetencyAssessmentsPanel({ employeeId, employeeName, o
                             <Badge className="bg-red-100 text-red-700 text-[10px] px-1">Overdue</Badge>
                           )}
                           {dueSoon && !overdue && (
-                            <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">Due Soon</Badge>
+                            <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1">Awaiting admin review</Badge>
                           )}
                         </div>
                       </TableCell>

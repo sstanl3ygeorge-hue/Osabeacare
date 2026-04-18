@@ -133,28 +133,28 @@ const getComplianceFileWorkflowStatus = (complianceFile, sectionKey) => {
   const isRtwExpired = isRtw && permissionDate && permissionDate < new Date();
 
   if (!hasEvidence) {
-    return { label: 'No evidence', tone: 'gray', isBlocking: true };
+    return { label: 'Missing', tone: 'gray', isBlocking: true };
   }
   if (!hasAcceptedEvidence) {
-    return { label: 'Awaiting evidence review', tone: 'amber', isBlocking: true };
+    return { label: 'Awaiting admin review', tone: 'amber', isBlocking: true };
   }
   if (!hasCheck) {
-    return { label: 'Check required', tone: 'amber', isBlocking: true };
+    return { label: 'Awaiting admin review', tone: 'amber', isBlocking: true };
   }
   if (checkFailed) {
-    return { label: 'Check failed', tone: 'red', isBlocking: true };
+    return { label: 'Rejected / action required', tone: 'red', isBlocking: true };
   }
   if (!checkVerified) {
-    return { label: 'Check in progress', tone: 'amber', isBlocking: true };
+    return { label: 'Awaiting admin review', tone: 'amber', isBlocking: true };
   }
   if (proofRequired && !proofDocumentId) {
-    return { label: 'Proof required', tone: 'amber', isBlocking: true };
+    return { label: 'Awaiting admin review', tone: 'amber', isBlocking: true };
   }
   if (isDbsOverdue) {
-    return { label: 'Recheck overdue', tone: 'red', isBlocking: true, reviewDueAt };
+    return { label: 'Rejected / action required', tone: 'red', isBlocking: true, reviewDueAt };
   }
   if (isRtwExpired) {
-    return { label: 'Expired', tone: 'red', isBlocking: true, permissionEndDate };
+    return { label: 'Rejected / action required', tone: 'red', isBlocking: true, permissionEndDate };
   }
 
   return { label: 'Verified', tone: 'green', isBlocking: false, reviewDueAt, permissionEndDate };
@@ -3237,12 +3237,12 @@ export default function EmployeeProfilePage() {
   const cvLinkedForReview = Boolean(employee?.cv_document_id && activeCvDocument);
   const cvReviewReady = Boolean(cvLinkedForReview && activeCvDocument && cvIsPdf);
   const cvStatusLabel = cvReviewReady
-    ? 'Ready for review'
+    ? (employee?.cv_status === 'approved' ? 'Verified' : 'Evidence on file')
     : !cvFileExists
       ? 'Missing'
       : !cvIsPdf
-        ? 'Uploaded (unsupported format)'
-        : 'Uploaded (not linked for review)';
+        ? 'Rejected / action required'
+        : 'Cannot assess';
   const cvStatusBadgeClass = cvReviewReady
     ? 'bg-green-100 text-green-700 border-green-200'
     : cvFileExists
@@ -3250,9 +3250,9 @@ export default function EmployeeProfilePage() {
       : 'bg-gray-100 text-gray-600 border-gray-200';
   const cvReviewStateLabel =
     cvReviewReady && employee?.cv_status === 'approved'
-      ? 'CV has already been reviewed and approved.'
-      : cvReviewReady && employee?.cv_extraction_status === 'reviewed'
-        ? 'CV has been reviewed and is awaiting approval.'
+      ? 'CV has been verified.'
+    : cvReviewReady && employee?.cv_extraction_status === 'reviewed'
+        ? 'CV has been reviewed and is awaiting admin review.'
         : !cvFileExists
           ? 'No CV file is currently available on this page.'
           : !cvIsPdf
@@ -3269,6 +3269,7 @@ export default function EmployeeProfilePage() {
   const employmentHistoryExists = Boolean(employee?.employment_history?.length > 0);
   const employmentCoverage = employee?.employment_coverage || null;
   const coverageMet = Boolean(employmentCoverage?.meets_10_year_requirement);
+  const employmentCannotAssess = !complianceFile;
   const allGapsResolved = employmentGapEvaluation
     ? Boolean(gapAnalysisRun && employmentGapEvaluation.is_complete && gapNeedsReviewCount === 0)
     : !employmentHistoryExists;
@@ -3278,7 +3279,7 @@ export default function EmployeeProfilePage() {
   );
   // Pre-conditions gate: all data requirements satisfied, ready for admin sign-off
   // Coverage must be met AND all gaps resolved
-  const employmentReadyForSignOff = Boolean(applicationAvailable && declarationsOnFile && employmentHistoryExists && allGapsResolved && (coverageMet || !employmentCoverage));
+  const employmentReadyForSignOff = Boolean(!employmentCannotAssess && applicationAvailable && declarationsOnFile && employmentHistoryExists && allGapsResolved && coverageMet);
   // Persisted sign-off: only true once an admin has explicitly signed off via the backend
   const employmentSignedOff = Boolean(employee?.employment_review_signed_off);
   const employmentSignedOffBy = employee?.employment_review_signed_off_by_name
@@ -3287,10 +3288,12 @@ export default function EmployeeProfilePage() {
   // Final "Complete" requires the persisted sign-off, not just derived conditions
   const employmentComplete = employmentSignedOff;
   const employmentStatusBlockers = [
+    employmentCannotAssess  ? 'Cannot assess employment compliance file' : null,
     !applicationAvailable    ? 'Upload or attach application form' : null,
     !declarationsOnFile      ? 'Record applicant declarations before sign-off' : null,
     !employmentHistoryExists ? 'Add or extract employment history' : null,
     !allGapsResolved         ? 'Review or resolve employment gaps' : null,
+    !employmentCoverage      ? 'Cannot assess 10-year employment coverage' : null,
     (employmentCoverage && !coverageMet) ? '10-year employment coverage incomplete' : null,
   ].filter(Boolean);
 
@@ -3867,7 +3870,7 @@ export default function EmployeeProfilePage() {
                 return (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-100 rounded-lg">
                     <Clock className="h-4 w-4 text-amber-600" />
-                    <span className="text-sm font-medium text-amber-700">{pending} Pending Review</span>
+                    <span className="text-sm font-medium text-amber-700">{pending} Awaiting admin review</span>
                   </div>
                 );
               }
@@ -3889,7 +3892,7 @@ export default function EmployeeProfilePage() {
                     }`}>
                       <Calendar className={`h-4 w-4 ${days <= 0 ? 'text-red-600' : 'text-amber-600'}`} />
                       <span className={`text-sm font-medium ${days <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
-                        RTW {days <= 0 ? 'Expired' : `Expires ${days}d`}
+                        RTW {days <= 0 ? 'Rejected / action required' : 'Awaiting admin review'}
                       </span>
                     </div>
                   );
@@ -3907,7 +3910,7 @@ export default function EmployeeProfilePage() {
                     }`}>
                       <Calendar className={`h-4 w-4 ${days <= 0 ? 'text-red-600' : 'text-amber-600'}`} />
                       <span className={`text-sm font-medium ${days <= 0 ? 'text-red-700' : 'text-amber-700'}`}>
-                        DBS {days <= 0 ? 'Overdue' : `Review ${days}d`}
+                        DBS {days <= 0 ? 'Rejected / action required' : 'Awaiting admin review'}
                       </span>
                     </div>
                   );
@@ -4615,7 +4618,7 @@ export default function EmployeeProfilePage() {
                     Complete and review the interview record before progressing to later onboarding checks.
                   </p>
                 </div>
-                <Badge className="bg-blue-100 text-blue-700">Early Review</Badge>
+                <Badge className="bg-blue-100 text-blue-700">Awaiting admin review</Badge>
               </div>
             </CardHeader>
             <CardContent>
@@ -4644,7 +4647,7 @@ export default function EmployeeProfilePage() {
                 <div className="flex items-center justify-between p-3 mb-4 rounded-lg border border-red-200 bg-red-50 text-red-700">
                   <div className="flex items-center gap-2 text-sm">
                     <AlertCircle className="h-4 w-4 shrink-0" />
-                    Unable to load form status
+                    Cannot assess forms. Data unavailable and review actions are disabled.
                   </div>
                   <Button size="sm" variant="outline" onClick={fetchFormSubmissions}
                     className="text-red-600 border-red-200 hover:bg-red-50">
@@ -4655,6 +4658,17 @@ export default function EmployeeProfilePage() {
 
               {/* Helper: derive robust form status */}
               {(() => {
+                if (formSubmissionsError) {
+                  return (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      <span className="font-medium">Form blockers:</span> Cannot assess &nbsp;|&nbsp;
+                      <span className="font-medium">Pending reviews:</span> Cannot assess &nbsp;|&nbsp;
+                      <span className="font-medium">Cannot assess:</span> 1 &nbsp;|&nbsp;
+                      <span className="font-medium">Signed off:</span> Cannot assess
+                    </div>
+                  );
+                }
+
                 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', {
                   day: 'numeric', month: 'short', year: 'numeric'
                 }) : null;
@@ -4684,9 +4698,31 @@ export default function EmployeeProfilePage() {
                     ]
                   },
                 ];
+                const allFormDefinitions = FORM_GROUPS.flatMap((group) => group.forms);
+                const formStatusCounts = allFormDefinitions.reduce((counts, form) => {
+                  const submission = formSubmissions?.find(fs =>
+                    fs.form_type === form.key ||
+                    fs.requirement_id === form.key
+                  );
+                  const rawStatus = submission?.status || 'not_started';
+                  const isVerified = rawStatus === 'verified' || rawStatus === 'signed_off' || submission?.verified === true;
+                  const isRejected = rawStatus === 'rejected';
+                  const isAwaiting = !isVerified && !isRejected && (rawStatus === 'submitted' || rawStatus === 'approved');
+                  return {
+                    blockers: counts.blockers + (!submission || isRejected ? 1 : 0),
+                    pending: counts.pending + (isAwaiting ? 1 : 0),
+                    signedOff: counts.signedOff + (isVerified ? 1 : 0)
+                  };
+                }, { blockers: 0, pending: 0, signedOff: 0 });
 
                 return (
                   <div className="space-y-5">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                      <span className="font-medium">Form blockers:</span> {formStatusCounts.blockers} &nbsp;|&nbsp;
+                      <span className="font-medium">Pending reviews:</span> {formStatusCounts.pending} &nbsp;|&nbsp;
+                      <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
+                      <span className="font-medium">Signed off:</span> {formStatusCounts.signedOff}
+                    </div>
                     {FORM_GROUPS.map(group => (
                       <div key={group.label}>
                         {/* Group label */}
@@ -4709,10 +4745,10 @@ export default function EmployeeProfilePage() {
                             const hasSubmission = !!submission;
 
                             const statusLabel = isVerified ? 'Verified'
-                              : isRejected ? 'Rejected – Action Required'
-                              : isAwaiting ? 'Submitted – Awaiting Review'
-                              : isInProgress ? 'In Progress'
-                              : 'Not Started';
+                              : isRejected ? 'Rejected / action required'
+                              : isAwaiting ? 'Submitted, not reviewed'
+                              : isInProgress ? 'Awaiting admin review'
+                              : 'Missing';
 
                             const statusColor = isVerified ? 'bg-green-100 text-green-700'
                               : isRejected ? 'bg-red-100 text-red-700'
@@ -4841,7 +4877,7 @@ export default function EmployeeProfilePage() {
                                             className={isInProgress ? 'bg-amber-50 text-amber-700 text-xs' : 'bg-slate-100 text-slate-600 text-xs'}
                                             data-testid={`form-status-${form.key}`}
                                           >
-                                            {isInProgress ? 'Worker In Progress' : 'Awaiting Worker Completion'}
+                                            {isInProgress ? 'Awaiting admin review' : 'Missing'}
                                           </Badge>
                                         )}
 
@@ -4921,7 +4957,7 @@ export default function EmployeeProfilePage() {
                 </div>
                 <div className="flex-1">
                   <p className={`font-medium ${employmentComplete ? 'text-green-800' : 'text-amber-800'}`}>
-                    Employment Status: {employmentComplete ? 'Complete (signed off)' : 'Incomplete'}
+                    Employment Status: {employmentComplete ? 'Signed off' : employmentCannotAssess ? 'Cannot assess' : 'Rejected / action required'}
                   </p>
                   {employmentComplete && (
                     <p className="mt-1 text-xs text-green-700">
@@ -4957,7 +4993,7 @@ export default function EmployeeProfilePage() {
               <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                 <p className="text-xs text-text-muted">Application form</p>
                 <Badge variant="outline" className={`mt-2 ${applicationAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`}>
-                  {applicationAvailable ? 'Available' : 'Missing'}
+                  {applicationAvailable ? 'Evidence on file' : 'Missing'}
                 </Badge>
               </div>
               <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
@@ -4970,7 +5006,7 @@ export default function EmployeeProfilePage() {
                 <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
                   <p className="text-xs text-text-muted">10-year history</p>
                   <Badge variant="outline" className={`mt-2 ${gapAnalysisRun && employmentGapEvaluation.is_complete ? 'bg-green-100 text-green-700 border-green-200' : 'bg-amber-100 text-amber-700 border-amber-200'}`}>
-                    {gapAnalysisRun && employmentGapEvaluation.is_complete ? 'Complete' : 'Needs review'}
+                    {gapAnalysisRun && employmentGapEvaluation.is_complete ? 'Reviewed' : 'Awaiting admin review'}
                   </Badge>
                 </div>
               )}
@@ -4982,6 +5018,12 @@ export default function EmployeeProfilePage() {
                   </p>
                 </div>
               )}
+              <div className="rounded-xl border border-[#E4E8EB] bg-white p-3 shadow-sm">
+                <p className="text-xs text-text-muted">Blockers</p>
+                <p className="mt-2 text-sm font-medium text-gray-800">
+                  {employmentCannotAssess ? 'Cannot assess' : employmentStatusBlockers.length}
+                </p>
+              </div>
             </div>
 
             {/* 10-Year Coverage Card */}
@@ -5000,7 +5042,7 @@ export default function EmployeeProfilePage() {
                       </p>
                       <p className="text-xs text-slate-600">
                         Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
-                        {' · '}Status: {coverageMet ? '✅ Complete' : '❌ Incomplete'}
+                        {' · '}Status: {coverageMet ? 'Reviewed' : 'Rejected / action required'}
                       </p>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
@@ -5034,7 +5076,7 @@ export default function EmployeeProfilePage() {
                         <p className="mt-1 text-xs text-text-muted">Application submission and PDF export where already available.</p>
                       </div>
                       <Badge variant="outline" className={applicationAvailable ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-600 border-gray-200'}>
-                        {applicationAvailable ? 'Available' : 'Missing'}
+                        {applicationAvailable ? 'Evidence on file' : 'Missing'}
                       </Badge>
                     </div>
 
@@ -5243,7 +5285,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
                   <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-red-800">CV Rejected - Awaiting Worker Action</p>
+                    <p className="font-medium text-red-800">CV rejected / action required</p>
                     <p className="text-sm text-red-600 mt-1">{employee?.cv_rejection_reason}</p>
                     <p className="text-xs text-red-500 mt-2">
                       Worker has been notified to explain gaps or upload a new CV.
@@ -5256,7 +5298,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
                   <Clock className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-amber-800">CV Reviewed - Pending Approval</p>
+                    <p className="font-medium text-amber-800">CV reviewed - awaiting admin review</p>
                     <p className="text-sm text-amber-600 mt-1">
                       Found {employee?.cv_extracted_employment_history?.length || 0} jobs, 
                       {employee?.cv_gaps_detected?.length || 0} gaps detected.
@@ -5279,7 +5321,7 @@ export default function EmployeeProfilePage() {
                 <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">CV Approved</p>
+                    <p className="font-medium text-green-800">CV Verified</p>
                     <p className="text-sm text-green-600 mt-1">
                       Employment history verified with {employee?.cv_extracted_employment_history?.length || 0} jobs extracted.
                     </p>

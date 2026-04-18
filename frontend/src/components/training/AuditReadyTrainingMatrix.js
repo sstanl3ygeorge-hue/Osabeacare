@@ -77,7 +77,53 @@ const STATUS_STYLES = {
   awaiting_review: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Clock, label: 'Awaiting admin review' },
   rejected: { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', icon: XCircle, label: 'Rejected / action required' },
   proposed: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', icon: Wand2, label: 'Awaiting admin review' },
+  cannot_assess: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', icon: AlertTriangle, label: 'Cannot assess' },
 };
+
+const TIMING_CURRENT_STATUSES = new Set(['current', 'verified', 'valid', 'no_expiry']);
+const TIMING_DUE_SOON_STATUSES = new Set(['expiring_soon', 'due_soon']);
+const TIMING_EXPIRED_STATUSES = new Set(['expired', 'overdue']);
+const PENDING_REVIEW_STATUSES = new Set(['completed', 'pending', 'awaiting_review', 'proposed']);
+const REJECTED_STATUSES = new Set(['rejected', 'action_required']);
+
+const isTrainingVerified = (item) => Boolean(item?.verified || item?.is_verified || item?.status === 'verified');
+const getTrainingTimingStatus = (item) => (
+  item?.status_band ||
+  item?.renewal_status ||
+  item?.timing_status ||
+  item?.renewalStatus ||
+  item?.status
+);
+const getTrainingExpiryDate = (item) => item?.expires_at || item?.expiry_date;
+const isExpiryDatePast = (expiryDate) => {
+  if (!expiryDate) return false;
+  const parsed = new Date(expiryDate);
+  if (Number.isNaN(parsed.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  parsed.setHours(0, 0, 0, 0);
+  return parsed < today;
+};
+const isTrainingExpiredOrOverdue = (item) => (
+  TIMING_EXPIRED_STATUSES.has(getTrainingTimingStatus(item)) ||
+  isExpiryDatePast(getTrainingExpiryDate(item))
+);
+const isTrainingDueSoon = (item) => (
+  !isTrainingExpiredOrOverdue(item) &&
+  TIMING_DUE_SOON_STATUSES.has(getTrainingTimingStatus(item))
+);
+const isTrainingCurrent = (item) => (
+  !isTrainingExpiredOrOverdue(item) &&
+  (TIMING_CURRENT_STATUSES.has(getTrainingTimingStatus(item)) || isTrainingDueSoon(item))
+);
+const isMandatoryTrainingSatisfied = (item) => isTrainingVerified(item) && isTrainingCurrent(item);
+const isEvidenceOnFile = (item) => Boolean(
+  item?.completed_at ||
+  item?.source_document_id ||
+  item?.certificate_url ||
+  item?.evidence_files?.length ||
+  item?.evidence?.length
+);
 
 /**
  * AuditReadyTrainingMatrix - Comprehensive training management for CQC audit readiness
@@ -99,6 +145,11 @@ export default function AuditReadyTrainingMatrix({
   const { token, user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [sourceErrors, setSourceErrors] = useState({
+    matrix: false,
+    certificates: false,
+    proposedItems: false,
+  });
   const [activeTab, setActiveTab] = useState('mandatory');
   
   // Data states
@@ -144,25 +195,27 @@ export default function AuditReadyTrainingMatrix({
     setLoading(true);
     try {
       setLoadError(false);
+      setSourceErrors({ matrix: false, certificates: false, proposedItems: false });
       // Fetch training matrix data
-      const [matrixRes, proposedRes, docsRes] = await Promise.all([
+      const [matrixResult, proposedResult, docsResult] = await Promise.allSettled([
         axios.get(`${API}/api/employees/${employeeId}/training/matrix`, {
           headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => null),
+        }),
         axios.get(`${API}/api/employees/${employeeId}/training/proposed-items`, {
           headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => ({ data: [] })),
+        }),
         axios.get(`${API}/api/employees/${employeeId}/training/certificates`, {
           headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => ({ data: { certificates: [] } }))
+        })
       ]);
 
-      if (!matrixRes) {
+      if (matrixResult.status !== 'fulfilled') {
+        setSourceErrors({ matrix: true, certificates: docsResult.status !== 'fulfilled', proposedItems: proposedResult.status !== 'fulfilled' });
         throw new Error('Training matrix unavailable');
       }
       
       // Process matrix data
-      const matrixData = matrixRes?.data || {};
+      const matrixData = matrixResult.value?.data || {};
       const allItems = matrixData.items || [];
       const additionalFromMatrix = matrixData.additional_items || [];
       
@@ -172,34 +225,38 @@ export default function AuditReadyTrainingMatrix({
       setAdditionalTraining(additionalFromMatrix);
       
       // Handle proposed items - ensure it's an array
-      const proposedData = proposedRes?.data;
+      const proposedFailed = proposedResult.status !== 'fulfilled';
+      const proposedData = proposedFailed ? null : proposedResult.value?.data;
       const proposedArray = Array.isArray(proposedData) ? proposedData : 
                            proposedData?.items || proposedData?.proposed_items || [];
       setProposedItems(proposedArray);
       
       // Get training certificates from merged endpoint (canonical + legacy)
-      const docsData = docsRes?.data;
+      const certificatesFailed = docsResult.status !== 'fulfilled';
+      const docsData = certificatesFailed ? null : docsResult.value?.data;
       const trainingCerts = docsData?.certificates || [];
       setCertificates(trainingCerts);
+      setSourceErrors({ matrix: false, certificates: certificatesFailed, proposedItems: proposedFailed });
       
       // Use the summary from API which already has correct calculations
       const apiSummary = matrixData.summary || {};
-      const pendingReview = proposedArray.filter(p => p.status === 'proposed').length;
+      const pendingReview = proposedFailed ? null : proposedArray.filter(p => p.status === 'proposed').length;
       
       setSummary({
         totalRequired: apiSummary.total || allItems.length,
-        current: apiSummary.current || 0,
-        needsRenewal: apiSummary.expiring || 0,
-        missing: apiSummary.missing || 0,
+        current: allItems.filter(isMandatoryTrainingSatisfied).length,
+        needsRenewal: allItems.filter(isTrainingDueSoon).length,
+        missing: allItems.filter(item => item.status === 'missing').length,
         blockers: apiSummary.blockers || 0,
         additionalQualifications: apiSummary.additional_count || additionalFromMatrix.length,
-        certificatesUploaded: trainingCerts.length,
+        certificatesUploaded: certificatesFailed ? null : trainingCerts.length,
         needsReview: pendingReview
       });
       
     } catch (err) {
       console.error('Error fetching training data:', err);
       setLoadError(true);
+      setSourceErrors(prev => ({ ...prev, matrix: true }));
       toast.error('Failed to load training data');
     } finally {
       setLoading(false);
@@ -218,12 +275,20 @@ export default function AuditReadyTrainingMatrix({
 
   // Open edit dialog for proposed item
   const handleEditProposed = (item) => {
+    if (sourceErrors.proposedItems) {
+      toast.error('Cannot assess pending reviews until training review data loads.');
+      return;
+    }
     setEditingItem(item);
     setEditDialogOpen(true);
   };
 
   // Approve proposed item
   const handleApproveProposed = async (item) => {
+    if (sourceErrors.proposedItems) {
+      toast.error('Cannot assess pending reviews until training review data loads.');
+      return;
+    }
     try {
       await axios.post(
         `${API}/api/employees/${employeeId}/training/proposed-items/review`,
@@ -249,6 +314,10 @@ export default function AuditReadyTrainingMatrix({
 
   // Reject proposed item
   const handleRejectProposed = async (item) => {
+    if (sourceErrors.proposedItems) {
+      toast.error('Cannot assess pending reviews until training review data loads.');
+      return;
+    }
     try {
       await axios.post(
         `${API}/api/employees/${employeeId}/training/proposed-items/review`,
@@ -356,6 +425,10 @@ export default function AuditReadyTrainingMatrix({
 
   // Re-run extraction on certificate
   const handleReExtract = async (documentId) => {
+    if (sourceErrors.certificates) {
+      toast.error('Cannot assess certificates until certificate data loads.');
+      return;
+    }
     try {
       const response = await axios.post(
         `${API}/api/employees/${employeeId}/training/re-extract`,
@@ -402,6 +475,59 @@ export default function AuditReadyTrainingMatrix({
   const progressPercent = summary.totalRequired > 0
     ? Math.round((summary.current / summary.totalRequired) * 100)
     : 0;
+  const mandatoryVerifiedCurrent = mandatoryTraining.filter(isMandatoryTrainingSatisfied);
+  const mandatoryMissing = mandatoryTraining.filter(item => item.status === 'missing');
+  const mandatoryDueSoon = mandatoryTraining.filter(isTrainingDueSoon);
+  const mandatoryExpired = mandatoryTraining.filter(isTrainingExpiredOrOverdue);
+  const mandatoryPendingVerification = mandatoryTraining.filter(item =>
+    !isMandatoryTrainingSatisfied(item) &&
+    !REJECTED_STATUSES.has(item.status) &&
+    !isTrainingExpiredOrOverdue(item) &&
+    !isTrainingDueSoon(item) &&
+    (PENDING_REVIEW_STATUSES.has(item.status) || (isEvidenceOnFile(item) && !isTrainingVerified(item)))
+  );
+  const mandatoryBlockers = mandatoryTraining.filter(item =>
+    item.status === 'missing' ||
+    REJECTED_STATUSES.has(item.status) ||
+    isTrainingExpiredOrOverdue(item) ||
+    !isMandatoryTrainingSatisfied(item)
+  );
+  const exactBlockerNames = mandatoryBlockers
+    .map(item => item.title || item.training_name || item.code || 'Unnamed training')
+    .filter(Boolean);
+  const mandatoryKeys = new Set(
+    mandatoryTraining.map(item => (item.code || item.title || item.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim())
+  );
+  const isRequiredTrainingItem = (item) => {
+    const key = (item?.code || item?.title || item?.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim();
+    return Boolean(item?.is_required || item?.is_mandatory || item?.required || item?.mandatory || mandatoryKeys.has(key));
+  };
+  const cannotAssessCount = (sourceErrors.certificates ? 1 : 0) + (sourceErrors.proposedItems ? 1 : 0);
+  const trainingDecisionState = sourceErrors.matrix || loadError
+    ? 'Cannot assess'
+    : mandatoryBlockers.length > 0
+      ? 'Blocked'
+      : 'Ready from training';
+  const trainingDecisionClasses = trainingDecisionState === 'Ready from training'
+    ? {
+        panel: 'border-emerald-200 bg-emerald-50',
+        icon: 'text-emerald-600',
+        text: 'text-emerald-800',
+        subtext: 'text-emerald-700',
+      }
+    : trainingDecisionState === 'Cannot assess'
+      ? {
+          panel: 'border-red-200 bg-red-50',
+          icon: 'text-red-600',
+          text: 'text-red-800',
+          subtext: 'text-red-700',
+        }
+      : {
+          panel: 'border-amber-200 bg-amber-50',
+          icon: 'text-amber-600',
+          text: 'text-amber-800',
+          subtext: 'text-amber-700',
+        };
 
   if (loading) {
     return (
@@ -432,24 +558,61 @@ export default function AuditReadyTrainingMatrix({
 
   return (
     <div className="space-y-6" data-testid="audit-ready-training-matrix">
+      <div className={`rounded-lg border p-4 ${trainingDecisionClasses.panel}`}>
+        <div className="flex items-start gap-3">
+          <div className={`mt-0.5 ${trainingDecisionClasses.icon}`}>
+            {trainingDecisionState === 'Ready from training' ? (
+              <CheckCircle2 className="h-5 w-5" />
+            ) : (
+              <AlertTriangle className="h-5 w-5" />
+            )}
+          </div>
+          <div className="flex-1">
+            <p className={`font-medium ${trainingDecisionClasses.text}`}>
+              Training Status: {trainingDecisionState}
+            </p>
+            <p className={`mt-1 text-sm ${trainingDecisionClasses.subtext}`}>
+              Only verified and current mandatory training counts toward work readiness.
+            </p>
+            {trainingDecisionState === 'Blocked' && exactBlockerNames.length > 0 && (
+              <div className={`mt-2 text-sm ${trainingDecisionClasses.subtext}`}>
+                <p className="font-medium">Mandatory blockers</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  {exactBlockerNames.slice(0, 8).map((name) => (
+                    <li key={name}>{name}</li>
+                  ))}
+                  {exactBlockerNames.length > 8 && (
+                    <li>{exactBlockerNames.length - 8} more mandatory item{exactBlockerNames.length - 8 !== 1 ? 's' : ''}</li>
+                  )}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* ============================================ */}
       {/* SUMMARY CARDS                               */}
       {/* ============================================ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-10 gap-3">
         <div className="p-3 bg-white border border-gray-200 rounded-lg">
           <p className="text-2xl font-bold text-gray-900">{summary.totalRequired}</p>
           <p className="text-xs text-gray-500">Required</p>
         </div>
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-          <p className="text-2xl font-bold text-emerald-700">{summary.current}</p>
-          <p className="text-xs text-emerald-600">Verified</p>
+          <p className="text-2xl font-bold text-emerald-700">{mandatoryVerifiedCurrent.length}</p>
+          <p className="text-xs text-emerald-600">Verified/current</p>
         </div>
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <p className="text-2xl font-bold text-amber-700">{summary.needsRenewal}</p>
-          <p className="text-xs text-amber-600">Needs renewal</p>
+          <p className="text-2xl font-bold text-amber-700">{mandatoryDueSoon.length}</p>
+          <p className="text-xs text-amber-600">Due soon</p>
         </div>
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p className="text-2xl font-bold text-red-700">{summary.missing}</p>
+          <p className="text-2xl font-bold text-red-700">{mandatoryExpired.length}</p>
+          <p className="text-xs text-red-600">Expired/overdue</p>
+        </div>
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-2xl font-bold text-red-700">{mandatoryMissing.length}</p>
           <p className="text-xs text-red-600">Missing</p>
         </div>
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
@@ -457,12 +620,24 @@ export default function AuditReadyTrainingMatrix({
           <p className="text-xs text-blue-600">Additional</p>
         </div>
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
-          <p className="text-2xl font-bold text-slate-700">{summary.certificatesUploaded}</p>
+          <p className={cn('font-bold text-slate-700', sourceErrors.certificates ? 'text-sm' : 'text-2xl')}>
+            {sourceErrors.certificates ? 'Cannot assess' : summary.certificatesUploaded}
+          </p>
           <p className="text-xs text-slate-600">Certificates</p>
         </div>
         <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
-          <p className="text-2xl font-bold text-purple-700">{summary.needsReview}</p>
+          <p className={cn('font-bold text-purple-700', sourceErrors.proposedItems ? 'text-sm' : 'text-2xl')}>
+            {sourceErrors.proposedItems ? 'Cannot assess' : summary.needsReview}
+          </p>
           <p className="text-xs text-purple-600">Awaiting admin review</p>
+        </div>
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-2xl font-bold text-blue-700">{mandatoryPendingVerification.length}</p>
+          <p className="text-xs text-blue-600">Pending verification</p>
+        </div>
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-2xl font-bold text-red-700">{cannotAssessCount}</p>
+          <p className="text-xs text-red-600">Cannot assess</p>
         </div>
         <div className="p-3 bg-gray-100 border border-gray-200 rounded-lg">
           <p className="text-2xl font-bold text-gray-700">{progressPercent}%</p>
@@ -471,10 +646,13 @@ export default function AuditReadyTrainingMatrix({
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-        <span className="font-medium">Training blockers:</span> {summary.blockers} &nbsp;|&nbsp;
-        <span className="font-medium">Pending reviews:</span> {summary.needsReview + summary.needsRenewal} &nbsp;|&nbsp;
-        <span className="font-medium">Cannot assess:</span> 0 &nbsp;|&nbsp;
-        <span className="font-medium">Current:</span> {summary.current}/{summary.totalRequired}
+        <span className="font-medium">Training blockers:</span> {mandatoryBlockers.length} &nbsp;|&nbsp;
+        <span className="font-medium">Pending verification:</span> {mandatoryPendingVerification.length} &nbsp;|&nbsp;
+        <span className="font-medium">Expired/overdue:</span> {mandatoryExpired.length} &nbsp;|&nbsp;
+        <span className="font-medium">Cannot assess:</span> {cannotAssessCount} &nbsp;|&nbsp;
+        <span className="font-medium">Verified/current:</span> {mandatoryVerifiedCurrent.length}/{summary.totalRequired}
+        {sourceErrors.certificates && <span> | Cannot assess certificates</span>}
+        {sourceErrors.proposedItems && <span> | Cannot assess pending reviews</span>}
       </div>
 
       {/* Progress Bar */}
@@ -517,7 +695,7 @@ export default function AuditReadyTrainingMatrix({
           </TabsTrigger>
           <TabsTrigger value="certificates" className="flex items-center gap-2">
             <Award className="h-4 w-4" />
-            Certificates ({summary.certificatesUploaded})
+            Certificates ({sourceErrors.certificates ? 'Cannot assess' : summary.certificatesUploaded})
           </TabsTrigger>
         </TabsList>
 
@@ -532,7 +710,7 @@ export default function AuditReadyTrainingMatrix({
                     Mandatory Training Requirements
                   </CardTitle>
                   <CardDescription>
-                    These 8 mandatory training items are required for work readiness
+                    These items must be verified and current before work readiness.
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
@@ -650,7 +828,7 @@ export default function AuditReadyTrainingMatrix({
                           </div>
                         ) : item.status !== 'missing' ? (
                           <Badge className="bg-amber-100 text-amber-700 border-amber-200">
-                            Unverified
+                            Submitted, not reviewed
                           </Badge>
                         ) : null}
                       </TableCell>
@@ -715,7 +893,7 @@ export default function AuditReadyTrainingMatrix({
                     Training Library
                   </CardTitle>
                   <CardDescription>
-                    Complete training record including additional qualifications
+                    Optional or additional records do not block readiness unless marked required.
                   </CardDescription>
                 </div>
                 <div className="relative w-64">
@@ -731,6 +909,11 @@ export default function AuditReadyTrainingMatrix({
             </CardHeader>
             <CardContent>
               {/* Proposed Items Needing Review */}
+              {sourceErrors.proposedItems && (
+                <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  <span className="font-medium">Cannot assess pending reviews.</span> Extracted training review data did not load, so awaiting-review counts are unavailable.
+                </div>
+              )}
               {proposedItems.filter(p => p.status === 'proposed').length > 0 && (
                 <div className="mb-6">
                   <h4 className="text-sm font-medium text-purple-800 mb-3 flex items-center gap-2">
@@ -760,6 +943,7 @@ export default function AuditReadyTrainingMatrix({
                             <Button
                               variant="ghost"
                               size="sm"
+                              disabled={sourceErrors.proposedItems}
                               onClick={() => handleEditProposed(item)}
                             >
                               <Edit2 className="h-4 w-4" />
@@ -768,6 +952,7 @@ export default function AuditReadyTrainingMatrix({
                               variant="outline"
                               size="sm"
                               className="text-red-600 border-red-200 hover:bg-red-50"
+                              disabled={sourceErrors.proposedItems}
                               onClick={() => handleRejectProposed(item)}
                             >
                               <XCircle className="h-4 w-4" />
@@ -775,6 +960,7 @@ export default function AuditReadyTrainingMatrix({
                             <Button
                               size="sm"
                               className="bg-green-600 hover:bg-green-700 text-white"
+                              disabled={sourceErrors.proposedItems}
                               onClick={() => handleApproveProposed(item)}
                             >
                               <CheckCircle className="h-4 w-4 mr-1" />
@@ -872,7 +1058,7 @@ export default function AuditReadyTrainingMatrix({
                         )}
                       </TableCell>
                       <TableCell>
-                        {item.is_required || item.blocker !== undefined ? (
+                        {isRequiredTrainingItem(item) ? (
                           <Badge className="bg-red-100 text-red-700">Required</Badge>
                         ) : (
                           <Badge variant="outline" className="text-gray-500">Optional</Badge>
@@ -983,7 +1169,7 @@ export default function AuditReadyTrainingMatrix({
                     Training Certificates
                   </CardTitle>
                   <CardDescription>
-                    Uploaded certificates with extracted training items
+                    Certificates are evidence only until reviewed or verified.
                   </CardDescription>
                 </div>
                 {isAdmin && (
@@ -995,7 +1181,17 @@ export default function AuditReadyTrainingMatrix({
               </div>
             </CardHeader>
             <CardContent>
-              {certificates.length === 0 ? (
+              {sourceErrors.certificates ? (
+                <div className="text-center py-12 text-red-700">
+                  <AlertTriangle className="h-12 w-12 text-red-400 mx-auto mb-4" />
+                  <p className="font-medium">Cannot assess certificates</p>
+                  <p className="mt-1 text-sm">Certificate evidence did not load. Certificate counts and extraction links are unavailable.</p>
+                  <Button variant="outline" size="sm" onClick={fetchTrainingData} className="mt-4">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Retry
+                  </Button>
+                </div>
+              ) : certificates.length === 0 ? (
                 <div className="text-center py-12">
                   <Award className="h-12 w-12 text-gray-300 mx-auto mb-4" />
                   <p className="text-gray-500">No training certificates uploaded yet</p>
@@ -1012,6 +1208,11 @@ export default function AuditReadyTrainingMatrix({
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {sourceErrors.proposedItems && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      <span className="font-medium">Cannot assess extracted training links.</span> Pending-review data did not load, so certificate extraction status may be incomplete.
+                    </div>
+                  )}
                   {certificates.map((cert) => {
                     // Find proposed items linked to this certificate
                     const linkedItems = proposedItems.filter(p => p.source_document_id === cert.id);

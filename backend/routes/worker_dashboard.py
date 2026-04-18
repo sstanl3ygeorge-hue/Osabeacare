@@ -1706,6 +1706,38 @@ async def worker_upload_document(
                 if proposed_items:
                     await db.proposed_training_items.insert_many(proposed_items)
                     logger.info(f"Created {len(proposed_items)} NEW proposed training items for admin review")
+
+                    # Create preliminary training_records for mandatory items so the
+                    # evaluator returns "awaiting_review" instead of "missing".
+                    # The admin review flow (review_proposed_items) already handles
+                    # updating existing records, so no duplicate issue.
+                    preliminary_records = []
+                    for p_item in proposed_items:
+                        if p_item.get("mapped_training_code"):
+                            preliminary_records.append({
+                                "id": str(uuid.uuid4()),
+                                "employee_id": employee_id,
+                                "training_name": p_item["training_name"],
+                                "requirement_id": p_item["mapped_training_code"],
+                                "mandatory": True,
+                                "completion_date": p_item.get("completion_date"),
+                                "expiry_date": p_item.get("expiry_date"),
+                                "status": "completed",
+                                "certificate_url": file_url,
+                                "original_filename": file.filename,
+                                "verified": False,
+                                "completion_method": "certificate",
+                                "record_status": "active",
+                                "source_document_id": doc_id,
+                                "intake_item_id": p_item["id"],
+                                "ai_extracted": True,
+                                "uploaded_by_worker": True,
+                                "created_at": now,
+                                "updated_at": now,
+                            })
+                    if preliminary_records:
+                        await db.training_records.insert_many(preliminary_records)
+                        logger.info(f"Created {len(preliminary_records)} preliminary training_records for mandatory items (awaiting verification)")
                 
                 if updated_items:
                     logger.info(f"Updated {len(updated_items)} existing training records with new certificate")

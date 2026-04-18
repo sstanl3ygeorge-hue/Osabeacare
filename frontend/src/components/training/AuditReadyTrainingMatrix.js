@@ -453,9 +453,11 @@ export default function AuditReadyTrainingMatrix({
         fetchTrainingData();
       } else {
         toast.error(response.data.message || 'No trainings detected');
+        fetchTrainingData();
       }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to extract training');
+      fetchTrainingData();
     }
   };
 
@@ -467,6 +469,28 @@ export default function AuditReadyTrainingMatrix({
       <Badge className={cn('text-xs', style.bg, style.text, style.border)}>
         <Icon className="h-3 w-3 mr-1" />
         {style.label}
+      </Badge>
+    );
+  };
+
+  const renderExtractionStatusBadge = (cert) => {
+    const status = cert.extraction_status || (cert.extraction_count || cert.extracted_item_count ? 'extracted_with_matches' : 'not_extracted');
+    const extractedCount = cert.extracted_item_count ?? cert.extraction_count ?? 0;
+    const statusConfig = {
+      not_extracted: { label: 'Not extracted', className: 'bg-gray-100 text-gray-700 border-gray-200', icon: Clock },
+      extraction_pending: { label: 'Extraction pending', className: 'bg-blue-50 text-blue-700 border-blue-200', icon: Loader2 },
+      extraction_failed: { label: 'Extraction failed', className: 'bg-red-50 text-red-700 border-red-200', icon: AlertTriangle },
+      extracted_no_match: { label: 'Extracted: no matches', className: 'bg-amber-50 text-amber-700 border-amber-200', icon: AlertTriangle },
+      extracted_with_matches: { label: `Extracted: ${extractedCount} item${extractedCount === 1 ? '' : 's'}`, className: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+      completed: { label: `Extracted: ${extractedCount} item${extractedCount === 1 ? '' : 's'}`, className: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 },
+    };
+    const config = statusConfig[status] || statusConfig.not_extracted;
+    const Icon = config.icon;
+
+    return (
+      <Badge variant="outline" className={cn('text-xs', config.className)}>
+        <Icon className={cn('h-3 w-3 mr-1', status === 'extraction_pending' && 'animate-spin')} />
+        {config.label}
       </Badge>
     );
   };
@@ -495,11 +519,41 @@ export default function AuditReadyTrainingMatrix({
   const exactBlockerNames = mandatoryBlockers
     .map(item => item.title || item.training_name || item.code || 'Unnamed training')
     .filter(Boolean);
+  const normalizeTrainingKey = (value) => (
+    (value || '').toLowerCase().replace(/&/g, 'and').replace(/[\s_-]+/g, ' ').trim()
+  );
+  const getPendingExtractedMatch = (mandatoryItem) => {
+    const mandatoryCandidates = [
+      mandatoryItem?.code,
+      mandatoryItem?.title,
+      mandatoryItem?.id,
+      mandatoryItem?.training_name,
+    ].map(normalizeTrainingKey).filter(Boolean);
+
+    return proposedItems.find((proposed) => {
+      if (proposed.status !== 'proposed') return false;
+      const proposedCandidates = [
+        proposed.mapped_training_code,
+        proposed.mapped_training_title,
+        proposed.raw_course_title,
+        proposed.training_name,
+        proposed.course_name,
+      ].map(normalizeTrainingKey).filter(Boolean);
+
+      return mandatoryCandidates.some((mandatoryKey) =>
+        proposedCandidates.some((proposedKey) =>
+          proposedKey === mandatoryKey ||
+          proposedKey.includes(mandatoryKey) ||
+          mandatoryKey.includes(proposedKey)
+        )
+      );
+    });
+  };
   const mandatoryKeys = new Set(
-    mandatoryTraining.map(item => (item.code || item.title || item.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim())
+    mandatoryTraining.map(item => normalizeTrainingKey(item.code || item.title || item.id))
   );
   const isRequiredTrainingItem = (item) => {
-    const key = (item?.code || item?.title || item?.id || '').toLowerCase().replace(/[\s&_-]+/g, ' ').trim();
+    const key = normalizeTrainingKey(item?.code || item?.title || item?.id);
     return Boolean(item?.is_required || item?.is_mandatory || item?.required || item?.mandatory || mandatoryKeys.has(key));
   };
   const cannotAssessCount = (sourceErrors.certificates ? 1 : 0) + (sourceErrors.proposedItems ? 1 : 0);
@@ -573,6 +627,9 @@ export default function AuditReadyTrainingMatrix({
             </p>
             <p className={`mt-1 text-sm ${trainingDecisionClasses.subtext}`}>
               Only verified and current mandatory training counts toward work readiness.
+            </p>
+            <p className={`mt-1 text-sm ${trainingDecisionClasses.subtext}`}>
+              Certificates are evidence only. Extracted items must be reviewed into canonical training records before Mandatory compliance changes.
             </p>
             {trainingDecisionState === 'Blocked' && exactBlockerNames.length > 0 && (
               <div className={`mt-2 text-sm ${trainingDecisionClasses.subtext}`}>
@@ -710,7 +767,7 @@ export default function AuditReadyTrainingMatrix({
                     Mandatory Training Requirements
                   </CardTitle>
                   <CardDescription>
-                    These items must be verified and current before work readiness.
+                    Mandatory only reflects approved training records. Extracted certificate evidence must be reviewed and then verified before it can satisfy work readiness.
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
@@ -745,137 +802,148 @@ export default function AuditReadyTrainingMatrix({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mandatoryTraining.map((item) => (
-                    <TableRow 
-                      key={item.code || item.id}
-                      className={cn(item.blocker && 'bg-red-50/50')}
-                    >
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {item.blocker && (
-                            <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
-                          )}
-                          <div>
-                            <p className="font-medium text-gray-900">{item.title}</p>
+                  {mandatoryTraining.map((item) => {
+                    const pendingExtractedMatch = !isMandatoryTrainingSatisfied(item)
+                      ? getPendingExtractedMatch(item)
+                      : null;
+
+                    return (
+                      <TableRow
+                        key={item.code || item.id}
+                        className={cn(item.blocker && 'bg-red-50/50')}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-2">
                             {item.blocker && (
-                              <p className="text-xs text-red-600">Work blocker</p>
+                              <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0" />
                             )}
+                            <div>
+                              <p className="font-medium text-gray-900">{item.title}</p>
+                              {item.blocker && (
+                                <p className="text-xs text-red-600">Work blocker</p>
+                              )}
+                              {pendingExtractedMatch && (
+                                <p className="text-xs text-purple-700">
+                                  Matching extracted evidence awaiting admin review
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>{renderStatusBadge(item.status)}</TableCell>
-                      <TableCell>
-                        {(item.record_id || item.id) && (item.source_document_id || item.certificate_url || item.evidence_files?.length) ? (
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="h-auto p-0 text-blue-600"
-                            onClick={() => onViewCertificate?.(item.record_id || item.id)}
-                          >
-                            <FileText className="h-3 w-3 mr-1" />
-                            View
-                          </Button>
-                        ) : item.certificate_url ? (
-                          <a 
-                            href={item.certificate_url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center text-sm text-blue-600 hover:underline"
-                          >
-                            <FileText className="h-3 w-3 mr-1" />
-                            View
-                          </a>
-                        ) : item.evidence?.length > 0 ? (
-                          <div className="flex items-center gap-1">
-                            <FileText className="h-4 w-4 text-gray-400" />
-                            <span className="text-sm text-gray-600">
-                              {item.evidence.length} file{item.evidence.length !== 1 ? 's' : ''}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-sm text-gray-400">None</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm text-gray-600">
-                          {item.completed_at ? formatBackendDate(item.completed_at, { format: 'short' }) : '-'}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {item.expires_at ? (
-                          <span className={cn(
-                            "text-sm",
-                            item.status === 'expired' ? 'text-red-600 font-medium' :
-                            item.status === 'expiring_soon' ? 'text-amber-600' :
-                            'text-gray-600'
-                          )}>
-                            {formatBackendDate(item.expires_at, { format: 'short' })}
+                        </TableCell>
+                        <TableCell>{renderStatusBadge(item.status)}</TableCell>
+                        <TableCell>
+                          {(item.record_id || item.id) && (item.source_document_id || item.certificate_url || item.evidence_files?.length) ? (
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0 text-blue-600"
+                              onClick={() => onViewCertificate?.(item.record_id || item.id)}
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              View
+                            </Button>
+                          ) : item.certificate_url ? (
+                            <a
+                              href={item.certificate_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center text-sm text-blue-600 hover:underline"
+                            >
+                              <FileText className="h-3 w-3 mr-1" />
+                              View
+                            </a>
+                          ) : item.evidence?.length > 0 ? (
+                            <div className="flex items-center gap-1">
+                              <FileText className="h-4 w-4 text-gray-400" />
+                              <span className="text-sm text-gray-600">
+                                {item.evidence.length} file{item.evidence.length !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400">None</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm text-gray-600">
+                            {item.completed_at ? formatBackendDate(item.completed_at, { format: 'short' }) : '-'}
                           </span>
-                        ) : (
-                          <span className="text-sm text-gray-400">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {item.verified || item.is_verified ? (
-                          <div className="flex flex-col">
-                            <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Verified
+                        </TableCell>
+                        <TableCell>
+                          {item.expires_at ? (
+                            <span className={cn(
+                              "text-sm",
+                              item.status === 'expired' ? 'text-red-600 font-medium' :
+                              item.status === 'expiring_soon' ? 'text-amber-600' :
+                              'text-gray-600'
+                            )}>
+                              {formatBackendDate(item.expires_at, { format: 'short' })}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {item.verified || item.is_verified ? (
+                            <div className="flex flex-col">
+                              <Badge className="bg-green-100 text-green-700 border-green-200 w-fit">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Verified
+                              </Badge>
+                              {item.verified_by && (
+                                <span className="text-xs text-gray-500 mt-1">{item.verified_by}</span>
+                              )}
+                            </div>
+                          ) : item.status !== 'missing' ? (
+                            <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                              Submitted, not reviewed
                             </Badge>
-                            {item.verified_by && (
-                              <span className="text-xs text-gray-500 mt-1">{item.verified_by}</span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {/* View button - always available for completed training */}
+                            {item.completed_at && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => handleOpenDetail(item)}
+                                title="View details"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {/* Edit button for Admin */}
+                            {isAdmin && item.completed_at && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-gray-500 hover:text-primary"
+                                onClick={() => {
+                                  setEditingItem(item);
+                                  setEditDialogOpen(true);
+                                }}
+                                title="Edit dates"
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {isAdmin && item.status === 'missing' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8"
+                                onClick={onUploadCertificate}
+                              >
+                                <Upload className="h-3.5 w-3.5 mr-1" />
+                                Upload
+                              </Button>
                             )}
                           </div>
-                        ) : item.status !== 'missing' ? (
-                          <Badge className="bg-amber-100 text-amber-700 border-amber-200">
-                            Submitted, not reviewed
-                          </Badge>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* View button - always available for completed training */}
-                          {item.completed_at && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0"
-                              onClick={() => handleOpenDetail(item)}
-                              title="View details"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {/* Edit button for Admin */}
-                          {isAdmin && item.completed_at && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-gray-500 hover:text-primary"
-                              onClick={() => {
-                                setEditingItem(item);
-                                setEditDialogOpen(true);
-                              }}
-                              title="Edit dates"
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {isAdmin && item.status === 'missing' && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8"
-                              onClick={onUploadCertificate}
-                            >
-                              <Upload className="h-3.5 w-3.5 mr-1" />
-                              Upload
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </CardContent>
@@ -893,7 +961,7 @@ export default function AuditReadyTrainingMatrix({
                     Training Library
                   </CardTitle>
                   <CardDescription>
-                    Optional or additional records do not block readiness unless marked required.
+                    This tab separates approved/canonical qualifications from extracted certificate items awaiting admin review.
                   </CardDescription>
                 </div>
                 <div className="relative w-64">
@@ -908,6 +976,12 @@ export default function AuditReadyTrainingMatrix({
               </div>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                <p className="font-medium">How training evidence becomes compliant</p>
+                <p className="mt-1">
+                  Certificates are evidence only. Extracted items appear below for review, then become canonical qualifications only after admin approval. Mandatory compliance still requires verified and current training records.
+                </p>
+              </div>
               {/* Proposed Items Needing Review */}
               {sourceErrors.proposedItems && (
                 <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -918,8 +992,11 @@ export default function AuditReadyTrainingMatrix({
                 <div className="mb-6">
                   <h4 className="text-sm font-medium text-purple-800 mb-3 flex items-center gap-2">
                     <Wand2 className="h-4 w-4" />
-                    Awaiting admin review ({proposedItems.filter(p => p.status === 'proposed').length})
+                    Extracted items awaiting admin review ({proposedItems.filter(p => p.status === 'proposed').length})
                   </h4>
+                  <p className="mb-3 text-sm text-purple-700">
+                    These items came from certificate extraction. They do not affect Mandatory compliance until reviewed, approved, and verified where required.
+                  </p>
                   <div className="space-y-2">
                     {proposedItems.filter(p => p.status === 'proposed').map((item) => (
                       <div 
@@ -975,6 +1052,12 @@ export default function AuditReadyTrainingMatrix({
               )}
 
               {/* All Training Records */}
+              <div className="mb-3">
+                <h4 className="text-sm font-medium text-gray-900">Approved/canonical qualifications</h4>
+                <p className="text-sm text-gray-500">
+                  These rows come from approved training records. Mandatory uses this canonical record set, not raw certificate files or unreviewed extraction results.
+                </p>
+              </div>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1169,7 +1252,7 @@ export default function AuditReadyTrainingMatrix({
                     Training Certificates
                   </CardTitle>
                   <CardDescription>
-                    Certificates are evidence only until reviewed or verified.
+                    Certificates are the raw evidence library. Extraction creates review items; it does not verify training or satisfy Mandatory compliance by itself.
                   </CardDescription>
                 </div>
                 {isAdmin && (
@@ -1241,9 +1324,7 @@ export default function AuditReadyTrainingMatrix({
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {linkedItems.length} item{linkedItems.length !== 1 ? 's' : ''} extracted
-                            </Badge>
+                            {renderExtractionStatusBadge(cert)}
                             {pendingItems.length > 0 && (
                               <Badge className="bg-purple-100 text-purple-700">
                                 {pendingItems.length} pending review
@@ -1280,6 +1361,11 @@ export default function AuditReadyTrainingMatrix({
                             )}
                           </div>
                         </div>
+                        {cert.extraction_status === 'extraction_failed' && cert.extraction_error && (
+                          <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">
+                            <span className="font-medium">Extraction error:</span> {cert.extraction_error}
+                          </div>
+                        )}
                         
                         {/* Extracted Items */}
                         {linkedItems.length > 0 && (
@@ -1317,7 +1403,7 @@ export default function AuditReadyTrainingMatrix({
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    {item.confidence && (
+                                    {typeof item.confidence === 'number' && (
                                       <span className="text-xs text-gray-500">
                                         {Math.round(item.confidence * 100)}% confidence
                                       </span>

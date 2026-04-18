@@ -702,6 +702,15 @@ async def retrieve_file_bytes(file_url: str) -> tuple:
     Returns (bytes, content_type_str).
     Raises on total failure.
     """
+    if not file_url:
+        raise ValueError("No file reference provided")
+
+    def _legacy_object_path(ref: str) -> str:
+        legacy_prefix = f"{STORAGE_URL}/objects/"
+        if ref.startswith(legacy_prefix):
+            return ref.replace(legacy_prefix, "", 1)
+        return ref.lstrip("/")
+
     ext = file_url.rsplit(".", 1)[-1].lower() if "." in file_url else ""
 
     # --- 1. Direct HTTP(S) URL ---
@@ -724,8 +733,20 @@ async def retrieve_file_bytes(file_url: str) -> tuple:
         except Exception as e:
             logger.warning(f"retrieve_file_bytes: Supabase download failed for {file_url}: {e}")
 
+    # --- 2b. Supabase object key/path ---
+    try:
+        from supabase_storage import get_supabase_public_url, is_supabase_storage_configured
+        if is_supabase_storage_configured() and not file_url.startswith(("http://", "https://")):
+            content = await download_file_from_storage(get_supabase_public_url(file_url))
+            if content:
+                return content, _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
+    except Exception as e:
+        logger.warning(f"retrieve_file_bytes: Supabase path download failed for {file_url}: {e}")
+
     # --- 3. Legacy Emergent storage ---
-    file_bytes, stored_ct = get_object(file_url)
+    # Worker/admin uploads may store either the raw object key
+    # ("documents/<employee>/<file>") or the full legacy object URL.
+    file_bytes, stored_ct = get_object(_legacy_object_path(file_url))
     return file_bytes, stored_ct or _EXT_CONTENT_TYPES.get(ext, "application/octet-stream")
 
 
@@ -11536,7 +11557,7 @@ async def re_extract_training_from_existing_certificate(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
-    file_path = None
+    doc = None
     original_filename = "certificate"
     
     # Try to get certificate from document_id first
@@ -11544,43 +11565,75 @@ async def re_extract_training_from_existing_certificate(
         doc = await db.employee_documents.find_one({"id": document_id}, {"_id": 0})
         if doc:
             certificate_url = doc.get("file_url") or doc.get("url")
+            if not certificate_url and doc.get("evidence_files"):
+                evidence_file = next(
+                    (ef for ef in doc.get("evidence_files", []) if ef.get("file_url") or ef.get("url")),
+                    None
+                )
+                if evidence_file:
+                    certificate_url = evidence_file.get("file_url") or evidence_file.get("url")
             original_filename = doc.get("original_filename") or doc.get("file_name") or "certificate"
     
     if not certificate_url:
         raise HTTPException(status_code=400, detail="No certificate URL provided")
     
-    # Download or read the certificate file
-    contents = None
-    
+    doc_id_for_status = doc.get("id") if doc else document_id
+    if doc_id_for_status:
+        await db.employee_documents.update_one(
+            {"id": doc_id_for_status},
+            {"$set": {
+                "extraction_status": "extraction_pending",
+                "extraction_error": None,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+
+    # Download or read the certificate file using the shared evidence reader.
     try:
-        # Check if it's a local file path
         if certificate_url.startswith("/uploads/") or certificate_url.startswith("uploads/"):
             local_path = Path("/app") / certificate_url.lstrip("/")
-            if local_path.exists():
-                with open(local_path, "rb") as f:
-                    contents = f.read()
-                original_filename = local_path.name
-        elif certificate_url.startswith("http"):
-            # Download from URL
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                async with session.get(certificate_url, timeout=30) as response:
-                    if response.status == 200:
-                        contents = await response.read()
-                        # Try to get filename from URL
-                        original_filename = certificate_url.split("/")[-1].split("?")[0]
-        
+            if not local_path.exists():
+                raise FileNotFoundError(f"Local certificate file not found: {certificate_url}")
+            with open(local_path, "rb") as f:
+                contents = f.read()
+            original_filename = local_path.name
+        else:
+            contents, _content_type = await retrieve_file_bytes(certificate_url)
+
         if not contents:
             raise HTTPException(status_code=400, detail="Could not read certificate file")
         
     except Exception as e:
         logger.error(f"Error reading certificate for re-extraction: {e}")
+        if doc_id_for_status:
+            await db.employee_documents.update_one(
+                {"id": doc_id_for_status},
+                {"$set": {
+                    "extraction_status": "extraction_failed",
+                    "extraction_error": str(e),
+                    "extracted_item_count": 0,
+                    "extraction_count": 0,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
         raise HTTPException(status_code=400, detail=f"Could not read certificate: {str(e)}")
     
     # Extract trainings using AI with enhanced prompts
     extracted = await extract_training_from_certificate(contents, original_filename)
     
     if not extracted:
+        if doc_id_for_status:
+            await db.employee_documents.update_one(
+                {"id": doc_id_for_status},
+                {"$set": {
+                    "extraction_status": "extracted_no_match",
+                    "extraction_error": None,
+                    "extracted_item_count": 0,
+                    "extraction_count": 0,
+                    "extraction_date": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
         return {
             "success": False,
             "certificate_url": certificate_url,
@@ -11665,6 +11718,19 @@ async def re_extract_training_from_existing_certificate(
         })
     
     # Log re-extraction attempt
+    if doc_id_for_status:
+        await db.employee_documents.update_one(
+            {"id": doc_id_for_status},
+            {"$set": {
+                "extraction_status": "extracted_with_matches",
+                "extraction_error": None,
+                "extracted_item_count": len(trainings_for_preview),
+                "extraction_count": len(trainings_for_preview),
+                "extraction_date": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+
     await log_audit_action(user['user_id'], "training_certificate_re_extracted", "employee", employee_id, {
         "certificate_url": certificate_url,
         "trainings_found": len(trainings_for_preview),
@@ -11710,6 +11776,7 @@ async def bulk_save_training_records(
     now = datetime.now(timezone.utc).isoformat()
     saved_records = []
     skipped_duplicates = []
+    touched_document_ids = set()
     
     # Build set of existing proposed items for dedup
     existing_proposed = await db.proposed_training_items.find({
@@ -11767,6 +11834,8 @@ async def bulk_save_training_records(
         document_id = training.get("document_id")
         if not document_id:
             logger.warning(f"[bulk-save] No document_id for training '{training_name}' (employee {employee_id}). Evidence linkage will be broken.")
+        else:
+            touched_document_ids.add(document_id)
         
         # Create proposed training item (NOT a training_record)
         item_id = f"pti_{uuid.uuid4().hex[:12]}"
@@ -11796,6 +11865,19 @@ async def bulk_save_training_records(
             "training_name": training_name,
             "is_mandatory": is_mandatory
         })
+
+    if touched_document_ids:
+        await db.employee_documents.update_many(
+            {"id": {"$in": list(touched_document_ids)}, "employee_id": employee_id},
+            {"$set": {
+                "extraction_status": "extracted_with_matches" if saved_records or skipped_duplicates else "extracted_no_match",
+                "extraction_error": None,
+                "extracted_item_count": len(saved_records) + len(skipped_duplicates),
+                "new_items_count": len(saved_records),
+                "skipped_duplicate_count": len(skipped_duplicates),
+                "updated_at": now
+            }}
+        )
     
     # Log audit
     await log_audit_action(user['user_id'], "training_bulk_save_proposed", "employee", employee_id, {
@@ -39095,22 +39177,38 @@ Important:
 - If only one course, set is_multi_training to false
 - Preserve exact course titles for audit purposes"""
 
-            # Download the image using get_object (includes storage key)
+            # Download the image using the shared evidence reader.
             import base64
             from services.openai_client import call_openai_vision_async, parse_json_response as _pjr
-            
-            # Extract the storage path from the URL
-            storage_path = file_url.replace(f"{STORAGE_URL}/objects/", "")
+
+            await db.employee_documents.update_one(
+                {"id": document_id},
+                {"$set": {
+                    "extraction_status": "extraction_pending",
+                    "extraction_error": None,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
             
             try:
-                image_bytes, content_type_header = get_object(storage_path)
+                image_bytes, content_type_header = await retrieve_file_bytes(file_url)
             except Exception as download_err:
                 logger.error(f"Failed to get object from storage: {download_err}")
+                await db.employee_documents.update_one(
+                    {"id": document_id},
+                    {"$set": {
+                        "extraction_status": "extraction_failed",
+                        "extraction_error": str(download_err),
+                        "extracted_item_count": 0,
+                        "extraction_count": 0,
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
                 return {"status": "error", "message": f"Failed to download image for extraction: {str(download_err)}"}
             
             # Convert to images for OpenAI vision
             images_b64 = []
-            is_pdf = 'pdf' in storage_path.lower()
+            is_pdf = 'pdf' in (file_url or "").lower() or content_type_header == "application/pdf"
             if is_pdf:
                 import fitz
                 try:
@@ -39133,6 +39231,16 @@ Important:
             )
             
             if not response:
+                await db.employee_documents.update_one(
+                    {"id": document_id},
+                    {"$set": {
+                        "extraction_status": "extraction_failed",
+                        "extraction_error": "AI extraction returned no response",
+                        "extracted_item_count": 0,
+                        "extraction_count": 0,
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
                 return {"status": "error", "message": "AI extraction returned no response"}
             
             # Parse JSON from response
@@ -39141,6 +39249,16 @@ Important:
             
             extraction_data = _pjr(response)
             if not extraction_data:
+                await db.employee_documents.update_one(
+                    {"id": document_id},
+                    {"$set": {
+                        "extraction_status": "extraction_failed",
+                        "extraction_error": "Could not parse extraction response",
+                        "extracted_item_count": 0,
+                        "extraction_count": 0,
+                        "updated_at": datetime.now(timezone.utc).isoformat()
+                    }}
+                )
                 return {
                     "status": "error",
                     "message": "Could not parse extraction response",
@@ -39149,6 +39267,16 @@ Important:
             
         except Exception as e:
             logger.error(f"Multi-training extraction failed: {e}")
+            await db.employee_documents.update_one(
+                {"id": document_id},
+                {"$set": {
+                    "extraction_status": "extraction_failed",
+                    "extraction_error": str(e),
+                    "extracted_item_count": 0,
+                    "extraction_count": 0,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
             return {"status": "error", "message": str(e)}
         
         # Create proposed items from extraction
@@ -39347,9 +39475,13 @@ Important:
                 {"id": document_id},
                 {"$set": {
                     "extraction_count": len(courses),
+                    "extracted_item_count": len(courses),
                     "new_items_count": len(new_items),
                     "updated_items_count": len(updated_items),
-                    "extraction_status": "completed"
+                    "extraction_status": "extracted_with_matches" if courses else "extracted_no_match",
+                    "extraction_error": None,
+                    "extraction_date": now,
+                    "updated_at": now
                 }}
             )
             
@@ -39363,6 +39495,20 @@ Important:
                 "raw_extraction": extraction_data
             }
         
+        await db.employee_documents.update_one(
+            {"id": document_id},
+            {"$set": {
+                "extraction_count": len(courses),
+                "extracted_item_count": len(courses),
+                "new_items_count": 0,
+                "updated_items_count": 0,
+                "extraction_status": "extracted_no_match",
+                "extraction_error": None,
+                "extraction_date": now,
+                "updated_at": now
+            }}
+        )
+
         return {
             "status": "success",
             "is_multi_training": extraction_data.get("is_multi_training", len(courses) > 1),

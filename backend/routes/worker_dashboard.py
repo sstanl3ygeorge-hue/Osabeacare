@@ -1529,6 +1529,14 @@ async def worker_upload_document(
     # Training certificate AI extraction
     if requirement_id.startswith("training") or "training" in requirement_id.lower():
         try:
+            await db.employee_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "extraction_status": "extraction_pending",
+                    "extraction_error": None,
+                    "updated_at": now
+                }}
+            )
             extracted_trainings = await extract_training_from_certificate(contents, file.filename)
             
             if extracted_trainings:
@@ -1538,8 +1546,11 @@ async def worker_upload_document(
                     {"id": doc_id},
                     {"$set": {
                         "extraction_count": len(extracted_trainings),
-                        "extraction_status": "completed",
-                        "extraction_date": now
+                        "extracted_item_count": len(extracted_trainings),
+                        "extraction_status": "extracted_with_matches",
+                        "extraction_error": None,
+                        "extraction_date": now,
+                        "updated_at": now
                     }}
                 )
                 
@@ -1571,6 +1582,8 @@ async def worker_upload_document(
                 for prop in existing_proposed:
                     existing_names.add(normalize_name(prop.get("training_name")))
                     existing_names.add(normalize_name(prop.get("course_name")))
+                    existing_names.add(normalize_name(prop.get("raw_course_title")))
+                    existing_names.add(normalize_name(prop.get("mapped_training_title")))
                 
                 proposed_items = []
                 updated_items = []
@@ -1670,13 +1683,18 @@ async def worker_upload_document(
                             "source_document_name": file.filename,
                             "training_name": training_name,
                             "course_name": training.get("course_name", training_name),
+                            "raw_course_title": training_name,
+                            "mapped_training_title": training_name,
                             "provider": training.get("provider"),
                             "completion_date": training.get("completion_date"),
+                            "completed_at": training.get("completion_date"),
                             "expiry_date": training.get("expiry_date"),
+                            "expires_at": training.get("expiry_date"),
                             "mapped_training_code": matched_code,
                             "is_mandatory": matched_code is not None,
                             "ai_extracted": True,
                             "extraction_confidence": training.get("confidence", "medium"),
+                            "confidence": training.get("confidence", "medium"),
                             "status": "proposed",
                             "uploaded_by_worker": True,
                             "created_at": now
@@ -1706,8 +1724,30 @@ async def worker_upload_document(
                     },
                     "message": f"Certificate uploaded. AI extracted {len(extracted_trainings)} training(s): {len(new_items)} new, {len(updated_items)} updated."
                 }
+            else:
+                await db.employee_documents.update_one(
+                    {"id": doc_id},
+                    {"$set": {
+                        "extraction_count": 0,
+                        "extracted_item_count": 0,
+                        "extraction_status": "extracted_no_match",
+                        "extraction_error": None,
+                        "extraction_date": now,
+                        "updated_at": now
+                    }}
+                )
         except Exception as e:
             logger.warning(f"AI training extraction failed for worker upload: {e}")
+            await db.employee_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "extraction_count": 0,
+                    "extracted_item_count": 0,
+                    "extraction_status": "extraction_failed",
+                    "extraction_error": str(e),
+                    "updated_at": now
+                }}
+            )
     
     # CV uploads
     if requirement_id in ["cv", "resume", "curriculum_vitae"] or "cv" in requirement_id.lower():

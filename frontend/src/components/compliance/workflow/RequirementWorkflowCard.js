@@ -22,6 +22,7 @@ import { ProofSection } from './ProofSection';
 import { FinalStatusSection } from './FinalStatusSection';
 import RecordCheckDialog from '../RecordCheckDialog';
 import EvidenceReviewDialog from '../EvidenceReviewDialog';
+import EvidenceReviewViewerDialog from '../EvidenceReviewViewerDialog';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -105,8 +106,12 @@ export default function RequirementWorkflowCard({
   const { token } = useAuth();
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [reviewDialog, setReviewDialog] = useState({ open: false, file: null });
+  const [viewerDialog, setViewerDialog] = useState({ open: false, file: null });
   const [checkDialog, setCheckDialog] = useState({ open: false });
   const [invalidateDialog, setInvalidateDialog] = useState({ open: false, reason: '', loading: false });
+
+  // Identity and PoA use the full evidence review viewer for accepting
+  const isIdentityOrPOA = requirementKey === 'identity' || requirementKey === 'proof_of_address';
 
   // ── Extract rows from section data ────────────────────────────────────
   const evidenceRow = sectionData?.rows?.find((r) => r.row_type === 'evidence');
@@ -407,6 +412,7 @@ export default function RequirementWorkflowCard({
             onRemove={handleRemoveFile}
             onRequestReplacement={handleRequestReplacement}
             onReviewFile={(file) => setReviewDialog({ open: true, file })}
+            onViewAndApprove={isIdentityOrPOA ? (file) => setViewerDialog({ open: true, file }) : null}
             onPreviewFile={onPreviewFile}
             onUpload={onUploadEvidence || (() => {})}
             workflow={workflow}
@@ -462,6 +468,23 @@ export default function RequirementWorkflowCard({
           handleRefresh();
         }}
       />
+
+      {/* Full evidence review viewer for Identity/POA — view, checklist, verify & stamp */}
+      {isIdentityOrPOA && (
+        <EvidenceReviewViewerDialog
+          isOpen={viewerDialog.open}
+          onClose={() => setViewerDialog({ open: false, file: null })}
+          file={viewerDialog.file}
+          employeeId={employeeId}
+          employeeName={employeeName}
+          requirementType={requirementKey}
+          aiValidation={viewerDialog.file?.ai_extraction?.date_validation || null}
+          onVerificationComplete={() => {
+            setViewerDialog({ open: false, file: null });
+            handleRefresh();
+          }}
+        />
+      )}
 
       <RecordCheckDialog
         open={checkDialog.open}

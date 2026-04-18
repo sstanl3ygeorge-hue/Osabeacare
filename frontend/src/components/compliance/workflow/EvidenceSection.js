@@ -52,6 +52,7 @@ export function EvidenceSection({
   onRemove,
   onRequestReplacement,
   onReviewFile,
+  onViewAndApprove,
   onPreviewFile,
   onUpload,
   workflow,
@@ -193,6 +194,21 @@ export function EvidenceSection({
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {getFileStatusBadge(file)}
 
+                  {/* View & Approve button — prominent for Identity/POA */}
+                  {onViewAndApprove && !isAccepted && !isRejected && (
+                    <Button
+                      size="sm"
+                      variant="default"
+                      className="h-7 px-3 text-xs bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => onViewAndApprove(file)}
+                      data-testid={`evidence-view-approve-${docId}`}
+                      title="View, verify and stamp document"
+                    >
+                      <Eye className="h-3 w-3 mr-1" />
+                      View &amp; Approve
+                    </Button>
+                  )}
+
                   {/* View */}
                   <Button
                     size="sm"
@@ -247,14 +263,25 @@ export function EvidenceSection({
                         {/* Accept/Reject only when not yet reviewed */}
                         {!isAccepted && !isRejected && (
                           <>
-                            <DropdownMenuItem
-                              className="text-emerald-700 focus:bg-emerald-50 focus:text-emerald-800"
-                              onClick={() => onAccept(docId)}
-                              data-testid={`evidence-accept-${docId}`}
-                            >
-                              <CheckCircle className="h-3.5 w-3.5 mr-2" />
-                              Accept Evidence
-                            </DropdownMenuItem>
+                            {onViewAndApprove ? (
+                              <DropdownMenuItem
+                                className="text-emerald-700 focus:bg-emerald-50 focus:text-emerald-800 font-medium"
+                                onClick={() => onViewAndApprove(file)}
+                                data-testid={`evidence-view-approve-${docId}`}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-2" />
+                                View & Approve
+                              </DropdownMenuItem>
+                            ) : (
+                              <DropdownMenuItem
+                                className="text-emerald-700 focus:bg-emerald-50 focus:text-emerald-800"
+                                onClick={() => onAccept(docId)}
+                                data-testid={`evidence-accept-${docId}`}
+                              >
+                                <CheckCircle className="h-3.5 w-3.5 mr-2" />
+                                Accept Evidence
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               className="text-red-600 focus:bg-red-50 focus:text-red-700"
                               onClick={() => onReviewFile(file)}

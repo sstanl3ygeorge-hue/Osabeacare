@@ -472,7 +472,8 @@ def detect_employment_gaps_with_coverage(
 
 def compute_coverage_summary(
     employment_history: List[Dict],
-    coverage_years: int = 10
+    coverage_years: int = 10,
+    gap_records: List[Dict] = None,
 ) -> Dict:
     """
     Pure helper – returns a coverage summary dict without side effects.
@@ -480,6 +481,10 @@ def compute_coverage_summary(
     ``meets_10_year_requirement`` is **True** only when there are no
     active unresolved coverage gaps in the required window (NOT a
     percentage threshold).
+
+    If *gap_records* is provided (actual DB records with real statuses),
+    those are used for the unresolved-gap check instead of freshly-
+    detected gaps which always have status ``pending``.
     """
     from datetime import timedelta
 
@@ -545,9 +550,13 @@ def compute_coverage_summary(
     total_covered = sum((e - s).days for s, e in merged)
     coverage_pct = round((total_covered / total_days_required) * 100, 1) if total_days_required > 0 else 0.0
 
-    # Determine if requirement is met: run coverage-aware detection and
-    # check for any unresolved gaps.
-    all_gaps = detect_employment_gaps_with_coverage(employment_history, coverage_years)
+    # Determine if requirement is met: check for any unresolved gaps.
+    # Use DB gap_records (with real statuses) when provided; otherwise
+    # fall back to freshly-detected gaps (which all default to "pending").
+    if gap_records is not None:
+        all_gaps = gap_records
+    else:
+        all_gaps = detect_employment_gaps_with_coverage(employment_history, coverage_years)
     unresolved_statuses = {
         GapStatus.PENDING.value,
         GapStatus.EXPLAINED.value,

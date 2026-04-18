@@ -25502,12 +25502,25 @@ async def submit_structured_application(form: StructuredApplicationForm):
         # Store detected gaps in employee record and create gap records
         if detected_gaps:
             # --- Merge applicant-supplied gap explanations into detected gaps ---
-            expl_by_id = {e["gap_id"]: e for e in (form.gap_explanations or [])}
+            applicant_explanations = form.gap_explanations or []
             for gap in detected_gaps:
-                match = expl_by_id.get(gap.get("gap_id"))
-                if match and match.get("explanation"):
-                    gap["explanation"] = match["explanation"]
-                    gap["reason_type"] = match.get("reason_type")
+                matched_expl = None
+                gap_start = gap.get("gap_start")
+                gap_end = gap.get("gap_end")
+                # Date-range match (robust against reordering)
+                for expl in applicant_explanations:
+                    expl_start = expl.get("gap_start") or expl.get("start_date")
+                    expl_end = expl.get("gap_end") or expl.get("end_date")
+                    if expl_start and expl_end and expl_start == gap_start and expl_end == gap_end:
+                        matched_expl = expl
+                        break
+                # Fallback: sequential gap_id match
+                if not matched_expl:
+                    expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
+                    matched_expl = expl_by_id.get(gap.get("gap_id"))
+                if matched_expl and matched_expl.get("explanation"):
+                    gap["explanation"] = matched_expl["explanation"]
+                    gap["reason_type"] = matched_expl.get("reason_type")
                     gap["explanation_provided_at"] = now
                     gap["explained_by"] = "applicant"
                     gap["explanation_source"] = "application_form"

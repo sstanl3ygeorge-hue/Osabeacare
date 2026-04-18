@@ -691,19 +691,31 @@ async def detect_employment_gaps(
     
     # Detect gaps using canonical coverage-aware engine
     detected_gaps = detect_employment_gaps_with_coverage(employment_history)
-    coverage = compute_coverage_summary(employment_history)
     
     now = datetime.now(timezone.utc).isoformat()
     new_gaps = 0
 
     # Merge applicant-supplied gap explanations (same logic as application submit)
     applicant_explanations = employee.get("gap_explanations", [])
-    expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
+    # Match by date range first, then fall back to sequential gap_id
     for gap in detected_gaps:
-        match = expl_by_id.get(gap.get("gap_id"))
-        if match and match.get("explanation"):
-            gap["explanation"] = match["explanation"]
-            gap["reason_type"] = match.get("reason_type")
+        matched_expl = None
+        gap_start = gap.get("gap_start")
+        gap_end = gap.get("gap_end")
+        # Date-range match (robust against reordering)
+        for expl in applicant_explanations:
+            expl_start = expl.get("gap_start") or expl.get("start_date")
+            expl_end = expl.get("gap_end") or expl.get("end_date")
+            if expl_start and expl_end and expl_start == gap_start and expl_end == gap_end:
+                matched_expl = expl
+                break
+        # Fallback: sequential gap_id match
+        if not matched_expl:
+            expl_by_id = {e.get("gap_id"): e for e in applicant_explanations if e.get("gap_id")}
+            matched_expl = expl_by_id.get(gap.get("gap_id"))
+        if matched_expl and matched_expl.get("explanation"):
+            gap["explanation"] = matched_expl["explanation"]
+            gap["reason_type"] = matched_expl.get("reason_type")
             gap["explanation_provided_at"] = now
             gap["explained_by"] = "applicant"
             gap["explanation_source"] = "application_form"
@@ -748,6 +760,12 @@ async def detect_employment_gaps(
             }
             await db.employment_gaps.insert_one(gap_record)
             new_gaps += 1
+
+    # Re-read all gap records from DB to get accurate statuses for coverage
+    final_gap_records = await db.employment_gaps.find(
+        {"employee_id": employee_id}
+    ).to_list(100)
+    coverage = compute_coverage_summary(employment_history, gap_records=final_gap_records)
 
     # Persist coverage summary + clear failure state
     await db.employees.update_one(

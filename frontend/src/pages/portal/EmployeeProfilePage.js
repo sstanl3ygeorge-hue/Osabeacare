@@ -745,6 +745,24 @@ export default function EmployeeProfilePage() {
     setInlineViewerFilename(cvDocument?.original_filename || 'cv.pdf');
     setInlineViewerOpen(true);
   };
+
+  // Link an existing CV document as the active review CV
+  const handleLinkCv = async () => {
+    setCvReviewLoading(true);
+    try {
+      await axios.post(
+        `${API}/admin/employees/${employeeId}/cv/link`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      toast.success('CV linked as review document');
+      await Promise.all([fetchEmployee(), fetchCompliance(), fetchComplianceFile()]);
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || 'Failed to link CV');
+    } finally {
+      setCvReviewLoading(false);
+    }
+  };
   
   // Admin approves CV after review
   const handleApproveCv = async () => {
@@ -3263,7 +3281,7 @@ export default function EmployeeProfilePage() {
           ? 'No CV file is currently available on this page.'
           : !cvIsPdf
             ? 'A CV file exists but is not in a reviewable PDF format. Upload a PDF to enable review.'
-            : 'A CV file exists but is not linked as the review CV. Click "Link as Review CV" or upload a PDF.';
+            : 'A CV file exists but is not linked as the review CV. Click "Link as Review CV" to enable review, or upload a new PDF.';
   const cvRecoveryActionLabel = cvFileExists ? 'Replace with PDF' : 'Upload PDF CV';
   const gapVerifiedCount = employmentGapEvaluation?.verified_count;
   const gapNeedsReviewCount = employmentGapEvaluation
@@ -5262,7 +5280,7 @@ export default function EmployeeProfilePage() {
                       </p>
                       <p className="text-xs text-slate-600">
                         Required: {employmentCoverage.coverage_start ? new Date(employmentCoverage.coverage_start + 'T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : '?'} — Today
-                        {' · '}Status: {coverageMet ? 'Reviewed' : 'Rejected / action required'}
+                        {' · '}Status: {coverageMet ? 'Reviewed' : 'Pending review'}
                       </p>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div
@@ -5472,14 +5490,32 @@ export default function EmployeeProfilePage() {
                               Review CV
                             </Button>
                           ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={openCvRecoveryUpload}
-                            >
-                              <Upload className="h-4 w-4 mr-1" />
-                              {cvRecoveryActionLabel}
-                            </Button>
+                            <>
+                              {cvIsPdf && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={handleLinkCv}
+                                  disabled={cvReviewLoading}
+                                  className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
+                                >
+                                  {cvReviewLoading ? (
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <FileSearch className="h-4 w-4 mr-1" />
+                                  )}
+                                  Link as Review CV
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={openCvRecoveryUpload}
+                              >
+                                <Upload className="h-4 w-4 mr-1" />
+                                {cvRecoveryActionLabel}
+                              </Button>
+                            </>
                           )}
                         </div>
                         {!cvReviewReady && (

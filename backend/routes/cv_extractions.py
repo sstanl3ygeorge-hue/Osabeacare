@@ -171,6 +171,64 @@ def build_cv_review_extraction_response(extraction_result: dict, employment_hist
 
 
 
+# ==================== ADMIN LINK CV ENDPOINT ====================
+
+@router.post("/admin/employees/{employee_id}/cv/link")
+async def link_cv_document(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """
+    Link an existing CV document as the active review CV.
+    Sets cv_document_id on the employee so the Review CV button becomes available.
+    """
+    db = get_db()
+
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # Find the best CV-like document for this employee
+    cv_requirement_ids = ["cv", "resume", "curriculum_vitae"]
+    cv_doc = await db.employee_documents.find_one(
+        {
+            "employee_id": employee_id,
+            "requirement_id": {"$in": cv_requirement_ids},
+            "status": {"$nin": ["superseded", "archived", "deleted"]},
+            "$or": [{"is_active": True}, {"is_active": {"$exists": False}}],
+        },
+        {"_id": 0},
+        sort=[("uploaded_at", -1)],
+    )
+
+    if not cv_doc:
+        raise HTTPException(status_code=404, detail="No CV document found for this employee")
+
+    now = datetime.now(timezone.utc).isoformat()
+    doc_id = cv_doc["id"]
+
+    await db.employees.update_one(
+        {"id": employee_id},
+        {"$set": {"cv_document_id": doc_id, "cv_status": "uploaded", "updated_at": now}},
+    )
+
+    await log_audit_action(
+        user.get("user_id"),
+        "cv_document_linked",
+        "employee",
+        employee_id,
+        {"document_id": doc_id, "action": "manual_link"},
+    )
+
+    logger.info("CV linked for employee=%s doc_id=%s by=%s", employee_id, doc_id, user.get("user_id"))
+
+    return {
+        "success": True,
+        "cv_document_id": doc_id,
+        "message": "CV linked as review document",
+    }
+
+
 # ==================== WORKER CV ENDPOINTS ====================
 
 @router.get("/worker/cv-extraction-status")

@@ -22087,6 +22087,42 @@ async def update_employee_training_record(
     }
 
 
+# ── Static training sub-routes ─────────────────────────────────────
+# These MUST be defined BEFORE the parameterised
+#   /employees/{employee_id}/training/{requirement_id}
+# route, otherwise FastAPI treats "proposed-items" as a requirement_id.
+@api_router.get("/employees/{employee_id}/training/proposed-items")
+async def get_proposed_training_items_inline(
+    employee_id: str,
+    status: Optional[str] = None,
+    user: dict = Depends(get_current_user)
+):
+    """Get proposed training items awaiting review for an employee."""
+    query = {"employee_id": employee_id}
+    if status:
+        query["status"] = status
+
+    items = await db.proposed_training_items.find(
+        query, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+
+    for item in items:
+        doc_id = item.get("source_document_id")
+        if doc_id:
+            doc = await db.employee_documents.find_one(
+                {"id": doc_id},
+                {"_id": 0, "original_filename": 1, "file_url": 1, "uploaded_at": 1}
+            )
+            if doc:
+                item["source_document"] = {
+                    "filename": doc.get("original_filename"),
+                    "url": doc.get("file_url"),
+                    "uploaded_at": doc.get("uploaded_at")
+                }
+
+    return {"proposed_items": items, "total": len(items)}
+
+
 @api_router.get("/employees/{employee_id}/training/{requirement_id}")
 async def get_employee_training_record(
     employee_id: str,

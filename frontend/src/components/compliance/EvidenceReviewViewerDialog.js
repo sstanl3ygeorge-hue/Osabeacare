@@ -165,7 +165,12 @@ export default function EvidenceReviewViewerDialog({
   const isAddress = requirementType === 'proof_of_address';
   const methods = isIdentity ? IDENTITY_METHODS : ADDRESS_METHODS;
   const fileName = file?.file_name || file?.name || 'Document';
-  const fileUrl = file?.file_url;
+  const docId = file?.id || file?.file_id;
+  // Normalise file URL — backend evidence URLs are often relative (/api/...)
+  const rawFileUrl = file?.file_url || (docId ? `/api/employee-documents/${docId}/file` : null);
+  const fileUrl = rawFileUrl && rawFileUrl.startsWith('/api/')
+    ? `${API}${rawFileUrl.substring(4)}`
+    : rawFileUrl;
   const fileType = getFileType(contentType, fileName);
   const hasMetMinViewTime = viewSeconds >= MIN_VIEW_SECONDS;
 

@@ -67,7 +67,7 @@ const ScoreSelector = ({ value, onChange, disabled = false }) => (
 );
 
 // Question card with scoring criteria tooltip
-const QuestionCard = ({ question, score, onChange, notes, onNotesChange, disabled }) => {
+const QuestionCard = ({ question, score, onChange, notes, onNotesChange, disabled, workerAnswer }) => {
   const [showCriteria, setShowCriteria] = useState(false);
   
   return (
@@ -139,6 +139,17 @@ const QuestionCard = ({ question, score, onChange, notes, onNotesChange, disable
         </div>
       )}
       
+      {/* Worker's pre-interview answer (read-only source material) */}
+      {workerAnswer && (
+        <div className="bg-violet-50 border border-violet-200 rounded-lg p-3">
+          <p className="text-xs font-medium text-violet-700 mb-1 flex items-center gap-1">
+            <User className="h-3 w-3" />
+            Worker's answer:
+          </p>
+          <p className="text-sm text-violet-900 whitespace-pre-wrap">{workerAnswer}</p>
+        </div>
+      )}
+
       <div className="flex items-center justify-between pt-2 border-t">
         <Label className="text-xs text-gray-500">Score:</Label>
         <ScoreSelector value={score} onChange={onChange} disabled={disabled} />
@@ -164,6 +175,8 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
   const [saving, setSaving] = useState(false);
   const [interviewConfig, setInterviewConfig] = useState(null);
   const [activeTab, setActiveTab] = useState('part1');
+  const [workerAnswers, setWorkerAnswers] = useState(null); // Worker pre-interview data
+  const [prefilled, setPrefilled] = useState(false); // Whether form was prefilled from worker answers
   
   // Form state
   const [formData, setFormData] = useState({
@@ -246,6 +259,65 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
     }
   }, [employeeId, employeeRole]);
 
+  // Part 2 field mapping: worker admin_q IDs -> admin interview field IDs
+  const WORKER_TO_ADMIN_MAP = {
+    admin_q1: 'requires_work_permit',
+    admin_q2: 'rtw_proof_taken',
+    admin_q3: 'hours_wanted',
+    admin_q4: 'flexible_working',
+    admin_q5: 'has_driving_licence',
+    admin_q6: 'annual_leave_booked',
+    admin_q7: 'notice_period',
+    admin_q8: 'start_date'
+  };
+
+  // Normalise yes_no checkbox values from worker form to admin Select values
+  const normaliseYesNo = (val) => {
+    if (val === true || val === 'true' || val === 'yes' || val === 'Yes') return 'yes';
+    if (val === false || val === 'false' || val === 'no' || val === 'No') return 'no';
+    return val || '';
+  };
+
+  // Fetch worker pre-interview questionnaire and prefill form
+  const fetchWorkerPreInterview = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(
+        `${API}/employees/${employeeId}/pre-interview-questionnaire`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = response.data;
+      if (data.status === 'not_submitted' || !data.form_data) {
+        setWorkerAnswers(null);
+        setPrefilled(false);
+        return;
+      }
+      const wd = data.form_data;
+      setWorkerAnswers(wd);
+
+      // Prefill Part 2 admin fields from worker's admin_q answers
+      const part2Updates = {};
+      for (const [workerKey, adminKey] of Object.entries(WORKER_TO_ADMIN_MAP)) {
+        if (wd[workerKey] !== undefined && wd[workerKey] !== '' && wd[workerKey] !== null) {
+          // yes_no fields need normalisation
+          if (['admin_q1', 'admin_q4', 'admin_q5'].includes(workerKey)) {
+            part2Updates[adminKey] = normaliseYesNo(wd[workerKey]);
+          } else {
+            part2Updates[adminKey] = String(wd[workerKey]);
+          }
+        }
+      }
+
+      setFormData(prev => ({ ...prev, ...part2Updates }));
+      setPrefilled(true);
+    } catch (error) {
+      console.error('Failed to fetch worker pre-interview:', error);
+      // Non-blocking — form stays blank if fetch fails
+      setWorkerAnswers(null);
+      setPrefilled(false);
+    }
+  };
+
   const resetForm = () => {
     setFormData({
       interview_date: new Date().toISOString().split('T')[0],
@@ -271,6 +343,8 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
     });
     setEditingId(null);
     setActiveTab('part1');
+    setWorkerAnswers(null);
+    setPrefilled(false);
   };
 
   // Calculate total score
@@ -441,7 +515,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
             </Button>
             <Button 
               size="sm" 
-              onClick={() => { resetForm(); setShowCreateDialog(true); }}
+              onClick={() => { resetForm(); setShowCreateDialog(true); fetchWorkerPreInterview(); }}
               className="rounded-xl bg-primary hover:bg-primary/90"
               data-testid="create-interview-btn"
             >
@@ -631,6 +705,17 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
           </DialogDescription>
         </DialogHeader>
 
+        {/* Prefill indicator banner */}
+        {prefilled && !editingId && (
+          <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-3 flex items-center gap-2">
+            <Info className="h-4 w-4 text-violet-600 shrink-0" />
+            <p className="text-sm text-violet-700">
+              <span className="font-medium">Prefilled from worker's pre-interview questionnaire.</span>
+              {' '}Part 1 shows their written answers. Part 2 admin fields have been pre-populated. All fields remain editable.
+            </p>
+          </div>
+        )}
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid grid-cols-3 mb-4">
             <TabsTrigger value="part1">Part 1: Assessment</TabsTrigger>
@@ -715,6 +800,7 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
                     ...formData,
                     question_notes: {...formData.question_notes, [question.id]: notes}
                   })}
+                  workerAnswer={!editingId && workerAnswers ? workerAnswers[question.id] : undefined}
                 />
               ))}
             </div>
@@ -722,6 +808,12 @@ export default function InterviewFormPanel({ employeeId, employeeName, employeeR
 
           {/* Part 2 - Administrative Questions */}
           <TabsContent value="part2" className="space-y-4">
+            {prefilled && !editingId && (
+              <div className="bg-violet-50 border border-violet-200 rounded-lg px-4 py-2 text-sm text-violet-700 flex items-center gap-2">
+                <User className="h-4 w-4 text-violet-600 shrink-0" />
+                Fields below were pre-populated from the worker's answers. Review and adjust as needed.
+              </div>
+            )}
             <div className="bg-gray-50 rounded-lg p-4">
               <h4 className="font-medium text-gray-700 mb-4">General Interview Questions</h4>
               <div className="space-y-4">

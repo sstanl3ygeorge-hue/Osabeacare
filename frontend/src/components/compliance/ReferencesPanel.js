@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import { 
   User, Mail, Phone, Building, Briefcase, Clock, CheckCircle, 
   XCircle, Send, AlertTriangle, Loader2, RefreshCw, Calendar,
-  MessageSquare, FileText, Plus, Edit, Shield, Eye
+  MessageSquare, FileText, Plus, Edit, Shield, Eye, Download
 } from 'lucide-react';
 import { formatBackendDate } from '../../lib/dateUtils';
 
@@ -100,6 +100,9 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
   const [reviewNotes, setReviewNotes] = useState('');
   const [reviewingExplanation, setReviewingExplanation] = useState(false);
 
+  // PDF download state
+  const [downloadingPdf, setDownloadingPdf] = useState(null);
+
   const fetchReferences = async () => {
     try {
       setLoading(true);
@@ -164,6 +167,37 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
   const openReviewDialog = (refNum) => {
     setReviewRefNum(refNum);
     setReviewDialogOpen(true);
+  };
+
+  // Download reference response as PDF
+  const handleDownloadReferencePdf = async (refNum) => {
+    try {
+      setDownloadingPdf(refNum);
+      const token = localStorage.getItem('token');
+      const response = await axios.get(
+        `${API}/references/${employeeId}/${refNum}/download-pdf`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          responseType: 'blob'
+        }
+      );
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const empName = `${employee?.first_name || ''}_${employee?.last_name || ''}`.replace(/\s+/g, '_');
+      link.download = `reference_${refNum}_${empName}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      toast.success('Reference PDF downloaded');
+    } catch (error) {
+      console.error('PDF download failed:', error);
+      toast.error('Failed to download reference PDF');
+    } finally {
+      setDownloadingPdf(null);
+    }
   };
   
   // Open verify/reject modal
@@ -1152,6 +1186,22 @@ export default function ReferencesPanel({ employeeId, employee, onRefresh, onEdi
             <Button variant="outline" onClick={() => setReviewDialogOpen(false)}>
               Close
             </Button>
+
+            {/* Download PDF button */}
+            {reviewRefNum && (
+              <Button
+                variant="outline"
+                onClick={() => handleDownloadReferencePdf(reviewRefNum)}
+                disabled={downloadingPdf === reviewRefNum}
+              >
+                {downloadingPdf === reviewRefNum ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                Download PDF
+              </Button>
+            )}
 
             {reviewRefNum && (() => {
               const currentRef = references?.references?.[`reference_${reviewRefNum}`];

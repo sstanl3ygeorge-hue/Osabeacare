@@ -17,6 +17,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi.responses import Response
 from pydantic import BaseModel, EmailStr
 
 from .dependencies import (
@@ -412,3 +413,68 @@ async def get_references_drift_report(
         },
         "results": report_rows,
     }
+
+
+# ==================== PDF DOWNLOADS ====================
+
+@router.get("/references/{employee_id}/{ref_num}/download-pdf")
+async def download_reference_response_pdf(
+    employee_id: str,
+    ref_num: int,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Download a referee response as a branded PDF with company logo."""
+    db = get_db()
+    
+    if ref_num not in [1, 2]:
+        raise HTTPException(status_code=400, detail="ref_num must be 1 or 2")
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Get reference data from canonical references collection
+    ref_doc = await db.references.find_one({"employee_id": employee_id}, {"_id": 0})
+    ref_key = f"reference_{ref_num}"
+    ref_data = (ref_doc or {}).get(ref_key, {}) if ref_doc else {}
+    
+    response_data = ref_data.get("response")
+    if not response_data:
+        # Fallback: check employee flat fields
+        response_data = employee.get(f"reference_{ref_num}_response_data")
+    
+    if not response_data:
+        raise HTTPException(status_code=404, detail=f"Reference {ref_num} response not found")
+    
+    declared_data = ref_data.get("declared", {})
+    if not declared_data:
+        declared_data = {
+            "name": employee.get(f"reference_{ref_num}_name", ""),
+            "email": employee.get(f"reference_{ref_num}_email", ""),
+            "organisation": employee.get(f"reference_{ref_num}_company", ""),
+        }
+    
+    mismatch_data = ref_data.get("mismatch")
+    
+    from services.pdf_service import generate_reference_response_pdf
+    
+    pdf_bytes = generate_reference_response_pdf(
+        response_data=response_data,
+        declared_data=declared_data,
+        employee_data=employee,
+        reference_num=ref_num,
+        mismatch_data=mismatch_data
+    )
+    
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"reference_{ref_num}_{employee_name}.pdf"
+    
+    await log_audit_action(user['user_id'], "pdf_downloaded", "reference_response", employee_id, {
+        "reference_num": ref_num, "type": "reference_response"
+    })
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )

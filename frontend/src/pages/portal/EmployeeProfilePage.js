@@ -5142,7 +5142,36 @@ export default function EmployeeProfilePage() {
                   <p className="text-gray-500 text-center py-8">No submission data available</p>
                 )}
               </div>
-              <DialogFooter>
+              <DialogFooter className="gap-2">
+                {/* Download PDF for pre-interview questionnaire */}
+                {viewFormSubmission?.formType === 'pre_interview_questionnaire' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const resp = await axios.get(
+                          `${API}/employees/${employee?.id}/pre-interview-questionnaire/download-pdf`,
+                          { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' }
+                        );
+                        const blob = new Blob([resp.data], { type: 'application/pdf' });
+                        const url = window.URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `pre_interview_questionnaire_${employee?.first_name || ''}_${employee?.last_name || ''}.pdf`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        window.URL.revokeObjectURL(url);
+                        toast.success('Pre-interview questionnaire PDF downloaded');
+                      } catch { toast.error('Failed to download PDF'); }
+                    }}
+                    className="mr-auto"
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download PDF
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => setViewFormSubmission(null)}>
                   Close
                 </Button>

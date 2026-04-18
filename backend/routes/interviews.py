@@ -16,6 +16,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .dependencies import (
@@ -361,3 +362,108 @@ async def review_pre_interview_questionnaire(
         "next_stage": "admin_final_assessment",
         "review_status": review.review_decision
     }
+
+
+# ==================== PDF DOWNLOADS ====================
+
+@router.get("/employees/{employee_id}/interview-records/{record_id}/download-pdf")
+async def download_interview_record_pdf(
+    employee_id: str,
+    record_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Download an interview assessment record as a branded PDF with company logo."""
+    db = get_db()
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    record = await db.interview_records.find_one({"id": record_id, "employee_id": employee_id}, {"_id": 0})
+    if not record:
+        raise HTTPException(status_code=404, detail="Interview record not found")
+    
+    from services.pdf_service import generate_admin_form_pdf
+    
+    form_data = record.get("form_data") or record
+    admin_data = {
+        "name": record.get("created_by_name") or record.get("interviewer_name") or user.get("name", "Admin")
+    }
+    
+    pdf_bytes = generate_admin_form_pdf(
+        form_type="interview_record",
+        form_data=form_data,
+        employee_data=employee,
+        admin_data=admin_data
+    )
+    
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"interview_record_{employee_name}.pdf"
+    
+    await log_audit_action(user['user_id'], "pdf_downloaded", "interview_record", record_id, {
+        "employee_id": employee_id, "type": "interview_record"
+    })
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
+@router.get("/employees/{employee_id}/pre-interview-questionnaire/download-pdf")
+async def download_pre_interview_pdf(
+    employee_id: str,
+    user: dict = Depends(require_manager_or_admin)
+):
+    """Download a pre-interview questionnaire response as a branded PDF with company logo."""
+    db = get_db()
+    
+    employee = await db.employees.find_one({"id": employee_id}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    questionnaire = await db.form_submissions.find_one({
+        "employee_id": employee_id,
+        "$or": [
+            {"form_type": "pre_interview_questionnaire"},
+            {"requirement_id": "pre_interview_questionnaire"},
+            {"requirement_id": "interview"}
+        ]
+    }, {"_id": 0})
+    
+    if not questionnaire:
+        raise HTTPException(status_code=404, detail="Pre-interview questionnaire not found")
+    
+    form_data = questionnaire.get("form_data") or questionnaire.get("data") or {}
+    
+    # Try to get role-specific questions for structured display
+    questions_config = None
+    try:
+        role = employee.get("role", "care_assistant")
+        config = get_role_interview_config(role)
+        if config and config.get("pre_screen_questions"):
+            questions_config = config["pre_screen_questions"]
+    except Exception:
+        pass
+    
+    from services.pdf_service import generate_pre_interview_pdf
+    
+    pdf_bytes = generate_pre_interview_pdf(
+        form_data=form_data,
+        employee_data=employee,
+        questions_config=questions_config
+    )
+    
+    employee_name = f"{employee.get('first_name', '')}_{employee.get('last_name', '')}".replace(' ', '_')
+    filename = f"pre_interview_questionnaire_{employee_name}.pdf"
+    
+    await log_audit_action(user['user_id'], "pdf_downloaded", "pre_interview_questionnaire", questionnaire.get("id", ""), {
+        "employee_id": employee_id, "type": "pre_interview_questionnaire"
+    })
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )

@@ -22,7 +22,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 import requests
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 # Company logo URL - configurable via environment variable
 LOGO_URL = os.environ.get("COMPANY_LOGO_URL", None)
@@ -38,25 +38,29 @@ BORDER_COLOR = HexColor("#E5E7EB")
 def get_logo_image(width=50*mm, height=20*mm) -> Optional[Image]:
     """
     Fetch and return logo image.
-    Returns None if logo URL is not configured or fetch fails.
+    Falls back to local osabea_logo.png if COMPANY_LOGO_URL is not configured.
     """
-    if not LOGO_URL:
-        return None
-    
+    # Try COMPANY_LOGO_URL first
+    if LOGO_URL:
+        try:
+            if LOGO_URL.startswith('/') or LOGO_URL.startswith('./'):
+                if os.path.exists(LOGO_URL):
+                    return Image(LOGO_URL, width=width, height=height)
+            else:
+                response = requests.get(LOGO_URL, timeout=5)
+                if response.status_code == 200:
+                    logo_data = io.BytesIO(response.content)
+                    return Image(logo_data, width=width, height=height)
+        except Exception as e:
+            print(f"Failed to load logo from URL: {e}")
+
+    # Fallback to local osabea_logo.png
     try:
-        # Handle local file paths
-        if LOGO_URL.startswith('/') or LOGO_URL.startswith('./'):
-            if os.path.exists(LOGO_URL):
-                return Image(LOGO_URL, width=width, height=height)
-            return None
-        
-        # Handle URLs
-        response = requests.get(LOGO_URL, timeout=5)
-        if response.status_code == 200:
-            logo_data = io.BytesIO(response.content)
-            return Image(logo_data, width=width, height=height)
+        local_logo = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'osabea_logo.png')
+        if os.path.exists(local_logo):
+            return Image(local_logo, width=width, height=height)
     except Exception as e:
-        print(f"Failed to load logo: {e}")
+        print(f"Failed to load local logo: {e}")
     
     return None
 
@@ -516,6 +520,320 @@ def generate_spotcheck_pdf_content(form_data: Dict[str, Any], styles) -> list:
         elements.append(Paragraph(f"Follow-up Date: {follow_up_date}", styles['FieldValue']))
     
     return elements
+
+
+def generate_reference_response_pdf(
+    response_data: Dict[str, Any],
+    declared_data: Dict[str, Any],
+    employee_data: Dict[str, Any],
+    reference_num: int,
+    mismatch_data: Optional[Dict[str, Any]] = None
+) -> bytes:
+    """
+    Generate PDF for a referee response with company logo.
+    
+    Args:
+        response_data: Referee's submitted form data
+        declared_data: What the applicant declared about this referee
+        employee_data: Employee details
+        reference_num: Reference number (1 or 2)
+        mismatch_data: Optional mismatch detection data
+    
+    Returns:
+        PDF bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    styles = create_pdf_styles()
+    elements = []
+    
+    # ===== HEADER WITH LOGO =====
+    logo = get_logo_image()
+    if logo:
+        logo_table = Table([[logo]], colWidths=[170*mm])
+        logo_table.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        elements.append(logo_table)
+        elements.append(Spacer(1, 3*mm))
+    else:
+        elements.append(Paragraph("Osabea Healthcare Solutions", styles['CompanyName']))
+        elements.append(Spacer(1, 3*mm))
+    
+    elements.append(Paragraph(f"Employment Reference — Referee {reference_num}", styles['FormTitle']))
+    elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5*mm))
+    
+    # Employee info
+    employee_name = f"{employee_data.get('first_name', '')} {employee_data.get('last_name', '')}".strip() or 'Unknown'
+    info_data = [
+        ['Applicant:', employee_name],
+        ['Employee Code:', employee_data.get('employee_code') or employee_data.get('applicant_reference') or ''],
+        ['Reference Number:', str(reference_num)],
+        ['Received:', response_data.get('received_at', response_data.get('submitted_at', 'N/A'))],
+    ]
+    info_table = Table(info_data, colWidths=[35*mm, 135*mm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 4*mm))
+    
+    # ===== DECLARED VS RETURNED COMPARISON =====
+    elements.append(Paragraph("Declared vs Returned Comparison", styles['SectionHeader']))
+    
+    comparison_data = [
+        ['', 'Declared by Applicant', 'Returned by Referee'],
+        ['Name', declared_data.get('name', 'N/A'), response_data.get('referee_full_name', 'N/A')],
+        ['Organisation', declared_data.get('organisation') or declared_data.get('company', 'N/A'), response_data.get('referee_organisation', 'N/A')],
+        ['Email', declared_data.get('email', 'N/A'), response_data.get('referee_work_email', 'N/A')],
+    ]
+    comp_table = Table(comparison_data, colWidths=[30*mm, 70*mm, 70*mm])
+    comp_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3*mm),
+        ('TOPPADDING', (0, 0), (-1, -1), 3*mm),
+        ('BOX', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+        ('LEFTPADDING', (0, 0), (-1, -1), 3*mm),
+    ]))
+    elements.append(comp_table)
+    elements.append(Spacer(1, 3*mm))
+    
+    # Mismatch warning
+    if mismatch_data and mismatch_data.get('detected'):
+        mismatch_style = ParagraphStyle('MismatchWarn', parent=styles['FieldValue'], textColor=HexColor("#DC2626"), fontSize=10, fontName='Helvetica-Bold')
+        elements.append(Paragraph("⚠ MISMATCH DETECTED", mismatch_style))
+        for reason in (mismatch_data.get('reasons') or []):
+            elements.append(Paragraph(f"  • {reason}", styles['FieldValue']))
+        elements.append(Spacer(1, 3*mm))
+    
+    # ===== EMPLOYMENT DETAILS =====
+    elements.append(Paragraph("Employment Details", styles['SectionHeader']))
+    employment_fields = [
+        ('Relationship Type', 'relationship_type'),
+        ('Known From', 'known_from_date'),
+        ('Known To', 'known_to_date'),
+        ('Employment Dates Confirmed', 'employment_dates_confirm'),
+        ('Job Title Held', 'job_title_held'),
+        ('Reason for Leaving', 'reason_for_leaving'),
+    ]
+    for label, key in employment_fields:
+        val = response_data.get(key)
+        if val is not None and val != '':
+            display_val = 'Yes' if val is True else ('No' if val is False else str(val))
+            elements.append(Paragraph(f"<b>{label}:</b> {display_val}", styles['FieldValue']))
+            elements.append(Spacer(1, 1*mm))
+    elements.append(Spacer(1, 3*mm))
+    
+    # ===== PERFORMANCE ASSESSMENT =====
+    elements.append(Paragraph("Performance Assessment", styles['SectionHeader']))
+    perf_fields = [
+        ('Performance Rating', 'performance_rating'),
+        ('Reliability', 'reliability'),
+        ('Professionalism', 'professionalism'),
+        ('Teamwork', 'teamwork'),
+    ]
+    perf_data = [['Criterion', 'Rating']]
+    for label, key in perf_fields:
+        val = response_data.get(key)
+        if val is not None:
+            perf_data.append([label, str(val)])
+    
+    if len(perf_data) > 1:
+        perf_table = Table(perf_data, colWidths=[85*mm, 85*mm])
+        perf_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3*mm),
+            ('TOPPADDING', (0, 0), (-1, -1), 3*mm),
+            ('BOX', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('INNERGRID', (0, 0), (-1, -1), 0.5, BORDER_COLOR),
+            ('LEFTPADDING', (0, 0), (-1, -1), 3*mm),
+        ]))
+        elements.append(perf_table)
+    elements.append(Spacer(1, 3*mm))
+    
+    # ===== SUITABILITY & SAFEGUARDING =====
+    elements.append(Paragraph("Suitability & Safeguarding", styles['SectionHeader']))
+    safeguard_fields = [
+        ('Safeguarding Concerns', 'safeguarding_concerns'),
+        ('Safeguarding Details', 'safeguarding_details'),
+        ('Disciplinary Record', 'disciplinary_record'),
+        ('Disciplinary Details', 'disciplinary_details'),
+        ('Would Re-employ', 'would_re_employ'),
+        ('Re-employ Notes', 're_employ_notes'),
+        ('Suitable for Vulnerable Care', 'care_vulnerable_suitable'),
+        ('Care Suitability Notes', 'care_suitability_notes'),
+    ]
+    for label, key in safeguard_fields:
+        val = response_data.get(key)
+        if val is not None and val != '':
+            display_val = 'Yes' if val is True else ('No' if val is False else str(val))
+            # Highlight concerns in red
+            if ('concern' in str(val).lower() or val is True) and 'concern' in key:
+                elements.append(Paragraph(f"<b>{label}:</b> <font color='#DC2626'>{display_val}</font>", styles['FieldValue']))
+            else:
+                elements.append(Paragraph(f"<b>{label}:</b> {display_val}", styles['FieldValue']))
+            elements.append(Spacer(1, 1*mm))
+    elements.append(Spacer(1, 3*mm))
+    
+    # ===== ADDITIONAL COMMENTS =====
+    if response_data.get('additional_comments'):
+        elements.append(Paragraph("Additional Comments", styles['SectionHeader']))
+        elements.append(Paragraph(str(response_data['additional_comments']), styles['Notes']))
+        elements.append(Spacer(1, 3*mm))
+    
+    # ===== DECLARATIONS =====
+    elements.append(Paragraph("Referee Declarations", styles['SectionHeader']))
+    if response_data.get('declaration_accurate'):
+        elements.append(Paragraph("✓ Information provided is accurate to the best of their knowledge", styles['FieldValue']))
+    if response_data.get('declaration_authority'):
+        elements.append(Paragraph("✓ Has authority to provide this reference", styles['FieldValue']))
+    elements.append(Spacer(1, 3*mm))
+    
+    # ===== FOOTER =====
+    elements.append(Spacer(1, 6*mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceBefore=5*mm))
+    footer_text = f"Generated by Osabea Healthcare Solutions Compliance System on {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')}"
+    elements.append(Paragraph(footer_text, styles['Footer']))
+    elements.append(Paragraph("This is an official compliance document. Store securely.", styles['Footer']))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_pre_interview_pdf(
+    form_data: Dict[str, Any],
+    employee_data: Dict[str, Any],
+    questions_config: Optional[List[Dict[str, Any]]] = None
+) -> bytes:
+    """
+    Generate PDF for a pre-interview questionnaire response with company logo.
+    
+    Args:
+        form_data: Worker's submitted questionnaire answers
+        employee_data: Employee details
+        questions_config: Optional role-specific question definitions
+    
+    Returns:
+        PDF bytes
+    """
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=15*mm,
+        bottomMargin=15*mm
+    )
+    
+    styles = create_pdf_styles()
+    elements = []
+    
+    # ===== HEADER WITH LOGO =====
+    logo = get_logo_image()
+    if logo:
+        logo_table = Table([[logo]], colWidths=[170*mm])
+        logo_table.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        elements.append(logo_table)
+        elements.append(Spacer(1, 3*mm))
+    else:
+        elements.append(Paragraph("Osabea Healthcare Solutions", styles['CompanyName']))
+        elements.append(Spacer(1, 3*mm))
+    
+    elements.append(Paragraph("Pre-Interview Questionnaire", styles['FormTitle']))
+    elements.append(HRFlowable(width="100%", thickness=1, color=BORDER_COLOR, spaceAfter=5*mm))
+    
+    # Employee info
+    employee_name = f"{employee_data.get('first_name', '')} {employee_data.get('last_name', '')}".strip() or 'Unknown'
+    info_data = [
+        ['Applicant:', employee_name],
+        ['Employee Code:', employee_data.get('employee_code') or employee_data.get('applicant_reference') or ''],
+        ['Role:', employee_data.get('role', 'N/A')],
+        ['Date:', datetime.now(timezone.utc).strftime('%d %B %Y')],
+    ]
+    info_table = Table(info_data, colWidths=[35*mm, 135*mm])
+    info_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), TEXT_SECONDARY),
+        ('TEXTCOLOR', (1, 0), (1, -1), TEXT_PRIMARY),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2*mm),
+    ]))
+    elements.append(info_table)
+    elements.append(Spacer(1, 6*mm))
+    
+    # ===== QUESTIONNAIRE RESPONSES =====
+    # If we have questions config, use structured display
+    if questions_config:
+        for i, question in enumerate(questions_config):
+            q_id = question.get('id', f'q{i+1}')
+            q_text = question.get('question') or question.get('label', f'Question {i+1}')
+            answer = form_data.get(q_id, 'No answer provided')
+            
+            if isinstance(answer, bool):
+                answer = 'Yes' if answer else 'No'
+            elif answer is None:
+                answer = 'No answer provided'
+            
+            # Question number and text
+            q_style = ParagraphStyle(
+                f'Q{i}',
+                parent=styles['FieldLabel'],
+                fontSize=10,
+                fontName='Helvetica-Bold',
+                textColor=PRIMARY_COLOR,
+                spaceBefore=4*mm
+            )
+            elements.append(Paragraph(f"Q{i+1}. {q_text}", q_style))
+            elements.append(Paragraph(str(answer), styles['Notes']))
+    else:
+        # Fallback: render all form_data fields
+        elements.append(Paragraph("Responses", styles['SectionHeader']))
+        skip_keys = {'_submitted_at', '_verified', '_status', 'submitted_at', 'ip_address', 'user_agent'}
+        
+        q_num = 1
+        for key, value in form_data.items():
+            if key.startswith('_') or key in skip_keys:
+                continue
+            
+            label = key.replace('_', ' ').title()
+            if isinstance(value, bool):
+                value = 'Yes' if value else 'No'
+            elif value is None:
+                value = 'N/A'
+            
+            elements.append(Paragraph(f"<b>{label}:</b>", styles['FieldLabel']))
+            elements.append(Paragraph(str(value), styles['Notes']))
+            q_num += 1
+    
+    # ===== FOOTER =====
+    elements.append(Spacer(1, 10*mm))
+    elements.append(HRFlowable(width="100%", thickness=0.5, color=BORDER_COLOR, spaceBefore=5*mm))
+    footer_text = f"Generated by Osabea Healthcare Solutions Compliance System on {datetime.now(timezone.utc).strftime('%d %B %Y %H:%M UTC')}"
+    elements.append(Paragraph(footer_text, styles['Footer']))
+    elements.append(Paragraph("This is an official compliance document. Store securely.", styles['Footer']))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
 def generate_generic_pdf_content(form_data: Dict[str, Any], styles) -> list:
